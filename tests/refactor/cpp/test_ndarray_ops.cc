@@ -1,5 +1,5 @@
 #include "hetu/core/ndarray.h"
-#include "hetu/test/test_utils.h"
+#include "test_utils.h"
 
 using namespace hetu;
 

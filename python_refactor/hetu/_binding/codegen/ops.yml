@@ -1,0 +1,130 @@
+# Operators to be generated
+# - name: Name of python functions
+# - op: Name of cpp Operators
+# - args: Operator-specific arguments (excluding OpMeta-related arguments)
+# - self [optional]: If provided, generate a member function
+
+#######################################################
+# Arithmetic
+#######################################################
+
+- name: add
+  op: AddElewiseOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: add
+  op: AddByConstOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: add
+  op: AddByConstOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: sub
+  op: SubElewiseOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: sub
+  op: SubByConstOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: sub
+  op: SubFromConstOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: neg
+  op: NegateOp
+  args: Tensor input
+  self: input
+
+- name: mul
+  op: MulElewiseOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: mul
+  op: MulByConstOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: mul
+  op: MulByConstOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: div
+  op: DivElewiseOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: div
+  op: DivByConstOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: div
+  op: DivFromConstOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: reciprocal
+  op: ReciprocalOp
+  args: Tensor input
+  self: input
+
+#######################################################
+# LinAlg
+#######################################################
+
+- name: linear
+  op: LinearOp
+  args: Tensor a, Tensor b, Tensor bias=None, bool trans_a=False, bool trans_b=True
+
+- name: matmul
+  op: MatMulOp
+  args: Tensor input, Tensor other, bool trans_a=False, bool trans_b=False
+  self: input
+
+#######################################################
+# Loss
+#######################################################
+
+- name: binary_cross_entroy
+  op: BinaryCrossEntropyOp
+  args: Tensor preds, Tensor labels
+
+#######################################################
+# Activation
+#######################################################
+
+- name: relu
+  op: ReluOp
+  args: Tensor input
+  self: input
+
+- name: sigmoid
+  op: SigmoidOp
+  args: Tensor input
+  self: input
+
+#######################################################
+# Optimizer
+#######################################################
+
+- name: sgd_update
+  op: SGDUpdateOp
+  args: Tensor param, Tensor grad, float lr
+
+#######################################################
+# Misc
+#######################################################
+
+- name: group
+  op: GroupOp
+  args: List[Tensor] deps

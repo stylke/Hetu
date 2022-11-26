@@ -1,0 +1,8 @@
+set(HETU_CPP_TEST_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+file(GLOB HETU_CPP_TEST_SRC ${HETU_CPP_TEST_SRC_DIR}/test_*.cc)
+foreach(test ${HETU_CPP_TEST_SRC})
+  get_filename_component(TName ${test} NAME_WE)
+  add_executable(${TName} ${test})
+  target_link_libraries(${TName} PUBLIC hetu_C)
+  target_include_directories(${TName} PRIVATE ${HETU_CPP_TEST_SRC_DIR})
+endforeach()
