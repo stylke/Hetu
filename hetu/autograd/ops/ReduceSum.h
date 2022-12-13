@@ -15,11 +15,17 @@ class ReduceSumOpDef : public OperatorDef {
 
  public:
   ReduceSumOpDef(const constrcutor_access_key&, Tensor input,
-                 const HTAxes& axes, const HTKeepDims& keepdims = {false},
+                 const HTAxes& axes = {}, const HTKeepDims& keepdims = {false},
                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReduceSumOp), {input}, op_meta),
     _axes(axes),
     _keepdims(keepdims) {
+    if (axes.size() == 0) {
+      _axes.reserve(input->ndim());
+      for (size_t i = 0; i < input->ndim(); ++i) {
+        _axes.push_back(i);
+      }
+    }
     HT_ASSERT(keepdims.size() == axes.size() || keepdims.size() == 1);
     if (keepdims.size() == 1) {
       int len = axes.size();
@@ -105,7 +111,7 @@ class ReduceSumOpDef : public OperatorDef {
 class ReduceSumOp final : public OpWrapper<ReduceSumOpDef> {
  public:
   // ReduceSumOp() : OpWrapper<ReduceSumOpDef>() {}
-  ReduceSumOp(Tensor input, const HTAxes& axes,
+  ReduceSumOp(Tensor input, const HTAxes& axes = {},
               const HTKeepDims& keepdims = {false},
               const OpMeta& op_meta = OpMeta())
   : OpWrapper<ReduceSumOpDef>(

@@ -7,21 +7,19 @@ namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-__global__ void embedding_lookup_kernel(const spec_t* input, const spec_t* ids,
+__global__ void embedding_lookup_kernel(const spec_t* input, const int64_t* ids,
                                         size_t size, size_t length,
                                         size_t input_row, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  int id = ids[idx];
-  spec_t* output_ptr = output + length * idx;
+  int64_t id = ids[idx];
   if (id < 0 || id >= input_row) {
     for (int i = 0; i < length; i++)
-      output_ptr[i] = 0;
+      output[length * idx + i] = 0;
   } else {
-    const spec_t* input_ptr = input + length * id;
     for (int i = 0; i < length; i++)
-      output_ptr[i] = input_ptr[i];
+      output[length * idx + i] = input[length * id + i];
   }
 }
 
@@ -35,13 +33,13 @@ __global__ void array_zero_set_kernel(spec_t* input, size_t size) {
 
 template <typename spec_t>
 __global__ void embedding_lookup_gradient_kernel(const float* output_grad,
-                                                 const float* ids, size_t size,
+                                                 const int64_t* ids, size_t size,
                                                  size_t length,
                                                  float* input_grad) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  int id = ids[idx];
+  int id = int(ids[idx]);
   const float* output_grad_ptr = output_grad + length * idx;
   float* input_grad_ptr = input_grad + length * id;
   for (int i = 0; i < length; i++)
@@ -76,7 +74,7 @@ void EmbeddingLookupCuda(const NDArray& input, const NDArray& id,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "EmbbedingLookupCuda", [&]() {
       embedding_lookup_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), id->data_ptr<spec_t>(), size, length,
+        input->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size, length,
         input_row, output->data_ptr<spec_t>());
     });
 }
@@ -114,7 +112,7 @@ void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
     input_grad->dtype(), spec_t, "EmbeddingLookupGradientCuda", [&]() {
       embedding_lookup_gradient_kernel<float>
         <<<blocks, threads, 0, cuda_stream>>>(
-          output_grad->data_ptr<float>(), id->data_ptr<float>(), size, length,
+          output_grad->data_ptr<float>(), id->data_ptr<int64_t>(), size, length,
           input_grad->data_ptr<float>());
     });
 }

@@ -142,6 +142,33 @@ inline std::vector<double> Float64List_FromPyFloatList(PyObject* obj) {
   return ret;
 }
 
+inline bool CheckPyBoolList(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  if (is_tuple || PyList_Check(obj)) {
+    size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+    if (size > 0) {
+      // only check for the first item for efficiency
+      auto* item = is_tuple ? PyTuple_GET_ITEM(obj, 0) \
+                            : PyList_GET_ITEM(obj, 0);
+      if (!CheckPyBool(item))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+inline std::vector<bool> BoolList_FromPyBoolList(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  std::vector<bool> ret(size);
+  for (size_t i = 0; i < size; i++) {
+    auto* item = is_tuple ? PyTuple_GET_ITEM(obj, i) : PyList_GET_ITEM(obj, i);
+    ret[i] = Bool_FromPyBool(item);
+  }
+  return ret;
+}
+
 inline bool CheckPyStringList(PyObject* obj) {
   bool is_tuple = PyTuple_Check(obj);
   if (is_tuple || PyList_Check(obj)) {

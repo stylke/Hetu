@@ -3,46 +3,48 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/kernel/Binary.cuh"
 
 namespace hetu {
 namespace impl {
 
-template <typename spec_t>
-__global__ void div_elewise_kernel(const spec_t* inputA, const spec_t* inputB,
-                                   size_t size, spec_t* output) {
+template <typename spec_t, typename Operator>
+__global__ void binary_elewise_kernel(const spec_t* inputA, const spec_t* inputB,
+                                      size_t size, Operator op, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < size)
-    output[idx] = inputA[idx] / inputB[idx];
+    output[idx] = op(inputA[idx], inputB[idx]);
 }
 
-template <typename spec_t>
+template <typename spec_t, typename Operator>
 __global__ void
-div_elewise_broadcast_kernel(const spec_t* inputA, const spec_t* inputB,
-                             size_t size, spec_t* output, uint* A_dims,
-                             uint* B_dims, size_t A_ndims, size_t B_ndims,
-                             uint* out_strides, size_t out_dims) {
+binary_elewise_broadcast_kernel(const spec_t* inputA, const spec_t* inputB,
+                                size_t size, Operator op, spec_t* output, uint* A_dims,
+                                uint* B_dims, size_t A_ndims, size_t B_ndims,
+                                uint* out_strides, size_t out_dims) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
   size_t A_ind = 0;
   size_t temp = idx;
-  for (int i = 0; i < out_dims; ++i) {
+  for (size_t i = 0; i < out_dims; ++i) {
     A_ind *= A_dims[i];
     A_ind += (A_dims[i] > 1) * temp / out_strides[i];
     temp %= out_strides[i];
   }
   size_t B_ind = 0;
   temp = idx;
-  for (int i = 0; i < out_dims; ++i) {
+  for (size_t i = 0; i < out_dims; ++i) {
     B_ind *= B_dims[i];
     B_ind += (B_dims[i] > 1) * temp / out_strides[i];
     temp %= out_strides[i];
   }
-  output[idx] = inputA[A_ind] / inputB[B_ind];
+  output[idx] = op(inputA[A_ind] , inputB[B_ind]);
 }
 
-void DivElewiseCuda(const NDArray& inputA, const NDArray& inputB,
-                    NDArray& output, const Stream& stream) {
+template<typename Operator>
+void BinaryElewiseToolCuda(const NDArray& inputA, const NDArray& inputB,
+                       NDArray& output, Operator op, const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(inputA);
   HT_ASSERT_SAME_DEVICE(inputA, output);
   HT_ASSERT_SAME_DEVICE(inputB, output);
@@ -58,9 +60,9 @@ void DivElewiseCuda(const NDArray& inputA, const NDArray& inputB,
     CUDAStream cuda_stream(stream);
     hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-      inputA->dtype(), spec_t, "DivElewiseCuda", [&]() {
-        div_elewise_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-          inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size,
+      inputA->dtype(), spec_t, "BinaryElewiseCuda", [&]() {
+        binary_elewise_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
+          inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size, op,
           output->data_ptr<spec_t>());
       });
   } else {
@@ -71,6 +73,7 @@ void DivElewiseCuda(const NDArray& inputA, const NDArray& inputB,
     size_t output_dim = output->ndim();
     size_t output_size = 1;
     size_t diff = output_dim - inputA->ndim();
+
     for (int i = output_dim - 1; i >= 0; --i) {
       out_strides[i] = output_size;
       output_size *= output->shape(i);
@@ -88,10 +91,10 @@ void DivElewiseCuda(const NDArray& inputA, const NDArray& inputB,
         B_dims[i] = inputB->shape(i - diff);
       }
     }
+
+    size = output->numel();
     CUDAStream cuda_stream(stream);
     hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-    int dev_id = cuda_stream.device_id();
-    size = output->numel();
     dim3 blocks, threads;
     threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
     blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
@@ -111,14 +114,15 @@ void DivElewiseCuda(const NDArray& inputA, const NDArray& inputB,
     CUDA_CALL(cudaMemcpyAsync(gpu_output_strides, out_strides, allocated,
                               cudaMemcpyHostToDevice, cuda_stream));
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-      inputA->dtype(), spec_t, "DivElewiseCuda", [&]() {
-        div_elewise_broadcast_kernel<spec_t>
+      inputA->dtype(), spec_t, "BinaryElewiseCuda", [&]() {
+        binary_elewise_broadcast_kernel<spec_t>
           <<<blocks, threads, 0, cuda_stream>>>(
-            inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size,
+            inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size, op,
             output->data_ptr<spec_t>(), gpu_dimsA, gpu_dimsB,
             (size_t) inputA->ndim(), (size_t) inputB->ndim(),
             gpu_output_strides, output_dim);
       });
+
     FreeToMemoryPool(gpu_dimsA_ptr);
     FreeToMemoryPool(gpu_dimsB_ptr);
     FreeToMemoryPool(gpu_output_strides_ptr);
@@ -127,6 +131,43 @@ void DivElewiseCuda(const NDArray& inputA, const NDArray& inputB,
     free(out_strides);
   }
 }
+
+void AddElewiseCuda(const NDArray& inputA, const NDArray& inputB,
+                    NDArray& output, const Stream& stream) {
+  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+      inputA->dtype(), spec_t, "AddElewiseCuda", [&]() {
+        auto op = kplus<spec_t>();
+        BinaryElewiseToolCuda(inputA, inputB, output, op, stream);
+      }); 
+}
+
+void SubElewiseCuda(const NDArray& inputA, const NDArray& inputB,
+                    NDArray& output, const Stream& stream) {
+  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+      inputA->dtype(), spec_t, "SubElewiseCuda", [&]() {
+        auto op = kminus<spec_t>();
+        BinaryElewiseToolCuda(inputA, inputB, output, op, stream);
+      }); 
+}
+
+void MulElewiseCuda(const NDArray& inputA, const NDArray& inputB,
+                    NDArray& output, const Stream& stream) {
+  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+      inputA->dtype(), spec_t, "MulElewiseCuda", [&]() {
+        auto op = kmultiplies<spec_t>();
+        BinaryElewiseToolCuda(inputA, inputB, output, op, stream);
+      }); 
+}
+
+void DivElewiseCuda(const NDArray& inputA, const NDArray& inputB,
+                    NDArray& output, const Stream& stream) {
+  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+      inputA->dtype(), spec_t, "DivElewiseCuda", [&]() {
+        auto op = kdivides<spec_t>();
+        BinaryElewiseToolCuda(inputA, inputB, output, op, stream);
+      }); 
+}
+
 
 } // namespace impl
 } // namespace hetu

@@ -15,11 +15,17 @@ class ReduceMeanOpDef : public OperatorDef {
 
  public:
   ReduceMeanOpDef(const constrcutor_access_key&, Tensor input,
-                  const HTShape& axes, const HTKeepDims& keepdims = {false},
+                  const HTShape& axes = {}, const HTKeepDims& keepdims = {false},
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReduceMeanOp), {input}, op_meta),
     _axes(axes),
     _keepdims(keepdims) {
+    if (axes.size() == 0) {
+      _axes.reserve(input->ndim());
+      for (size_t i = 0; i < input->ndim(); ++i) {
+        _axes.push_back(i);
+      }
+    }
     HT_ASSERT(keepdims.size() == axes.size() || keepdims.size() == 1);
     if (keepdims.size() == 1) {
       int len = axes.size();
@@ -116,7 +122,7 @@ class ReduceMeanOpDef : public OperatorDef {
 class ReduceMeanOp final : public OpWrapper<ReduceMeanOpDef> {
  public:
   ReduceMeanOp() : OpWrapper<ReduceMeanOpDef>() {}
-  ReduceMeanOp(Tensor input, const HTShape& axes,
+  ReduceMeanOp(Tensor input, const HTShape& axes = {},
                const HTKeepDims& keepdims = {false},
                const OpMeta& op_meta = OpMeta())
   : OpWrapper<ReduceMeanOpDef>(

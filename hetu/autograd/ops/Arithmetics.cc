@@ -1,4 +1,6 @@
 #include "hetu/autograd/ops/Arithmetics.h"
+#include "hetu/impl/utils/dispatch.h"
+#include "hetu/impl/utils/cuda_utils.h"
 
 namespace hetu {
 namespace autograd {

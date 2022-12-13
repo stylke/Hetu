@@ -184,7 +184,6 @@ class Conv2dAddBiasOpDef : public OperatorDef {
   : OperatorDef(quote(Conv2dAddBiasOp), {input, filter, bias}, op_meta) {
     _padding = {padding, padding};
     _stride = {stride, stride};
-
     int64_t N = input->shape(0);
     int64_t H = input->shape(2);
     int64_t W = input->shape(3);

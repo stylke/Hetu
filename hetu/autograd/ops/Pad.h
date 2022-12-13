@@ -17,7 +17,7 @@ class PadOpDef : public OperatorDef {
 
  public:
   PadOpDef(const constrcutor_access_key&, Tensor input, const HTShape& paddings,
-           size_t mode, double constant, const OpMeta& op_meta = OpMeta())
+           const std::string& mode, double constant, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(PadOp), {input}, op_meta),
     _mode(mode),
     _paddings(paddings),
@@ -36,7 +36,7 @@ class PadOpDef : public OperatorDef {
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
   }
 
-  size_t get_mode() const {
+  const std::string& get_mode() const {
     return _mode;
   }
 
@@ -56,7 +56,7 @@ class PadOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  size_t _mode;
+  std::string _mode;
 
   HTShape _paddings;
 
@@ -65,7 +65,7 @@ class PadOpDef : public OperatorDef {
 
 class PadOp final : public OpWrapper<PadOpDef> {
  public:
-  PadOp(Tensor input, const HTShape& paddings, size_t mode, double constant,
+  PadOp(Tensor input, const HTShape& paddings, std::string mode, double constant,
         const OpMeta& op_meta = OpMeta())
   : OpWrapper<PadOpDef>(make_ptr<PadOpDef>(PadOpDef::constrcutor_access_key(),
                                            input, paddings, mode, constant,
@@ -79,7 +79,7 @@ class PadGradientOpDef : public OperatorDef {
 
  public:
   PadGradientOpDef(const constrcutor_access_key&, Tensor grad_output,
-                   const HTShape& paddings, size_t mode,
+                   const HTShape& paddings, const std::string& mode,
                    const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(PadGradientOp), {grad_output}, op_meta),
     _mode(mode),
@@ -95,7 +95,7 @@ class PadGradientOpDef : public OperatorDef {
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
   }
 
-  size_t get_mode() const {
+  const std::string& get_mode() const {
     return _mode;
   }
 
@@ -109,14 +109,14 @@ class PadGradientOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  size_t _mode;
+  std::string _mode;
 
   HTShape _paddings;
 };
 
 class PadGradientOp final : public OpWrapper<PadGradientOpDef> {
  public:
-  PadGradientOp(Tensor grad_output, const HTShape& paddings, size_t mode,
+  PadGradientOp(Tensor grad_output, const HTShape& paddings, std::string mode,
                 const OpMeta& op_meta = OpMeta())
   : OpWrapper<PadGradientOpDef>(
       make_ptr<PadGradientOpDef>(PadGradientOpDef::constrcutor_access_key(),

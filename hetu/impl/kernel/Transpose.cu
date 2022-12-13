@@ -109,28 +109,28 @@ void TransposeCuda(const NDArray& input, NDArray& output, int64_t* perm,
   uint ndim = uint(input->ndim());
   uint ndim_ = uint(output->ndim());
   HT_ASSERT(ndim == ndim_);
-  if (BatchTranspose(ndim, perm)) {
-    int64_t rows = input->shape(ndim - 2);
-    int64_t cols = input->shape(ndim - 1);
-    int64_t tile_size = TILE_SIZE;
-    int64_t num_tile_rows = (rows + tile_size - 1) / tile_size;
-    int64_t num_tile_cols = (cols + tile_size - 1) / tile_size;
-    int64_t num_batches = input->numel() / (rows * cols);
-    int64_t block_nums = num_batches * num_tile_rows * num_tile_cols;
-    CUDAStream cuda_stream(stream);
-    int dev_id = cuda_stream.device_id();
-    dim3 blocks, threads;
-    threads.x = TILE_SIZE;
-    threads.y = BLOCK_ROWS;
-    blocks.x = block_nums;
-    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-      input->dtype(), spec_t, "TransposeCuda", [&]() {
-        batch_transpose_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-          input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), rows, cols,
-          num_tile_rows, num_tile_cols, block_nums, tile_size);
-      });
-  } else {
+  // if (BatchTranspose(ndim, perm)) {
+  //   int64_t rows = input->shape(ndim - 2);
+  //   int64_t cols = input->shape(ndim - 1);
+  //   int64_t tile_size = TILE_SIZE;
+  //   int64_t num_tile_rows = (rows + tile_size - 1) / tile_size;
+  //   int64_t num_tile_cols = (cols + tile_size - 1) / tile_size;
+  //   int64_t num_batches = input->numel() / (rows * cols);
+  //   int64_t block_nums = num_batches * num_tile_rows * num_tile_cols;
+  //   CUDAStream cuda_stream(stream);
+  //   int dev_id = cuda_stream.device_id();
+  //   dim3 blocks, threads;
+  //   threads.x = TILE_SIZE;
+  //   threads.y = BLOCK_ROWS;
+  //   blocks.x = block_nums;
+  //   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  //   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+  //     input->dtype(), spec_t, "TransposeCuda", [&]() {
+  //       batch_transpose_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
+  //         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), rows, cols,
+  //         num_tile_rows, num_tile_cols, block_nums, tile_size);
+  //     });
+  // } else {
     const int64_t* in_dims = input->shape().data();
     const int64_t* out_dims = output->shape().data();
     uint* buf = (uint*) malloc(3 * ndim * sizeof(uint));
@@ -170,7 +170,7 @@ void TransposeCuda(const NDArray& input, NDArray& output, int64_t* perm,
       });
     FreeToMemoryPool(gpu_buf_ptr);
     free(buf);
-  }
+  // }
 }
 
 } // namespace impl

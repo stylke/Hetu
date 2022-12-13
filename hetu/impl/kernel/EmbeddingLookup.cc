@@ -7,13 +7,13 @@ namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-void embedding_lookup_cpu(const spec_t* input, const spec_t* ids, size_t size,
+void embedding_lookup_cpu(const spec_t* input, const int64_t* ids, size_t size,
                           size_t length, size_t input_row, spec_t* output) {
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
   for (size_t idx = 0; idx < size; ++idx) {
-    int id = ids[idx];
+    int64_t id = ids[idx];
     spec_t* output_ptr = output + length * idx;
     if (id < 0 || id >= (int) input_row) {
       for (size_t i = 0; i < length; i++)
@@ -37,14 +37,14 @@ void array_zero_set_cpu(spec_t* input, size_t size) {
 }
 
 template <typename spec_t>
-void embedding_lookup_gradient_cpu(const spec_t* output_grad, const spec_t* ids,
+void embedding_lookup_gradient_cpu(const spec_t* output_grad, const int64_t* ids,
                                    size_t size, size_t length,
                                    spec_t* input_grad) {
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
   for (size_t idx = 0; idx < size; ++idx) {
-    int id = ids[idx];
+    int64_t id = ids[idx];
     const spec_t* output_grad_ptr = output_grad + length * idx;
     spec_t* input_grad_ptr = input_grad + length * id;
     for (size_t i = 0; i < length; i++)
@@ -74,7 +74,7 @@ void EmbeddingLookupCpu(const NDArray& input, const NDArray& id,
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "EmbbedingLookupCpu", [&]() {
-      embedding_lookup_cpu(input->data_ptr<spec_t>(), id->data_ptr<spec_t>(),
+      embedding_lookup_cpu(input->data_ptr<spec_t>(), id->data_ptr<int64_t>(),
                            size, length, input_row, output->data_ptr<spec_t>());
     });
 }
@@ -104,7 +104,7 @@ void EmbeddingLookupGradientCpu(const NDArray& output_grad, const NDArray& id,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_grad->dtype(), spec_t, "EmbeddingLookupGradientCuda", [&]() {
       embedding_lookup_gradient_cpu(output_grad->data_ptr<spec_t>(),
-                                    id->data_ptr<spec_t>(), size, length,
+                                    id->data_ptr<int64_t>(), size, length,
                                     input_grad->data_ptr<spec_t>());
     });
 }

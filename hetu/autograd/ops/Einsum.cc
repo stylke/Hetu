@@ -20,7 +20,7 @@ NDArray sumproduct_pair(NDArray& left_, NDArray& right_, HTShape sum_dims_,
   HT_ASSERT(dim <= (int64_t) dim_bitset_size)
     << "only tensors with up to " << dim_bitset_size << " dims are supported";
   std::bitset<dim_bitset_size> sum_dims;
-  for (int i = 0; i < sum_dims_.size(); ++i) {
+  for (size_t i = 0; i < sum_dims_.size(); ++i) {
     size_t d = sum_dims_[i];
     HT_ASSERT(!sum_dims[d])
       << "dim " << d << " appears multiple times in the list of dims";
@@ -134,7 +134,7 @@ NDArray sumproduct_pair(NDArray& left_, NDArray& right_, HTShape sum_dims_,
 
   NDArray result = NDArray::batchmatmul(left, right, false, false);
   HTShape os(out_size.size());
-  for (int i = 0; i < out_size.size(); ++i) {
+  for (size_t i = 0; i < out_size.size(); ++i) {
     os[i] = out_size[i];
   }
 
@@ -251,7 +251,7 @@ void EinsumOpDef::ParseMsg() {
     num_ellipsis = 0;
     i = 0;
     OpDim tmp_dim = {};
-    int label_idx = 0;
+    // int label_idx = 0;
     while (i < output_len) {
       switch (tmp_output[i]) {
         case '.':
@@ -336,7 +336,6 @@ void EinsumOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
     OpDim input_labels;
     HTShape input_shape;
     NDArray input_tensor = NDArray::copy(inputs.at(i));
-    ;
     input_labels = input_dims[i];
     input_shape = inputs.at(i)->shape();
 
@@ -387,7 +386,7 @@ void EinsumOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
 
   for (int dim = 0; dim < num_output_labels; dim++) {
     int output_dim_size = permuted_inputs[0]->shape(dim);
-    for (int i = 1; i < num_inputs(); ++i) {
+    for (size_t i = 1; i < num_inputs(); ++i) {
       int input_dim_size = permuted_inputs[i]->shape(dim);
       HT_ASSERT(output_dim_size == input_dim_size || output_dim_size == 1 ||
                 input_dim_size == 1)
@@ -424,9 +423,7 @@ void EinsumOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
   // cudaEventRecord(stop, 0);
   // cudaEventSynchronize(stop);
   // cudaEventElapsedTime(&elapsed, start, stop);
-  // std::cout << "_____________________________part3 elapsed:" << elapsed
-  // <<std::endl;
-  for (int i = 1; i < num_inputs(); ++i) {
+  for (size_t i = 1; i < num_inputs(); ++i) {
     NDArray permuted_input = NDArray::copy(permuted_inputs[i]);
     HTShape sum_dims;
     // Sum out or squeeze dimensions that are size 1 for all later operands
@@ -445,10 +442,8 @@ void EinsumOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
     }
     // Multiply tensors and sum out dimensions in sum_dims
     if (sum_dims.empty()) {
-      std::cout << "PT1" << std::endl;
       output_tensor = NDArray::mul(output_tensor, permuted_input);
     } else if (sum_dims.size() == output_tensor->ndim()) {
-      std::cout << "PT2" << std::endl;
       NDArray flatten_input = NDArray::flatten(permuted_input, 0, -1);
       NDArray flatten_output = NDArray::flatten(output_tensor, 0, -1);
       output_tensor =
@@ -678,7 +673,7 @@ void EinsumGradientOpDef::ParseMsg() {
     i = 0;
     OpDim tmp_dim = {};
     undefined_labels = {};
-    int label_idx = 0;
+    // int label_idx = 0;
     while (i < output_len) {
       switch (tmp_output[i]) {
         case '.':
@@ -803,7 +798,7 @@ void EinsumGradientOpDef::DoCompute(const NDArrayList& inputs,
 
   for (int dim = 0; dim < num_output_labels; dim++) {
     int output_dim_size = permuted_inputs[0]->shape(dim);
-    for (int i = 1; i < num_inputs(); ++i) {
+    for (size_t i = 1; i < num_inputs(); ++i) {
       int input_dim_size = permuted_inputs[i]->shape(dim);
       HT_ASSERT(output_dim_size == input_dim_size || output_dim_size == 1 ||
                 input_dim_size == 1)
@@ -837,7 +832,7 @@ void EinsumGradientOpDef::DoCompute(const NDArrayList& inputs,
     }
   }
 
-  for (int i = 1; i < num_inputs(); ++i) {
+  for (size_t i = 1; i < num_inputs(); ++i) {
     NDArray permuted_input = permuted_inputs[i];
     HTShape sum_dims;
 

@@ -112,6 +112,11 @@ DECLARE_KERNEL_CPU_AND_CUDA(InstanceNorm, const NDArray&, NDArray&, NDArray&,
 DECLARE_KERNEL_CPU_AND_CUDA(InstanceNormGradient, const NDArray&,
                             const NDArray&, NDArray&, const NDArray&,
                             const NDArray&, float, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(KLDivLoss, const NDArray& pred,
+                            const NDArray& label, NDArray& loss, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(KLDivLossGradient, const NDArray& pred,
+                            const NDArray& label, const NDArray& grad_loss,
+                            NDArray& output, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(LayerNorm, const NDArray&, const NDArray&,
                             const NDArray&, NDArray&, NDArray&, NDArray&, float,
                             const Stream&);
@@ -138,17 +143,27 @@ DECLARE_KERNEL_CPU_AND_CUDA(MaxPoolGradient, const NDArray&, const NDArray&,
                             const NDArray&, const size_t, const size_t,
                             NDArray&, const size_t, const size_t,
                             const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(MSELoss, const NDArray& pred,
+                            const NDArray& label, NDArray& loss, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(MSELossGradient, const NDArray& pred,
+                            const NDArray& label, const NDArray& grad_loss,
+                            NDArray& output, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(MulConst, const NDArray&, double, NDArray&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(MulElewise, const NDArray&, const NDArray&,
                             NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(NLLLoss, const NDArray& pred,
+                            const NDArray& label, NDArray& loss, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(NLLLossGradient, const NDArray& pred,
+                            const NDArray& label, const NDArray& grad_loss,
+                            NDArray& output, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Onehot, const NDArray&, size_t, NDArray&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Opposite, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Pad, const NDArray&, NDArray&, const HTShape&,
-                            const Stream&, size_t, double);
+                            const Stream&, std::string, double);
 DECLARE_KERNEL_CPU_AND_CUDA(PadGradient, const NDArray&, NDArray&,
-                            const HTShape&, const Stream&, size_t);
+                            const HTShape&, const Stream&, std::string);
 DECLARE_KERNEL_CPU_AND_CUDA(Pow, const NDArray&, double, NDArray&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Reduce, const NDArray&, NDArray&, const HTAxes&,
@@ -182,6 +197,10 @@ DECLARE_KERNEL_CPU_AND_CUDA(SoftmaxCrossEntropyGradient, const NDArray&,
                             const NDArray&, const NDArray&, NDArray&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Sqrt, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(SubConst, const NDArray&, double, NDArray&,
+                            const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(SubElewise, const NDArray&, const NDArray&,
+                            NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ReciprocalSqrt, const NDArray&, NDArray&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Reciprocal, const NDArray&, NDArray&,

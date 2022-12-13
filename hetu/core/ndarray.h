@@ -2,6 +2,7 @@
 
 #include "hetu/utils/shared_ptr_wrapper.h"
 #include "hetu/core/reduction_type.h"
+#include "hetu/core/binary_type.h"
 #include "hetu/core/ndarray_meta.h"
 #include "hetu/core/ndarray_storage.h"
 #include "hetu/core/stream.h"

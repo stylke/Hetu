@@ -67,7 +67,7 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
       CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
       CUDNN_CALL(cudnnSetConvolution2dDescriptor(
         conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
+        CUDNN_CROSS_CORRELATION, datatype));
       // output
       cudnnTensorDescriptor_t out_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&out_desc));
@@ -99,7 +99,6 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
           break;
         }
       }
-    // algo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
 
 #else
         CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(

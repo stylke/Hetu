@@ -17,13 +17,19 @@ class ReduceOpDef : public OperatorDef {
 
  public:
   ReduceOpDef(const constrcutor_access_key&, Tensor input,
-              const std::string& mode, const HTAxes& axes,
+              const std::string& mode, const HTAxes& axes = {},
               const HTKeepDims& keepdims = {false},
               const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReduceOp), {input}, op_meta),
     _mode(mode),
     _axes(axes),
     _keepdims(keepdims) {
+    if (axes.size() == 0) {
+      _axes.reserve(input->ndim());
+      for (size_t i = 0; i < input->ndim(); ++i) {
+        _axes.push_back(i);
+      }
+    }
     HT_ASSERT(keepdims.size() == axes.size() || keepdims.size() == 1);
     if (keepdims.size() == 1) {
       int len = axes.size();
@@ -130,7 +136,7 @@ class ReduceOpDef : public OperatorDef {
 class ReduceOp final : public OpWrapper<ReduceOpDef> {
  public:
   ReduceOp() : OpWrapper<ReduceOpDef>() {}
-  ReduceOp(Tensor input, const std::string& mode, const HTAxes& axes,
+  ReduceOp(Tensor input, const std::string& mode, const HTAxes& axes = {},
            const HTKeepDims& keepdims = {false},
            const OpMeta& op_meta = OpMeta())
   : OpWrapper<ReduceOpDef>(

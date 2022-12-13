@@ -116,17 +116,8 @@ NDArray NDArray::sub(const NDArray& x, const NDArray& y, StreamIndex stream_id,
     ? output
     : NDArray::empty(output_shape, x->device(), x->dtype());
   Stream stream(x->device(), stream_id);
-  // TODO: support element-wise subtraction kernel
-  NDArray opposite_y;
-  if (x->shape() == y->shape())
-    opposite_y = out;
-  else
-    opposite_y = NDArray::empty_like(y);
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(y->device().type(), __FUNCTION__,
-                                  hetu::impl::Opposite, y, opposite_y, stream);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
-                                  hetu::impl::AddElewise, x, opposite_y, out,
-                                  stream);
+                                  hetu::impl::SubElewise, x, y, out, stream);
   return out;
 }
 
@@ -137,8 +128,12 @@ NDArray NDArray::sub(const NDArray& input, double scalar, StreamIndex stream_id,
 
 NDArray NDArray::sub(double scalar, const NDArray& input, StreamIndex stream_id,
                      NDArray& output) {
-  auto out = NDArray::neg(input, stream_id, output);
-  return NDArray::add(out, scalar, stream_id, out);
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::SubConst, input, scalar, out,
+                                  stream);
+  return out;
 }
 
 NDArray NDArray::neg(const NDArray& input, StreamIndex stream_id,
@@ -197,8 +192,12 @@ NDArray NDArray::div(const NDArray& input, double scalar, StreamIndex stream_id,
 
 NDArray NDArray::div(double scalar, const NDArray& input, StreamIndex stream_id,
                      NDArray& output) {
-  auto out = NDArray::reciprocal(input, stream_id, output);
-  return NDArray::mul(out, scalar, stream_id, out);
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::DivConst, input, scalar, out,
+                                  stream);
+  return out;
 }
 
 NDArray NDArray::pow(const NDArray& input, double exponent,

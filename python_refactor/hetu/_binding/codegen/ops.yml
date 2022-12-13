@@ -78,6 +78,79 @@
   args: Tensor input
   self: input
 
+- name: sqrt
+  op: SqrtOp
+  args: Tensor input
+  self: input
+
+- name: sum
+  op: SumOp
+  args: TensorList inputs
+
+
+#######################################################
+# Transform
+#######################################################
+
+- name: broadcast
+  op: BroadcastOp
+  args: Tensor input, HTShape shape, HTShape add_axes
+  self: input
+
+- name: broadcast
+  op: BroadcastOp
+  args: Tensor input, Tensor output
+  self: input
+
+- name: concat
+  op: ConcatOp
+  args: Tensor inputA, Tensor inputB, int64_t axis
+  self: inputA
+
+- name: concat
+  op: ConcatenateOp
+  args: TensorList inputs, int64_t axis=0
+
+- name: pad
+  op: PadOp
+  args: Tensor input, HTShape paddings, std::string mode, double constant
+  self: input
+
+- name: reduce
+  op: ReduceOp
+  args: Tensor input, std::string mode, HTAxes axes=[], HTKeepDims keepdims=[False]
+  self: input
+
+- name: sum
+  op: ReduceSumOp
+  args: Tensor input, HTAxes axes=[], HTKeepDims keepdims=[False]
+  self: input
+
+- name: mean
+  op: ReduceMeanOp
+  args: Tensor input, HTAxes axes=[], HTKeepDims keepdims=[False]
+  self: input
+
+- name: reshape
+  op: ArrayReshapeOp
+  args: Tensor input, HTShape output_shape
+  self: input
+
+- name: slice
+  op: SliceOp
+  args: Tensor input, HTShape begin_pos, HTShape output_shape
+  self: input
+
+- name: split
+  op: SplitOp
+  args: Tensor input, HTAxes axes, HTShape indices, HTShape splits
+  self: input
+
+- name: transpose
+  op: TransposeOp
+  args: Tensor input, HTShape perms
+  self: input
+
 #######################################################
 # LinAlg
 #######################################################
@@ -91,13 +164,105 @@
   args: Tensor input, Tensor other, bool trans_a=False, bool trans_b=False
   self: input
 
+- name: bmm
+  op: BatchMatMulOp
+  args: Tensor input, Tensor other, bool trans_a=False, bool trans_b=False
+  self: input
+
+- name: dot
+  op: MatDotOp
+  args: Tensor a, Tensor b, int64_t axes=0
+  self: a
+
 #######################################################
 # Loss
 #######################################################
 
 - name: binary_cross_entroy
   op: BinaryCrossEntropyOp
-  args: Tensor preds, Tensor labels
+  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+
+- name: nll_loss
+  op: NLLLossOp
+  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+
+- name: mse_loss
+  op: MSELossOp
+  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+
+- name: kl_div
+  op: KLDivLossOp
+  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+
+- name: softmax_cross_entroy
+  op: SoftmaxCrossEntropyOp
+  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+
+#######################################################
+# CNN Related
+#######################################################
+
+- name: conv2d
+  op: Conv2dOp
+  args: Tensor input, Tensor filter, int64_t padding, int64_t stride
+  self: input
+
+- name: conv2d
+  op: Conv2dAddBiasOp
+  args: Tensor input, Tensor filter, Tensor bias, int64_t padding, int64_t stride
+  self: input
+
+- name: avgpool
+  op: AvgPoolOp
+  args: Tensor input, int64_t kernel_H, int64_t kernel_W, int64_t padding, int64_t stride
+  self: input
+
+- name: maxpool
+  op: MaxPoolOp
+  args: Tensor input, int64_t kernel_H, int64_t kernel_W, int64_t padding, int64_t stride
+  self: input
+
+#######################################################
+# Normalize
+#######################################################
+
+- name: batchnorm
+  op: BatchNormOp
+  args: Tensor input, Tensor bn_scale, Tensor bn_bias, double momentum=0.1, double eps=1e-5
+  self: input
+
+- name: instancenorm
+  op: InstanceNormOp
+  args: Tensor input, double eps=1e-7
+  self: input
+
+- name: layernorm
+  op: LayerNormOp
+  args: Tensor input, Tensor ln_scale, Tensor ln_bias, double eps=0.01
+  self: input
+
+#######################################################
+# Dropout
+#######################################################
+
+- name: dropout
+  op: DropoutOp
+  args: Tensor input, double keep_prob, bool recompute=False, bool inplace=False
+  self: input
+
+- name: dropout2d
+  op: Dropout2dOp
+  args: Tensor input, double keep_prob, bool recompute=False, bool inplace=False
+  self: input
+
+# #######################################################
+# # Einsum
+# #######################################################
+
+- name: einsum
+  op: EinsumOp
+  args: std::string msg, TensorList inputs
+
 
 #######################################################
 # Activation
@@ -108,8 +273,23 @@
   args: Tensor input
   self: input
 
+- name: leakyrelu
+  op: LeakyReluOp
+  args: Tensor input, double alpha
+  self: input
+
 - name: sigmoid
   op: SigmoidOp
+  args: Tensor input
+  self: input
+
+- name: softmax
+  op: SoftmaxOp
+  args: Tensor input
+  self: input
+
+- name: tanh
+  op: TanhOp
   args: Tensor input
   self: input
 
@@ -128,3 +308,21 @@
 - name: group
   op: GroupOp
   args: List[Tensor] deps
+
+#######################################################
+# Others
+#######################################################
+
+- name: embedding_lookup
+  op: EmbeddingLookupOp
+  args: Tensor input, Tensor id
+  self: input
+
+- name: onehot
+  op: OnehotOp
+  args: Tensor input, int64_t num_classes
+  self: input
+
+- name: where
+  op: WhereOp
+  args: Tensor cond, Tensor inputA, Tensor inputB

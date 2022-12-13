@@ -42,6 +42,8 @@ std::string ArgType2Str(ArgType type) {
       return "hetu.Tensor";
     case ArgType::TENSOR_LIST:
       return "List[hetu.Tensor]";
+    case ArgType::BOOL_LIST:
+      return "List[bool]";
     default:
       HT_VALUE_ERROR << "Unknown argument type: " << static_cast<int>(type);
       __builtin_unreachable();
@@ -95,6 +97,10 @@ ArgType Str2ArgType(const std::string& type) {
       type == "List[hetu.tensor]" || type == "List[tensor]" || 
       type == "TensorList") 
     return ArgType::TENSOR_LIST;
+  if (type == "List[bool]" || type == "BoolList" ||
+      type == "std::vector<bool>" || type == "vector<bool>" || 
+      type == "HTKeepDims")
+    return ArgType::BOOL_LIST;
   HT_VALUE_ERROR << "Unknown argument type: " << type;
   __builtin_unreachable();
 }
@@ -192,6 +198,15 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
           _default_repr = default_str;
         }
         break;
+      case ArgType::BOOL_LIST:
+        if (!_default_as_none) {
+          auto err_msg = parse_bool_list_slow_but_safe(
+            default_str, _default_bool_list);
+          if (!err_msg.empty())
+            HT_VALUE_ERROR << "Cannot parse default List[bool]: " << err_msg;
+          _default_repr = default_str;
+        }
+        break;
       case ArgType::STRING_LIST:
       case ArgType::PY_ARRAY:
       case ArgType::PY_OBJECT:
@@ -228,6 +243,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyIntList(obj);
     case ArgType::FLOAT64_LIST:
       return CheckPyFloatList(obj);
+    case ArgType::BOOL_LIST:
+      return CheckPyBoolList(obj);
     case ArgType::STRING_LIST:
       return CheckPyStringList(obj);
     case ArgType::DATA_TYPE:

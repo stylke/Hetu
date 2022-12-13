@@ -58,7 +58,7 @@ void pad_gradient_cpu(const spec_t* output_grad, spec_t* input_grad, size_t N,
 }
 
 void PadCpu(const NDArray& input, NDArray& output, const HTShape& paddings,
-            const Stream& stream, size_t mode = 0, double constant_values = 0) {
+            const Stream& stream, std::string mode = "constant", double constant_values = 0) {
   HT_ASSERT(input->is_cpu()) << "Input is not on a host device.";
   HT_ASSERT(output->is_cpu()) << "Output is not on a host device.";
   HT_ASSERT(input->device() == output->device())
@@ -83,7 +83,7 @@ void PadCpu(const NDArray& input, NDArray& output, const HTShape& paddings,
     }
   }
   // size_t size = output->numel();
-  if (mode == 0) {
+  if (mode == "constant") {
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       input->dtype(), spec_t, "PadCpu", [&]() {
         pad_cpu<spec_t>(input->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
@@ -97,7 +97,7 @@ void PadCpu(const NDArray& input, NDArray& output, const HTShape& paddings,
 
 void PadGradientCpu(const NDArray& output_grad, NDArray& input_grad,
                     const HTShape& paddings, const Stream& stream,
-                    size_t mode = 0) {
+                    std::string mode = "constant") {
   HT_ASSERT(output_grad->is_cpu()) << "Output_grad is not on a host device.";
   HT_ASSERT(input_grad->is_cpu()) << "Input_grad is not on a host device.";
   HT_ASSERT(input_grad->device() == output_grad->device())
@@ -125,7 +125,7 @@ void PadGradientCpu(const NDArray& output_grad, NDArray& input_grad,
     }
   }
   // size_t size = input_grad->numel();
-  if (mode == 0) {
+  if (mode == "constant") {
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       input_grad->dtype(), spec_t, "PadGradientCpu", [&]() {
         pad_gradient_cpu<spec_t>(output_grad->data_ptr<spec_t>(),

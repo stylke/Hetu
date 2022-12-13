@@ -7,19 +7,20 @@ class ArgType:
     INT64 = 1; INT64_STR = ("int", "int64_t", "int64")
     FLOAT64 = 2; FLOAT64_STR = ("float", "double", "float64")
     STRING = 3; STRING_STR = ("str", "std::string", "string", "OpName", "TensorName")
-    INT64_LIST = 4; INT64_LIST_STR = ("List[int]", "IntList", "std::vector<int64_t>", "vector<int64_t>", "HTShape", "HTStride", "HTAxes")
-    FLOAT64_LIST = 5; FLOAT64_LIST_STR = ("List[float]", "FloatList", "std::vector<double>", "vector<double>")
-    STRING_LIST = 6; STRING_LIST_STR = ("List[string]", "List[str]", "StringList", "std::vector<std::string>", "vector<string>")
-    PY_ARRAY = 7; PY_ARRAY_STR = ("numpy.array", "numpy.ndarray", "PyArray", "NumpyArray")
-    PY_OBJECT = 8; PY_OBJECT_STR = ("PyObject*", "py_object", "py_obj")
-    DATA_TYPE = 9; DATA_TYPE_STR = ("hetu.dtype", "dtype", "DataType")
-    DEVICE = 10; DEVICE_STR = ("hetu.device", "device", "Device")
-    DEVICE_GROUP = 11; DEVICE_GROUP_STR = ("hetu.DeviceGroup", "DeviceGroup")
-    STREAM = 12; STREAM_STR = ("hetu.stream", "stream", "Stream")
-    ND_ARRAY = 13; ND_ARRAY_STR = ("hetu.NDArray", "NDArray", "hetu.ndarray", "ndarray")
-    ND_ARRAY_LIST = 14; ND_ARRAY_LIST_STR = ("List[hetu.NDArray]", "List[NDArray]", "List[hetu.ndarray]", "List[ndarray]", "NDArrayList")
-    TENSOR = 15; TENSOR_STR = ("hetu.Tensor", "Tensor", "hetu.tensor", "tensor")
-    TENSOR_LIST = 16; TENSOR_LIST_STR = ("List[hetu.Tensor]", "List[Tensor]", "List[hetu.tensor]", "List[tensor]", "TensorList")
+    BOOL_LIST = 4; BOOL_LIST_STR = ("List[bool]", "BoolList", "std::vector<bool>", "vector<bool>", "HTKeepDims")
+    INT64_LIST = 5; INT64_LIST_STR = ("List[int]", "IntList", "std::vector<int64_t>", "vector<int64_t>", "HTShape", "HTStride", "HTAxes")
+    FLOAT64_LIST = 6; FLOAT64_LIST_STR = ("List[float]", "FloatList", "std::vector<double>", "vector<double>")
+    STRING_LIST = 7; STRING_LIST_STR = ("List[string]", "List[str]", "StringList", "std::vector<std::string>", "vector<string>")
+    PY_ARRAY = 8; PY_ARRAY_STR = ("numpy.array", "numpy.ndarray", "PyArray", "NumpyArray")
+    PY_OBJECT = 9; PY_OBJECT_STR = ("PyObject*", "py_object", "py_obj")
+    DATA_TYPE = 10; DATA_TYPE_STR = ("hetu.dtype", "dtype", "DataType")
+    DEVICE = 11; DEVICE_STR = ("hetu.device", "device", "Device")
+    DEVICE_GROUP = 12; DEVICE_GROUP_STR = ("hetu.DeviceGroup", "DeviceGroup")
+    STREAM = 13; STREAM_STR = ("hetu.stream", "stream", "Stream")
+    ND_ARRAY = 14; ND_ARRAY_STR = ("hetu.NDArray", "NDArray", "hetu.ndarray", "ndarray")
+    ND_ARRAY_LIST = 15; ND_ARRAY_LIST_STR = ("List[hetu.NDArray]", "List[NDArray]", "List[hetu.ndarray]", "List[ndarray]", "NDArrayList")
+    TENSOR = 16; TENSOR_STR = ("hetu.Tensor", "Tensor", "hetu.tensor", "tensor")
+    TENSOR_LIST = 17; TENSOR_LIST_STR = ("List[hetu.Tensor]", "List[Tensor]", "List[hetu.tensor]", "List[tensor]", "TensorList")
 
     # None is for returning type rather than argument type. 
     # We slightly abuse the notation here.
@@ -49,6 +50,7 @@ class ArgType:
         ArgType.type_to_type_str_mapping[ArgType.ND_ARRAY_LIST] = ArgType.ND_ARRAY_LIST_STR
         ArgType.type_to_type_str_mapping[ArgType.TENSOR] = ArgType.TENSOR_STR
         ArgType.type_to_type_str_mapping[ArgType.TENSOR_LIST] = ArgType.TENSOR_LIST_STR
+        ArgType.type_to_type_str_mapping[ArgType.BOOL_LIST] = ArgType.BOOL_LIST_STR
         for t, ss in ArgType.type_to_type_str_mapping.items():
             for s in ss:
                 ArgType.type_str_to_type_mapping[s] = t
@@ -292,6 +294,11 @@ def get_arg_getter_fn(arg_type, default_str, has_default, type_str, args):
             return "get_tensor_list_or_empty"
         else:
             return "get_tensor_list"
+    elif arg_type == ArgType.BOOL_LIST:
+        if has_default:
+            return "get_bool_list_or_default"
+        else:
+            return "get_bool_list"
     else:
         raise Exception(
             f"Invalid args \"{args}\": type {type_str} is invalid")
