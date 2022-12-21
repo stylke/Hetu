@@ -128,6 +128,8 @@ HTShape NDArrayMeta::Reduce(const HTShape& shape, const HTAxes& axes,
   if (keepdims) {
     for (auto axis : parsed_axes)
       reduced_shape[axis] = 1;
+  } else if (parsed_axes.size() == num_dim) {
+    return {1};
   } else {
     for (auto axis : parsed_axes)
       reduced_shape.erase(reduced_shape.begin() + axis);

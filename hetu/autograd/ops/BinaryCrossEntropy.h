@@ -17,18 +17,19 @@ class BinaryCrossEntropyOpDef : public OperatorDef {
 
  public:
   BinaryCrossEntropyOpDef(const constrcutor_access_key&, Tensor preds,
-                          Tensor labels, bool reduce = true,
-                          const std::string& reduction = "mean",  
+                          Tensor labels, ReductionType reduction = kMEAN,
                           const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(BinaryCrossEntropyOp), {preds, labels}, op_meta) ,
-    _reduce(reduce),
-    _reduction(reduction){
+  : OperatorDef(quote(BinaryCrossEntropyOp), {preds, labels}, op_meta),
+    _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
     AddOutput(preds->meta());
   }
 
-  bool reduce() const { return _reduce; }
-
-  const std::string& reduction() const { return _reduction; }
+  ReductionType reduction() const {
+    return _reduction;
+  }
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -38,19 +39,24 @@ class BinaryCrossEntropyOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  bool _reduce;
-
-  std::string _reduction;
+  ReductionType _reduction;
 };
 
 class BinaryCrossEntropyOp final : public OpWrapper<BinaryCrossEntropyOpDef> {
  public:
-  BinaryCrossEntropyOp(Tensor preds, Tensor labels, bool reduce = true,
+  BinaryCrossEntropyOp(Tensor preds, Tensor labels,
+                       ReductionType reduction = kMEAN,
+                       const OpMeta& op_meta = OpMeta())
+  : OpWrapper<BinaryCrossEntropyOpDef>(make_ptr<BinaryCrossEntropyOpDef>(
+      BinaryCrossEntropyOpDef::constrcutor_access_key(), preds, labels,
+      reduction, op_meta)) {}
+
+  BinaryCrossEntropyOp(Tensor preds, Tensor labels,
                        const std::string& reduction = "mean",
                        const OpMeta& op_meta = OpMeta())
   : OpWrapper<BinaryCrossEntropyOpDef>(make_ptr<BinaryCrossEntropyOpDef>(
       BinaryCrossEntropyOpDef::constrcutor_access_key(), preds, labels,
-      reduce, reduction, op_meta)) {}
+      Str2ReductionType(reduction), op_meta)) {}
 };
 
 class BinaryCrossEntropyGradientOpDef : public OperatorDef {
@@ -60,17 +66,21 @@ class BinaryCrossEntropyGradientOpDef : public OperatorDef {
 
  public:
   BinaryCrossEntropyGradientOpDef(const constrcutor_access_key&, Tensor preds,
-                                  Tensor labels, Tensor grad_output, bool reduce = true,
-                                  const std::string& reduction = "mean",
+                                  Tensor labels, Tensor grad_output,
+                                  ReductionType reduction = kMEAN,
                                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(BinaryCrossEntropyGradientOp),
-                {preds, labels, grad_output}, op_meta) {
+                {preds, labels, grad_output}, op_meta),
+    _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
     AddOutput(preds->meta());
   }
 
-  bool reduce() const { return _reduce; }
-
-  const std::string& reduction() const { return _reduction; }
+  ReductionType reduction() const {
+    return _reduction;
+  }
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -78,21 +88,27 @@ class BinaryCrossEntropyGradientOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  bool _reduce;
-
-  std::string _reduction;
+  ReductionType _reduction;
 };
 
 class BinaryCrossEntropyGradientOp final
 : public OpWrapper<BinaryCrossEntropyGradientOpDef> {
  public:
-  BinaryCrossEntropyGradientOp(Tensor preds, Tensor labels, Tensor grad_output, bool reduce = true,
+  BinaryCrossEntropyGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
+                               ReductionType reduction = kMEAN,
+                               const OpMeta& op_meta = OpMeta())
+  : OpWrapper<BinaryCrossEntropyGradientOpDef>(
+      make_ptr<BinaryCrossEntropyGradientOpDef>(
+        BinaryCrossEntropyGradientOpDef::constrcutor_access_key(), preds,
+        labels, grad_output, reduction, op_meta)) {}
+
+  BinaryCrossEntropyGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
                                const std::string& reduction = "mean",
                                const OpMeta& op_meta = OpMeta())
   : OpWrapper<BinaryCrossEntropyGradientOpDef>(
       make_ptr<BinaryCrossEntropyGradientOpDef>(
         BinaryCrossEntropyGradientOpDef::constrcutor_access_key(), preds,
-        labels, grad_output, reduce, reduction, op_meta)) {}
+        labels, grad_output, Str2ReductionType(reduction), op_meta)) {}
 };
 
 } // namespace autograd

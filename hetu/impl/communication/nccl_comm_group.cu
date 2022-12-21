@@ -41,19 +41,22 @@ inline ncclRedOp_t to_NCCL_Op(ReductionType red_type) {
     case kPROD: return ncclProd;
     case kMAX: return ncclMax;
     case kMIN: return ncclMin;
-    case kAVG:
+    case kMEAN:
 #if defined(NCCL_MAJOR) &&                                                     \
   ((NCCL_MAJOR > 2) ||                                                         \
    (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 10))
       return ncclAvg;
 #else
       HT_NOT_IMPLEMENTED << "ncclAvg requires NCCL 2.10+";
-      return ncclSum; // shoud not reach here
+      __builtin_unreachable();
 #endif
+    case kNONE:
+      HT_NOT_IMPLEMENTED << "Reduction type cannot be none";
+      __builtin_unreachable();
     default:
       HT_NOT_IMPLEMENTED << "Reduction type " << red_type
                          << " is not supported for NCCL.";
-      return ncclSum; // shoud not reach here
+      __builtin_unreachable();
   }
 }
 
@@ -69,7 +72,7 @@ inline ncclDataType_t to_NCCL_Datatype(DataType dtype) {
     default:
       HT_NOT_IMPLEMENTED << "Data type " << dtype
                          << " is not supported for NCCL.";
-      return ncclFloat32; // shoud not reach here
+      __builtin_unreachable();
   }
 }
 

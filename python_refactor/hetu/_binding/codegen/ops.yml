@@ -180,7 +180,7 @@
 
 - name: binary_cross_entroy
   op: BinaryCrossEntropyOp
-  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+  args: Tensor preds, Tensor labels, std::string reduction=\"mean\"
 
 - name: nll_loss
   op: NLLLossOp

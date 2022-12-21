@@ -191,51 +191,44 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                        StreamIndex stream_id = DEFAULT_STREAM,
                        NDArray& output = EMPTY);
 
- protected:
-  static NDArray _reduce(const NDArray& input, ReductionType red_type,
-                         const HTAxes& axes = HTAxes(), bool keepdims = false,
-                         StreamIndex stream_id = DEFAULT_STREAM,
-                         NDArray& output = EMPTY);
+  static NDArray reduce(const NDArray& input, ReductionType red_type,
+                        const HTAxes& axes = HTAxes(), bool keepdims = false,
+                        StreamIndex stream_id = DEFAULT_STREAM,
+                        NDArray& output = EMPTY);
 
- public:
   static NDArray sum(const NDArray& input, const HTAxes& axes = HTAxes(),
                      bool keepdims = false,
                      StreamIndex stream_id = DEFAULT_STREAM,
                      NDArray& output = EMPTY) {
-    return NDArray::_reduce(input, ReductionType::SUM, axes, keepdims,
-                            stream_id, output);
+    return NDArray::reduce(input, kSUM, axes, keepdims, stream_id, output);
   }
 
   static NDArray mean(const NDArray& input, const HTAxes& axes = HTAxes(),
                       bool keepdims = false,
                       StreamIndex stream_id = DEFAULT_STREAM,
                       NDArray& output = EMPTY) {
-    return NDArray::_reduce(input, ReductionType::AVG, axes, keepdims,
-                            stream_id, output);
+    return NDArray::reduce(input, kMEAN, axes, keepdims, stream_id, output);
   }
 
   static NDArray prod(const NDArray& input, const HTAxes& axes = HTAxes(),
                       bool keepdims = false,
                       StreamIndex stream_id = DEFAULT_STREAM,
                       NDArray& output = EMPTY) {
-    return NDArray::_reduce(input, ReductionType::PROD, axes, keepdims,
-                            stream_id, output);
+    return NDArray::reduce(input, kPROD, axes, keepdims, stream_id, output);
   }
 
   static NDArray max(const NDArray& input, const HTAxes& axes = HTAxes(),
                      bool keepdims = false,
                      StreamIndex stream_id = DEFAULT_STREAM,
                      NDArray& output = EMPTY) {
-    return NDArray::_reduce(input, ReductionType::MAX, axes, keepdims,
-                            stream_id, output);
+    return NDArray::reduce(input, kMAX, axes, keepdims, stream_id, output);
   }
 
   static NDArray min(const NDArray& input, const HTAxes& axes = HTAxes(),
                      bool keepdims = false,
                      StreamIndex stream_id = DEFAULT_STREAM,
                      NDArray& output = EMPTY) {
-    return NDArray::_reduce(input, ReductionType::MIN, axes, keepdims,
-                            stream_id, output);
+    return NDArray::reduce(input, kMIN, axes, keepdims, stream_id, output);
   }
 
   static NDArray matmul(const NDArray& x, const NDArray& y,

@@ -72,7 +72,6 @@ std::ostream& operator<<(std::ostream&, const DataType&);
 
 namespace std {
 template <>
-
 struct hash<hetu::DataType> {
   std::size_t operator()(hetu::DataType data_type) const noexcept {
     return std::hash<int>()(static_cast<int>(data_type));
@@ -82,5 +81,4 @@ struct hash<hetu::DataType> {
 inline std::string to_string(hetu::DataType data_type) {
   return hetu::DataType2Str(data_type);
 }
-
 } // namespace std

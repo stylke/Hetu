@@ -300,9 +300,9 @@ NDArray NDArray::round(const NDArray& input, StreamIndex stream_id,
   return out;
 }
 
-NDArray NDArray::_reduce(const NDArray& input, ReductionType red_type,
-                         const HTAxes& axes, bool keepdims,
-                         StreamIndex stream_id, NDArray& output) {
+NDArray NDArray::reduce(const NDArray& input, ReductionType red_type,
+                        const HTAxes& axes, bool keepdims,
+                        StreamIndex stream_id, NDArray& output) {
   auto output_shape = NDArrayMeta::Reduce(input->shape(), axes, keepdims);
   NDArray out = output.is_defined()
     ? output
