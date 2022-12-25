@@ -170,6 +170,9 @@ bool OperatorDef::MapToParallelDevices(const DeviceGroup& placement_group) {
 bool OperatorDef::DoMapToParallelDevices(const DeviceGroup& placement_group) {
   _placement_group = placement_group;
   // TODO: set the parallel statuses of outputs
+  for (auto& output : _outputs) {
+    output->set_placement_group(placement_group);
+  }
 
   // add P2P communication ops
   auto& dst_group = _placement_group;
@@ -252,6 +255,8 @@ bool OperatorDef::DoPlaceToLocalDevice(const Device& placement,
     _start = std::make_shared<DefaultEvent>(_placement);
     _stop = std::make_shared<DefaultEvent>(_placement);
   }
+  
+  // 顺便给tensor的distributed_states也增加placement的attribute
   for (auto& output : _outputs)
     output->set_placement(placement);
 

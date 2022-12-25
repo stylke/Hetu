@@ -64,6 +64,15 @@ class OperatorDef : public shared_ptr_target {
 
   bool PlaceToLocalDevice(const Device& placement, StreamIndex stream_id);
 
+  // 必须由各op根据自己的规则重载实现 
+  virtual bool DoDeduceDistributedStates() {
+    for (auto& output : _outputs) {
+      if (!output->get_distributed_states().is_valid()) {
+        return false;
+      }
+    }
+  }  
+
   inline void Sync() {
     _stop->Sync();
   }
@@ -207,6 +216,8 @@ class OperatorDef : public shared_ptr_target {
   bool is_computed() const {
     return _computed;
   }
+  
+  void ReplaceInput(size_t index, Tensor new_input); // 暂时先挪到public来
 
  protected:
   // Walkaround methods to get the corresponding wrapper
@@ -231,8 +242,6 @@ class OperatorDef : public shared_ptr_target {
     for (const auto& output_meta : output_meta_list)
       AddOutput(output_meta);
   }
-
-  void ReplaceInput(size_t index, Tensor new_input);
 
   virtual NDArrayList DoCompute(const NDArrayList& inputs,
                                 RuntimeContext& ctx) {
@@ -366,9 +375,18 @@ static const uint64_t PEER_TO_PEER_SEND_OP = 1ul << 5;
 static const uint64_t PEER_TO_PEER_RECV_OP = 1ul << 6;
 static const uint64_t ALL_TO_ALL_OP = 1ul << 7;
 static const uint64_t ALL_REDUCE_OP = 1ul << 8;
+static const uint64_t ALL_GATHER_OP = 1ul << 9;
+static const uint64_t REDUCE_SCATTER_OP = 1ul << 10;
+static const uint64_t BROADCAST_OP = 1ul << 11;
+static const uint64_t REDUCE_OP = 1ul << 12;
+static const uint64_t P2P_OP = 1ul << 13;
+static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t OPTIMIZER_UPDATE_OP = 1ul << 62;
 static const uint64_t GROUP_OP = 1ul << 63;
 
+inline bool is_comm_op(const Operator& op) {
+  return (op->op_indicator() & COMM_OP) != 0;
+}
 inline bool is_data_loader_op(const Operator& op) {
   return (op->op_indicator() & DATA_LOADER_OP) != 0;
 }

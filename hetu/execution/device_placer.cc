@@ -11,14 +11,14 @@ void MapOpsToParallelDevices(const OpList& topo_order,
                      [](const Operator& op) {
                        return op->device_group().empty();
                      });
-  if (pure_dp) {
+  if (pure_dp) { // pure_dp or pure_tp
     // pure data parallel
     HT_ASSERT(device_group.num_devices() > 1)
       << "Invalid device group for data parallel: " << device_group;
     for (auto& op : topo_order) {
       op->MapToParallelDevices(device_group);
     }
-  } else {
+  } else { // (dp, tp, pp)
     for (auto& op : topo_order) {
       if (!op->device_group().empty()) {
         op->MapToParallelDevices(op->device_group());
