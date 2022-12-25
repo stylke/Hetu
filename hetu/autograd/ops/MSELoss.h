@@ -17,18 +17,19 @@ class MSELossOpDef : public OperatorDef {
 
  public:
   MSELossOpDef(const constrcutor_access_key&, Tensor preds,
-                          Tensor labels, bool reduce = true,
-                          const std::string& reduction = "mean",  
+                          Tensor labels, ReductionType reduction = kMEAN,
                           const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(MSELossOp), {preds, labels}, op_meta) ,
-    _reduce(reduce),
-    _reduction(reduction){
+  : OperatorDef(quote(MSELossOp), {preds, labels}, op_meta),
+    _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
     AddOutput(preds->meta());
   }
 
-  bool reduce() const { return _reduce; }
-
-  const std::string& reduction() const { return _reduction; }
+  ReductionType reduction() const {
+    return _reduction;
+  }
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -38,19 +39,24 @@ class MSELossOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  bool _reduce;
-
-  std::string _reduction;
+  ReductionType _reduction;
 };
 
 class MSELossOp final : public OpWrapper<MSELossOpDef> {
  public:
-  MSELossOp(Tensor preds, Tensor labels, bool reduce = true,
+  MSELossOp(Tensor preds, Tensor labels,
+                       ReductionType reduction = kMEAN,
+                       const OpMeta& op_meta = OpMeta())
+  : OpWrapper<MSELossOpDef>(make_ptr<MSELossOpDef>(
+      MSELossOpDef::constrcutor_access_key(), preds, labels,
+      reduction, op_meta)) {}
+
+  MSELossOp(Tensor preds, Tensor labels,
                        const std::string& reduction = "mean",
                        const OpMeta& op_meta = OpMeta())
   : OpWrapper<MSELossOpDef>(make_ptr<MSELossOpDef>(
       MSELossOpDef::constrcutor_access_key(), preds, labels,
-      reduce, reduction, op_meta)) {}
+      Str2ReductionType(reduction), op_meta)) {}
 };
 
 class MSELossGradientOpDef : public OperatorDef {
@@ -60,17 +66,21 @@ class MSELossGradientOpDef : public OperatorDef {
 
  public:
   MSELossGradientOpDef(const constrcutor_access_key&, Tensor preds,
-                                  Tensor labels, Tensor grad_output, bool reduce = true,
-                                  const std::string& reduction = "mean",
+                                  Tensor labels, Tensor grad_output,
+                                  ReductionType reduction = kMEAN,
                                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(MSELossGradientOp),
-                {preds, labels, grad_output}, op_meta) {
+                {preds, labels, grad_output}, op_meta),
+    _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
     AddOutput(preds->meta());
   }
 
-  bool reduce() const { return _reduce; }
-
-  const std::string& reduction() const { return _reduction; }
+  ReductionType reduction() const {
+    return _reduction;
+  }
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -78,21 +88,27 @@ class MSELossGradientOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  bool _reduce;
-
-  std::string _reduction;
+  ReductionType _reduction;
 };
 
 class MSELossGradientOp final
 : public OpWrapper<MSELossGradientOpDef> {
  public:
-  MSELossGradientOp(Tensor preds, Tensor labels, Tensor grad_output, bool reduce = true,
+  MSELossGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
+                               ReductionType reduction = kMEAN,
+                               const OpMeta& op_meta = OpMeta())
+  : OpWrapper<MSELossGradientOpDef>(
+      make_ptr<MSELossGradientOpDef>(
+        MSELossGradientOpDef::constrcutor_access_key(), preds,
+        labels, grad_output, reduction, op_meta)) {}
+
+  MSELossGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
                                const std::string& reduction = "mean",
                                const OpMeta& op_meta = OpMeta())
   : OpWrapper<MSELossGradientOpDef>(
       make_ptr<MSELossGradientOpDef>(
         MSELossGradientOpDef::constrcutor_access_key(), preds,
-        labels, grad_output, reduce, reduction, op_meta)) {}
+        labels, grad_output, Str2ReductionType(reduction), op_meta)) {}
 };
 
 } // namespace autograd

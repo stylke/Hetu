@@ -16,7 +16,7 @@ __global__ void nllloss_kernel(const spec_t* pred, const int64_t* label,
   if (id < 0 || id >= n_cols) {
     loss[idx] = 0;
   } else {
-    loss[idx] = -pred[n_cols * idx + id];
+    loss[idx] = - pred[n_cols * idx + id];
   }
 }
 
@@ -82,20 +82,22 @@ void NLLLossGradientCuda(const NDArray& pred, const NDArray& label,
   HT_ASSERT_SAME_DEVICE(pred, output);
 
   size_t n_rows = 1, n_cols;
-  for (size_t i = 0; i < pred->ndim(); i++)
+  for (size_t i = 0; i < pred->ndim() - 1; ++i)
     n_rows *= label->shape(i);
   n_cols = pred->shape(pred->ndim() - 1);
   if (n_rows == 0)
     return;
   dim3 blocks, threads;
-  threads.x = MIN(n_rows, 1024);
-  blocks.x = DIVUP(n_rows, 1024);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "NLLLossGradientCuda", [&]() {
+      threads.x = MIN(n_rows * n_cols, 1024);
+      blocks.x = DIVUP(n_rows * n_cols, 1024);
       array_zero_set_kernel<<<blocks, threads, 0, cuda_stream>>>(
         output->data_ptr<spec_t>(), n_rows * n_cols);
+      threads.x = MIN(n_rows, 1024);
+      blocks.x = DIVUP(n_rows, 1024);
       nllloss_gradient_kernel<<<blocks, threads, 0, cuda_stream>>>(
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(),
         grad_loss->data_ptr<spec_t>(), n_rows, n_cols, output->data_ptr<spec_t>());

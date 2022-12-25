@@ -17,18 +17,19 @@ class NLLLossOpDef : public OperatorDef {
 
  public:
   NLLLossOpDef(const constrcutor_access_key&, Tensor preds,
-                          Tensor labels, bool reduce = true,
-                          const std::string& reduction = "mean",  
+                          Tensor labels, ReductionType reduction = kMEAN,
                           const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(NLLLossOp), {preds, labels}, op_meta) ,
-    _reduce(reduce),
-    _reduction(reduction){
+  : OperatorDef(quote(NLLLossOp), {preds, labels}, op_meta),
+    _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
     AddOutput(preds->meta());
   }
 
-  bool reduce() const { return _reduce; }
-
-  const std::string& reduction() const { return _reduction; }
+  ReductionType reduction() const {
+    return _reduction;
+  }
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -38,19 +39,24 @@ class NLLLossOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  bool _reduce;
-
-  std::string _reduction;
+  ReductionType _reduction;
 };
 
 class NLLLossOp final : public OpWrapper<NLLLossOpDef> {
  public:
-  NLLLossOp(Tensor preds, Tensor labels, bool reduce = true,
+  NLLLossOp(Tensor preds, Tensor labels,
+                       ReductionType reduction = kMEAN,
+                       const OpMeta& op_meta = OpMeta())
+  : OpWrapper<NLLLossOpDef>(make_ptr<NLLLossOpDef>(
+      NLLLossOpDef::constrcutor_access_key(), preds, labels,
+      reduction, op_meta)) {}
+
+  NLLLossOp(Tensor preds, Tensor labels,
                        const std::string& reduction = "mean",
                        const OpMeta& op_meta = OpMeta())
   : OpWrapper<NLLLossOpDef>(make_ptr<NLLLossOpDef>(
       NLLLossOpDef::constrcutor_access_key(), preds, labels,
-      reduce, reduction, op_meta)) {}
+      Str2ReductionType(reduction), op_meta)) {}
 };
 
 class NLLLossGradientOpDef : public OperatorDef {
@@ -60,17 +66,21 @@ class NLLLossGradientOpDef : public OperatorDef {
 
  public:
   NLLLossGradientOpDef(const constrcutor_access_key&, Tensor preds,
-                                  Tensor labels, Tensor grad_output, bool reduce = true,
-                                  const std::string& reduction = "mean",
+                                  Tensor labels, Tensor grad_output,
+                                  ReductionType reduction = kMEAN,
                                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(NLLLossGradientOp),
-                {preds, labels, grad_output}, op_meta) {
+                {preds, labels, grad_output}, op_meta),
+    _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
     AddOutput(preds->meta());
   }
 
-  bool reduce() const { return _reduce; }
-
-  const std::string& reduction() const { return _reduction; }
+  ReductionType reduction() const {
+    return _reduction;
+  }
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -78,21 +88,27 @@ class NLLLossGradientOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  bool _reduce;
-
-  std::string _reduction;
+  ReductionType _reduction;
 };
 
 class NLLLossGradientOp final
 : public OpWrapper<NLLLossGradientOpDef> {
  public:
-  NLLLossGradientOp(Tensor preds, Tensor labels, Tensor grad_output, bool reduce = true,
+  NLLLossGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
+                               ReductionType reduction = kMEAN,
+                               const OpMeta& op_meta = OpMeta())
+  : OpWrapper<NLLLossGradientOpDef>(
+      make_ptr<NLLLossGradientOpDef>(
+        NLLLossGradientOpDef::constrcutor_access_key(), preds,
+        labels, grad_output, reduction, op_meta)) {}
+
+  NLLLossGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
                                const std::string& reduction = "mean",
                                const OpMeta& op_meta = OpMeta())
   : OpWrapper<NLLLossGradientOpDef>(
       make_ptr<NLLLossGradientOpDef>(
         NLLLossGradientOpDef::constrcutor_access_key(), preds,
-        labels, grad_output, reduce, reduction, op_meta)) {}
+        labels, grad_output, Str2ReductionType(reduction), op_meta)) {}
 };
 
 } // namespace autograd

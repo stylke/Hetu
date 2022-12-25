@@ -492,8 +492,8 @@ class TestNormOps(unittest.TestCase):
             bias = hetu.from_numpy(bias_np)
             gt = torch.batch_norm(torch.from_numpy(x_np), weight = torch.from_numpy(scale_np), bias = torch.from_numpy(bias_np),
                                  running_mean=None, running_var=None, training=True, momentum=0.1, eps=1e-5, cudnn_enabled=True).numpy()
-            self.assertTrue(allclose(hetu.batchnorm(x, scale, bias, 0.1 ,1e-5), gt))
-            self.assertTrue(allclose(x.batchnorm(scale, bias, 0.1 ,1e-5), gt))
+            self.assertTrue(allclose(hetu.batch_norm(x, scale, bias, 0.1 ,1e-5), gt))
+            self.assertTrue(allclose(x.batch_norm(scale, bias, 0.1 ,1e-5), gt))
 
     def test_layernorm_op(self):
         for shape in TestPoolOps._test_shapes:
@@ -509,8 +509,8 @@ class TestNormOps(unittest.TestCase):
             gt2 = torch.layer_norm(torch.from_numpy(x_np), normalized_shape=tuple(norm_shape), weight = torch.from_numpy(scale_np), bias = torch.from_numpy(bias_np),
                                   eps=1e-5).numpy()
             self.assertTrue(allclose(gt2, gt))
-            self.assertTrue(allclose(hetu.layernorm(x, scale, bias, 1e-5), gt))
-            self.assertTrue(allclose(x.layernorm(scale, bias, 1e-5), gt))
+            self.assertTrue(allclose(hetu.layer_norm(x, scale, bias, 1e-5), gt))
+            self.assertTrue(allclose(x.layer_norm(scale, bias, 1e-5), gt))
     
     def test_instancenorm_op(self):
         for shape in TestPoolOps._test_shapes:
@@ -518,8 +518,8 @@ class TestNormOps(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             instancenorm = torch.nn.InstanceNorm2d(num_features=shape[1], eps=1e-5)
             gt = instancenorm(torch.from_numpy(x_np)).detach().numpy()
-            self.assertTrue(allclose(hetu.instancenorm(x, 1e-5), gt))
-            self.assertTrue(allclose(x.instancenorm(1e-5), gt))
+            self.assertTrue(allclose(hetu.instance_norm(x, 1e-5), gt))
+            self.assertTrue(allclose(x.instance_norm(1e-5), gt))
 
 class TestReduceOps(unittest.TestCase):
 
@@ -625,7 +625,6 @@ class TestLossOps(unittest.TestCase):
             self.assertTrue(allclose(loss, gt))
     
     def test_kldivloss_op(self):
-        MIN_VALUE = -100.0
         for shape in TestLossOps._test_binary_label_shapes:
             probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
             labels_np = np.random.choice([0, 1], size=shape).astype(np.float32)
@@ -652,21 +651,21 @@ class TestLossOps(unittest.TestCase):
             loss = hetu.mse_loss(probs, labels)
             self.assertTrue(allclose(loss, gt))
 
-    def test_softmax_cross_entropy_op(self):
-        MIN_VALUE = -100.0
-        for shape in TestLossOps._test_cross_entropy_label_shapes:
-            probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
-            labels_np = np.random.uniform(0.25, 0.5, size=shape).astype(np.float32)
-            # probs_np = np.arange(4).astype(np.float32) + 1
-            # probs_np = probs_np.reshape(2,2)
-            # labels_np = np.array([[1,0],[0,1]]).astype(np.float32).reshape(2,2)
-            crs_etp = torch.nn.CrossEntropyLoss()
-            gt = crs_etp(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
-            # gt = torch.nn.functional.cross_entropy(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
-            probs = hetu.from_numpy(probs_np)
-            labels = hetu.from_numpy(labels_np)
-            loss = hetu.softmax_cross_entroy(probs, labels)
-            self.assertTrue(allclose(loss, gt))
+    # def test_softmax_cross_entropy_op(self):
+    #     MIN_VALUE = -100.0
+    #     for shape in TestLossOps._test_cross_entropy_label_shapes:
+    #         probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
+    #         labels_np = np.random.uniform(0.25, 0.5, size=shape).astype(np.float32)
+    #         # probs_np = np.arange(4).astype(np.float32) + 1
+    #         # probs_np = probs_np.reshape(2,2)
+    #         # labels_np = np.array([[1,0],[0,1]]).astype(np.float32).reshape(2,2)
+    #         crs_etp = torch.nn.CrossEntropyLoss()
+    #         gt = crs_etp(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
+    #         # gt = torch.nn.functional.cross_entropy(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
+    #         probs = hetu.from_numpy(probs_np)
+    #         labels = hetu.from_numpy(labels_np)
+    #         loss = hetu.softmax_cross_entroy(probs, labels)
+    #         self.assertTrue(allclose(loss, gt))
 
 class TestEinsumOps(unittest.TestCase):
 

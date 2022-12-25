@@ -8,6 +8,7 @@ from .conv import *
 from .pooling import *
 from .container import *
 from .loss import *
+from .dropout import *
 
 
 __all__ = [
@@ -24,4 +25,6 @@ __all__ = [
     'Sequential', 'ModuleList', 'ModuleDict',
     #loss
     'NLLLoss', 'KLDivLoss', 'MSELoss', 'BCELoss',
+    #dropout
+    'Dropout', 'Dropout2d',
 ]

@@ -8,11 +8,11 @@ namespace autograd {
 
 void ReduceOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                             RuntimeContext& ctx) {
-  if (mode() == "mean") {
+  if (reduction() == ReductionType::MEAN) {
     HT_DISPATCH_KERNEL_CUDA_ONLY(
       placement().type(), type(), hetu::impl::ReduceMean, inputs.at(0),
       outputs.at(0), get_axes().data(), get_axes().size(), stream());
-  } else if (mode() == "sum") {
+  } else if (reduction() == ReductionType::SUM) {
     HT_DISPATCH_KERNEL_CUDA_ONLY(
       placement().type(), type(), hetu::impl::ReduceSum, inputs.at(0),
       outputs.at(0), get_axes().data(), get_axes().size(), stream());
@@ -20,7 +20,7 @@ void ReduceOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
 }
 
 TensorList ReduceOpDef::DoGradient(const TensorList& grad_outputs) {
-  return {ReduceGradientOp(grad_outputs.at(0), _outputs[0], HTShape(), mode(),
+  return {ReduceGradientOp(grad_outputs.at(0), _outputs[0], HTShape(), reduction(),
                            HTAxes(), grad_op_meta().set_name(grad_name()))
             ->output(0)};
 }
@@ -28,7 +28,7 @@ TensorList ReduceOpDef::DoGradient(const TensorList& grad_outputs) {
 HTShapeList ReduceOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   HTShapeList outputlist = {};
-  if (mode() == "mean") {
+  if (reduction() == ReductionType::MEAN) {
     HTShape input_shape = input_shapes.at(0);
     int ndim = input_shape.size();
     int64_t mean_multiplier = 1;
@@ -68,7 +68,7 @@ HTShapeList ReduceOpDef::DoInferShape(const HTShapeList& input_shapes) {
     if (output_shape.size() == 0)
       output_shape.emplace_back(1);
     outputlist = {output_shape};
-  } else if (mode() == "sum") {
+  } else if (reduction() == ReductionType::SUM) {
     HTShape input_shape = input_shapes.at(0);
     int ndim = input_shape.size();
     HTShape axes = get_axes();
@@ -108,7 +108,7 @@ HTShapeList ReduceOpDef::DoInferShape(const HTShapeList& input_shapes) {
 
 void ReduceGradientOpDef::DoCompute(const NDArrayList& inputs,
                                     NDArrayList& outputs, RuntimeContext& ctx) {
-  if (mode() == "mean") {
+  if (reduction() == ReductionType::MEAN) {
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       placement().type(), type(), hetu::impl::BroadcastShapeMul, inputs.at(0),
       get_const_value(), outputs.at(0), get_add_axes(), stream());
@@ -126,7 +126,7 @@ HTShapeList ReduceGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   if (input_ptr) {
     set_add_axes(input_ptr->get_grad_axes());
     set_shape(input_ptr->get_grad_shape());
-    if (mode() == "mean") {
+    if (reduction() == ReductionType::MEAN) {
       set_const_value(input_ptr->get_grad_const());
     }
   }

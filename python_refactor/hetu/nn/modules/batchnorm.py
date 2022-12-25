@@ -27,5 +27,5 @@ class BatchNorm(NormBase):
         super(BatchNorm, self).__init__(num_features, eps, momentum)
 
     def forward(self, input: Tensor) -> Tensor:
-        return hetu.batchnorm(input, self.weight, self.bias, self.momentum, self.eps)
+        return hetu.batch_norm(input, self.weight, self.bias, self.momentum, self.eps)
 

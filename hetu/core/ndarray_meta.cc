@@ -190,7 +190,7 @@ int64_t NDArrayMeta::ParseAxis(int64_t axis, int64_t num_dim) {
 HTAxes NDArrayMeta::ParseAxes(const HTAxes axes, int64_t num_dim) {
   HTAxes ret;
   if (axes.size() == 0) {
-    ret.reserve(num_dim);
+    ret.resize(num_dim);
     std::iota(ret.begin(), ret.end(), 0);
   } else {
     ret.reserve(axes.size());

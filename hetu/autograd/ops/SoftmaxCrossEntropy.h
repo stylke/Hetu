@@ -16,27 +16,20 @@ class SoftmaxCrossEntropyOpDef : public OperatorDef {
   struct constrcutor_access_key {};
 
  public:
-  SoftmaxCrossEntropyOpDef(const constrcutor_access_key&, Tensor preds, 
-                           Tensor labels, bool reduce = true,
-                           const std::string& reduction = "mean",
-                           const OpMeta& op_meta = OpMeta())
+  SoftmaxCrossEntropyOpDef(const constrcutor_access_key&, Tensor preds,
+                          Tensor labels, ReductionType reduction = kMEAN,
+                          const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SoftmaxCrossEntropyOp), {preds, labels}, op_meta),
-    _reduce(reduce),
     _reduction(reduction) {
-    HTShape output_shape = {};
-    output_shape.reserve(preds->ndim());
-    for (size_t i = 0; i < preds->ndim() - 1; ++i) {
-      output_shape.emplace_back(preds->shape(i));
-    }
-    if (output_shape.size() == 0)
-      output_shape.emplace_back(-1);
-    AddOutput(
-      NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
+    AddOutput(preds->meta());
   }
 
-  bool reduce() const { return _reduce; }
-
-  const std::string& reduction() const { return _reduction; }
+  ReductionType reduction() const {
+    return _reduction;
+  }
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -46,19 +39,24 @@ class SoftmaxCrossEntropyOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  bool _reduce;
-
-  std::string _reduction;
+  ReductionType _reduction;
 };
 
 class SoftmaxCrossEntropyOp final : public OpWrapper<SoftmaxCrossEntropyOpDef> {
  public:
-  SoftmaxCrossEntropyOp(Tensor preds, Tensor labels, bool reduce = true,
-                        const std::string& reduction = "mean",
-                        const OpMeta& op_meta = OpMeta())
+  SoftmaxCrossEntropyOp(Tensor preds, Tensor labels,
+                       ReductionType reduction = kMEAN,
+                       const OpMeta& op_meta = OpMeta())
   : OpWrapper<SoftmaxCrossEntropyOpDef>(make_ptr<SoftmaxCrossEntropyOpDef>(
-      SoftmaxCrossEntropyOpDef::constrcutor_access_key(), preds, labels, reduce, reduction,
-      op_meta)) {}
+      SoftmaxCrossEntropyOpDef::constrcutor_access_key(), preds, labels,
+      reduction, op_meta)) {}
+
+  SoftmaxCrossEntropyOp(Tensor preds, Tensor labels,
+                       const std::string& reduction = "mean",
+                       const OpMeta& op_meta = OpMeta())
+  : OpWrapper<SoftmaxCrossEntropyOpDef>(make_ptr<SoftmaxCrossEntropyOpDef>(
+      SoftmaxCrossEntropyOpDef::constrcutor_access_key(), preds, labels,
+      Str2ReductionType(reduction), op_meta)) {}
 };
 
 class SoftmaxCrossEntropyGradientOpDef : public OperatorDef {
@@ -68,19 +66,21 @@ class SoftmaxCrossEntropyGradientOpDef : public OperatorDef {
 
  public:
   SoftmaxCrossEntropyGradientOpDef(const constrcutor_access_key&, Tensor preds,
-                                   Tensor labels, Tensor grad_output, bool reduce = true,
-                                   const std::string& reduction = "mean",
-                                   const OpMeta& op_meta = OpMeta())
+                                  Tensor labels, Tensor grad_output,
+                                  ReductionType reduction = kMEAN,
+                                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SoftmaxCrossEntropyGradientOp),
                 {preds, labels, grad_output}, op_meta),
-    _reduce(reduce),
     _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
     AddOutput(preds->meta());
   }
 
-  bool reduce() const { return _reduce; }
-
-  const std::string& reduction() const { return _reduction; }
+  ReductionType reduction() const {
+    return _reduction;
+  }
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -88,21 +88,27 @@ class SoftmaxCrossEntropyGradientOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  bool _reduce;
-
-  std::string _reduction;
+  ReductionType _reduction;
 };
 
 class SoftmaxCrossEntropyGradientOp final
 : public OpWrapper<SoftmaxCrossEntropyGradientOpDef> {
  public:
-  SoftmaxCrossEntropyGradientOp(Tensor preds, Tensor labels, Tensor grad_output, bool reduce = true,
-                                const std::string& reduction = "mean",
-                                const OpMeta& op_meta = OpMeta())
+  SoftmaxCrossEntropyGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
+                               ReductionType reduction = kMEAN,
+                               const OpMeta& op_meta = OpMeta())
   : OpWrapper<SoftmaxCrossEntropyGradientOpDef>(
       make_ptr<SoftmaxCrossEntropyGradientOpDef>(
         SoftmaxCrossEntropyGradientOpDef::constrcutor_access_key(), preds,
-        labels, grad_output, reduce, reduction, op_meta)) {}
+        labels, grad_output, reduction, op_meta)) {}
+
+  SoftmaxCrossEntropyGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
+                               const std::string& reduction = "mean",
+                               const OpMeta& op_meta = OpMeta())
+  : OpWrapper<SoftmaxCrossEntropyGradientOpDef>(
+      make_ptr<SoftmaxCrossEntropyGradientOpDef>(
+        SoftmaxCrossEntropyGradientOpDef::constrcutor_access_key(), preds,
+        labels, grad_output, Str2ReductionType(reduction), op_meta)) {}
 };
 
 } // namespace autograd

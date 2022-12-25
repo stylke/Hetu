@@ -51,7 +51,8 @@ void ReduceCuda(const NDArray& input, NDArray& output, const HTAxes& axes,
   // TODO: Optimize reduction performance. Do NOT rely on CuDNN.
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
-  CudnnReduceCuda(input, output, axes, red_type, stream);
+  HTAxes parsed_axes = NDArrayMeta::ParseAxes(axes, input->ndim());
+  CudnnReduceCuda(input, output, parsed_axes, red_type, stream);
 }
 } // namespace impl
 } // namespace hetu

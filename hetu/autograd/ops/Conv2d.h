@@ -87,7 +87,7 @@ class Conv2dGradientofFilterOpDef : public OperatorDef {
                 op_meta),
     _padding(padding),
     _stride(stride) {
-    AddOutput(input->meta());
+    AddOutput(filter->meta());
   }
 
   HTShape get_padding() const {

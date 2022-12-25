@@ -184,19 +184,19 @@
 
 - name: nll_loss
   op: NLLLossOp
-  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+  args: Tensor preds, Tensor labels, std::string reduction=\"mean\"
 
 - name: mse_loss
   op: MSELossOp
-  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+  args: Tensor preds, Tensor labels, std::string reduction=\"mean\"
 
 - name: kl_div
   op: KLDivLossOp
-  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+  args: Tensor preds, Tensor labels, std::string reduction=\"mean\"
 
 - name: softmax_cross_entroy
   op: SoftmaxCrossEntropyOp
-  args: Tensor preds, Tensor labels, bool reduce=True, std::string reduction=\"mean\"
+  args: Tensor preds, Tensor labels, std::string reduction=\"mean\"
 
 #######################################################
 # CNN Related
@@ -226,17 +226,17 @@
 # Normalize
 #######################################################
 
-- name: batchnorm
+- name: batch_norm
   op: BatchNormOp
   args: Tensor input, Tensor bn_scale, Tensor bn_bias, double momentum=0.1, double eps=1e-5
   self: input
 
-- name: instancenorm
+- name: instance_norm
   op: InstanceNormOp
   args: Tensor input, double eps=1e-7
   self: input
 
-- name: layernorm
+- name: layer_norm
   op: LayerNormOp
   args: Tensor input, Tensor ln_scale, Tensor ln_bias, double eps=0.01
   self: input

@@ -3,7 +3,6 @@ from hetu import Tensor
 from .module import Module
 import math
 from .utils import _pair
-from ..parameter import UninitializedParameter
 
 from typing import Any, TypeVar, Union, Tuple, Optional
 
@@ -21,7 +20,7 @@ class ConvNd(Module):
         self.kernel_size = list(kernel_size)
         self.stride = list(stride)
         self.padding = list(padding)
-        self.weight = hetu.nn.Parameter(hetu.empty([in_channels, out_channels, *kernel_size]))
+        self.weight = hetu.nn.Parameter(hetu.empty([out_channels, in_channels, *kernel_size]))
         if bias:
             self.bias = hetu.nn.Parameter(hetu.empty([out_channels]))
         else:

@@ -15,15 +15,15 @@ class ReduceOpDef : public OperatorDef {
   friend class ReduceOp;
   struct constrcutor_access_key {};
 
- public:
-  ReduceOpDef(const constrcutor_access_key&, Tensor input,
-              const std::string& mode, const HTAxes& axes = {},
+protected:
+  ReduceOpDef(OpType&& op_type, Tensor input, ReductionType reduction = kMEAN, 
+              const HTAxes& axes = {},
               const HTKeepDims& keepdims = {false},
               const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(ReduceOp), {input}, op_meta),
-    _mode(mode),
+  : OperatorDef(std::move(op_type), {input}, op_meta),
     _axes(axes),
-    _keepdims(keepdims) {
+    _keepdims(keepdims),
+    _reduction(reduction) {
     if (axes.size() == 0) {
       _axes.reserve(input->ndim());
       for (size_t i = 0; i < input->ndim(); ++i) {
@@ -62,9 +62,15 @@ class ReduceOpDef : public OperatorDef {
       if (output_shape.size() == 0)
         output_shape.emplace_back(1);
     }
-    AddOutput(
-      NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
   }
+
+ public:
+  ReduceOpDef(const constrcutor_access_key&, Tensor input,
+              ReductionType reduction, const HTAxes& axes = {},
+              const HTKeepDims& keepdims = {false},
+              const OpMeta& op_meta = OpMeta())
+  : ReduceOpDef(quote(ReduceOp), input, reduction, axes, keepdims, op_meta) {}
 
   const HTShape& get_axes() const {
     return _axes;
@@ -76,6 +82,10 @@ class ReduceOpDef : public OperatorDef {
 
   const std::string& mode() const {
     return _mode;
+  }
+
+  ReductionType reduction() const {
+    return _reduction;
   }
 
   void set_axes(const HTShape& axes) {
@@ -131,16 +141,25 @@ class ReduceOpDef : public OperatorDef {
   HTShape _grad_shape;
 
   double _grad_const;
+
+  ReductionType _reduction;
 };
 
 class ReduceOp final : public OpWrapper<ReduceOpDef> {
  public:
   ReduceOp() : OpWrapper<ReduceOpDef>() {}
+  ReduceOp(Tensor input, ReductionType reduction, const HTAxes& axes = {},
+           const HTKeepDims& keepdims = {false},
+           const OpMeta& op_meta = OpMeta())
+  : OpWrapper<ReduceOpDef>(
+      make_ptr<ReduceOpDef>(ReduceOpDef::constrcutor_access_key(), input, reduction,
+                            axes, keepdims, op_meta)) {}
+
   ReduceOp(Tensor input, const std::string& mode, const HTAxes& axes = {},
            const HTKeepDims& keepdims = {false},
            const OpMeta& op_meta = OpMeta())
   : OpWrapper<ReduceOpDef>(
-      make_ptr<ReduceOpDef>(ReduceOpDef::constrcutor_access_key(), input, mode,
+      make_ptr<ReduceOpDef>(ReduceOpDef::constrcutor_access_key(), input, Str2ReductionType(mode),
                             axes, keepdims, op_meta)) {}
 };
 
@@ -152,14 +171,14 @@ class ReduceGradientOpDef : public OperatorDef {
  public:
   ReduceGradientOpDef(const constrcutor_access_key&, Tensor input,
                       Tensor ori_input, const HTShape& shape,
-                      const std::string& mode,
+                      ReductionType reduction = kMEAN,
                       const HTAxes& add_axes = HTAxes(),
                       const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReduceGradientOp), {input, ori_input}, op_meta),
     grad_input(),
-    _mode(mode),
     _shape(shape),
-    _add_axes(add_axes) {
+    _add_axes(add_axes),
+    _reduction(reduction) {
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
   }
 
@@ -197,6 +216,10 @@ class ReduceGradientOpDef : public OperatorDef {
     return _mode;
   }
 
+  ReductionType reduction() const {
+    return _reduction;
+  }
+
   void set_grad_axes(const HTShape& axes) {
     _grad_add_axes = axes;
   }
@@ -226,16 +249,25 @@ class ReduceGradientOpDef : public OperatorDef {
   HTShape _grad_add_axes;
 
   HTKeepDims _grad_keep_dims;
+
+  ReductionType _reduction;
 };
 
 class ReduceGradientOp final : public OpWrapper<ReduceGradientOpDef> {
  public:
   ReduceGradientOp(Tensor input, Tensor ori_input, const HTShape& shape,
+                   ReductionType reduction, const HTAxes& add_axes = HTAxes(),
+                   const OpMeta& op_meta = OpMeta())
+  : OpWrapper<ReduceGradientOpDef>(make_ptr<ReduceGradientOpDef>(
+      ReduceGradientOpDef::constrcutor_access_key(), input, ori_input, shape,
+      reduction, add_axes, op_meta)) {}
+
+  ReduceGradientOp(Tensor input, Tensor ori_input, const HTShape& shape,
                    std::string mode, const HTAxes& add_axes = HTAxes(),
                    const OpMeta& op_meta = OpMeta())
   : OpWrapper<ReduceGradientOpDef>(make_ptr<ReduceGradientOpDef>(
       ReduceGradientOpDef::constrcutor_access_key(), input, ori_input, shape,
-      mode, add_axes, op_meta)) {}
+      Str2ReductionType(mode), add_axes, op_meta)) {}
 };
 
 } // namespace autograd
