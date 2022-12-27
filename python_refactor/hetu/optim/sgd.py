@@ -5,8 +5,8 @@ from typing import Optional, Iterable
 
 class SGD(Optimizer):
 
-    def __init__(self, params: Optional[Iterable[Tensor]], lr: float, 
-                 momentum: float = 0.0, nesterov: bool = False):
+    def __init__(self, params: Optional[Iterable[Tensor]] = None, 
+                 lr: float = 0.1, momentum: float = 0.0, nesterov: bool = False):
         # if not isinstance(lr, float):
         #     lr = float(lr)
         if lr < 0.0:

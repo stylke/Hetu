@@ -607,7 +607,7 @@ class TestLossOps(unittest.TestCase):
             gt = torch.nn.functional.binary_cross_entropy(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
             probs = hetu.from_numpy(probs_np)
             labels = hetu.from_numpy(labels_np)
-            loss = hetu.binary_cross_entroy(probs, labels)
+            loss = hetu.binary_cross_entropy(probs, labels)
             self.assertTrue(allclose(loss, gt))
     
     def test_nllloss_op(self):

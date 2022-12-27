@@ -106,6 +106,43 @@ PyObject* TensorCopyCtor(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
 }
 
 /******************************************************
+ * Placeholder Constrcutor
+ ******************************************************/
+
+PyObject* PyTensor_placeholder(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  auto* unsafe_self = PyTensor_Type->tp_alloc(PyTensor_Type, 0);
+  HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyTensor";
+  auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
+  
+  static PyArgParser parser({
+    "placeholder(DataType dtype, HTShape shape, " OP_META_ARGS ")", 
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  
+  if (parsed_args.signature_index() == 0) {
+    new(&self->tensor) Tensor();
+    self->tensor = PlaceholderOp(
+      parsed_args.get_dtype(0), 
+      parsed_args.get_int64_list(1), 
+      parse_op_meta(parsed_args, 2))->output(0);
+  } else {
+    Py_TYPE(self)->tp_free(self);
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  
+  return reinterpret_cast<PyObject*>(self);
+  HT_PY_FUNC_END
+}
+
+REGISTER_TENSOR_CLASS_METHOD(
+  placeholder, 
+  (PyCFunction) PyTensor_placeholder, 
+  METH_VARARGS | METH_KEYWORDS, 
+  nullptr);
+
+/******************************************************
  * Empty Tensors
  ******************************************************/
 

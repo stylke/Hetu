@@ -188,6 +188,9 @@ NDArrayList DefaultDARSubExecutor::Run(const TensorList& fetches,
     // TODO: transfer H2D if needed
     // TODO: check shape & dtype
     edge2arr[kv.first] = kv.second;
+    if (edge2arr[kv.first]->is_cpu()) {
+      edge2arr[kv.first] = NDArray::cuda(edge2arr[kv.first]);
+    }
   }
   for (auto& op : _placeholder_ops) {
     HT_ASSERT(edge2arr.find(op->output(0)->id()) != edge2arr.end())

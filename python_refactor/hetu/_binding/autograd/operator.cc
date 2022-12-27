@@ -23,6 +23,18 @@ PyObject* PyOperator_New(const Operator& op, bool return_none_if_undefined) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyOperatorList_New(const OpList& ops, bool return_none_if_undefined) {
+  HT_PY_FUNC_BEGIN
+  PyObject* ret = PyList_New(ops.size());
+  HT_RUNTIME_ERROR_IF(!ret) << "Failed to alloc list";
+  for (size_t i = 0; i < ops.size(); i++) {
+    auto* op_obj = PyOperator_New(ops[i], return_none_if_undefined);
+    PyList_SET_ITEM(ret, i, op_obj);
+  }
+  return ret;
+  HT_PY_FUNC_END
+}
+
 void PyOperator_dealloc(PyOperator* self) {
   (&self->op)->~Operator();
   Py_TYPE(self)->tp_free(self);

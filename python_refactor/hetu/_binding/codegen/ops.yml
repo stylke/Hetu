@@ -178,7 +178,7 @@
 # Loss
 #######################################################
 
-- name: binary_cross_entroy
+- name: binary_cross_entropy
   op: BinaryCrossEntropyOp
   args: Tensor preds, Tensor labels, std::string reduction=\"mean\"
 

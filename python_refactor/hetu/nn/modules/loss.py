@@ -42,7 +42,7 @@ class BCELoss(_WeightedLoss):
         super(BCELoss, self).__init__(weight, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return hetu.binary_cross_entroy(input, target)
+        return hetu.binary_cross_entropy(input, target)
 
 class KLDivLoss(_WeightedLoss):
     ignore_index: int

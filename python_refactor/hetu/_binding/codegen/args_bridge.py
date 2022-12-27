@@ -21,6 +21,9 @@ class ArgType:
     ND_ARRAY_LIST = 15; ND_ARRAY_LIST_STR = ("List[hetu.NDArray]", "List[NDArray]", "List[hetu.ndarray]", "List[ndarray]", "NDArrayList")
     TENSOR = 16; TENSOR_STR = ("hetu.Tensor", "Tensor", "hetu.tensor", "tensor")
     TENSOR_LIST = 17; TENSOR_LIST_STR = ("List[hetu.Tensor]", "List[Tensor]", "List[hetu.tensor]", "List[tensor]", "TensorList")
+    OPERATOR = 18; OPERATOR_STR = ("hetu.Operator", "Operator", "hetu.operator", "operator")
+    OPERATOR_LIST = 19; OPERATOR_LIST_STR = ("List[hetu.Operator]", "List[Operator]", "List[hetu.operator]", "List[operator]", "OperatorList", "OpList")
+    FEED_DICT = 20; FEED_DICT_STR = ("FeedDict", "feed_dict")
 
     # None is for returning type rather than argument type. 
     # We slightly abuse the notation here.
@@ -37,6 +40,7 @@ class ArgType:
         ArgType.type_to_type_str_mapping[ArgType.INT64] = ArgType.INT64_STR
         ArgType.type_to_type_str_mapping[ArgType.FLOAT64] = ArgType.FLOAT64_STR
         ArgType.type_to_type_str_mapping[ArgType.STRING] = ArgType.STRING_STR
+        ArgType.type_to_type_str_mapping[ArgType.BOOL_LIST] = ArgType.BOOL_LIST_STR
         ArgType.type_to_type_str_mapping[ArgType.INT64_LIST] = ArgType.INT64_LIST_STR
         ArgType.type_to_type_str_mapping[ArgType.FLOAT64_LIST] = ArgType.FLOAT64_LIST_STR
         ArgType.type_to_type_str_mapping[ArgType.STRING_LIST] = ArgType.STRING_LIST_STR
@@ -50,7 +54,10 @@ class ArgType:
         ArgType.type_to_type_str_mapping[ArgType.ND_ARRAY_LIST] = ArgType.ND_ARRAY_LIST_STR
         ArgType.type_to_type_str_mapping[ArgType.TENSOR] = ArgType.TENSOR_STR
         ArgType.type_to_type_str_mapping[ArgType.TENSOR_LIST] = ArgType.TENSOR_LIST_STR
-        ArgType.type_to_type_str_mapping[ArgType.BOOL_LIST] = ArgType.BOOL_LIST_STR
+        ArgType.type_to_type_str_mapping[ArgType.OPERATOR] = ArgType.OPERATOR_STR
+        ArgType.type_to_type_str_mapping[ArgType.OPERATOR_LIST] = ArgType.OPERATOR_LIST_STR
+        ArgType.type_to_type_str_mapping[ArgType.FEED_DICT] = ArgType.FEED_DICT_STR
+        
         for t, ss in ArgType.type_to_type_str_mapping.items():
             for s in ss:
                 ArgType.type_str_to_type_mapping[s] = t
@@ -218,6 +225,11 @@ def get_arg_getter_fn(arg_type, default_str, has_default, type_str, args):
             return "get_string_or_default"
         else:
             return "get_string"
+    elif arg_type == ArgType.BOOL_LIST:
+        if has_default:
+            return "get_bool_list_or_default"
+        else:
+            return "get_bool_list"
     elif arg_type == ArgType.INT64_LIST:
         if has_default:
             return "get_int64_list_or_default"
@@ -294,11 +306,24 @@ def get_arg_getter_fn(arg_type, default_str, has_default, type_str, args):
             return "get_tensor_list_or_empty"
         else:
             return "get_tensor_list"
-    elif arg_type == ArgType.BOOL_LIST:
+    elif arg_type == ArgType.OPERATOR:
         if has_default:
-            return "get_bool_list_or_default"
+            assert_default_is_none(type_str, default_str)
+            return "get_operator_optional"
         else:
-            return "get_bool_list"
+            return "get_operator"
+    elif arg_type == ArgType.OPERATOR_LIST:
+        if has_default:
+            assert_default_is_none(type_str, default_str)
+            return "get_operator_list_or_empty"
+        else:
+            return "get_operator_list"
+    elif arg_type == ArgType.FEED_DICT:
+        if has_default:
+            assert_default_is_none(type_str, default_str)
+            return "get_feed_dict_or_empty"
+        else:
+            return "get_feed_dict"
     else:
         raise Exception(
             f"Invalid args \"{args}\": type {type_str} is invalid")

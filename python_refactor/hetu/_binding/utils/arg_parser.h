@@ -7,11 +7,14 @@
 #include "hetu/_binding/core/device.h"
 #include "hetu/_binding/core/stream.h"
 #include "hetu/_binding/core/ndarray.h"
+#include "hetu/_binding/autograd/operator.h"
 #include "hetu/_binding/autograd/tensor.h"
+#include "hetu/_binding/execution/dar_executor.h"
 
 namespace hetu {
 
 using namespace hetu::autograd;
+using namespace hetu::execution;
 
 enum class ArgType : uint8_t {
   /* Python primitives */
@@ -42,6 +45,9 @@ enum class ArgType : uint8_t {
   ND_ARRAY_LIST, 
   TENSOR, 
   TENSOR_LIST,
+  OPERATOR,
+  OPERATOR_LIST,
+  FEED_DICT
 };
 
 std::string ArgType2Str(ArgType);
@@ -333,6 +339,30 @@ class ParsedPyArgs {
 
   inline TensorList get_tensor_list_or_empty(size_t i) const {
     return has(i) ? TensorList_FromPyObject(_args[i]) : TensorList();
+  }
+
+  inline Operator get_operator(size_t i) const {
+    return Operator_FromPyObject(_args[i]);
+  }
+
+  inline Operator get_operator_optional(size_t i) const {
+    return has(i) ? get_operator(i) : Operator();
+  }
+
+  inline OpList get_operator_list(size_t i) const {
+    return OperatorList_FromPyObject(_args[i]);
+  }
+
+  inline OpList get_operator_list_or_empty(size_t i) const {
+    return has(i) ? OperatorList_FromPyObject(_args[i]) : OpList();
+  }
+
+  inline FeedDict get_feed_dict(size_t i) const {
+    return FeedDict_FromPyObject(_args[i]);
+  }
+
+  inline FeedDict get_feed_dict_or_empty(size_t i) const {
+    return has(i) ? get_feed_dict(i) : FeedDict();
   }
 
  private:

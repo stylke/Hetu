@@ -7,6 +7,7 @@
 #include "hetu/_binding/core/ndarray.h"
 #include "hetu/_binding/autograd/operator.h"
 #include "hetu/_binding/autograd/tensor.h"
+#include "hetu/_binding/execution/dar_executor.h"
 
 PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::AddPyDeviceTypeToModule(m);
@@ -17,4 +18,5 @@ PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::autograd::AddPyOperatorTypeToModule(m);
   hetu::autograd::AddPyTensorTypeToModule(m);
   hetu::autograd::AddOpContextManagingFunctionsToModule(m);
+  hetu::execution::AddPyDARExecutorTypeToModule(m);
 }

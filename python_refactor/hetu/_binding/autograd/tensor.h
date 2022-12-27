@@ -23,8 +23,11 @@ inline bool PyTensor_CheckExact(PyObject* obj) {
   return PyTensor_Type && obj->ob_type == PyTensor_Type;
 }
 
-PyObject* PyTensor_New(const Tensor& ndarray,
+PyObject* PyTensor_New(const Tensor& tensor,
                        bool return_none_if_undefined = true);
+
+PyObject* PyTensorList_New(const TensorList& tensors,
+                           bool return_none_if_undefined = true);
 
 void AddPyTensorTypeToModule(py::module_& module);
 

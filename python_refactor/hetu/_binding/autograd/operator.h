@@ -27,7 +27,49 @@ inline bool PyOperator_CheckExact(PyObject* obj) {
 PyObject* PyOperator_New(const Operator& op,
                          bool return_none_if_undefined = true);
 
+PyObject* PyOperatorList_New(const OpList& ops,
+                             bool return_none_if_undefined = true);
+
 void AddPyOperatorTypeToModule(py::module_& module);
+
+/******************************************************
+ * ArgParser Utils
+ ******************************************************/
+
+inline bool CheckPyOperator(PyObject* obj) {
+  return PyOperator_Check(obj);
+}
+
+inline Operator Operator_FromPyObject(PyObject* obj) {
+  return reinterpret_cast<PyOperator*>(obj)->op;
+}
+
+inline bool CheckPyOperatorList(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  if (is_tuple || PyList_Check(obj)) {
+    size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+    if (size > 0) {
+      // only check for the first item for efficiency
+      auto* item = is_tuple ? PyTuple_GET_ITEM(obj, 0) \
+                            : PyList_GET_ITEM(obj, 0);
+      if (!CheckPyOperator(item))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+inline OpList OperatorList_FromPyObject(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  OpList ret(size);
+  for (size_t i = 0; i < size; i++) {
+    auto* item = is_tuple ? PyTuple_GET_ITEM(obj, i) : PyList_GET_ITEM(obj, i);
+    ret[i] = Operator_FromPyObject(item);
+  }
+  return ret;
+}
 
 /******************************************************
  * For contextlib usage
