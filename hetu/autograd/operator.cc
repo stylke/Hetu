@@ -220,6 +220,7 @@ bool OperatorDef::DoMapToParallelDevices(const DeviceGroup& placement_group) {
       p2p_recv_op->MapToParallelDevices(dst_group);
       p2p_send_op->BindRecvOp(p2p_recv_op);
       p2p_recv_op->BindSendOp(p2p_send_op);
+      p2p_recv_op->output(0)->set_placement_group(placement_group);
       ReplaceInput(i, p2p_recv_op->output(0));
     }
   }

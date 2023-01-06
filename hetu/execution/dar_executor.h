@@ -6,6 +6,7 @@
 #include "hetu/autograd/topo.h"
 #include "hetu/autograd/runtime_context.h"
 #include "hetu/execution/run_metadata.h"
+#include "hetu/autograd/ops/Communicate.h"
 
 namespace hetu {
 namespace execution {
@@ -99,8 +100,17 @@ class DARExecutor {
   void SubstituteCommOp(const OpList& local_topo_order);
   void CrossSend(std::unordered_map<int32_t, int32_t> split_cur_state, 
                  std::unordered_map<int32_t, int32_t> split_target_state,
-                 int32_t depth, bool need_split, int32_t& device_index, CommOp& op);
-  Tensor CrossReceive(int32_t depth, int32_t& device_index, CommOp& op);                  
+                 int32_t depth, bool need_split, int32_t& device_index, 
+                 CommOp& op, std::vector<P2PSendOp>& send_ops, 
+                 Tensor& self_send_data, int32_t& used_device_index, 
+                 std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list);
+  Tensor CrossReceive(int32_t depth, int32_t& device_index, CommOp& op,
+                      OpList& linked_ops, Tensor& self_send_data, 
+                      int32_t& used_device_index, std::vector<P2PRecvOp>& recv_ops,
+                      std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list);
+  void GenerateLocalSendRecvTopo(CommOp& comm_op, std::vector<P2PSendOp>& send_ops, 
+                                 std::vector<P2PRecvOp>& recv_ops,
+                                 std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list);
 
   std::shared_ptr<DARSubExecutor>
   GetOrCreateSubExecutor(const TensorList& fetches);

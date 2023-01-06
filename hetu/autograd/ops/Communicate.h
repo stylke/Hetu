@@ -2,6 +2,7 @@
 
 #include "hetu/autograd/operator.h"
 #include "hetu/autograd/tensor.h"
+#include "hetu/autograd/distributed_states.h"
 
 namespace hetu {
 namespace autograd {
@@ -23,30 +24,33 @@ class CommOpDef : public OperatorDef {
  private:
   friend class CommOp;
   struct constructor_access_key {};
+
  public:
   CommOpDef(const constructor_access_key&, Tensor input, 
             DistributedStates dst_distributed_states, const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(CommOpDef), {input}, op_meta), _dst_distributed_states(dst_distributed_states) {
+  : OperatorDef(quote(CommOp), {input}, op_meta), _dst_distributed_states(dst_distributed_states) {
     // op1 (tensor1) -> comm_op (tensor2) -> op2 (tensor3), 用具体的通信算子替换comm_op 
     // 1. 根据input->states+dst_states来判断要插入什么样的通信算子
-    // auto src_states = input->get_states();
-    if (input->get_distributed_states().check_allreduce(dst_distributed_states)) {
-      // make allreduce
+    auto src_distributed_states = input->get_distributed_states();
+    if (src_distributed_states.check_allreduce(dst_distributed_states)) {
       _comm_type = ALL_REDUCE_OP;
-    } else if (input->get_distributed_states().check_allgather(dst_distributed_states)) {
-      // make allgather
+      HT_LOG_DEBUG << "ALL_REDUCE_OP";
+    } else if (src_distributed_states.check_allgather(dst_distributed_states)) {
       _comm_type = ALL_GATHER_OP;
-    } else if (input->get_distributed_states().check_reducescatter(dst_distributed_states)) {
-      // make reducescatter
+      HT_LOG_DEBUG << "ALL_GATHER_OP";
+    } else if (src_distributed_states.check_reducescatter(dst_distributed_states)) {
       _comm_type = REDUCE_SCATTER_OP;
-    } else if (input->get_distributed_states().check_boradcast(dst_distributed_states)) {
+      HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
+    } else if (src_distributed_states.check_boradcast(dst_distributed_states)) {
       _comm_type = BROADCAST_OP;
-    } else if (input->get_distributed_states().check_reduce(dst_distributed_states)) {
+      HT_LOG_DEBUG << "BROADCAST_OP";
+    } else if (src_distributed_states.check_reduce(dst_distributed_states)) {
       _comm_type = REDUCE_OP;
+      HT_LOG_DEBUG << "REDUCE_OP";
     } else {
       // other case: 非集合通信, 部分device之间p2p通信
-      // 需要建一张p2p的map: {src_device: [(dst_device, tensor_slice[i,j,...]), ...]}
       _comm_type = P2P_OP;
+      HT_LOG_DEBUG << "P2P_OP";
     }
 
     // 2. comm_op -> op2, 其中op2所需的tensor分片已经由集合通信转化完毕, 接下来在op2的do compute里确定output的distributed_states
@@ -73,10 +77,10 @@ class CommOpDef : public OperatorDef {
 
 class CommOp final : public OpWrapper<CommOpDef> {
  public:
-  CommOp(Tensor input, std::unordered_map<size_t, size_t>& dst_states, 
+  CommOp(Tensor input, DistributedStates& dst_distributed_states, 
          const OpMeta& op_meta = OpMeta())
   : OpWrapper<CommOpDef>(make_ptr<CommOpDef>(
-    CommOpDef::constructor_access_key(), input, dst_states, op_meta)) {}
+    CommOpDef::constructor_access_key(), input, dst_distributed_states, op_meta)) {}
 };
 
 class AllReduceOpDef : public OperatorDef {
@@ -123,8 +127,8 @@ class P2PSendOpDef : public OperatorDef {
 
  public:
   P2PSendOpDef(const constrcutor_access_key&, Tensor input,
-               const DeviceGroup& dst_group, const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(P2PSendOp), {input}, op_meta), _dst_group(dst_group) {
+               const DeviceGroup& dst_group, int dst_device_index = -1, const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(P2PSendOp), {input}, op_meta), _dst_group(dst_group), _dst_device_index(dst_device_index) {
     HT_ASSERT(!dst_group.empty())
       << "Please provide the \"dst_group\" argument to indicate "
       << "the destination devices for P2PSend";
@@ -145,6 +149,22 @@ class P2PSendOpDef : public OperatorDef {
     return _dst_group;
   }
 
+  int dst_device_index() {
+    return _dst_device_index;
+  }
+
+  bool is_distributed_tensor_send_op() {
+    return _dst_device_index != -1;
+  }  
+
+  OpList& local_send_recv_topo() {
+    return _local_send_recv_topo;
+  }
+
+  void set_local_send_recv_topo(OpList& local_send_recv_topo) {
+    _local_send_recv_topo = local_send_recv_topo;
+  }  
+
   uint64_t op_indicator() const noexcept {
     return PEER_TO_PEER_SEND_OP;
   }
@@ -158,8 +178,10 @@ class P2PSendOpDef : public OperatorDef {
   NDArrayList DoCompute(const NDArrayList& inputs,
                         RuntimeContext& ctx) override;
 
+  OpList _local_send_recv_topo{};
   DeviceGroup _dst_group;
-  int _index_in_group{-1};
+  int _dst_device_index{-1}; // for distributed tensor p2p
+  int _index_in_group{-1}; // for pipeline p2p
   // The `_recv_op` member is wrapped into a unique pointer since
   // the forward declared `P2PRecvOp` class has incomplete type now.
   std::unique_ptr<P2PRecvOp> _recv_op;
@@ -167,10 +189,10 @@ class P2PSendOpDef : public OperatorDef {
 
 class P2PSendOp final : public OpWrapper<P2PSendOpDef> {
  public:
-  P2PSendOp(Tensor input, const DeviceGroup& dst_group,
-            const OpMeta& op_meta = OpMeta())
+  P2PSendOp(Tensor input, const DeviceGroup& dst_group, 
+            int dst_device_index = -1, const OpMeta& op_meta = OpMeta())
   : OpWrapper<P2PSendOpDef>(make_ptr<P2PSendOpDef>(
-      P2PSendOpDef::constrcutor_access_key(), input, dst_group, op_meta)) {}
+      P2PSendOpDef::constrcutor_access_key(), input, dst_group, dst_device_index, op_meta)) {}
 };
 
 class P2PRecvOpDef : public OperatorDef {
@@ -179,11 +201,11 @@ class P2PRecvOpDef : public OperatorDef {
   struct constrcutor_access_key {};
 
  public:
-  P2PRecvOpDef(const constrcutor_access_key&, const DeviceGroup& src_group,
-               DataType dtype, const HTShape& shape = HTShape(),
+  P2PRecvOpDef(const constrcutor_access_key&, const DeviceGroup& src_group, 
+               DataType dtype, const HTShape& shape = HTShape(), int src_device_index = -1,
                const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(P2PRecvOp), TensorList(), op_meta),
-    _src_group(src_group) {
+    _src_group(src_group), _src_device_index(src_device_index) {
     HT_ASSERT(!src_group.empty())
       << "Please provide the \"src_group\" argument to indicate "
       << "the source devices for P2PRecv";
@@ -207,6 +229,32 @@ class P2PRecvOpDef : public OperatorDef {
     return _src_group;
   }
 
+  int src_device_index() {
+    return _src_device_index;
+  }
+
+  bool is_distributed_tensor_recv_op() {
+    return _src_device_index != -1;
+  }
+
+  OpList& linked_ops() {
+    HT_ASSERT(_linked_ops.size() > 0) << "P2PRecvOp src linked ops num should > 0!";
+    return _linked_ops;
+  }
+
+  void set_linked_ops(OpList& linked_ops) {
+    HT_ASSERT(linked_ops.size() > 0) << "P2PRecvOp src linked ops num should > 0!";
+    _linked_ops = linked_ops;
+  }
+
+  OpList& local_send_recv_topo() {
+    return _local_send_recv_topo;
+  }
+
+  void set_local_send_recv_topo(OpList& local_send_recv_topo) {
+    _local_send_recv_topo = local_send_recv_topo;
+  }
+
   uint64_t op_indicator() const noexcept {
     return PEER_TO_PEER_RECV_OP;
   }
@@ -220,18 +268,22 @@ class P2PRecvOpDef : public OperatorDef {
   NDArrayList DoCompute(const NDArrayList& inputs,
                         RuntimeContext& ctx) override;
 
+  OpList _linked_ops{};
+  OpList _local_send_recv_topo{};
   DeviceGroup _src_group;
-  int _index_in_group{-1};
+  int _src_device_index{-1}; // for distributed tensor p2p
+  int _index_in_group{-1}; // for pipeline p2p
   std::unique_ptr<P2PSendOp> _send_op;
 };
 
 class P2PRecvOp final : public OpWrapper<P2PRecvOpDef> {
  public:
   P2PRecvOp(const DeviceGroup& src_group, DataType dtype,
-            const HTShape& shape = HTShape(), const OpMeta& op_meta = OpMeta())
+            const HTShape& shape = HTShape(), int src_device_index = -1, 
+            const OpMeta& op_meta = OpMeta())
   : OpWrapper<P2PRecvOpDef>(
       make_ptr<P2PRecvOpDef>(P2PRecvOpDef::constrcutor_access_key(), src_group,
-                             dtype, shape, op_meta)) {}
+                             dtype, shape, src_device_index, op_meta)) {}
 };
 
 } // namespace autograd

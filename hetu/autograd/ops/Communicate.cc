@@ -69,8 +69,11 @@ bool P2PSendOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
 bool P2PSendOpDef::DoPlaceToLocalDevice(const Device& placement,
                                         StreamIndex stream_id) {
   _index_in_group = _placement_group.get_index(placement);
-  HT_ASSERT(_dst_group.get(_index_in_group) != placement)
-    << "Source and destination are the same (" << placement << ")";
+  HT_ASSERT(_dst_device_index != -1 || _dst_device_index == -1 && _dst_group.get(_index_in_group) != placement)
+    << "Pipeline p2p send op: source and destination are the same (" << placement << ")";
+  if (_dst_device_index == -1) {
+    _dst_device_index = _index_in_group;
+  }  
   return OperatorDef::DoPlaceToLocalDevice(placement, stream_id);
 }
 
@@ -87,12 +90,12 @@ NDArrayList P2PSendOpDef::DoCompute(const NDArrayList& inputs,
   auto* ptr = send_shape->data_ptr<int64_t>();
   ptr[0] = static_cast<int64_t>(input->ndim());
   std::copy(input->shape().begin(), input->shape().end(), ptr + 1);
-  hetu::impl::P2PSendCpu(send_shape, _dst_group.get(_index_in_group),
+  hetu::impl::P2PSendCpu(send_shape, _dst_group.get(_dst_device_index),
                          Stream(Device(kCPU), kBlockingStream));
 
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::P2PSend, input,
-                                  _dst_group.get(_index_in_group), stream());
+                                  _dst_group.get(_dst_device_index), stream());
   return NDArrayList();
 }
 
@@ -103,14 +106,20 @@ bool P2PRecvOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
 
   _placement_group = pg;
   // TODO: set the parallel statuses of output
+  for (auto& output : _outputs) {
+    output->set_placement_group(pg);
+  }  
   return true;
 }
 
 bool P2PRecvOpDef::DoPlaceToLocalDevice(const Device& placement,
                                         StreamIndex stream_id) {
   _index_in_group = _placement_group.get_index(placement);
-  HT_ASSERT(_src_group.get(_index_in_group) != placement)
-    << "Source and destination are the same (" << placement << ")";
+  HT_ASSERT(_src_device_index != -1 || _src_device_index == -1 && _src_group.get(_index_in_group) != placement)
+    << "Pipeline p2p recv op: source and destination are the same (" << placement << ")";
+  if (_src_device_index == -1) {
+    _src_device_index = _index_in_group;
+  }
   return OperatorDef::DoPlaceToLocalDevice(placement, stream_id);
 }
 
@@ -119,7 +128,7 @@ NDArrayList P2PRecvOpDef::DoCompute(const NDArrayList& inputs,
   // TODO: receiving the shape in compute fn is just a walkaround,
   // we shall determine the shape for recv op in executor
   NDArray recv_shape = NDArray::empty({HT_MAX_NDIM + 1}, Device(kCPU), kInt64);
-  hetu::impl::P2PRecvCpu(recv_shape, _src_group.get(_index_in_group),
+  hetu::impl::P2PRecvCpu(recv_shape, _src_group.get(_src_device_index),
                          Stream(Device(kCPU), kBlockingStream));
   auto* ptr = recv_shape->data_ptr<int64_t>();
   HTShape shape(ptr + 1, ptr + 1 + ptr[0]);
@@ -127,7 +136,7 @@ NDArrayList P2PRecvOpDef::DoCompute(const NDArrayList& inputs,
 
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::P2PRecv, output,
-                                  _src_group.get(_index_in_group), stream());
+                                  _src_group.get(_src_device_index), stream());
   return {output};
 }
 

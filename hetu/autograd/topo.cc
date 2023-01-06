@@ -37,9 +37,15 @@ OpList TopoSort(const OpList& nodes, bool connect_p2p, bool skip_computed) {
     for (const auto& in_node_ref : in_nodes_refs)
       traverse_fn(in_node_ref);
     if (connect_p2p && is_peer_to_peer_recv_op(node)) {
-      const auto& send_node = reinterpret_cast<const Operator&>(
-        reinterpret_cast<const P2PRecvOp&>(node)->send_op());
-      traverse_fn(send_node);
+      auto& recv_op = reinterpret_cast<const P2PRecvOp&>(node);
+      if (recv_op->is_distributed_tensor_recv_op()) { // distributed recv op
+        for (auto& linked_op : recv_op->linked_ops()) {
+          traverse_fn(linked_op);
+        }
+      } else { // pipeline recv op
+        const auto& send_node = reinterpret_cast<const Operator&>(recv_op->send_op());
+        traverse_fn(send_node);
+      }
     }
   }
 
@@ -47,6 +53,40 @@ OpList TopoSort(const OpList& nodes, bool connect_p2p, bool skip_computed) {
   while (!topo_sort_queue.empty()) {
     const Operator& node = topo_sort_queue.front().get();
     topo_sort_queue.pop();
+
+    if (is_peer_to_peer_send_op(node) || is_peer_to_peer_recv_op(node)) {
+      OpList local_send_recv_topo;
+      if (is_peer_to_peer_send_op(node)) {
+        auto& send_op = reinterpret_cast<const P2PSendOp&>(node);
+        if (send_op->is_distributed_tensor_send_op()) {
+          local_send_recv_topo = send_op->local_send_recv_topo();
+        }
+      }      
+      if (is_peer_to_peer_recv_op(node)) {
+        auto& recv_op = reinterpret_cast<const P2PRecvOp&>(node);
+        if (recv_op->is_distributed_tensor_recv_op()) {
+          local_send_recv_topo = recv_op->local_send_recv_topo();
+        }
+      }
+      bool move_op_after = false;
+      // local_topo在node前的那些send/recv op需要先执行完(已经出现在topo_order里)
+      for (int32_t i = 0; i < local_send_recv_topo.size(); i++) {
+        if (local_send_recv_topo[i]->id() == node->id()) {
+          break;
+        }
+        auto it = find_if(topo_order.begin(), topo_order.end(),
+        [&](Operator& op) -> bool {return op->id() == local_send_recv_topo[i]->id(); });
+        if (it == topo_order.end()) {
+          move_op_after = true;
+          break;
+        }
+      }
+      if (move_op_after) {
+        topo_sort_queue.push(node);
+        continue;
+      }
+    }
+    
     if (!skip_computed || !node->is_computed())
       topo_order.push_back(node);
     OpRefList out_nodes_refs = node->output_ops_ref();
