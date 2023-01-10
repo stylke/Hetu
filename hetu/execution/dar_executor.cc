@@ -27,7 +27,7 @@ DARExecutor::DARExecutor(const Device& local_device,
   // 0. 所有tensor的placement_group/placement/index和device_num的赋值在这个阶段完成
   bool parallel = PlaceDevices(TopoSort(OperatorPool::GetAllOps(), true));
   _exec_ctx->_global_topo_order = TopoSort(OperatorPool::GetAllOps(), true);
-  HT_LOG_DEBUG << "Topo order: " << _exec_ctx->_global_topo_order;
+  // HT_LOG_DEBUG << "Topo order: " << _exec_ctx->_global_topo_order;
   bool training = _exec_ctx->_global_topo_order.end() !=
     std::find_if(_exec_ctx->_global_topo_order.begin(),
                  _exec_ctx->_global_topo_order.end(),
@@ -38,11 +38,11 @@ DARExecutor::DARExecutor(const Device& local_device,
     // 2. 获取local topo
     _exec_ctx->_local_topo_order =
       get_local_nodes(_exec_ctx->_global_topo_order, _exec_ctx->_local_device);
-    HT_LOG_DEBUG << "Local topo: " << _exec_ctx->_local_topo_order;
+    // HT_LOG_DEBUG << "Local topo: " << _exec_ctx->_local_topo_order;
     // 3. 将local_topo中的comm_op替换为具体的通信op
-    HT_LOG_DEBUG << "Substitute comm ops begin!";
+    HT_LOG_DEBUG << _exec_ctx->local_device() << ": Substitute comm ops begin!";
     SubstituteCommOp(_exec_ctx->_local_topo_order);
-    HT_LOG_DEBUG << "Substitute comm ops end!";
+    HT_LOG_DEBUG << _exec_ctx->local_device() << ": Substitute comm ops end!";
 
     if (_exec_ctx->is_pipeline_parallel()) {
       HT_LOG_DEBUG << "Topo order of pipeline stage: "
@@ -134,7 +134,6 @@ void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
       auto& comm_op = reinterpret_cast<CommOp&>(op);
       uint64_t comm_type = comm_op->get_comm_type();
       Tensor result;
-      HT_LOG_DEBUG << comm_op->name() << ": " << comm_type;
       if (comm_type == ALL_REDUCE_OP) {
         AllReduceOp all_reduce_op(
           comm_op->input(0),
@@ -160,10 +159,10 @@ void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
         for (int32_t used_device_index = 0; used_device_index < comm_op->placement_group().num_devices(); used_device_index++) {
           if (used_device_index == local_device_index) { // 只有cross send/recv的used_device等于local_device的时候才会生成用于替换comm_op的ops
             int32_t device_index = 0;     
-            HT_LOG_DEBUG << "cross send begin!";
+            HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross send begin!";
             CrossSend({}, {}, 0, false, device_index, comm_op, send_ops, self_send_data, used_device_index, send_recv_list); // 注: partial的情况还要再想一下
             HT_ASSERT(device_index == _exec_ctx->device_group().num_devices()) << "cross send error!";
-            HT_LOG_DEBUG << "cross send end!";
+            HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross send end!";
 
             if (send_ops.size() == 0) { // 在self_send_tensor被赋值的情况下可以不用push, 但是push了也不会有影响
               linked_ops.push_back(comm_op->input(0)->producer());
@@ -172,13 +171,17 @@ void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
                 linked_ops.push_back(send_op);
               }
             }
-            HT_LOG_DEBUG << "linked ops: " << linked_ops; 
+            HT_LOG_DEBUG << _exec_ctx->local_device() << ": linked ops: " << linked_ops; 
 
             device_index = 0;
-            HT_LOG_DEBUG << "cross receive begin!";            
+            HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross receive begin!";            
             result = CrossReceive(0, device_index, comm_op, linked_ops, self_send_data, used_device_index, recv_ops, send_recv_list);
+            // 考虑recv_ops为空的情况, 此时topo需要额外补充
+            if (recv_ops.size() == 0) {
+              ;
+            }
             HT_ASSERT(device_index == _exec_ctx->device_group().num_devices()) << "cross receive error!";   
-            HT_LOG_DEBUG << "cross receive end!";        
+            HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross receive end!";        
           } else { // 不会生成任何新的op, 也不会修改linked_ops、self_send_data和recv_ops, 仅用于获取全局的send_recv_list信息
             int32_t device_index = 0;
             CrossSend({}, {}, 0, false, device_index, comm_op, send_ops, self_send_data, used_device_index, send_recv_list);
@@ -189,7 +192,9 @@ void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
           }
         }
         // 给该comm_op对应的send/recv ops生成局部topo序, 避免死锁
+        HT_LOG_DEBUG << _exec_ctx->local_device() << ": generate local send recv topo begin!";
         GenerateLocalSendRecvTopo(comm_op, send_ops, recv_ops, send_recv_list);
+        HT_LOG_DEBUG << _exec_ctx->local_device() << ": generate local send recv topo end!";        
       }
       result->set_distributed_states(comm_op->get_dst_distributed_states()); // 替换comm_op后得到的result tensor需要设置为dst_distributed_states
 
@@ -211,62 +216,76 @@ void DARExecutor::GenerateLocalSendRecvTopo(
   std::vector<P2PRecvOp>& recv_ops, 
   std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list) {
   int32_t local_device_index = comm_op->placement_group().get_index(comm_op->placement());
-  std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<bool>>> is_visited;
+  std::unordered_map<int32_t, std::unordered_map<int32_t, std::unordered_map<int32_t, bool>>> is_visited;
   int32_t total_num = 0;
   for (int32_t index = 0; index < comm_op->placement_group().num_devices(); index++) {
     for (int32_t i = 0; i < send_recv_list[index][0].size(); i++) {
       int32_t dst = send_recv_list[index][0][i];
-      if (dst != index) {
-        is_visited[index][0].push_back(false);               
+      if (dst != index) {    
+        is_visited[0][index][dst] = false;
         total_num++;
       } else {
-        is_visited[index][0].push_back(true);              
+        is_visited[0][index][dst] = true;
       }
       if (local_device_index == 0) HT_LOG_DEBUG << index << " send to " << dst;
     }
     for (int32_t i = 0; i < send_recv_list[index][1].size(); i++) {
       int32_t src = send_recv_list[index][1][i];
-      if (src != index) {
-        is_visited[index][1].push_back(false);              
+      if (src != index) {  
+        is_visited[1][index][src] = false;
         total_num++;
       } else {
-        is_visited[index][1].push_back(true);              
+        is_visited[1][index][src] = true;
       }
       if (local_device_index == 0) HT_LOG_DEBUG << index << " recv from " << src;
     }
   }
 
   std::vector<std::tuple<int32_t, int32_t, int32_t>> send_recv_order;
-  int32_t next = 0;
+  int32_t next = -1;
+  bool find_next = false;
   while (send_recv_order.size() < total_num) {
-    bool find_next = false;
-    for (int32_t i = 0; i < send_recv_list[next][0].size(); i++) {
-      if (!is_visited[next][0][i]) {
-        send_recv_order.push_back({0, next, i});
-        send_recv_order.push_back({1, i, next});
-        is_visited[next][0][i] = true;
-        is_visited[i][1][next] = true;
-        next = i;
-        find_next = true;
-        break;
-      }
-    }
-
     if (!find_next) {
       for (int32_t index = 0; index < comm_op->placement_group().num_devices(); index++) {
         for (int32_t i = 0; i < send_recv_list[index][0].size(); i++) {
-          if (!is_visited[index][0][i]) {
-            send_recv_order.push_back({0, index, i});
-            send_recv_order.push_back({1, i, index});
-            is_visited[index][0][i] = true;
-            is_visited[i][1][index] = true;
-            next = i;
-            find_next = true;
+          int32_t dst = send_recv_list[index][0][i];
+          if (!is_visited[0][index][dst]) {
+            send_recv_order.push_back({0, index, dst});
+            send_recv_order.push_back({1, dst, index});
+            is_visited[0][index][dst] = true;
+            is_visited[1][dst][index] = true;
+            next = dst;
+            find_next = true;     
             break;
           }
         }
         if (find_next) break;
       }
+    }
+
+    HT_ASSERT(find_next || !find_next && send_recv_order.size() < total_num) 
+              << "send_recv_order: generate send recv order error!";
+
+    find_next = false;
+    for (int32_t i = 0; i < send_recv_list[next][0].size(); i++) {
+      int32_t dst = send_recv_list[next][0][i];
+      if (!is_visited[0][next][dst]) {
+        send_recv_order.push_back({0, next, dst});
+        send_recv_order.push_back({1, dst, next});
+        is_visited[0][next][dst] = true;
+        is_visited[1][dst][next] = true;
+        auto old_next = next;
+        next = dst;
+        find_next = true;     
+        break;
+      }
+    }
+  }
+
+  if (local_device_index == 0) {
+    for (int32_t i = 0; i < send_recv_order.size(); i++) {
+      HT_LOG_DEBUG << "send_recv_order[" << i << "]: " << std::get<0>(send_recv_order[i]) << ", " 
+                   << std::get<1>(send_recv_order[i]) << ", " << std::get<2>(send_recv_order[i]);
     }
   }
 
@@ -286,7 +305,7 @@ void DARExecutor::GenerateLocalSendRecvTopo(
           local_send_recv_topo.push_back(send_op);
         }
       }
-    } 
+    }
     if (std::get<0>(local_send_recv) == 1) {
       for (auto& recv_op : recv_ops) {
         auto src = std::get<2>(local_send_recv);
@@ -304,7 +323,7 @@ void DARExecutor::GenerateLocalSendRecvTopo(
     recv_op->set_local_send_recv_topo(local_send_recv_topo);
   }
 
-  HT_LOG_DEBUG << "local_send_recv_topo: " << local_send_recv_topo;  
+  HT_LOG_DEBUG << _exec_ctx->local_device() << ": local_send_recv_topo: " << local_send_recv_topo;  
 }
 
 // cross send的cur_state_index记录的是local device在prev states/order下分到了哪些数据, 通过device_index来记录local device需要发送的目标devices,
@@ -439,6 +458,7 @@ void DARExecutor::CrossSend(
   std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list) {
   // basic info
   auto prev_distributed_states = comm_op->input(0)->get_distributed_states();
+  auto prev_partial = prev_distributed_states.get_dim(-2);
   auto prev_duplicate = prev_distributed_states.get_dim(-1);
   HT_ASSERT(comm_op->placement() == _exec_ctx->local_device()) 
           << "Corss Send: comm_op's placement " << comm_op->placement() << " != " << "local device " << _exec_ctx->local_device();
@@ -468,6 +488,13 @@ void DARExecutor::CrossSend(
   };
 
   // cross send part
+  if (prev_partial == 1 && prev_duplicate > target_duplicate && get_state_index(-1) % (prev_duplicate / target_duplicate) != 0) {
+    if (used_device_index == local_device_index) { 
+      HT_LOG_DEBUG << _exec_ctx->local_device() << ": don't need to send to other devices!";
+    }
+    device_index += comm_op->placement_group().num_devices();
+    return;
+  }  
   if (depth == target_order.size()) {
     if (used_device_index == local_device_index) {
       Tensor send_part;
@@ -514,8 +541,9 @@ void DARExecutor::CrossSend(
       if (prev_duplicate % target_duplicate == 0) {
         auto multiple = prev_duplicate / target_duplicate;
         if (cur_st % multiple != 0) {
-          HT_LOG_INFO << "Cross send: prev_duplicate mod target_duplicate == 0 but cur_st mod multiple != 0, "
-          << "cur_st: "<< cur_st << ", multiple: " << multiple; 
+          if (used_device_index == local_device_index) {
+            HT_LOG_DEBUG << _exec_ctx->local_device() << ": don't need to send to other devices!";
+          }
           return;
         }
         device_index += cur_st / multiple * loop_sizes[depth];
@@ -713,7 +741,7 @@ NDArrayList DefaultDARSubExecutor::Run(const TensorList& fetches,
       }
     }
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx);
-    HT_LOG_DEBUG << _exec_ctx->local_device() << ": " << op->name() << ": inputs: " << input_vals << "; outputs: " << output_vals; 
+    // HT_LOG_DEBUG << _exec_ctx->local_device() << ": " << op->name() << ": inputs: " << input_vals << "; outputs: " << output_vals; 
     for (size_t i = 0; i < op->num_outputs(); i++) {
       const auto& out_edge = op->output(i);
       if (edge2degrees[out_edge->id()] > 0 ||
