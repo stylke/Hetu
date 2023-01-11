@@ -344,6 +344,19 @@ void OperatorDef::ReplaceInput(size_t index, Tensor new_input) {
   new_input->AddConsumer(get_self());
 }
 
+void OperatorDef::AddInDeps(TensorList& in_deps) {
+  if (in_deps.empty()) {
+    return;
+  }
+  if (in_deps.size() == 1) {
+    _extra_in_dep_linkers.push_back(in_deps.front());
+  } else {
+    auto in_dep = GroupOp(in_deps, OpMeta().set_name(_op_meta.name + "_extra_in_dep"))->out_dep_linker();
+    _extra_in_dep_linkers.push_back(in_dep);
+  }
+  _extra_in_dep_linkers.back()->AddConsumer(get_self());
+}
+
 void OperatorDef::MarkAsComputed(const NDArrayList& output_vals) {
   CheckNumOutputsEqual(output_vals.size());
   _computed = true;

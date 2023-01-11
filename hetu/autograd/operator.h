@@ -218,6 +218,7 @@ class OperatorDef : public shared_ptr_target {
   }
   
   void ReplaceInput(size_t index, Tensor new_input); // 暂时先挪到public来
+  void AddInDeps(TensorList& in_deps);
 
  protected:
   // Walkaround methods to get the corresponding wrapper

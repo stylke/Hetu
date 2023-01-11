@@ -38,7 +38,8 @@ void TestDARDistributedTensor(DataType dtype = kFloat32) {
 
   DARExecutor exec(local_device, all_devices, {result});
 
-  NDArray data = NDArray::randn({8/4, dim}, local_device, dtype, 0.0, 1.0, (666 + all_device_group.get_index(local_device))); // 按照ds2: 4个device都不一样
+  NDArray data = NDArray::randn({8/4, dim}, local_device, dtype, 0.0, 1.0, (666 + all_device_group.get_index(local_device))); // ds1->ds2
+  // NDArray data = NDArray::randn({8/4, dim}, local_device, dtype, 0.0, 1.0, (666 + all_device_group.get_index(local_device) % 2)); // ds2->ds1
   HT_LOG_INFO << local_device << ": init data = " << data;
   SynchronizeAllStreams();
   

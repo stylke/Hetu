@@ -145,6 +145,16 @@ class P2PSendOpDef : public OperatorDef {
 
   P2PRecvOp& recv_op();
 
+  int index_in_group() {
+    return _index_in_group;
+  }
+
+  void set_index_in_group(int index) {
+    // 要么是在map to local device的时候已经赋值好了, 要么就是在这里赋值(用于distributed tensor中非local device的p2p op的赋值)
+    HT_ASSERT(_index_in_group == -1) << "only allow set when _index_in_group = -1!";
+    _index_in_group = index;
+  }  
+
   const DeviceGroup& dst_group() const {
     return _dst_group;
   }
@@ -157,12 +167,12 @@ class P2PSendOpDef : public OperatorDef {
     return _dst_device_index != -1;
   }  
 
-  OpList& local_send_recv_topo() {
-    return _local_send_recv_topo;
+  OpList& send_recv_topo() {
+    return _send_recv_topo;
   }
 
-  void set_local_send_recv_topo(OpList& local_send_recv_topo) {
-    _local_send_recv_topo = local_send_recv_topo;
+  void set_send_recv_topo(OpList& send_recv_topo) {
+    _send_recv_topo = send_recv_topo;
   }  
 
   uint64_t op_indicator() const noexcept {
@@ -178,7 +188,7 @@ class P2PSendOpDef : public OperatorDef {
   NDArrayList DoCompute(const NDArrayList& inputs,
                         RuntimeContext& ctx) override;
 
-  OpList _local_send_recv_topo{};
+  OpList _send_recv_topo{};
   DeviceGroup _dst_group;
   int _dst_device_index{-1}; // for distributed tensor p2p
   int _index_in_group{-1}; // for pipeline p2p
@@ -225,6 +235,16 @@ class P2PRecvOpDef : public OperatorDef {
 
   P2PSendOp& send_op();
 
+  int index_in_group() {
+    return _index_in_group;
+  }
+
+  void set_index_in_group(int index) {
+    // 要么是在map to local device的时候已经赋值好了, 要么就是在这里赋值(用于distributed tensor中非local device的p2p op的赋值)
+    HT_ASSERT(_index_in_group == -1) << "only allow set when _index_in_group = -1!";
+    _index_in_group = index;
+  }
+
   const DeviceGroup& src_group() const {
     return _src_group;
   }
@@ -237,22 +257,12 @@ class P2PRecvOpDef : public OperatorDef {
     return _src_device_index != -1;
   }
 
-  OpList& linked_ops() {
-    HT_ASSERT(_linked_ops.size() > 0) << "P2PRecvOp src linked ops num should > 0!";
-    return _linked_ops;
+  OpList& send_recv_topo() {
+    return _send_recv_topo;
   }
 
-  void set_linked_ops(OpList& linked_ops) {
-    HT_ASSERT(linked_ops.size() > 0) << "P2PRecvOp src linked ops num should > 0!";
-    _linked_ops = linked_ops;
-  }
-
-  OpList& local_send_recv_topo() {
-    return _local_send_recv_topo;
-  }
-
-  void set_local_send_recv_topo(OpList& local_send_recv_topo) {
-    _local_send_recv_topo = local_send_recv_topo;
+  void set_send_recv_topo(OpList& send_recv_topo) {
+    _send_recv_topo = send_recv_topo;
   }
 
   uint64_t op_indicator() const noexcept {
@@ -269,7 +279,7 @@ class P2PRecvOpDef : public OperatorDef {
                         RuntimeContext& ctx) override;
 
   OpList _linked_ops{};
-  OpList _local_send_recv_topo{};
+  OpList _send_recv_topo{};
   DeviceGroup _src_group;
   int _src_device_index{-1}; // for distributed tensor p2p
   int _index_in_group{-1}; // for pipeline p2p

@@ -69,9 +69,9 @@ bool P2PSendOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
 bool P2PSendOpDef::DoPlaceToLocalDevice(const Device& placement,
                                         StreamIndex stream_id) {
   _index_in_group = _placement_group.get_index(placement);
-  HT_ASSERT(_dst_device_index != -1 || _dst_device_index == -1 && _dst_group.get(_index_in_group) != placement)
+  HT_ASSERT(is_distributed_tensor_send_op() || !is_distributed_tensor_send_op() && _dst_group.get(_index_in_group) != placement)
     << "Pipeline p2p send op: source and destination are the same (" << placement << ")";
-  if (_dst_device_index == -1) {
+  if (!is_distributed_tensor_send_op()) {
     _dst_device_index = _index_in_group;
   }  
   return OperatorDef::DoPlaceToLocalDevice(placement, stream_id);
@@ -115,9 +115,9 @@ bool P2PRecvOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
 bool P2PRecvOpDef::DoPlaceToLocalDevice(const Device& placement,
                                         StreamIndex stream_id) {
   _index_in_group = _placement_group.get_index(placement);
-  HT_ASSERT(_src_device_index != -1 || _src_device_index == -1 && _src_group.get(_index_in_group) != placement)
+  HT_ASSERT(is_distributed_tensor_recv_op() || !is_distributed_tensor_recv_op() && _src_group.get(_index_in_group) != placement)
     << "Pipeline p2p recv op: source and destination are the same (" << placement << ")";
-  if (_src_device_index == -1) {
+  if (!is_distributed_tensor_recv_op()) {
     _src_device_index = _index_in_group;
   }
   return OperatorDef::DoPlaceToLocalDevice(placement, stream_id);
