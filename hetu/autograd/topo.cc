@@ -3,6 +3,9 @@
 #include "hetu/autograd/ops/Communicate.h"
 #include <queue>
 
+#include "hetu/impl/communication/comm_group.h"
+using namespace hetu::impl::comm;
+
 namespace hetu {
 namespace autograd {
 
@@ -10,6 +13,7 @@ using OpCRefQueue = std::queue<std::reference_wrapper<const Operator>>;
 
 OpList TopoSort(const OpList& nodes, bool connect_p2p, bool skip_computed) {
   TIK(fn);
+  auto local_device = GetLocalDevice();
   OpList topo_order;
   std::unordered_map<OpId, int32_t> in_degrees;
   OpCRefQueue topo_sort_queue;
@@ -24,7 +28,7 @@ OpList TopoSort(const OpList& nodes, bool connect_p2p, bool skip_computed) {
       if (in_degrees[node->id()] == 0)
         topo_sort_queue.push(node);
       traverse_queue.push(node);
-      visited.insert(node->id());
+      visited.insert(node->id()); 
     }
   };
 
@@ -34,20 +38,29 @@ OpList TopoSort(const OpList& nodes, bool connect_p2p, bool skip_computed) {
     const Operator& node = traverse_queue.front().get();
     traverse_queue.pop();
     OpRefList in_nodes_refs = node->input_ops_ref();
-    for (const auto& in_node_ref : in_nodes_refs)
+    for (const auto& in_node_ref : in_nodes_refs) {
+      // if (is_comm_op(in_node_ref)) {
+      //   HT_LOG_DEBUG << local_device <<<< "node: " << node << " has comm_op input: " << in_node_ref;
+      // }
       traverse_fn(in_node_ref);
+    }
     if (connect_p2p && is_peer_to_peer_recv_op(node)) {
       auto& recv_op = reinterpret_cast<const P2PRecvOp&>(node);
       const auto& send_node = reinterpret_cast<const Operator&>(recv_op->send_op());
       traverse_fn(send_node);
     }
   }
-
+  // HT_LOG_DEBUG << local_device << ": topo_sort_queue size: " << topo_sort_queue.size();
   // iteratively find the topo order
+  // int cnt = 0;
   while (!topo_sort_queue.empty()) {
+    // OpList tmp;
+
+    // HT_LOG_DEBUG << local_device << ": cur cnt = " << cnt << ", cur topo_sort_queue: " << topo_sort_queue << ", cur topo_order: " << topo_order;     
+    // if (++cnt == 1000) break;
     const Operator& node = topo_sort_queue.front().get();
     topo_sort_queue.pop();
-
+    // HT_LOG_DEBUG << local_device << ": node pop from topo_sort_queue: " << node->name();
     if (is_peer_to_peer_send_op(node) || is_peer_to_peer_recv_op(node)) {
       OpList send_recv_topo;
       if (is_peer_to_peer_send_op(node)) {
@@ -71,30 +84,40 @@ OpList TopoSort(const OpList& nodes, bool connect_p2p, bool skip_computed) {
         auto it = find_if(topo_order.begin(), topo_order.end(),
         [&](Operator& op) -> bool {return op->id() == send_recv_topo[i]->id(); });
         if (it == topo_order.end()) {
+          // HT_LOG_DEBUG << local_device << ": node: " << send_recv_topo[i]->name() << " should appear in topo_order before " << node->name(); 
           move_op_after = true;
           break;
         }
       }
       if (move_op_after) {
         topo_sort_queue.push(node);
+        // HT_LOG_DEBUG << local_device << ": node push back to topo_sort_queue: " << node->name(); 
         continue;
       }
     }
     
-    if (!skip_computed || !node->is_computed())
+    if (!skip_computed || !node->is_computed()) {
       topo_order.push_back(node);
+      // HT_LOG_DEBUG << local_device << ": topo_order[" << topo_order.size()-1 << "]: " << node;
+    }
     OpRefList out_nodes_refs = node->output_ops_ref();
     for (const auto& out_node_ref : out_nodes_refs) {
+      // if (is_comm_op(out_node_ref)) {
+      //   HT_LOG_INFO << "node: " << node << " has comm_op output: " << out_node_ref;        
+      // }
       const Operator& out_node = out_node_ref.get();
       OpId out_node_id = out_node->id();
       if (visited.find(out_node_id) == visited.end())
         continue;
       in_degrees[out_node_id]--;
-      if (in_degrees[out_node_id] == 0)
+      if (in_degrees[out_node_id] == 0) {
         topo_sort_queue.push(out_node);
+        // HT_LOG_DEBUG << local_device << ": node push to topo_sort_queue: " << out_node->name();        
+      }
     }
   }
 
+  // HT_LOG_DEBUG << local_device << ": final cnt: " << cnt;
   // ensure update ops are executed later
   for (size_t i = 0; i < topo_order.size(); i++) {
     if (is_optimizer_update_op(topo_order[i])) {

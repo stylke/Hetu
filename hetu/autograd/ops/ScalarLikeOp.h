@@ -30,6 +30,8 @@ class ScalarLikeOpDef : public OperatorDef {
     return _scalar_value;
   }
 
+  void ForwardDeduceStates();
+
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

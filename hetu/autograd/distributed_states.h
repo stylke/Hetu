@@ -85,6 +85,21 @@ class DistributedStates {
   int32_t get_dim(int32_t index);
   std::vector<int32_t> get_loop_sizes();
   std::unordered_map<int32_t, int32_t> map_device_to_state_index(int32_t device_index); // for single device
+  
+  inline std::string print_states() {
+    std::string s = "states = {";
+    for (int d = -2; d <= 1; d++) {
+      if (_states.find(d) != _states.end()) {
+        s += std::to_string(d);
+        s += ": ";
+        s += std::to_string(_states[d]);
+        s += ", ";
+      }
+    }
+    s = s.substr(0, s.size()-2);
+    s += "}";
+    return s;
+  }
 
  protected:
   // 同时赋值states和order, 保证其一致性

@@ -37,15 +37,26 @@ bool DistributedStates::is_valid() {
 void DistributedStates::set_states(const std::unordered_map<int32_t, int32_t>& states) {
   // 必须先确定device_num再赋值states
   HT_ASSERT(_device_num != -1) << "must assign device num before set states!";
-  HT_ASSERT(states.find(-1) != states.end() && states.find(-2) != states.end()) << "partial states[-2] or duplicate states[-1] must be assigned!";
+  // HT_ASSERT(states.find(-1) != states.end() && states.find(-2) != states.end()) << "partial states[-2] or duplicate states[-1] must be assigned!";
   // check states & set max dimension
   int32_t device_num = 1;
+  std::unordered_map<int32_t, int32_t> res_states;
   for (auto& kv : states) {
-    device_num *= kv.second;
+    if (kv.second > 1) {
+      res_states[kv.first] = kv.second;
+      device_num *= kv.second;
+    }
   }
+  if (res_states.find(-2) == res_states.end()) {
+    res_states[-2] = 1;
+  }
+  if (res_states.find(-1) == res_states.end()) {
+    res_states[-1] = 1;
+  }
+
   HT_ASSERT(device_num == _device_num) << "the devices num " << device_num 
             <<" used in states is not equal to distributed requirement " << _device_num << "!";
-  _states = states;
+  _states = res_states;
 }
 
 void DistributedStates::set_order(const std::vector<int32_t>& order) {
@@ -215,9 +226,13 @@ bool DistributedStates::check_reduce_dim(DistributedStates& dst_distributed_stat
   return equal_states_and_order(states, order, dst_states, dst_order);                                 
 }
 
+// 判断逻辑有待验证
 bool DistributedStates::check_allreduce(DistributedStates& dst_distributed_states) {
-  std::pair<std::vector<int32_t>, int32_t> src2dst = {{-2}, -1};
-  return _states[-2] > 1 && check_combine(dst_distributed_states, src2dst);
+  // 验证是否device_group内的所有device做allreduce
+  return (_states[-2] == _device_num) && (dst_distributed_states.get_dim(-1) == _device_num);
+  // 之前的代码逻辑是判断是否按某一维做allreduce? 这样的话后续就不是只加一个allreduce_op那么简单了, 需要对现有的device_group进行分组, 再在每组内部做allreduce, 之后再来补充这块的逻辑吧...
+  // std::pair<std::vector<int32_t>, int32_t> src2dst = {{-2}, -1};
+  // return _states[-2] > 1 && check_combine(dst_distributed_states, src2dst);
 }
 
 bool DistributedStates::check_allgather(DistributedStates& dst_distributed_states) {

@@ -64,6 +64,9 @@ class OperatorDef : public shared_ptr_target {
 
   bool PlaceToLocalDevice(const Device& placement, StreamIndex stream_id);
 
+  virtual void ForwardDeduceStates();
+  DistributedStates BackwardDeduceStates(int32_t index);
+
   // 必须由各op根据自己的规则重载实现 
   virtual bool DoDeduceDistributedStates() {
     for (auto& output : _outputs) {
@@ -382,6 +385,7 @@ static const uint64_t BROADCAST_OP = 1ul << 11;
 static const uint64_t REDUCE_OP = 1ul << 12;
 static const uint64_t P2P_OP = 1ul << 13;
 static const uint64_t COMM_OP = 1ul << 20;
+static const uint64_t UNKNOWN_OP = 1ul << 21;
 static const uint64_t OPTIMIZER_UPDATE_OP = 1ul << 62;
 static const uint64_t GROUP_OP = 1ul << 63;
 

@@ -2,6 +2,9 @@
 
 #include "hetu/autograd/operator.h"
 
+#include "hetu/impl/communication/comm_group.h"
+using namespace hetu::impl::comm;
+
 namespace hetu {
 namespace autograd {
 
@@ -126,6 +129,8 @@ class SplitOpDef : public OperatorDef {
     }
 
     HTShape ori_shape = input->shape();
+    // auto local_device = GetLocalDevice();
+    // HT_LOG_DEBUG << local_device << ": SplitOpDef: input: " << input << ", input shape: " << ori_shape << ", axes: " << axes << ", input.input: " << input->producer()->inputs();  
     int ndim = ori_shape.size();
     HTShape begin_pos(ndim);
     HTShape output_shape(ndim);

@@ -4,6 +4,9 @@
 #include "hetu/autograd/tensor.h"
 #include "hetu/autograd/distributed_states.h"
 
+#include "hetu/impl/communication/comm_group.h"
+using namespace hetu::impl::comm;
+
 namespace hetu {
 namespace autograd {
 
@@ -29,33 +32,42 @@ class CommOpDef : public OperatorDef {
   CommOpDef(const constructor_access_key&, Tensor input, 
             DistributedStates dst_distributed_states, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(CommOp), {input}, op_meta), _dst_distributed_states(dst_distributed_states) {
+    auto local_device = GetLocalDevice();
+
+    // bug
+
     // op1 (tensor1) -> comm_op (tensor2) -> op2 (tensor3), 用具体的通信算子替换comm_op 
     // 1. 根据input->states+dst_states来判断要插入什么样的通信算子
-    auto src_distributed_states = input->get_distributed_states();
-    if (src_distributed_states.check_allreduce(dst_distributed_states)) {
-      _comm_type = ALL_REDUCE_OP;
-      HT_LOG_DEBUG << "ALL_REDUCE_OP";
-    } else if (src_distributed_states.check_allgather(dst_distributed_states)) {
-      _comm_type = ALL_GATHER_OP;
-      HT_LOG_DEBUG << "ALL_GATHER_OP";
-    } else if (src_distributed_states.check_reducescatter(dst_distributed_states)) {
-      _comm_type = REDUCE_SCATTER_OP;
-      HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
-    } else if (src_distributed_states.check_boradcast(dst_distributed_states)) {
-      _comm_type = BROADCAST_OP;
-      HT_LOG_DEBUG << "BROADCAST_OP";
-    } else if (src_distributed_states.check_reduce(dst_distributed_states)) {
-      _comm_type = REDUCE_OP;
-      HT_LOG_DEBUG << "REDUCE_OP";
-    } else {
-      // other case: 非集合通信, 部分device之间p2p通信
-      _comm_type = P2P_OP;
-      HT_LOG_DEBUG << "P2P_OP";
-    }
+    auto src_distributed_states = _inputs[0]->get_distributed_states();
+    // HT_LOG_DEBUG << local_device << ": " << name() << ": input states(1): " << src_distributed_states.print_states();
+    get_comm_type();
 
+    // HT_LOG_DEBUG << local_device << ": " << name() << ": input states(2): " << src_distributed_states.print_states();
     // 2. comm_op -> op2, 其中op2所需的tensor分片已经由集合通信转化完毕, 接下来在op2的do compute里确定output的distributed_states
     // add output
-    AddOutput(input->meta());
+
+    // 检查src_ds是否valid
+    HT_ASSERT(src_distributed_states.is_valid()) 
+              << "distributed states for input tensor is not valid!";    
+    const HTShape& input_shape = _inputs[0]->shape();
+    HTShape shape = input_shape;
+    for (int d = 0; d < input_shape.size(); d++) {
+      shape[d] = input_shape[d] * src_distributed_states.get_dim(d) / dst_distributed_states.get_dim(d);
+      // HT_LOG_INFO << local_device << ": " << name() << ": input_shape[d]: " << input_shape[d] << ", src_distributed_states.get_dim(d): " 
+      // << src_distributed_states.get_dim(d) << ", dst_distributed_states.get_dim(d): " << dst_distributed_states.get_dim(d) << ", shape[d]: " << shape[d] << ", d: " << d;
+    }
+    // HT_LOG_INFO << local_device << ": " << name() << ": _inputs[0]->dtype(): " << _inputs[0]->dtype() << ", shape: " << shape;
+    // forward时由用户创建的comm_op, input states还没推到过来, 所以shape无法推断？感觉要把推ds的过程放到每个op定义时期做
+    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+
+    // HT_LOG_INFO << local_device << ": " << name() << ": input shape = " << _inputs[0]->shape() << ", output shape: " << _outputs[0]->shape();
+    // HT_LOG_DEBUG << local_device << ": " << name() << ": input states(3): " << src_distributed_states.print_states();    
+    // 在node定义的时候就做ds的推导
+    ForwardDeduceStates(); // inputs.ds -> outputs.ds
+    // test: 这里假设每个op的output只有一个, 简单测试输出的ds, 如果op的output不只一个, 则只输出第0个的情况
+    auto ds = _outputs[0]->get_distributed_states();
+    HT_LOG_DEBUG << local_device << ": " << name() << " definition, input " << _inputs[0]->producer()->name() << ": states: " << src_distributed_states.print_states() << ", shape: " << _inputs[0]->shape()
+    << "; output[0] states: " << ds.print_states() << ", shape: " << _outputs[0]->shape(); 
   }
 
   uint64_t op_indicator() const noexcept {
@@ -66,11 +78,43 @@ class CommOpDef : public OperatorDef {
     return _dst_distributed_states;
   }
 
-  inline uint64_t get_comm_type() const {
+  inline uint64_t get_comm_type() {
+    // TODO: 后面看要不要把单纯的get拆出一个函数来
+    // 惊讶的发现这一块代码会修改src_ds本身, 先注释掉, 后面再来查bug
+    auto src_ds = _inputs[0]->get_distributed_states();
+    auto dst_ds = _dst_distributed_states;
+    if (src_ds.check_allreduce(dst_ds)) {
+      _comm_type = ALL_REDUCE_OP;
+      HT_LOG_DEBUG << "ALL_REDUCE_OP";
+    } 
+    // else if (src_ds.check_allgather(dst_ds)) {
+    //   _comm_type = ALL_GATHER_OP;
+    //   HT_LOG_DEBUG << "ALL_GATHER_OP";
+    // } else if (src_ds.check_reducescatter(dst_ds)) {
+    //   _comm_type = REDUCE_SCATTER_OP;
+    //   HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
+    // } else if (src_ds.check_boradcast(dst_ds)) {
+    //   _comm_type = BROADCAST_OP;
+    //   HT_LOG_DEBUG << "BROADCAST_OP";
+    // } else if (src_ds.check_reduce(dst_ds)) {
+    //   _comm_type = REDUCE_OP;
+    //   HT_LOG_DEBUG << "REDUCE_OP";
+    // } 
+    else {
+      // other case: 非集合通信, 部分device之间p2p通信
+      _comm_type = P2P_OP;
+      HT_LOG_DEBUG << "P2P_OP";
+    }    
     return _comm_type;
   }
+
+  void ForwardDeduceStates();
+  DistributedStates BackwardDeduceStates(int32_t index);  
   
  protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override; 
+  TensorList DoGradient(const TensorList& grad_outputs) override;
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;  
   uint64_t _comm_type;
   DistributedStates _dst_distributed_states;
 };

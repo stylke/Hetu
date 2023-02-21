@@ -22,6 +22,7 @@ void MapOpsToParallelDevices(const OpList& topo_order,
     for (auto& op : topo_order) {
       if (!op->device_group().empty()) {
         op->MapToParallelDevices(op->device_group());
+        // HT_LOG_INFO << op->name() << ": map to device group " << op->device_group();
       } else {
         DeviceGroup inferred;
         if (is_group_op(op)) {
@@ -34,10 +35,11 @@ void MapOpsToParallelDevices(const OpList& topo_order,
         } else {
           HT_ASSERT(op->num_inputs() > 0)
             << "Currently we cannot infer the devices "
-            << "for operators with zero in-degree.";
+            << "for operators with zero in-degree. : " << op;
           inferred = op->input(0)->producer()->placement_group();
         }
         op->MapToParallelDevices(inferred);
+        // HT_LOG_INFO << op->name() << ": map to device group " << op->device_group() << ", placement group " << op->placement_group();        
       }
     }
   }

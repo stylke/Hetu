@@ -4,6 +4,94 @@
 namespace hetu {
 namespace autograd {
 
+bool CommOpDef::DoMapToParallelDevices(const DeviceGroup& placement_group) {
+  auto local_device = GetLocalDevice();
+  // 如果input是由comm_op产生的, 则合并这两个comm_op(否则相邻两个comm_op在SplitOp推导shape中会有问题, 暂时还没找到具体原因)
+  auto& input_op = _inputs[0]->producer();
+  if (is_comm_op(input_op)) {
+    HT_LOG_DEBUG << local_device << ": " << name() << ": replace input from " << _inputs[0] << " to " << input_op->input(0);     
+    ReplaceInput(0, input_op->input(0));
+    HT_LOG_DEBUG << local_device << ": " << name() << ": inputs: " << _inputs << ", outputs: " << _outputs;
+    // for (int i = 0; i <)
+    get_comm_type();
+  }
+  return OperatorDef::DoMapToParallelDevices(placement_group);  
+}
+
+// TODO: infer shape的代码逻辑需要纠正
+HTShapeList CommOpDef::DoInferShape(const HTShapeList& input_shapes) {
+  const HTShape& input_shape = input_shapes.at(0);
+
+  Tensor& input = _inputs[0];
+  auto src_ds = input->get_distributed_states();
+  auto dst_ds = get_dst_distributed_states();
+
+  HTShape shape; shape.reserve(input_shape.size());
+  for (size_t d = 0; d < input_shape.size(); d++) {
+    shape[d] = input_shape[d] * src_ds.get_dim(d) / dst_ds.get_dim(d);
+  }
+  
+  return {shape};
+}
+
+TensorList CommOpDef::DoGradient(const TensorList& grad_outputs) {
+  Tensor& input = _inputs[0];
+  auto ds_input = input->get_distributed_states();
+  Tensor& output = _outputs[0];
+  auto ds_output = output->get_distributed_states();
+  const Tensor& grad_output = grad_outputs.at(0);
+  auto ds_grad_output = grad_output->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid() && ds_output.is_valid())
+           << "distributed states for input and output tensor must be valid!";
+  HT_ASSERT(ds_input.get_device_num() == ds_output.get_device_num())
+           << "distributed states for input and output tensor must be matched!";
+  // HT_ASSERT() // TODO: check ds_grad_output and ds_output must be same
+  DistributedStates ds_grad_input(ds_input);
+  if (ds_grad_input.get_dim(-2) > 1) { // partial->duplicate
+    std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
+    auto res_states = ds_grad_input.combine_states(src2dst);
+    auto res_order = ds_grad_input.combine_order(src2dst);
+    auto device_num = ds_grad_input.get_device_num();
+    ds_grad_input.set_distributed_states({device_num, res_states, res_order});
+  }
+  Tensor grad_input = CommOp(grad_output, ds_grad_input, OpMeta().set_name("grad_" + name()))->output(0);
+  return {grad_input};
+}
+
+void CommOpDef::ForwardDeduceStates() {
+  Tensor& input = _inputs[0];
+  DistributedStates ds_input = input->get_distributed_states();
+  DistributedStates ds_dst = get_dst_distributed_states();
+  // TODO: check states/order between src and dst
+  HT_ASSERT(ds_input.is_valid() && ds_dst.is_valid())
+           << "distributed states for input and dst tensor must be valid!";
+  HT_ASSERT(ds_input.get_device_num() == ds_dst.get_device_num())
+           << "cannot convert src distributed states to unpaired dst distributed states!";
+  Tensor& output = _outputs[0];
+  output->set_distributed_states(ds_dst);
+}
+
+DistributedStates CommOpDef::BackwardDeduceStates(int32_t index) {
+  HT_ASSERT(index == 0) << "grad index in CommOp must be equal to 0!";
+  Tensor& input = _inputs[0];
+  auto ds_input = input->get_distributed_states();
+  Tensor& output = _outputs[0];
+  auto ds_output = output->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid() && ds_output.is_valid())
+           << "distributed states for input and output tensor must be valid!";
+  HT_ASSERT(ds_input.get_device_num() == ds_output.get_device_num())
+           << "distributed states for input and output tensor must be matched!";
+  DistributedStates ds_input_grad(ds_input);
+  if (ds_input_grad.get_dim(-2) > 1) { // partial->duplicate
+    std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
+    auto new_states = ds_input_grad.combine_states(src2dst);
+    auto new_order = ds_input_grad.combine_order(src2dst);
+    auto device_num = ds_input_grad.get_device_num();
+    ds_input_grad.set_distributed_states({device_num, new_states, new_order});
+  }
+  return ds_input_grad;
+}
+
 void P2PSendOpDef::BindRecvOp(const P2PRecvOp& recv_op) {
   HT_ASSERT(_recv_op == nullptr) << "Try to bind P2PRecvOp twice";
   _recv_op = std::make_unique<P2PRecvOp>(recv_op);
@@ -50,6 +138,7 @@ NDArrayList AllReduceOpDef::DoCompute(const NDArrayList& inputs,
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::AllReduce, inputs.at(0),
                                   outputs.at(0), placement_group(), stream());
+  // HT_LOG_INFO << "all_reduce_op inputs: " << inputs << ", outputs: " << outputs;                                
   return outputs;
 }
 

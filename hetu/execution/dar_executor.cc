@@ -27,7 +27,7 @@ DARExecutor::DARExecutor(const Device& local_device,
   // 0. 所有tensor的placement_group/placement/index和device_num的赋值在这个阶段完成
   bool parallel = PlaceDevices(TopoSort(OperatorPool::GetAllOps(), true));
   _exec_ctx->_global_topo_order = TopoSort(OperatorPool::GetAllOps(), true);
-  // HT_LOG_DEBUG << "Topo order: " << _exec_ctx->_global_topo_order;
+  HT_LOG_DEBUG << "Topo order: " << _exec_ctx->_global_topo_order;
   bool training = _exec_ctx->_global_topo_order.end() !=
     std::find_if(_exec_ctx->_global_topo_order.begin(),
                  _exec_ctx->_global_topo_order.end(),
@@ -38,7 +38,7 @@ DARExecutor::DARExecutor(const Device& local_device,
     // 2. 获取local topo
     _exec_ctx->_local_topo_order =
       get_local_nodes(_exec_ctx->_global_topo_order, _exec_ctx->_local_device);
-    // HT_LOG_DEBUG << "Local topo: " << _exec_ctx->_local_topo_order;
+    HT_LOG_DEBUG << "Local topo: " << _exec_ctx->_local_topo_order;
     // 3. 将local_topo中的comm_op替换为具体的通信op
     HT_LOG_DEBUG << _exec_ctx->local_device() << ": Substitute comm ops begin!";
     SubstituteCommOp(_exec_ctx->_local_topo_order);
@@ -131,15 +131,18 @@ void DARExecutor::DeduceDistributedStates(const OpList& topo_order) {
 void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
   for (auto op : local_topo_order) {
     if (is_comm_op(op)) {
+      HT_LOG_DEBUG << _exec_ctx->local_device() << "==============> substitute comm_op begin: " << op << "...";
       auto& comm_op = reinterpret_cast<CommOp&>(op);
       uint64_t comm_type = comm_op->get_comm_type();
       Tensor result;
       TensorList extra_in_deps;
       if (comm_type == ALL_REDUCE_OP) {
+        HT_LOG_DEBUG << _exec_ctx->local_device() << ": substitute comm_op to all_reduce_op...";
         AllReduceOp all_reduce_op(
           comm_op->input(0),
-          OpMeta().set_device_group(comm_op->device_group()).set_name(comm_op->input(0)->name() + "_AllReduce"));
-        all_reduce_op->MapToParallelDevices(comm_op->device_group());
+          OpMeta().set_device_group(comm_op->placement_group()).set_name(comm_op->input(0)->name() + "_AllReduce"));
+        all_reduce_op->MapToParallelDevices(comm_op->placement_group()); // 注意这里comm_op->device_group()可能为空, 但placement_group()绝对不为空(通过input_op的infer获取)
+        all_reduce_op->PlaceToLocalDevice(_exec_ctx->local_device(), kComputingStream);
         result = all_reduce_op->output(0);
       } else if (comm_type == ALL_GATHER_OP) {
         ;
@@ -151,21 +154,71 @@ void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
         ;
       } else if (comm_type == P2P_OP) {
         ; // 分为两部分: 1. 从local_device发送数据给需要的device 2. 从目标devices中接收需要的数据到local_device
+        // int32_t local_device_index = comm_op->placement_group().get_index(comm_op->placement());
+        // std::vector<P2PSendOp> send_ops;
+        // std::vector<P2PRecvOp> recv_ops;
+        // Tensor self_send_data;
+        // std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>> send_recv_list;
+        // for (int32_t used_device_index = 0; used_device_index < comm_op->placement_group().num_devices(); used_device_index++) {
+        //   int32_t device_index = 0;     
+        //   HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross send begin!";
+        //   CrossSend({}, {}, 0, false, device_index, comm_op, send_ops, self_send_data, used_device_index, send_recv_list);
+        //   HT_ASSERT(device_index == _exec_ctx->device_group().num_devices()) << "cross send error!";
+        //   HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross send end!";
+
+        //   device_index = 0;
+        //   HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross receive begin!";
+        //   auto cur_result = CrossReceive(0, device_index, comm_op, self_send_data, used_device_index, recv_ops, send_recv_list);
+        //   HT_ASSERT(device_index == _exec_ctx->device_group().num_devices()) << "cross receive error!";
+        //   if (used_device_index == local_device_index) {
+        //     result = cur_result;
+        //   } else {
+        //     extra_in_deps.push_back(cur_result);
+        //   }          
+        //   HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross receive end!";
+        // }
+        // // 必须要等全部的send/recv ops集齐了才能做binding, 否则可能会出现某个send/recv op对应要bind的op还没被创建的情况
+        // // send/recv ops binding, for topo search
+        // HT_LOG_DEBUG << _exec_ctx->local_device() << ": send/recv ops binding begin!";
+        // OpList _send_ops; for (auto& op : send_ops) {_send_ops.push_back(op);}
+        // OpList _recv_ops; for (auto& op : recv_ops) {_recv_ops.push_back(op);}
+        // HT_LOG_DEBUG << _exec_ctx->local_device() << ": send_ops: " << _send_ops;
+        // HT_LOG_DEBUG << _exec_ctx->local_device() << ": recv_ops: " << _recv_ops;        
+        // for (auto& send_op : send_ops) {
+        //   for (auto& recv_op : recv_ops) {
+        //     HT_ASSERT(send_op->dst_device_index() != -1 && recv_op->index_in_group() != -1)
+        //              << "send/recv ops src/dst info is not complete!";
+        //     if (send_op->dst_device_index() == recv_op->index_in_group() && recv_op->src_device_index() == send_op->index_in_group()) {
+        //       send_op->BindRecvOp(recv_op);
+        //       recv_op->BindSendOp(send_op);
+        //       HT_LOG_DEBUG << _exec_ctx->local_device() << ": send_op " << Operator(send_op) << " bind to recv_op " << Operator(recv_op); 
+        //       break;
+        //     }
+        //   }
+        // }
+        // HT_LOG_DEBUG << _exec_ctx->local_device() << ": send/recv ops binding end!";
+
         int32_t local_device_index = comm_op->placement_group().get_index(comm_op->placement());
         std::vector<P2PSendOp> send_ops;
         std::vector<P2PRecvOp> recv_ops;
-        Tensor self_send_data;
+        TensorList self_send_data_list;
         std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>> send_recv_list;
-        for (int32_t used_device_index = 0; used_device_index < comm_op->placement_group().num_devices(); used_device_index++) {
-          int32_t device_index = 0;     
+        
+        for (int32_t used_device_index = 0; used_device_index < comm_op->placement_group().num_devices(); used_device_index++) {     
           HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross send begin!";
+          int32_t device_index = 0;
+          Tensor self_send_data;
           CrossSend({}, {}, 0, false, device_index, comm_op, send_ops, self_send_data, used_device_index, send_recv_list);
+          self_send_data_list.push_back(self_send_data);
           HT_ASSERT(device_index == _exec_ctx->device_group().num_devices()) << "cross send error!";
           HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross send end!";
-
-          device_index = 0;
+        }
+        // 必须要等全部的send ops集齐了才能做binding, 否则可能会出现某个recv op对应要bind的send op还没被创建的情况
+        for (int32_t used_device_index = 0; used_device_index < comm_op->placement_group().num_devices(); used_device_index++) {
           HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross receive begin!";
-          auto cur_result = CrossReceive(0, device_index, comm_op, self_send_data, used_device_index, recv_ops, send_recv_list);
+          int32_t device_index = 0;
+          Tensor self_send_data = self_send_data_list[used_device_index];
+          auto cur_result = CrossReceive(0, device_index, comm_op, send_ops, self_send_data, used_device_index, recv_ops, send_recv_list);
           HT_ASSERT(device_index == _exec_ctx->device_group().num_devices()) << "cross receive error!";
           if (used_device_index == local_device_index) {
             result = cur_result;
@@ -174,44 +227,40 @@ void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
           }          
           HT_LOG_DEBUG << _exec_ctx->local_device() << ": cross receive end!";
         }
-        // 必须要等全部的send/recv ops集齐了才能做binding, 否则可能会出现某个send/recv op对应要bind的op还没被创建的情况
-        // send/recv ops binding, for topo search
-        HT_LOG_DEBUG << _exec_ctx->local_device() << ": send/recv ops binding begin!";
-        OpList _send_ops; for (auto& op : send_ops) {_send_ops.push_back(op);}
-        OpList _recv_ops; for (auto& op : recv_ops) {_recv_ops.push_back(op);}
-        HT_LOG_DEBUG << _exec_ctx->local_device() << ": send_ops: " << _send_ops;
-        HT_LOG_DEBUG << _exec_ctx->local_device() << ": recv_ops: " << _recv_ops;        
-        for (auto& send_op : send_ops) {
-          for (auto& recv_op : recv_ops) {
-            HT_ASSERT(send_op->dst_device_index() != -1 && recv_op->index_in_group() != -1)
-                     << "send/recv ops src/dst info is not complete!";
-            if (send_op->dst_device_index() == recv_op->index_in_group() && recv_op->src_device_index() == send_op->index_in_group()) {
-              send_op->BindRecvOp(recv_op);
-              recv_op->BindSendOp(send_op);
-              HT_LOG_DEBUG << _exec_ctx->local_device() << ": send_op " << Operator(send_op) << " bind to recv_op " << Operator(recv_op); 
-              break;
-            }
-          }
-        }
-        HT_LOG_DEBUG << _exec_ctx->local_device() << ": send/recv ops binding end!";        
+
         // 给该comm_op对应的send/recv ops生成topo序, 避免死锁
         HT_LOG_DEBUG << _exec_ctx->local_device() << ": generate send recv topo begin!";
         GenerateSendRecvTopo(comm_op, send_ops, recv_ops, send_recv_list);
         HT_LOG_DEBUG << _exec_ctx->local_device() << ": generate send recv topo end!";        
       }
+      
       result->set_distributed_states(comm_op->get_dst_distributed_states()); // 替换comm_op后得到的result tensor需要设置为dst_distributed_states
 
       // 找到所有消费tensor的op, 替换对应的input: 从占位符comm_op的output(0)替换为真正通信算子得到的result
-      for (size_t i = 0; i < comm_op->output(0)->num_consumers(); i++) {
+      // HT_LOG_INFO << _exec_ctx->local_device() << ": comm_op " << Operator(comm_op) << " num_consumers before replace input: " << comm_op->output(0)->num_consumers();
+      // if (comm_op->output(0)->num_consumers() == 2) {
+      //   HT_LOG_INFO << _exec_ctx->local_device() << ": comm_op " << Operator(comm_op) << " consumer[0] " << comm_op->output(0)->consumer(0) << ", its inputs: " << comm_op->output(0)->consumer(0)->inputs();
+      //   HT_LOG_INFO << _exec_ctx->local_device() << ": comm_op " << Operator(comm_op) << " consumer[1] " << comm_op->output(0)->consumer(1) << ", its inputs: " << comm_op->output(0)->consumer(1)->inputs();      
+      // }
+      // size_t是unsigned的, 永远>=0; 此外comm_op->output(0)->num_consumers()是size_t, 如果是0, 则-1是一个无限大的数, 这里要闭坑
+      for (int i = comm_op->output(0)->num_consumers() - 1; i >= 0; i--) { // size_t是一个坑, i从小到大遍历是一个坑
         if (!extra_in_deps.empty()) { // 其他devices替换comm_op所产生的op需要被添加依赖才能在topo中被遍历到
           comm_op->output(0)->consumer(i)->AddInDeps(extra_in_deps);
         }
-        for (size_t j = 0; j < comm_op->output(0)->consumer(i)->num_inputs(); j++) {
+        for (int j = 0; j < comm_op->output(0)->consumer(i)->num_inputs(); j++) {
+          // HT_LOG_INFO << _exec_ctx->local_device() << ": " << i << ", " << j << " begin!";
+          // HT_LOG_INFO << _exec_ctx->local_device() << ": comm_op " << Operator(comm_op) << " output(0) id: " << comm_op->output(0)->id() << ", consumer " << i << " " << comm_op->output(0)->consumer(i) << " input " << j << " " << comm_op->output(0)->consumer(i)->input(j) << " id: " << comm_op->output(0)->consumer(i)->input(j)->id();
           if (comm_op->output(0)->consumer(i)->input(j)->id() == comm_op->output(0)->id()) {
+            // HT_LOG_INFO << _exec_ctx->local_device() << ": comm_op consumer " << comm_op->output(0)->consumer(i) << " replace input " << j;
             comm_op->output(0)->consumer(i)->ReplaceInput(j, result); // op->ReplaceInput()原先是protected, 这里暂时挪到public来              
           }
+          // HT_LOG_INFO << _exec_ctx->local_device() << ": " << i << ", " << j << " end!";          
         }
       }
+      HT_LOG_DEBUG << _exec_ctx->local_device() << ": replace end!";
+      // HT_ASSERT(comm_op->output(0)->num_consumers()) << ""
+      // HT_LOG_INFO << _exec_ctx->local_device() << ": comm_op " << Operator(comm_op) << " num_consumers after replace input: " << comm_op->output(0)->num_consumers();    
+      HT_LOG_DEBUG << _exec_ctx->local_device() << "==============> substitute comm_op end: " << op << "...";
     }
   }
 }
@@ -288,12 +337,12 @@ void DARExecutor::GenerateSendRecvTopo(
     }
   }
 
-  if (local_device_index == 0) {
-    for (int32_t i = 0; i < send_recv_order.size(); i++) {
-      HT_LOG_DEBUG << "send_recv_order[" << i << "]: " << std::get<0>(send_recv_order[i]) << ", " 
-                   << std::get<1>(send_recv_order[i]) << ", " << std::get<2>(send_recv_order[i]);
-    }
-  }
+  // if (local_device_index == 0) {
+  //   for (int32_t i = 0; i < send_recv_order.size(); i++) {
+  //     HT_LOG_DEBUG << "send_recv_order[" << i << "]: " << std::get<0>(send_recv_order[i]) << ", " 
+  //                  << std::get<1>(send_recv_order[i]) << ", " << std::get<2>(send_recv_order[i]);
+  //   }
+  // }
 
   OpList send_recv_topo;
   for (auto& send_recv : send_recv_order) {
@@ -328,14 +377,14 @@ void DARExecutor::GenerateSendRecvTopo(
   for (auto& recv_op : recv_ops) {
     recv_op->set_send_recv_topo(send_recv_topo);
   }
-  if (local_device_index == 0) HT_LOG_DEBUG << "send_recv_topo: " << send_recv_topo;  
+  HT_LOG_DEBUG << _exec_ctx->local_device() << ": " << comm_op->name() << " send_recv_topo: " << send_recv_topo;  
 }
 
 // cross send的cur_state_index记录的是local device在prev states/order下分到了哪些数据, 通过device_index来记录local device需要发送的目标devices,
 // 并将split或原数据发送给它们; cross receive的cur_state_index记录的是local device在target states/order下需要的是哪些数据, 通过device_index记录
 // 这些所需数据来源的device, 将它们传来的数据进行sum/concatenate作为distributed tensor在local device转换后的part result tensor
 Tensor DARExecutor::CrossReceive(
-  int32_t depth, int32_t& device_index, CommOp& comm_op, 
+  int32_t depth, int32_t& device_index, CommOp& comm_op, std::vector<P2PSendOp>& send_ops,
   Tensor& self_send_data, int32_t& used_device_index, std::vector<P2PRecvOp>& recv_ops,
   std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list) {
   auto prev_distributed_states = comm_op->input(0)->get_distributed_states();
@@ -371,7 +420,24 @@ Tensor DARExecutor::CrossReceive(
     } else {
       auto& src_group = comm_op->placement_group();
       auto& dst_group = src_group;
-      P2PRecvOp p2p_recv_op(src_group, comm_op->input(0)->dtype(), HTShape(), device_index); // shape其实可以确定, 但这里先不推了
+      OpList paired_send_ops;
+      for (auto& send_op : send_ops) {
+        HT_ASSERT(send_op->dst_device_index() != -1) << "send op dst info is not complete!";
+        if (send_op->dst_device_index() == used_device_index && device_index == send_op->index_in_group()) {
+          paired_send_ops.push_back(send_op);
+          break;
+        }        
+      }
+      HT_ASSERT(paired_send_ops.size() == 1) << "recv op must match with specific send op!";
+      auto& paired_send_op = reinterpret_cast<P2PSendOp&>(paired_send_ops[0]);
+      // 坑坑坑坑爹啊！！！就是因为这里没有推recv_op的shape, 导致recv_op后跟的sum_op没有shape, 导致split_op在split的时候没有shape, 所以就segmentation fault了！！！
+      // 比较直觉的解决方案就是拿匹配的send_op的信息给recv_op赋值
+      P2PRecvOp p2p_recv_op(src_group, paired_send_op->input(0)->dtype(), paired_send_op->input(0)->shape(), device_index, OpMeta().set_name("RecvOp_" + std::to_string(used_device_index) + "from" + std::to_string(device_index) + "_" + comm_op->name())); // shape其实可以确定, 但这里先不推了
+      // send/recv op binding, for topo search 
+      paired_send_op->BindRecvOp(p2p_recv_op);
+      p2p_recv_op->BindSendOp(paired_send_op);
+      HT_LOG_DEBUG << _exec_ctx->local_device() << ": send_op " << Operator(paired_send_op) << " bind to recv_op " << Operator(p2p_recv_op);
+
       if (used_device_index == local_device_index) {
         p2p_recv_op->MapToParallelDevices(dst_group);
         p2p_recv_op->PlaceToLocalDevice(_exec_ctx->local_device(), kP2PStream);
@@ -389,7 +455,7 @@ Tensor DARExecutor::CrossReceive(
     if (cur_dim == -2) { // partial
       TensorList part_result_list;
       for (size_t i = 0; i < prev_partial; i++) {
-        auto part_result = CrossReceive(depth+1, device_index, comm_op, self_send_data, used_device_index, recv_ops, send_recv_list);
+        auto part_result = CrossReceive(depth+1, device_index, comm_op, send_ops, self_send_data, used_device_index, recv_ops, send_recv_list);
         part_result_list.push_back(part_result);
       }
       SumOp sum_op(part_result_list);
@@ -403,12 +469,12 @@ Tensor DARExecutor::CrossReceive(
       if (prev_duplicate % target_duplicate == 0) {
         auto multiple = prev_duplicate / target_duplicate;
         device_index += cur_st * multiple * loop_sizes[depth];
-        result = CrossReceive(depth+1, device_index, comm_op, self_send_data, used_device_index, recv_ops, send_recv_list);
+        result = CrossReceive(depth+1, device_index, comm_op, send_ops, self_send_data, used_device_index, recv_ops, send_recv_list);
         device_index += ((target_duplicate - cur_st) * multiple - 1) * loop_sizes[depth];
       } else if (target_duplicate % prev_duplicate == 0) {
         auto multiple = target_duplicate / prev_duplicate;
         device_index += cur_st / multiple * loop_sizes[depth];
-        result = CrossReceive(depth+1, device_index, comm_op, self_send_data, used_device_index, recv_ops, send_recv_list);
+        result = CrossReceive(depth+1, device_index, comm_op, send_ops, self_send_data, used_device_index, recv_ops, send_recv_list);
         device_index += (target_duplicate - 1 - cur_st) / multiple * loop_sizes[depth];
       } else {
         HT_ASSERT(false) << "cannot support!";
@@ -421,11 +487,11 @@ Tensor DARExecutor::CrossReceive(
         auto multiple = pre_st / tar_st;
         device_index += cur_st * multiple * loop_sizes[depth];
         if (multiple == 1) {
-          result = CrossReceive(depth+1, device_index, comm_op, self_send_data, used_device_index, recv_ops, send_recv_list);
+          result = CrossReceive(depth+1, device_index, comm_op, send_ops, self_send_data, used_device_index, recv_ops, send_recv_list);
         } else {
           TensorList part_result_list;
           for (size_t i = 0; i < multiple; i++) {
-            auto part_result = CrossReceive(depth+1, device_index, comm_op, self_send_data, used_device_index, recv_ops, send_recv_list);
+            auto part_result = CrossReceive(depth+1, device_index, comm_op, send_ops, self_send_data, used_device_index, recv_ops, send_recv_list);
             part_result_list.push_back(part_result);
           }
           ConcatenateOp concatenate_op(part_result_list, cur_dim);
@@ -439,7 +505,7 @@ Tensor DARExecutor::CrossReceive(
       } else if (tar_st % pre_st == 0) {
         auto multiple = tar_st / pre_st;
         device_index += cur_st / multiple * loop_sizes[depth];
-        result = CrossReceive(depth+1, device_index, comm_op, self_send_data, used_device_index, recv_ops, send_recv_list);
+        result = CrossReceive(depth+1, device_index, comm_op, send_ops, self_send_data, used_device_index, recv_ops, send_recv_list);
         device_index += (tar_st - 1 - cur_st) / multiple * loop_sizes[depth];
       } else {
         HT_ASSERT(false) << "cannot support!";
@@ -504,7 +570,8 @@ void DARExecutor::CrossSend(
         indices.push_back(split_cur_state[key]);
         splits.push_back(split_target_state[key]);
       }
-      // split_op: 把tensor在keys这些dimension上按照splits[key]份数切分, 并取出第indices[key]份, 作为要send的数据切片 
+      // split_op: 把tensor在keys这些dimension上按照splits[key]份数切分, 并取出第indices[key]份, 作为要send的数据切片
+      // HT_LOG_DEBUG << _exec_ctx->local_device() << ": device " << used_device_index << ": new SplitOp: input(comm_op->input(0)).shape = " << comm_op->input(0)->shape();
       SplitOp split_op(comm_op->input(0), keys, indices, splits);
       if (used_device_index == local_device_index) { // 其他device上生成的用于替换comm_op不需要map placement_group和placement
         split_op->MapToParallelDevices(comm_op->placement_group());
@@ -522,7 +589,7 @@ void DARExecutor::CrossSend(
     } else {
       auto& dst_group = comm_op->placement_group();
       auto& src_group = dst_group;
-      P2PSendOp p2p_send_op(send_part, dst_group, device_index);
+      P2PSendOp p2p_send_op(send_part, dst_group, device_index, OpMeta().set_name("SendOp_" + std::to_string(used_device_index) + "to" + std::to_string(device_index) + "_" + comm_op->name()));
       if (used_device_index == local_device_index) {
         p2p_send_op->MapToParallelDevices(src_group); // 这里的placement_group其实并不能准确地描述send_op, 因为部分device上是没有这个send_op的, 但这样设置对结果没啥影响
         p2p_send_op->PlaceToLocalDevice(_exec_ctx->local_device(), kP2PStream);
@@ -738,13 +805,18 @@ NDArrayList DefaultDARSubExecutor::Run(const TensorList& fetches,
         << "(with name \"" << op->name() << "\"): "
         << "Cannot find input " << in_edge;
       input_vals.push_back(it->second);
+      // if (is_all_reduce_op(op)) {
+      //   HT_LOG_DEBUG << _exec_ctx->local_device() << ": " << op->name() << ": in_edge: " << in_edge << ", val: " << it->second;
+      // }
       if ((--edge2degrees[in_edge->id()]) == 0 &&
           fetch_ids.find(in_edge->id()) == fetch_ids.end()) {
         edge2arr.erase(in_edge->id());
       }
     }
+    // HT_LOG_DEBUG << _exec_ctx->local_device() << ": " << op->name() << ": inputs: " << input_vals;
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx);
-    // HT_LOG_DEBUG << _exec_ctx->local_device() << ": " << op->name() << ": inputs: " << input_vals << "; outputs: " << output_vals; 
+    // HT_LOG_DEBUG << _exec_ctx->local_device() << ": " << op->name() << ": outputs: " << output_vals;
+    HT_LOG_DEBUG << _exec_ctx->local_device() << ": " << op->name() << ": inputs: " << input_vals << "; outputs: " << output_vals; 
     for (size_t i = 0; i < op->num_outputs(); i++) {
       const auto& out_edge = op->output(i);
       if (edge2degrees[out_edge->id()] > 0 ||

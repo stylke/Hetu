@@ -314,6 +314,18 @@ bool OperatorDef::DoPlaceToLocalDevice(const Device& placement,
   return true;
 }
 
+void OperatorDef::ForwardDeduceStates() {
+  // default: distributed states of output tensor directly copy from input tensor
+  // TODO: check input states is valid & check distributed states of all input tensor are the same.
+  HT_LOG_DEBUG << name() << ": default copy states from inputs";
+  for (auto& output : _outputs) {
+    for (auto& input : _inputs) {
+      HT_ASSERT(input->get_distributed_states().is_valid()) << "input states must be valid: " << name();
+      output->set_distributed_states(input->get_distributed_states());
+    }
+  }
+}
+
 void OperatorDef::BlockOrSync(Tensor& dep) {
   if (!dep.is_defined())
     return;
