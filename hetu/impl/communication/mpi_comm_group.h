@@ -38,6 +38,12 @@ class MPICommunicationGroupDef : public CommunicationGroupDef {
   void AllReduce(const NDArray& input, NDArray& output,
                  ReductionType red_type = kSUM) override;
 
+  void AllReduceCoalesce(const NDArrayList& inputs, NDArrayList& outputs,
+                         NDArray contiguous_buffers,
+                         ReductionType red_type = kSUM) override;
+
+  void AlltoAll(const NDArray& input, NDArray& output) override;
+
   void Reduce(const NDArray& input, NDArray& output, int reducer,
               ReductionType red_type = kSUM) override;
 
@@ -54,6 +60,12 @@ class MPICommunicationGroupDef : public CommunicationGroupDef {
 
   void Recv(NDArray& data, int sender) override;
 
+  Task ISend(const NDArray& data, int receiver) override;
+
+  Task IRecv(NDArray& data, int sender) override;
+
+  void BatchedISendIRecv(const std::vector<Task>& tasks) override;
+  
   void Barrier(bool sync = false) override;
 
   void Sync() override;

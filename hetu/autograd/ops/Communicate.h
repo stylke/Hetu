@@ -340,5 +340,68 @@ class P2PRecvOp final : public OpWrapper<P2PRecvOpDef> {
                              dtype, shape, src_device_index, op_meta)) {}
 };
 
+class BatchedISendIRecvOpDef : public OperatorDef {
+ private:
+  friend class BatchedISendIRecvOp;
+  struct constrcutor_access_key {};
+  
+ public:
+  BatchedISendIRecvOpDef(const constrcutor_access_key&, TensorList& inputs, std::vector<Device>& dst_devices,
+                         HTShapeList& outputs_shape, std::vector<Device>& src_devices, DataType dtype,
+                         const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(BatchedISendIRecvOp), inputs, op_meta), _src_devices(src_devices), _dst_devices(dst_devices) {
+    HT_ASSERT((inputs.size() == dst_devices.size()) && (outputs_shape.size() == src_devices.size())) 
+      << "Send/Recv data must be matched with dst/src Devices!";
+    print_mesg();
+    std::vector<NDArrayMeta> output_meta_list;
+    for (auto& output_shape : outputs_shape) {
+      output_meta_list.push_back(NDArrayMeta().set_dtype(dtype).set_shape(output_shape));
+    }
+    AddOutputs(output_meta_list);
+  }
+
+  void print_mesg() {
+    std::string dst = "dst devices =";
+    for (auto& d : _dst_devices) {
+      dst += " device_" + std::to_string(d.index());
+    }
+    std::string src = "src devices =";
+    for (auto& s : _src_devices) {
+      src += " device_" + std::to_string(s.index());
+    }
+    auto local_device = GetLocalDevice();
+    HT_LOG_DEBUG << local_device << ": BatchedISendIRecvOp definition: " << name() << ": " << dst << ", " << src;    
+  }
+
+  std::vector<Device> src_devices() {
+    return _src_devices;
+  }
+
+  std::vector<Device> dst_devices() {
+    return _dst_devices;
+  }
+
+  uint64_t op_indicator() const noexcept {
+    return BATCHED_ISEND_IRECV_OP;
+  }
+
+ protected:
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;  
+
+  std::vector<Device> _dst_devices;
+  std::vector<Device> _src_devices;
+};
+
+class BatchedISendIRecvOp final : public OpWrapper<BatchedISendIRecvOpDef> {
+ public:
+  BatchedISendIRecvOp(TensorList& inputs, std::vector<Device>& dst_devices,
+                      HTShapeList& outputs_shape, std::vector<Device>& src_devices, 
+                      DataType dtype, const OpMeta& op_meta = OpMeta())
+  : OpWrapper<BatchedISendIRecvOpDef>(
+    make_ptr<BatchedISendIRecvOpDef>(BatchedISendIRecvOpDef::constrcutor_access_key(), 
+    inputs, dst_devices, outputs_shape, src_devices, dtype, op_meta)) {}                      
+};
+
 } // namespace autograd
 } // namespace hetu

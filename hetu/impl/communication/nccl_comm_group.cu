@@ -73,6 +73,22 @@ inline ncclDataType_t to_NCCL_Datatype(DataType dtype) {
   }
 }
 
+inline int to_num_bytes(DataType dtype) {
+  switch (dtype) {
+    case kUInt8: return 1;
+    case kInt8: return 1;
+    case kInt32: return 4;
+    case kInt64: return 8;
+    case kFloat16: return 2;
+    case kFloat32: return 4;
+    case kFloat64: return 8;
+    default:
+      HT_NOT_IMPLEMENTED << "Data type " << dtype
+                         << " is not supported for NCCL.";
+      __builtin_unreachable();
+  }
+}
+
 static void NCCL_Init_Once() {
   std::call_once(nccl_init_flag, []() {
     // register exit handler
@@ -173,6 +189,93 @@ void NCCLCommunicationGroupDef::AllReduce(const NDArray& input, NDArray& output,
     NCCL_CALL(ncclAllReduce(send_buf, recv_buf, numel, nccl_dtype, nccl_red_op,
                             _comm, cuda_stream));
   }
+}
+
+void NCCLCommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
+                                                  NDArrayList& outputs,
+                                                  NDArray contiguous_buffers,
+                                                  ReductionType red_type) {
+  for (size_t i = 0; i < inputs.size(); i++) {
+    HT_ASSERT_CUDA_DEVICE(inputs[i]);
+    HT_ASSERT_CUDA_DEVICE(outputs[i]);
+    HT_ASSERT_EXCHANGABLE(inputs[i], outputs[i]);
+  }
+  auto nccl_dtype = to_NCCL_Datatype(inputs[0]->dtype());
+  auto nccl_red_op = to_NCCL_Op(red_type);
+
+  if (contiguous_buffers->numel() > 0) {
+    void* buffer_ptr = contiguous_buffers->raw_data_ptr();
+    int offset = 0;
+    {
+      CUDAStream cuda_stream(_stream);
+      hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+      NCCLGroupGuard();
+      // D2D Copy
+      for (size_t i = 0; i < inputs.size(); i++) {
+        void* send_buf = inputs[i]->raw_data_ptr();
+        int num_bytes = inputs[i]->numel() * to_num_bytes(inputs[i]->dtype());
+        CUDA_CALL(cudaMemcpyAsync(buffer_ptr + offset, send_buf, num_bytes,
+                                  cudaMemcpyDeviceToDevice, cuda_stream));
+        offset += num_bytes;
+      }
+      NCCL_CALL(ncclAllReduce(buffer_ptr, buffer_ptr,
+                              contiguous_buffers->numel(), nccl_dtype,
+                              nccl_red_op, _comm, cuda_stream));
+      // D2D Copy Back
+      offset = 0;
+      for (size_t i = 0; i < outputs.size(); i++) {
+        void* recv_buf = outputs[i]->raw_data_ptr();
+        int num_bytes = outputs[i]->numel() * to_num_bytes(outputs[i]->dtype());
+        CUDA_CALL(cudaMemcpyAsync(recv_buf, buffer_ptr + offset, num_bytes,
+                                  cudaMemcpyDeviceToDevice, cuda_stream));
+        offset += num_bytes;
+      }
+    }
+  } else {
+    {
+      CUDAStream cuda_stream(_stream);
+      hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+      NCCLGroupGuard();
+      for (size_t i = 0; i < inputs.size(); i++) {
+        void* send_buf = inputs[i]->raw_data_ptr();
+        void* recv_buf = outputs[i]->raw_data_ptr();
+        auto numel = inputs[i]->numel();
+        NCCL_CALL(ncclAllReduce(send_buf, recv_buf, numel, nccl_dtype,
+                                nccl_red_op, _comm, cuda_stream));
+      }
+    }
+  }
+}
+
+void NCCLCommunicationGroupDef::AlltoAll(const NDArray& input,
+                                         NDArray& output) {
+#if defined(NCCL_MAJOR) &&                                                     \
+  ((NCCL_MAJOR > 2) ||                                                         \
+   (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
+  HT_ASSERT_CUDA_DEVICE(input);
+  HT_ASSERT_CUDA_DEVICE(output);
+  HT_ASSERT_EXCHANGABLE(input, output);
+  void* send_buf = input->raw_data_ptr();
+  void* recv_buf = output->raw_data_ptr();
+  int numel = input->numel() / _size;
+  auto nccl_dtype = to_NCCL_Datatype(input->dtype());
+  int bytes_per_element = to_num_bytes(input->dtype());
+  {
+    CUDAStream cuda_stream(_stream);
+    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+    // TODO: NCCLGroupGuard(true);
+    NCCL_CALL(ncclGroupStart());
+    for (int i = 0; i < _size; i++) {
+      NCCL_CALL(ncclSend(send_buf + i * numel * bytes_per_element, numel,
+                         nccl_dtype, i, _comm, cuda_stream));
+      NCCL_CALL(ncclRecv(recv_buf + i * numel * bytes_per_element, numel,
+                         nccl_dtype, i, _comm, cuda_stream));
+    }
+    NCCL_CALL(ncclGroupEnd());
+  }
+#else
+  HT_NOT_IMPLEMENTED << "P2P communication requires NCCL 2.7+";
+#endif
 }
 
 void NCCLCommunicationGroupDef::Reduce(const NDArray& input, NDArray& output,
@@ -374,6 +477,69 @@ void NCCLCommunicationGroupDef::Recv(NDArray& data, int sender) {
 #else
   HT_NOT_IMPLEMENTED << "P2P communication requires NCCL 2.7+";
 #endif
+}
+
+Task NCCLCommunicationGroupDef::ISend(const NDArray& data, int receiver) {
+#if defined(NCCL_MAJOR) &&                                                     \
+  ((NCCL_MAJOR > 2) ||                                                         \
+   (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
+  int dst = world_to_group_rank(receiver);
+  HT_ASSERT(dst != _rank) << "Cannot send to self.";
+  size_t size = data->numel();
+  if (size == 0)
+    return Task();
+  void* send_buf = data->raw_data_ptr();
+  auto nccl_dtype = to_NCCL_Datatype(data->dtype());
+  auto task = Task([send_buf, size, nccl_dtype, dst, this]() {
+    {
+      CUDAStream cuda_stream(this->_stream);
+      hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+      NCCL_CALL(ncclSend(send_buf, size, nccl_dtype, dst, _comm, cuda_stream));
+    }
+  });
+#else
+  HT_NOT_IMPLEMENTED << "P2P communication requires NCCL 2.7+";
+  auto task = Task();
+#endif
+  return task;
+}
+
+Task NCCLCommunicationGroupDef::IRecv(NDArray& data, int sender) {
+#if defined(NCCL_MAJOR) &&                                                     \
+  ((NCCL_MAJOR > 2) ||                                                         \
+   (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
+  int src = world_to_group_rank(sender);
+  HT_ASSERT(src != _rank) << "Cannot receive from self.";
+  size_t size = data->numel();
+  if (size == 0)
+    return Task();
+  void* recv_buf = data->raw_data_ptr();
+  auto nccl_dtype = to_NCCL_Datatype(data->dtype());
+
+  auto task = Task([recv_buf, size, nccl_dtype, src, this]() {
+    {
+      CUDAStream cuda_stream(this->_stream);
+      hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+      NCCL_CALL(ncclRecv(recv_buf, size, nccl_dtype, src, _comm, cuda_stream));
+    }
+  });
+#else
+  HT_NOT_IMPLEMENTED << "P2P communication requires NCCL 2.7+";
+  auto task = Task();
+#endif
+  return task;
+}
+
+void NCCLCommunicationGroupDef::BatchedISendIRecv(
+  const std::vector<Task>& tasks) {
+  {
+    // NCCLGroupGuard(true);
+    NCCL_CALL(ncclGroupStart());
+    for (auto& task : tasks) {
+      task();
+    }
+    NCCL_CALL(ncclGroupEnd());
+  }
 }
 
 void NCCLCommunicationGroupDef::Barrier(bool sync) {

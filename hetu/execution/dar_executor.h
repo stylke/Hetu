@@ -101,12 +101,11 @@ class DARExecutor {
   void CrossSend(std::unordered_map<int32_t, int32_t> split_cur_state, 
                  std::unordered_map<int32_t, int32_t> split_target_state,
                  int32_t depth, bool need_split, int32_t& device_index, 
-                 CommOp& op, std::vector<P2PSendOp>& send_ops, 
-                 Tensor& self_send_data, int32_t& used_device_index, 
-                 std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list);
-  Tensor CrossReceive(int32_t depth, int32_t& device_index, CommOp& op, std::vector<P2PSendOp>& send_ops,
-                      Tensor& self_send_data, int32_t& used_device_index, std::vector<P2PRecvOp>& recv_ops,
-                      std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list);
+                 CommOp& op, TensorList& send_datas, std::vector<int32_t>& dsts, 
+                 int32_t& used_device_index);
+  Tensor CrossReceive(int32_t depth, int32_t& device_index, CommOp& op, 
+                      TensorList& recv_datas, std::vector<int32_t>& srcs,
+                      Tensor& self_send_data, int32_t& used_device_index);
   void GenerateSendRecvTopo(CommOp& comm_op, std::vector<P2PSendOp>& send_ops, std::vector<P2PRecvOp>& recv_ops,
                             std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list);
 

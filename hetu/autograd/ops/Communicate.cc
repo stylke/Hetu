@@ -229,5 +229,24 @@ NDArrayList P2PRecvOpDef::DoCompute(const NDArrayList& inputs,
   return {output};
 }
 
+NDArrayList BatchedISendIRecvOpDef::DoCompute(const NDArrayList& inputs, 
+                                              RuntimeContext& ctx) {
+  for (int i = 0; i < _inputs.size(); i++) {
+    NDArray input = inputs.at(i);
+    HT_ASSERT(input->dtype() == _inputs[i]->dtype())
+      << "Data type mismatched for ISend communication: " << input->dtype()
+      << " vs. " << _inputs[i]->dtype();
+  }
+  NDArrayList outputs;
+  for (int i = 0; i < _outputs.size(); i++) {
+    outputs.push_back(NDArray::empty(_outputs[i]->shape(), placement(), _outputs[i]->dtype()));
+  }
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), 
+                                  hetu::impl::BatchedISendIRecv,
+                                  inputs, _dst_devices, 
+                                  outputs, _src_devices, stream());
+  return outputs;                                
+}
+
 } // namespace autograd
 } // namespace hetu

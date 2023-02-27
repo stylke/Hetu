@@ -384,6 +384,7 @@ static const uint64_t REDUCE_SCATTER_OP = 1ul << 10;
 static const uint64_t BROADCAST_OP = 1ul << 11;
 static const uint64_t REDUCE_OP = 1ul << 12;
 static const uint64_t P2P_OP = 1ul << 13;
+static const uint64_t BATCHED_ISEND_IRECV_OP = 1ul << 14;
 static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t UNKNOWN_OP = 1ul << 21;
 static const uint64_t OPTIMIZER_UPDATE_OP = 1ul << 62;
