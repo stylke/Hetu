@@ -137,13 +137,14 @@ void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
       Tensor result;
       // TensorList extra_in_deps;
       if (comm_type == ALL_REDUCE_OP) {
-        HT_LOG_DEBUG << _exec_ctx->local_device() << ": substitute comm_op to all_reduce_op...";
+        DeviceGroup comm_group = comm_op->get_allreduce_devices(); // do allreduce among comm_op
         AllReduceOp all_reduce_op(
-          comm_op->input(0),
+          comm_op->input(0), comm_group, // comm_group is a subset of comm_op's placement_group
           OpMeta().set_device_group(comm_op->placement_group()).set_name(comm_op->input(0)->name() + "_AllReduce"));
-        all_reduce_op->MapToParallelDevices(comm_op->placement_group()); // 注意这里comm_op->device_group()可能为空, 但placement_group()绝对不为空(通过input_op的infer获取)
+        all_reduce_op->MapToParallelDevices(comm_op->placement_group());
         all_reduce_op->PlaceToLocalDevice(_exec_ctx->local_device(), kComputingStream);
         result = all_reduce_op->output(0);
+        HT_LOG_DEBUG << _exec_ctx->local_device() << ": substitute comm_op to all_reduce_op: " << comm_group;        
       } else if (comm_type == ALL_GATHER_OP) {
         ;
       } else if (comm_type == REDUCE_SCATTER_OP) {
@@ -518,7 +519,7 @@ void DARExecutor::CrossSend(
       // 如果不需要split, 则发送整个tensor
       send_part = comm_op->input(0);
     }
-    if (used_device_index == local_device_index) {
+    if (device_index == used_device_index) {
       HT_LOG_DEBUG << _exec_ctx->local_device() << ": device " << used_device_index << ": send to device " << device_index << " don't need isend";
     } else {
       HT_LOG_DEBUG << _exec_ctx->local_device() << ": device " << used_device_index << ": send to device " << device_index;

@@ -34,17 +34,8 @@ class CommOpDef : public OperatorDef {
   : OperatorDef(quote(CommOp), {input}, op_meta), _dst_distributed_states(dst_distributed_states) {
     auto local_device = GetLocalDevice();
 
-    // bug
-
-    // op1 (tensor1) -> comm_op (tensor2) -> op2 (tensor3), 用具体的通信算子替换comm_op 
-    // 1. 根据input->states+dst_states来判断要插入什么样的通信算子
     auto src_distributed_states = _inputs[0]->get_distributed_states();
-    // HT_LOG_DEBUG << local_device << ": " << name() << ": input states(1): " << src_distributed_states.print_states();
     get_comm_type();
-
-    // HT_LOG_DEBUG << local_device << ": " << name() << ": input states(2): " << src_distributed_states.print_states();
-    // 2. comm_op -> op2, 其中op2所需的tensor分片已经由集合通信转化完毕, 接下来在op2的do compute里确定output的distributed_states
-    // add output
 
     // 检查src_ds是否valid
     HT_ASSERT(src_distributed_states.is_valid()) 
@@ -53,21 +44,11 @@ class CommOpDef : public OperatorDef {
     HTShape shape = input_shape;
     for (int d = 0; d < input_shape.size(); d++) {
       shape[d] = input_shape[d] * src_distributed_states.get_dim(d) / dst_distributed_states.get_dim(d);
-      // HT_LOG_INFO << local_device << ": " << name() << ": input_shape[d]: " << input_shape[d] << ", src_distributed_states.get_dim(d): " 
-      // << src_distributed_states.get_dim(d) << ", dst_distributed_states.get_dim(d): " << dst_distributed_states.get_dim(d) << ", shape[d]: " << shape[d] << ", d: " << d;
     }
-    // HT_LOG_INFO << local_device << ": " << name() << ": _inputs[0]->dtype(): " << _inputs[0]->dtype() << ", shape: " << shape;
-    // forward时由用户创建的comm_op, input states还没推到过来, 所以shape无法推断？感觉要把推ds的过程放到每个op定义时期做
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
 
-    // HT_LOG_INFO << local_device << ": " << name() << ": input shape = " << _inputs[0]->shape() << ", output shape: " << _outputs[0]->shape();
-    // HT_LOG_DEBUG << local_device << ": " << name() << ": input states(3): " << src_distributed_states.print_states();    
-    // 在node定义的时候就做ds的推导
-    ForwardDeduceStates(); // inputs.ds -> outputs.ds
-    // test: 这里假设每个op的output只有一个, 简单测试输出的ds, 如果op的output不只一个, 则只输出第0个的情况
-    auto ds = _outputs[0]->get_distributed_states();
-    HT_LOG_DEBUG << local_device << ": " << name() << " definition, input " << _inputs[0]->producer()->name() << ": states: " << src_distributed_states.print_states() << ", shape: " << _inputs[0]->shape()
-    << "; output[0] states: " << ds.print_states() << ", shape: " << _outputs[0]->shape(); 
+    // inputs.ds -> outputs.ds
+    ForwardDeduceStates();
   }
 
   uint64_t op_indicator() const noexcept {
@@ -78,35 +59,8 @@ class CommOpDef : public OperatorDef {
     return _dst_distributed_states;
   }
 
-  inline uint64_t get_comm_type() {
-    // TODO: 后面看要不要把单纯的get拆出一个函数来
-    // 惊讶的发现这一块代码会修改src_ds本身, 先注释掉, 后面再来查bug
-    auto src_ds = _inputs[0]->get_distributed_states();
-    auto dst_ds = _dst_distributed_states;
-    if (src_ds.check_allreduce(dst_ds)) {
-      _comm_type = ALL_REDUCE_OP;
-      HT_LOG_DEBUG << "ALL_REDUCE_OP";
-    } 
-    // else if (src_ds.check_allgather(dst_ds)) {
-    //   _comm_type = ALL_GATHER_OP;
-    //   HT_LOG_DEBUG << "ALL_GATHER_OP";
-    // } else if (src_ds.check_reducescatter(dst_ds)) {
-    //   _comm_type = REDUCE_SCATTER_OP;
-    //   HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
-    // } else if (src_ds.check_boradcast(dst_ds)) {
-    //   _comm_type = BROADCAST_OP;
-    //   HT_LOG_DEBUG << "BROADCAST_OP";
-    // } else if (src_ds.check_reduce(dst_ds)) {
-    //   _comm_type = REDUCE_OP;
-    //   HT_LOG_DEBUG << "REDUCE_OP";
-    // } 
-    else {
-      // other case: 非集合通信, 部分device之间p2p通信
-      _comm_type = P2P_OP;
-      HT_LOG_DEBUG << "P2P_OP";
-    }    
-    return _comm_type;
-  }
+  uint64_t get_comm_type();
+  DeviceGroup get_allreduce_devices();
 
   void ForwardDeduceStates();
   DistributedStates BackwardDeduceStates(int32_t index);  
@@ -133,13 +87,24 @@ class AllReduceOpDef : public OperatorDef {
   struct constrcutor_access_key {};
 
  public:
-  AllReduceOpDef(const constrcutor_access_key&, Tensor input,
+  AllReduceOpDef(const constrcutor_access_key&, Tensor input, 
+                 const DeviceGroup& comm_group = DeviceGroup(),
                  const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(AllReduceOpDef), {input}, op_meta) {
-    if (!device_group().empty()) {
+  : OperatorDef(quote(AllReduceOpDef), {input}, op_meta), _comm_group(comm_group) {
+    auto& _device_group = device_group();
+    if (!_device_group.empty()) {
       // TODO: check whether it satisfies to form a DP group
-      HT_ASSERT(device_group().num_devices() >= 2)
-        << "AllReduce requires two or more devices. Got " << device_group();
+      if (comm_group.empty()) {
+        _comm_group = _device_group;
+      } else {
+        for (int i = 0; i < comm_group.num_devices(); i++) {
+          HT_ASSERT(_device_group.contains(comm_group.get(i))) 
+            << "AllReduceOp: device in comm_group: " << comm_group.get(i) 
+            << " must in device group: " << _device_group;
+        }
+      }
+      HT_ASSERT(_comm_group.num_devices() >= 2)
+        << "AllReduce requires two or more devices. Got " << _comm_group;
     }
     AddOutput(input->meta());
   }
@@ -148,6 +113,11 @@ class AllReduceOpDef : public OperatorDef {
     return ALL_REDUCE_OP;
   }
 
+ public:
+  const DeviceGroup& comm_group() const {
+    return _comm_group;
+  } 
+
  protected:
   bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
 
@@ -155,13 +125,16 @@ class AllReduceOpDef : public OperatorDef {
                         RuntimeContext& ctx) override;
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  DeviceGroup _comm_group;
 };
 
 class AllReduceOp final : public OpWrapper<AllReduceOpDef> {
  public:
-  AllReduceOp(Tensor input, const OpMeta& op_meta = OpMeta())
+  AllReduceOp(Tensor input, const DeviceGroup& comm_group = DeviceGroup(), 
+              const OpMeta& op_meta = OpMeta())
   : OpWrapper<AllReduceOpDef>(make_ptr<AllReduceOpDef>(
-      AllReduceOpDef::constrcutor_access_key(), input, op_meta)) {}
+      AllReduceOpDef::constrcutor_access_key(), input, comm_group, op_meta)) {}
 };
 
 class P2PSendOpDef : public OperatorDef {

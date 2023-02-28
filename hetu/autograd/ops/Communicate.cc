@@ -4,21 +4,72 @@
 namespace hetu {
 namespace autograd {
 
+uint64_t CommOpDef::get_comm_type() {
+  // TODO: 后面看要不要把单纯的get拆出一个函数来
+  // 惊讶的发现这一块代码会修改src_ds本身, 先注释掉, 后面再来查bug
+  auto src_ds = _inputs[0]->get_distributed_states();
+  auto dst_ds = _dst_distributed_states;
+  if (src_ds.check_allreduce(dst_ds)) {
+    _comm_type = ALL_REDUCE_OP;
+    HT_LOG_DEBUG << "ALL_REDUCE_OP";
+  } 
+  // else if (src_ds.check_allgather(dst_ds)) {
+  //   _comm_type = ALL_GATHER_OP;
+  //   HT_LOG_DEBUG << "ALL_GATHER_OP";
+  // } else if (src_ds.check_reducescatter(dst_ds)) {
+  //   _comm_type = REDUCE_SCATTER_OP;
+  //   HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
+  // } else if (src_ds.check_boradcast(dst_ds)) {
+  //   _comm_type = BROADCAST_OP;
+  //   HT_LOG_DEBUG << "BROADCAST_OP";
+  // } else if (src_ds.check_reduce(dst_ds)) {
+  //   _comm_type = REDUCE_OP;
+  //   HT_LOG_DEBUG << "REDUCE_OP";
+  // } 
+  else {
+    // other case: 非集合通信, 部分device之间p2p通信
+    _comm_type = P2P_OP;
+    HT_LOG_DEBUG << "P2P_OP";
+  }    
+  return _comm_type;
+}  
+
+// 和具体device相关的需求都放到CommOp上实现, DistributedStates仅提供切分状态相关的函数
+DeviceGroup CommOpDef::get_allreduce_devices() {
+  HT_ASSERT(_comm_type == ALL_REDUCE_OP) << "The comm_op " << name() << " must be allreduce op!";
+  HT_ASSERT(!_placement_group.empty()) << "Placement Group should be assigned before get allreduce devices!";
+  int32_t local_device_index = _placement_group.get_index(_placement);
+  int32_t interval = 1;
+  auto src_ds = _inputs[0]->get_distributed_states();
+  auto order = src_ds.get_order();
+  auto states = src_ds.get_states();
+  auto partial = states[-2];
+  auto partial_dim = std::find(order.begin(), order.end(), -2);
+  for (auto cur_order = partial_dim + 1; cur_order != order.end(); cur_order++) {
+    interval *= states[*cur_order];
+  }
+  int32_t macro_interval = interval * partial;
+  int32_t start = local_device_index - local_device_index % macro_interval + local_device_index % interval;
+  std::vector<Device> comm_group;
+  for (auto index = start; index < start + interval * partial; index += interval) {
+    comm_group.push_back(_placement_group.get(index));
+  }
+  return DeviceGroup(comm_group);
+}
+
 bool CommOpDef::DoMapToParallelDevices(const DeviceGroup& placement_group) {
   auto local_device = GetLocalDevice();
-  // 如果input是由comm_op产生的, 则合并这两个comm_op(否则相邻两个comm_op在SplitOp推导shape中会有问题, 暂时还没找到具体原因)
   auto& input_op = _inputs[0]->producer();
   if (is_comm_op(input_op)) {
     HT_LOG_DEBUG << local_device << ": " << name() << ": replace input from " << _inputs[0] << " to " << input_op->input(0);     
     ReplaceInput(0, input_op->input(0));
     HT_LOG_DEBUG << local_device << ": " << name() << ": inputs: " << _inputs << ", outputs: " << _outputs;
-    // for (int i = 0; i <)
+    // update comm_op type
     get_comm_type();
   }
   return OperatorDef::DoMapToParallelDevices(placement_group);  
 }
 
-// TODO: infer shape的代码逻辑需要纠正
 HTShapeList CommOpDef::DoInferShape(const HTShapeList& input_shapes) {
   const HTShape& input_shape = input_shapes.at(0);
 
@@ -126,8 +177,17 @@ P2PSendOp& P2PRecvOpDef::send_op() {
 
 bool AllReduceOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
   // TODO: check whether it satisfies to form a DP group
-  HT_ASSERT(pg.num_devices() >= 2)
-    << "Cannot call AllReduce with less than 2 devices: " << pg;
+  if (_comm_group.empty()) {
+    _comm_group = pg;
+  } else {
+    for (int i = 0; i < _comm_group.num_devices(); i++) {
+      HT_ASSERT(pg.contains(_comm_group.get(i))) 
+        << "AllReduceOp: device in comm_group: " << _comm_group.get(i) 
+        << " must in device group: " << pg;
+    }
+  }
+  HT_ASSERT(_comm_group.num_devices() >= 2)
+    << "AllReduce requires two or more devices. Got " << _comm_group;      
   return OperatorDef::DoMapToParallelDevices(pg);
 }
 
@@ -137,8 +197,7 @@ NDArrayList AllReduceOpDef::DoCompute(const NDArrayList& inputs,
   NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::AllReduce, inputs.at(0),
-                                  outputs.at(0), placement_group(), stream());
-  // HT_LOG_INFO << "all_reduce_op inputs: " << inputs << ", outputs: " << outputs;                                
+                                  outputs.at(0), _comm_group, stream()); // _comm_group is a subset of placement_group                              
   return outputs;
 }
 
