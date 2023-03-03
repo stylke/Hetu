@@ -36,6 +36,30 @@ P2PSendOp& P2PRecvOpDef::send_op() {
   return *_send_op;
 }
 
+/* BroadcastCommOp */
+bool BroadcastCommOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
+  // TODO: check whether it satisfies to form a DP group
+  HT_ASSERT(pg.num_devices() >= 2)
+    << "Cannot call BroadcastComm with less than 2 devices: " << pg;
+  return OperatorDef::DoMapToParallelDevices(pg);
+}
+
+NDArrayList BroadcastCommOpDef::DoCompute(const NDArrayList& inputs,
+                                      RuntimeContext& ctx) {
+  // TODO: support in-place?
+  NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+                                  hetu::impl::BroadcastComm, inputs.at(0),
+                                  outputs.at(0), broadcaster(), placement_group(), 
+                                  stream());
+  return outputs;
+}
+
+HTShapeList BroadcastCommOpDef::DoInferShape(const HTShapeList& input_shapes) {
+  return {input_shapes.at(0)};
+}
+
+/* AllReduceOp */
 bool AllReduceOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
   // TODO: check whether it satisfies to form a DP group
   HT_ASSERT(pg.num_devices() >= 2)
@@ -57,6 +81,154 @@ HTShapeList AllReduceOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }
 
+/* ReduceCommOp */
+bool ReduceCommOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
+  // TODO: check whether it satisfies to form a DP group
+  HT_ASSERT(pg.num_devices() >= 2)
+    << "Cannot call ReduceComm with less than 2 devices: " << pg;
+  return OperatorDef::DoMapToParallelDevices(pg);
+}
+
+NDArrayList ReduceCommOpDef::DoCompute(const NDArrayList& inputs,
+                                      RuntimeContext& ctx) {
+  // TODO: support in-place?
+  NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+                                  hetu::impl::ReduceComm, inputs.at(0),
+                                  outputs.at(0), reducer(), placement_group(), 
+                                  stream());
+  return outputs;
+}
+
+HTShapeList ReduceCommOpDef::DoInferShape(const HTShapeList& input_shapes) {
+  return {input_shapes.at(0)};
+}
+
+/* AllGatherOp */
+bool AllGatherOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
+  // TODO: check whether it satisfies to form a DP group
+  HT_ASSERT(pg.num_devices() >= 2)
+    << "Cannot call AllGather with less than 2 devices: " << pg;
+  return OperatorDef::DoMapToParallelDevices(pg);
+}
+
+NDArrayList AllGatherOpDef::DoCompute(const NDArrayList& inputs,
+                                      RuntimeContext& ctx) {
+  // TODO: support in-place?
+  NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+                                  hetu::impl::AllGather, inputs.at(0),
+                                  outputs.at(0), placement_group(), stream());
+  return outputs;
+}
+
+HTShapeList AllGatherOpDef::DoInferShape(const HTShapeList& input_shapes) {
+  HTShape input_shape = input_shapes.at(0);
+  HTShape output_shape(0);
+  output_shape.emplace_back(input_shape[0] * device_group().num_devices());
+  int ndim = input_shape.size();
+  for (int i = 1; i < ndim; ++i) {
+    if (input_shape[i] > 0)
+      output_shape.emplace_back(input_shape[i]);
+  }
+  set_input_shape(input_shape);
+  return {output_shape};
+}
+
+/* ReduceScatterOp */
+bool ReduceScatterOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
+  // TODO: check whether it satisfies to form a DP group
+  HT_ASSERT(pg.num_devices() >= 2)
+    << "Cannot call ReduceScatter with less than 2 devices: " << pg;
+  return OperatorDef::DoMapToParallelDevices(pg);
+}
+
+NDArrayList ReduceScatterOpDef::DoCompute(const NDArrayList& inputs,
+                                      RuntimeContext& ctx) {
+  // TODO: support in-place?
+  NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+                                  hetu::impl::ReduceScatter, inputs.at(0),
+                                  outputs.at(0), placement_group(), stream());
+  return outputs;
+}
+
+HTShapeList ReduceScatterOpDef::DoInferShape(const HTShapeList& input_shapes) {
+  HTShape input_shape = input_shapes.at(0);
+  HTShape output_shape(0);
+  output_shape.emplace_back(input_shape[0] / device_group().num_devices());
+  int ndim = input_shape.size();
+  for (int i = 1; i < ndim; ++i) {
+    if (input_shape[i] > 0)
+      output_shape.emplace_back(input_shape[i]);
+  }
+  return {output_shape};
+}
+
+/* GatherOp */
+bool GatherOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
+  // TODO: check whether it satisfies to form a DP group
+  HT_ASSERT(pg.num_devices() >= 2)
+    << "Cannot call ReduceComm with less than 2 devices: " << pg;
+  return OperatorDef::DoMapToParallelDevices(pg);
+}
+
+NDArrayList GatherOpDef::DoCompute(const NDArrayList& inputs,
+                                      RuntimeContext& ctx) {
+  // TODO: support in-place?
+  NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+                                  hetu::impl::Gather, inputs.at(0),
+                                  outputs.at(0), gatherer(), placement_group(), 
+                                  stream());
+  return outputs;
+}
+
+HTShapeList GatherOpDef::DoInferShape(const HTShapeList& input_shapes) {
+  HTShape input_shape = input_shapes.at(0);
+  HTShape output_shape(0);
+  output_shape.emplace_back(input_shape[0] * device_group().num_devices());
+  int ndim = input_shape.size();
+  for (int i = 1; i < ndim; ++i) {
+    if (input_shape[i] > 0)
+      output_shape.emplace_back(input_shape[i]);
+  }
+  set_input_shape(input_shape);
+  return {output_shape};
+}
+
+/* ScatterOp */
+bool ScatterOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
+  // TODO: check whether it satisfies to form a DP group
+  HT_ASSERT(pg.num_devices() >= 2)
+    << "Cannot call ReduceComm with less than 2 devices: " << pg;
+  return OperatorDef::DoMapToParallelDevices(pg);
+}
+
+NDArrayList ScatterOpDef::DoCompute(const NDArrayList& inputs,
+                                      RuntimeContext& ctx) {
+  // TODO: support in-place?
+  NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+                                  hetu::impl::Scatter, inputs.at(0),
+                                  outputs.at(0), scatterer(), placement_group(), 
+                                  stream());
+  return outputs;
+}
+
+HTShapeList ScatterOpDef::DoInferShape(const HTShapeList& input_shapes) {
+  HTShape input_shape = input_shapes.at(0);
+  HTShape output_shape(0);
+  output_shape.emplace_back(input_shape[0] / device_group().num_devices());
+  int ndim = input_shape.size();
+  for (int i = 1; i < ndim; ++i) {
+    if (input_shape[i] > 0)
+      output_shape.emplace_back(input_shape[i]);
+  }
+  return {output_shape};
+}
+
+/*  P2PSendOp */
 bool P2PSendOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
   HT_ASSERT(pg.num_devices() == _dst_group.num_devices())
     << "Currently we require equal data parallelism degree across "
@@ -99,6 +271,7 @@ NDArrayList P2PSendOpDef::DoCompute(const NDArrayList& inputs,
   return NDArrayList();
 }
 
+/*  P2PRecvOp */
 bool P2PRecvOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
   HT_ASSERT(pg.num_devices() == _src_group.num_devices())
     << "Currently we require equal data parallelism degree across "
