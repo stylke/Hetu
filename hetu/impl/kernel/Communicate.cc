@@ -15,6 +15,20 @@ void AllReduceCpu(const NDArray& input, NDArray& output,
   comm_group->AllReduce(input, output);
 }
 
+void AllGatherCpu(const NDArray& input, NDArray& output,
+                   const DeviceGroup& device_group, const Stream& stream) {
+  auto ranks = DeviceGroupToWorldRanks(device_group);
+  auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
+  comm_group->AllGather(input, output);                  
+}
+
+void ReduceScatterCpu(const NDArray& input, NDArray& output,
+                   const DeviceGroup& device_group, const Stream& stream) {
+  auto ranks = DeviceGroupToWorldRanks(device_group);
+  auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
+  comm_group->ReduceScatter(input, output);
+}
+
 void P2PSendCpu(const NDArray& data, const Device& dst, const Stream& stream) {
   auto src_rank = GetWorldRank();
   auto dst_rank = DeviceToWorldRank(dst);

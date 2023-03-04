@@ -17,6 +17,20 @@ void AllReduceCuda(const NDArray& input, NDArray& output,
   comm_group->AllReduce(input, output);
 }
 
+void AllGatherCuda(const NDArray& input, NDArray& output,
+                   const DeviceGroup& device_group, const Stream& stream) {
+  auto ranks = DeviceGroupToWorldRanks(device_group);
+  auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
+  comm_group->AllGather(input, output);                  
+}
+
+void ReduceScatterCuda(const NDArray& input, NDArray& output,
+                   const DeviceGroup& device_group, const Stream& stream) {
+  auto ranks = DeviceGroupToWorldRanks(device_group);
+  auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
+  comm_group->ReduceScatter(input, output);
+}
+
 void P2PSendCuda(const NDArray& data, const Device& dst, const Stream& stream) {
   auto src_rank = GetWorldRank();
   auto dst_rank = DeviceToWorldRank(dst);

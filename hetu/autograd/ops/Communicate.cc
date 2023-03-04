@@ -6,53 +6,65 @@ namespace autograd {
 
 uint64_t CommOpDef::get_comm_type() {
   // TODO: 后面看要不要把单纯的get拆出一个函数来
-  // 惊讶的发现这一块代码会修改src_ds本身, 先注释掉, 后面再来查bug
   auto src_ds = _inputs[0]->get_distributed_states();
   auto dst_ds = _dst_distributed_states;
   if (src_ds.check_allreduce(dst_ds)) {
     _comm_type = ALL_REDUCE_OP;
     HT_LOG_DEBUG << "ALL_REDUCE_OP";
-  } 
-  // else if (src_ds.check_allgather(dst_ds)) {
-  //   _comm_type = ALL_GATHER_OP;
-  //   HT_LOG_DEBUG << "ALL_GATHER_OP";
-  // } else if (src_ds.check_reducescatter(dst_ds)) {
-  //   _comm_type = REDUCE_SCATTER_OP;
-  //   HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
-  // } else if (src_ds.check_boradcast(dst_ds)) {
-  //   _comm_type = BROADCAST_OP;
-  //   HT_LOG_DEBUG << "BROADCAST_OP";
-  // } else if (src_ds.check_reduce(dst_ds)) {
-  //   _comm_type = REDUCE_OP;
-  //   HT_LOG_DEBUG << "REDUCE_OP";
-  // } 
-  else {
-    // other case: 非集合通信, 部分device之间p2p通信
-    _comm_type = P2P_OP;
+  } else if (src_ds.check_allgather(dst_ds)) {
+    _comm_type = ALL_GATHER_OP;
+    HT_LOG_DEBUG << "ALL_GATHER_OP";
+  } else if (src_ds.check_reducescatter(dst_ds)) {
+    _comm_type = REDUCE_SCATTER_OP;
+    HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
+  } else {
+    _comm_type = P2P_OP; // other case: 非集合通信, 部分device之间p2p通信
     HT_LOG_DEBUG << "P2P_OP";
-  }    
+  }
   return _comm_type;
 }  
 
 // 和具体device相关的需求都放到CommOp上实现, DistributedStates仅提供切分状态相关的函数
-DeviceGroup CommOpDef::get_allreduce_devices() {
-  HT_ASSERT(_comm_type == ALL_REDUCE_OP) << "The comm_op " << name() << " must be allreduce op!";
-  HT_ASSERT(!_placement_group.empty()) << "Placement Group should be assigned before get allreduce devices!";
-  int32_t local_device_index = _placement_group.get_index(_placement);
-  int32_t interval = 1;
+// DeviceGroup CommOpDef::get_allreduce_devices() {
+//   HT_ASSERT(_comm_type == ALL_REDUCE_OP) << "The comm_op " << name() << " must be allreduce op!";
+//   HT_ASSERT(!_placement_group.empty()) << "Placement Group should be assigned before get allreduce devices!";
+//   int32_t local_device_index = _placement_group.get_index(_placement);
+//   int32_t interval = 1;
+//   auto src_ds = _inputs[0]->get_distributed_states();
+//   auto order = src_ds.get_order();
+//   auto states = src_ds.get_states();
+//   auto partial = states[-2];
+//   auto partial_dim = std::find(order.begin(), order.end(), -2);
+//   for (auto cur_order = partial_dim + 1; cur_order != order.end(); cur_order++) {
+//     interval *= states[*cur_order];
+//   }
+//   int32_t macro_interval = interval * partial;
+//   int32_t start = local_device_index - local_device_index % macro_interval + local_device_index % interval;
+//   std::vector<Device> comm_group;
+//   for (auto index = start; index < start + interval * partial; index += interval) {
+//     comm_group.push_back(_placement_group.get(index));
+//   }
+//   return DeviceGroup(comm_group);
+// }
+
+// devices by dim for collective communication
+DeviceGroup CommOpDef::get_devices_by_dim(int32_t dim) {
+  HT_ASSERT(!_placement_group.empty()) << "Placement Group should be assigned before get devices by dim " << dim;
+  int32_t local_device_idx = _placement_group.get_index(_placement);
   auto src_ds = _inputs[0]->get_distributed_states();
   auto order = src_ds.get_order();
   auto states = src_ds.get_states();
-  auto partial = states[-2];
-  auto partial_dim = std::find(order.begin(), order.end(), -2);
-  for (auto cur_order = partial_dim + 1; cur_order != order.end(); cur_order++) {
+
+  auto idx = std::find(order.begin(), order.end(), dim);
+  int32_t interval = 1;
+  for (auto cur_order = idx + 1; cur_order != order.end(); cur_order++) {
     interval *= states[*cur_order];
   }
-  int32_t macro_interval = interval * partial;
-  int32_t start = local_device_index - local_device_index % macro_interval + local_device_index % interval;
+  int32_t macro_interval = interval * src_ds.get_dim(dim);
+  int32_t start = local_device_idx - local_device_idx % macro_interval + local_device_idx % interval;
   std::vector<Device> comm_group;
-  for (auto index = start; index < start + interval * partial; index += interval) {
-    comm_group.push_back(_placement_group.get(index));
+  for (auto i = start; i < start + macro_interval; i += interval) {
+    comm_group.push_back(_placement_group.get(i));
   }
   return DeviceGroup(comm_group);
 }
@@ -305,6 +317,62 @@ NDArrayList BatchedISendIRecvOpDef::DoCompute(const NDArrayList& inputs,
                                   inputs, _dst_devices, 
                                   outputs, _src_devices, stream());
   return outputs;                                
+}
+
+bool AllGatherOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
+  for (int i = 0; i < _comm_group.num_devices(); i++) {
+    HT_ASSERT(pg.contains(_comm_group.get(i))) 
+      << "Allgather: device in comm_group: " << _comm_group.get(i) 
+      << " must in device group: " << pg;
+  }
+  return OperatorDef::DoMapToParallelDevices(pg);
+}
+
+NDArrayList AllGatherOpDef::DoCompute(const NDArrayList& inputs,
+                                      RuntimeContext& ctx) {
+  HT_ASSERT(inputs.at(0)->dtype() == _inputs[0]->dtype())
+    << "Data type mismatched for AllGather communication: " << inputs.at(0)->dtype()
+    << " vs. " << _inputs[0]->dtype();
+  NDArray output = NDArray::empty(_outputs[0]->shape(), placement(), _outputs[0]->dtype());
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+                                  hetu::impl::AllGather, inputs.at(0),
+                                  output, _comm_group, stream());
+  return {output};                                  
+}
+
+HTShapeList AllGatherOpDef::DoInferShape(const HTShapeList& input_shapes) {
+  HTShape gather_shape = input_shapes.at(0);
+  gather_shape[0] *= _comm_group.num_devices();
+  return {gather_shape};
+}
+
+bool ReduceScatterOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
+  for (int i = 0; i < _comm_group.num_devices(); i++) {
+    HT_ASSERT(pg.contains(_comm_group.get(i))) 
+      << "ReduceScatter: device in comm_group: " << _comm_group.get(i) 
+      << " must in device group: " << pg;
+  }
+  return OperatorDef::DoMapToParallelDevices(pg);
+}
+
+NDArrayList ReduceScatterOpDef::DoCompute(const NDArrayList& inputs,
+                                      RuntimeContext& ctx) {
+  HT_ASSERT(inputs.at(0)->dtype() == _inputs[0]->dtype())
+    << "Data type mismatched for ReduceScatter communication: " << inputs.at(0)->dtype()
+    << " vs. " << _inputs[0]->dtype();
+  NDArray output = NDArray::empty(_outputs[0]->shape(), placement(), _outputs[0]->dtype());
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+                                  hetu::impl::ReduceScatter, inputs.at(0),
+                                  output, _comm_group, stream());
+  return {output};                                  
+}
+
+HTShapeList ReduceScatterOpDef::DoInferShape(const HTShapeList& input_shapes) {
+  HTShape scatter_shape = input_shapes.at(0);
+  scatter_shape[0] /= _comm_group.num_devices();
+  HT_ASSERT(scatter_shape[0] >= 1) << "ReduceScatter: input shape[0]: " 
+    << input_shapes.at(0)[0] << " must >= comm devices num: " << _comm_group.num_devices();  
+  return {scatter_shape};
 }
 
 } // namespace autograd

@@ -242,10 +242,12 @@ bool DistributedStates::check_reducescatter(DistributedStates& dst_distributed_s
   return _states[-2] > 1 && check_combine(dst_distributed_states, src2dst);
 }
 
+// 单个device上的一份, 分到多个device上每人一份duplicate
 bool DistributedStates::check_boradcast(DistributedStates& dst_distributed_states) {
   return dst_distributed_states.get_states()[-1] > 1 && dst_distributed_states.check_reduce_dim(*this, -1);
 }
 
+// 多个device上每人一份partial, 合并之后交给其中某个device上
 bool DistributedStates::check_reduce(DistributedStates& dst_distributed_states) {
   return _states[-2] > 1 && check_reduce_dim(dst_distributed_states, -2);
 }

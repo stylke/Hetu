@@ -60,7 +60,8 @@ class CommOpDef : public OperatorDef {
   }
 
   uint64_t get_comm_type();
-  DeviceGroup get_allreduce_devices();
+  DeviceGroup get_devices_by_dim(int32_t dim);
+  // DeviceGroup get_allreduce_devices();
 
   void ForwardDeduceStates();
   DistributedStates BackwardDeduceStates(int32_t index);  
@@ -113,7 +114,6 @@ class AllReduceOpDef : public OperatorDef {
     return ALL_REDUCE_OP;
   }
 
- public:
   const DeviceGroup& comm_group() const {
     return _comm_group;
   } 
@@ -376,5 +376,100 @@ class BatchedISendIRecvOp final : public OpWrapper<BatchedISendIRecvOpDef> {
     inputs, dst_devices, outputs_shape, src_devices, dtype, op_meta)) {}                      
 };
 
+class AllGatherOpDef : public OperatorDef {
+ private:
+  friend class AllGatherOp;
+  struct constructor_access_key {};
+ public:
+  AllGatherOpDef(const constructor_access_key&, Tensor input,
+                 const DeviceGroup& comm_group, const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(AllGatherOpDef), {input}, op_meta), _comm_group(comm_group) {
+    HT_ASSERT(_comm_group.num_devices() >= 2)
+      << "AllGather requires two or more devices. Got " << _comm_group;          
+    auto& _device_group = device_group();
+    if (!_device_group.empty()) {
+      for (int i = 0; i < comm_group.num_devices(); i++) {
+        HT_ASSERT(_device_group.contains(comm_group.get(i)))
+          << "AllGather: device in comm_group: " << comm_group.get(i) 
+          << " must in device group: " << _device_group;
+      }
+    }
+    DataType dtype = input->dtype();
+    HTShape gather_shape = input->shape();
+    gather_shape[0] *= _comm_group.num_devices();
+    AddOutput(NDArrayMeta().set_dtype(dtype).set_shape(gather_shape));
+  }                 
+ 
+ uint64_t op_indicator() const noexcept {
+  return ALL_GATHER_OP;
+ }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  DeviceGroup _comm_group;
+};
+
+class AllGatherOp final : public OpWrapper<AllGatherOpDef> {
+ public:
+  AllGatherOp(Tensor input, const DeviceGroup& comm_group,
+              const OpMeta& op_meta = OpMeta())
+  : OpWrapper<AllGatherOpDef>(make_ptr<AllGatherOpDef>(
+      AllGatherOpDef::constructor_access_key(), input, comm_group, op_meta)) {}              
+};
+
+class ReduceScatterOpDef : public OperatorDef {
+ private:
+  friend class ReduceScatterOp;
+  struct constructor_access_key {};
+ public:
+  ReduceScatterOpDef(const constructor_access_key&, Tensor input,
+                     const DeviceGroup& comm_group, const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(ReduceScatterOpDef), {input}, op_meta), _comm_group(comm_group) {
+    HT_ASSERT(_comm_group.num_devices() >= 2)
+      << "ReduceScatter requires two or more devices. Got " << _comm_group;          
+    auto& _device_group = device_group();
+    if (!_device_group.empty()) {
+      for (int i = 0; i < comm_group.num_devices(); i++) {
+        HT_ASSERT(_device_group.contains(comm_group.get(i)))
+          << "ReduceScatter: device in comm_group: " << comm_group.get(i) 
+          << " must in device group: " << _device_group;
+      }
+    }
+    DataType dtype = input->dtype();
+    HTShape scatter_shape = input->shape();
+    scatter_shape[0] /= _comm_group.num_devices();
+    HT_ASSERT(scatter_shape[0] >= 1) << "ReduceScatter: input shape[0]: " 
+      << input->shape()[0] << " must >= comm devices num: " << _comm_group.num_devices();
+    AddOutput(NDArrayMeta().set_dtype(dtype).set_shape(scatter_shape));
+  }                 
+ 
+ uint64_t op_indicator() const noexcept {
+  return REDUCE_SCATTER_OP;
+ }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  DeviceGroup _comm_group;
+};
+
+class ReduceScatterOp final : public OpWrapper<ReduceScatterOpDef> {
+ public:
+  ReduceScatterOp(Tensor input, const DeviceGroup& comm_group,
+              const OpMeta& op_meta = OpMeta())
+  : OpWrapper<ReduceScatterOpDef>(make_ptr<ReduceScatterOpDef>(
+      ReduceScatterOpDef::constructor_access_key(), input, comm_group, op_meta)) {}              
+};
 } // namespace autograd
 } // namespace hetu

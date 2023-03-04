@@ -137,7 +137,7 @@ void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
       Tensor result;
       // TensorList extra_in_deps;
       if (comm_type == ALL_REDUCE_OP) {
-        DeviceGroup comm_group = comm_op->get_allreduce_devices(); // do allreduce among comm_op
+        DeviceGroup comm_group = comm_op->get_devices_by_dim(-2); // do allreduce among comm_group
         AllReduceOp all_reduce_op(
           comm_op->input(0), comm_group, // comm_group is a subset of comm_op's placement_group
           OpMeta().set_device_group(comm_op->placement_group()).set_name(comm_op->input(0)->name() + "_AllReduce"));
@@ -146,15 +146,25 @@ void DARExecutor::SubstituteCommOp(const OpList& local_topo_order) {
         result = all_reduce_op->output(0);
         HT_LOG_DEBUG << _exec_ctx->local_device() << ": substitute comm_op to all_reduce_op: " << comm_group;        
       } else if (comm_type == ALL_GATHER_OP) {
-        ;
+        DeviceGroup comm_group = comm_op->get_devices_by_dim(0);
+        AllGatherOp all_gather_op(
+          comm_op->input(0), comm_group,
+          OpMeta().set_device_group(comm_op->placement_group()).set_name(comm_op->input(0)->name() + "_AllGather"));
+        all_gather_op->MapToParallelDevices(comm_op->placement_group());
+        all_gather_op->PlaceToLocalDevice(_exec_ctx->local_device(), kComputingStream);
+        result = all_gather_op->output(0);
+        HT_LOG_DEBUG << _exec_ctx->local_device() << ": substitute comm_op to all_gather_op: " << comm_group;
       } else if (comm_type == REDUCE_SCATTER_OP) {
-        ;
-      } else if (comm_type == BROADCAST_OP) {
-        ;
-      } else if (comm_type == REDUCE_OP) {
-        ;
+        DeviceGroup comm_group = comm_op->get_devices_by_dim(-2);
+        ReduceScatterOp reduce_scatter_op(
+          comm_op->input(0), comm_group,
+          OpMeta().set_device_group(comm_op->placement_group()).set_name(comm_op->input(0)->name() + "_ReduceScatter"));
+        reduce_scatter_op->MapToParallelDevices(comm_op->placement_group());
+        reduce_scatter_op->PlaceToLocalDevice(_exec_ctx->local_device(), kComputingStream);
+        result = reduce_scatter_op->output(0);
+        HT_LOG_DEBUG << _exec_ctx->local_device() << ": substitute comm_op to reduce_scatter_op: " << comm_group;
       } else if (comm_type == P2P_OP) {
-        ; // 分为两部分: 1. 从local_device发送数据给需要的device 2. 从目标devices中接收需要的数据到local_device
+        // 分为两部分: 1. 从local_device发送数据给需要的device 2. 从目标devices中接收需要的数据到local_device
         int32_t local_device_index = comm_op->placement_group().get_index(comm_op->placement());
         TensorList send_datas_local;
         std::vector<int32_t> dsts_local;
