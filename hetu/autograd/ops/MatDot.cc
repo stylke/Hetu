@@ -25,6 +25,11 @@ TensorList MatDotOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_inputA, grad_inputB};
 }
 
+void MatDotOpDef::DoInferMeta() {
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList MatDotOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }

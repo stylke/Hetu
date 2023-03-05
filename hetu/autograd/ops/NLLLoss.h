@@ -32,6 +32,8 @@ class NLLLossOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -83,6 +85,8 @@ class NLLLossGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

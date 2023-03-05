@@ -21,8 +21,7 @@ class ArrayReshapeOpDef : public OperatorDef {
                     const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ArrayReshapeOp), {input}, op_meta),
     _output_shape(output_shape) {
-    AddOutput(
-      NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    DoInferMeta();
   }
 
   HTShape get_output_shape() const {
@@ -38,6 +37,8 @@ class ArrayReshapeOpDef : public OperatorDef {
   };
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -66,36 +67,29 @@ class ArrayReshapeGradientOpDef : public OperatorDef {
 
  public:
   ArrayReshapeGradientOpDef(const constrcutor_access_key&, Tensor grad_output,
-                            ArrayReshapeOp input_node,
-                            const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(ArrayReshapeGradientOp), {grad_output}, op_meta),
-    _input_node(input_node) {
-    AddOutput(NDArrayMeta()
-                .set_dtype(_inputs[0]->dtype())
-                .set_shape(input_node->get_input_shape()));
-  }
-
-  ArrayReshapeOp get_input_node() const {
-    return _input_node;
+                            Tensor ori_input, const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(ArrayReshapeGradientOp), {grad_output, ori_input}, op_meta) {
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  ArrayReshapeOp _input_node;
 };
 
 class ArrayReshapeGradientOp final
 : public OpWrapper<ArrayReshapeGradientOpDef> {
  public:
-  ArrayReshapeGradientOp(Tensor grad_output, ArrayReshapeOp input_node,
+  ArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input,
                          const OpMeta& op_meta = OpMeta())
   : OpWrapper<ArrayReshapeGradientOpDef>(make_ptr<ArrayReshapeGradientOpDef>(
       ArrayReshapeGradientOpDef::constrcutor_access_key(), grad_output,
-      input_node, op_meta)) {}
+      ori_input, op_meta)) {}
 };
 
 } // namespace autograd

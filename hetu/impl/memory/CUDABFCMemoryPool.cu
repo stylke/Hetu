@@ -182,8 +182,8 @@ DataPtr CUDABFCMemoryPool::AllocDataSpace(size_t num_bytes) {
     // HT_LOG_INFO << "AllocateRaw " << Name() << "  " << num_bytes;
     void *result = AllocateRawInternal(num_bytes);
     if (result == nullptr) {
-        HT_LOG_WARN << "Allocator (" << Name() << ") ran out of memory trying "
-                    << "to allocate " << std::to_string(num_bytes);
+        // HT_LOG_WARN << "Allocator (" << Name() << ") ran out of memory trying "
+        //             << "to allocate " << std::to_string(num_bytes);
     }
     // HT_LOG_INFO << "AllocateRaw " << Name() << "  " << num_bytes << " "
     //             << result;
@@ -423,7 +423,7 @@ void CUDABFCMemoryPool::FreeDataSpace(DataPtr ptr) {
 
 void CUDABFCMemoryPool::DeallocateRawInternal(void *ptr) {
     if (ptr == nullptr) {
-        HT_LOG_WARN << "tried to deallocate nullptr";
+        // HT_LOG_WARN << "tried to deallocate nullptr";
         return;
     }
 

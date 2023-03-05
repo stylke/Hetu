@@ -21,10 +21,7 @@ class BinaryCrossEntropyOpDef : public OperatorDef {
                           const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(BinaryCrossEntropyOp), {preds, labels}, op_meta),
     _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-    AddOutput(preds->meta());
+    DoInferMeta();
   }
 
   ReductionType reduction() const {
@@ -32,6 +29,8 @@ class BinaryCrossEntropyOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -72,10 +71,7 @@ class BinaryCrossEntropyGradientOpDef : public OperatorDef {
   : OperatorDef(quote(BinaryCrossEntropyGradientOp),
                 {preds, labels, grad_output}, op_meta),
     _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-    AddOutput(preds->meta());
+    DoInferMeta();
   }
 
   ReductionType reduction() const {
@@ -83,6 +79,8 @@ class BinaryCrossEntropyGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

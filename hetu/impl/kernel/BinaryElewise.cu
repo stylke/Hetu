@@ -53,7 +53,7 @@ void BinaryElewiseToolCuda(const NDArray& inputA, const NDArray& inputB,
   size_t sizeA = inputA->numel();
   size_t sizeB = inputB->numel();
   if (sizeA == sizeB) {
-    size = sizeA;
+    size = sizeA; 
     dim3 blocks, threads;
     threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
     blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
@@ -65,6 +65,9 @@ void BinaryElewiseToolCuda(const NDArray& inputA, const NDArray& inputB,
           inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size, op,
           output->data_ptr<spec_t>());
       });
+    // CudaStreamSynchronize(cuda_stream);
+    // HT_LOG_INFO << "YES!" << inputA->data_ptr<void>() << " " <<
+    // inputB->data_ptr<void>() << " " << output->data_ptr<void>();
   } else {
     size_t allocated = output->ndim() * sizeof(uint);
     uint* A_dims = (uint*) malloc(allocated);
@@ -122,7 +125,9 @@ void BinaryElewiseToolCuda(const NDArray& inputA, const NDArray& inputB,
             (size_t) inputA->ndim(), (size_t) inputB->ndim(),
             gpu_output_strides, output_dim);
       });
-
+    // CudaStreamSynchronize(cuda_stream);
+    // HT_LOG_INFO << "YES!" << inputA->data_ptr<void>() << " " <<
+    // inputB->data_ptr<void>() << " " << output->data_ptr<void>();
     FreeToMemoryPool(gpu_dimsA_ptr);
     FreeToMemoryPool(gpu_dimsB_ptr);
     FreeToMemoryPool(gpu_output_strides_ptr);
@@ -139,6 +144,7 @@ void AddElewiseCuda(const NDArray& inputA, const NDArray& inputB,
         auto op = kplus<spec_t>();
         BinaryElewiseToolCuda(inputA, inputB, output, op, stream);
       }); 
+//   HT_LOG_INFO << inputA << "\n" << inputB << "\n" << output;
 }
 
 void SubElewiseCuda(const NDArray& inputA, const NDArray& inputB,

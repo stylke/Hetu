@@ -196,6 +196,11 @@ DECLARE_KERNEL_CPU_AND_CUDA(SoftmaxCrossEntropy, const NDArray&, const NDArray&,
 DECLARE_KERNEL_CPU_AND_CUDA(SoftmaxCrossEntropyGradient, const NDArray&,
                             const NDArray&, const NDArray&, NDArray&,
                             const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(SoftmaxCrossEntropySparse, const NDArray&, const NDArray&,
+                            NDArray&, const int64_t, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(SoftmaxCrossEntropySparseGradient, const NDArray&,
+                            const NDArray&, const NDArray&, NDArray&, const int64_t,
+                            const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Sqrt, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(SubConst, const NDArray&, double, NDArray&,
                             const Stream&);

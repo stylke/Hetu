@@ -22,6 +22,28 @@ TensorList TransposeOpDef::DoGradient(const TensorList& grad_outputs) {
             ->output(0)};
 }
 
+void TransposeOpDef::DoInferMeta() {
+  HTShape res_shape = {};
+  if (_inputs[0]->has_shape()) {
+    HTShape ori_shape = _inputs[0]->shape();
+    HTShape perm = _perms;
+    HT_ASSERT(perm.size() == ori_shape.size())
+      << "Invalid perm size:" << _perms << ",expect:" << _inputs[0]->shape();
+    int ndim = perm.size();
+    HTShape vis(ndim);
+    for (int i = 0; i < ndim; ++i) {
+      HT_ASSERT(perm[i] < ndim);
+      HT_ASSERT(vis[perm[i]] == 0);
+      vis[perm[i]]++;
+    }
+    res_shape = ori_shape;
+    for (int i = 0; i < ndim; ++i) {
+      res_shape[i] = ori_shape[perm[i]];
+    }
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(res_shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList TransposeOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   HTShape ori_shape = input_shapes.at(0);

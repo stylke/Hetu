@@ -27,6 +27,22 @@ TensorList Conv2dOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_input, grad_filter};
 }
 
+void Conv2dOpDef::DoInferMeta() {
+  HTShape shape = {-1, -1, -1, -1};
+  if (_inputs[0]->has_shape() && _inputs[1]->has_shape()) {
+    int64_t N = _inputs[0]->shape(0);
+    int64_t H = _inputs[0]->shape(2);
+    int64_t W = _inputs[0]->shape(3);
+    int64_t f_O = _inputs[1]->shape(0);
+    int64_t f_H = _inputs[1]->shape(2);
+    int64_t f_W = _inputs[1]->shape(3);
+    int64_t out_H = (H + 2 * get_padding()[0] - f_H) / get_stride()[0] + 1;
+    int64_t out_W = (W + 2 * get_padding()[1] - f_W) / get_stride()[1] + 1;
+    shape = {N, f_O, out_H, out_W};
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList Conv2dOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   int64_t N = input_shapes.at(0)[0];
@@ -51,6 +67,11 @@ void Conv2dGradientofFilterOpDef::DoCompute(const NDArrayList& inputs,
     get_padding()[1], get_stride()[0], get_stride()[1], stream());
 }
 
+void Conv2dGradientofFilterOpDef::DoInferMeta() {
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(_inputs[2]->meta());
+}
+
 HTShapeList
 Conv2dGradientofFilterOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
@@ -64,6 +85,11 @@ void Conv2dGradientofDataOpDef::DoCompute(const NDArrayList& inputs,
     placement().type(), type(), hetu::impl::Conv2dGradientofData, inputs.at(0),
     inputs.at(1), outputs.at(0), get_padding()[0], get_padding()[1],
     get_stride()[0], get_stride()[1], stream());
+}
+
+void Conv2dGradientofDataOpDef::DoInferMeta() {
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(_inputs[2]->meta());
 }
 
 HTShapeList
@@ -95,6 +121,22 @@ TensorList Conv2dAddBiasOpDef::DoGradient(const TensorList& grad_outputs) {
                                g_op_meta.set_name(grad_name(2)))
                      ->output(0);
   return {grad_input, grad_filter, grad_bias};
+}
+
+void Conv2dAddBiasOpDef::DoInferMeta() {
+  HTShape shape = {-1, -1, -1, -1};
+  if (_inputs[0]->has_shape() && _inputs[1]->has_shape()) {
+    int64_t N = _inputs[0]->shape(0);
+    int64_t H = _inputs[0]->shape(2);
+    int64_t W = _inputs[0]->shape(3);
+    int64_t f_O = _inputs[1]->shape(0);
+    int64_t f_H = _inputs[1]->shape(2);
+    int64_t f_W = _inputs[1]->shape(3);
+    int64_t out_H = (H + 2 * get_padding()[0] - f_H) / get_stride()[0] + 1;
+    int64_t out_W = (W + 2 * get_padding()[1] - f_W) / get_stride()[1] + 1;
+    shape = {N, f_O, out_H, out_W};
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
 }
 
 HTShapeList Conv2dAddBiasOpDef::DoInferShape(const HTShapeList& input_shapes) {

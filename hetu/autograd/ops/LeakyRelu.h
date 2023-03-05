@@ -19,7 +19,7 @@ class LeakyReluOpDef : public OperatorDef {
   LeakyReluOpDef(const constrcutor_access_key&, Tensor input, double alpha,
                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(LeakyReluOp), {input}, op_meta), _alpha(alpha) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   double get_alpha() const {
@@ -27,6 +27,8 @@ class LeakyReluOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -55,7 +57,7 @@ class LeakyReluGradientOpDef : public OperatorDef {
                          const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(LeakyReluGradientOp), {input, grad_output}, op_meta),
     _alpha(alpha) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   double get_alpha() const {
@@ -63,6 +65,8 @@ class LeakyReluGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

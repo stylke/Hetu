@@ -17,11 +17,11 @@ class EmbeddingLookupGradientOpDef : public OperatorDef {
 
  public:
   EmbeddingLookupGradientOpDef(const constrcutor_access_key&,
-                               Tensor grad_output, Tensor id, Tensor ori_input,
+                               Tensor grad_output, Tensor id, Tensor ori_input, Tensor input,
                                const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(EmbeddingLookupGradientOp), {grad_output, id, ori_input},
+  : OperatorDef(quote(EmbeddingLookupGradientOp), {grad_output, id, ori_input, input},
                 op_meta) {
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()));
+    DoInferMeta();
   }
 
   HTShape get_embed_shape() {
@@ -33,6 +33,8 @@ class EmbeddingLookupGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -44,12 +46,12 @@ class EmbeddingLookupGradientOpDef : public OperatorDef {
 class EmbeddingLookupGradientOp final
 : public OpWrapper<EmbeddingLookupGradientOpDef> {
  public:
-  EmbeddingLookupGradientOp(Tensor grad_output, Tensor id, Tensor ori_input,
+  EmbeddingLookupGradientOp(Tensor grad_output, Tensor id, Tensor ori_input, Tensor input,
                             const OpMeta& op_meta = OpMeta())
   : OpWrapper<EmbeddingLookupGradientOpDef>(
       make_ptr<EmbeddingLookupGradientOpDef>(
         EmbeddingLookupGradientOpDef::constrcutor_access_key(), grad_output, id,
-        ori_input, op_meta)) {}
+        ori_input, input, op_meta)) {}
 };
 
 class EmbeddingLookupOpDef : public OperatorDef {
@@ -61,31 +63,18 @@ class EmbeddingLookupOpDef : public OperatorDef {
   EmbeddingLookupOpDef(const constrcutor_access_key&, Tensor input, Tensor id,
                        const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(EmbeddingLookupOp), {input, id}, op_meta) {
-    HTShape shape;
-    if (input->has_shape() && id->has_shape()) {
-      shape = id->shape();
-      shape.emplace_back(input->shape(1));
-    }
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
-  }
-
-  HTShape get_grad_embed() const {
-    return _grad_embed_shape;
-  }
-
-  void set_grad_embed(HTShape shape) {
-    _grad_embed_shape = shape;
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
   TensorList DoGradient(const TensorList& grad_outputs) override;
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
-
-  HTShape _grad_embed_shape;
 };
 
 class EmbeddingLookupOp final : public OpWrapper<EmbeddingLookupOpDef> {

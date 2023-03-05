@@ -50,6 +50,33 @@ TensorList MatMulOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_a, grad_b};
 }
 
+void MatMulOpDef::DoInferMeta() {
+  auto a = _inputs[0];
+  auto b = _inputs[1];
+  if (a->has_shape() && b->has_shape()) {
+    HT_ASSERT(a->ndim() == 2 && b->ndim() == 2)
+      << "Failed to construct the \"" << type() << "\" operation "
+      << "(with name \"" << name() << "\"): "
+      << "Dimensions must be 2. "
+      << "Got " << a->ndim() << ", " << b->ndim() << ".";
+    int64_t dim_a = a->shape(trans_a() ? 0 : 1);
+    int64_t dim_b = b->shape(trans_b() ? 1 : 0);
+    HT_ASSERT(dim_a == -1 || dim_b == -1 || dim_a == dim_b)
+      << "Failed to construct the \"" << type() << "\" operation "
+      << "(with name \"" << name() << "\"): "
+      << "Dimensions must be compatible. "
+      << "Got " << dim_a << " vs. " << dim_b << ". "
+      << "Input shapes: " << a->shape() << " vs. " << b->shape() << ".";
+  }
+  HTShape shape = {-1, -1};
+  if (a->has_shape())
+    shape[0] = a->shape(trans_a() ? 1 : 0);
+  if (b->has_shape())
+    shape[1] = b->shape(trans_b() ? 0 : 1);
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList MatMulOpDef::DoInferShape(const HTShapeList& input_shapes) {
   const HTShape& a = input_shapes.at(0);
   const HTShape& b = input_shapes.at(1);

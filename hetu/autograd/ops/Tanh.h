@@ -19,10 +19,12 @@ class TanhOpDef : public OperatorDef {
   TanhOpDef(const constrcutor_access_key&, Tensor input,
             const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(TanhOp), {input}, op_meta) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -47,10 +49,12 @@ class TanhGradientOpDef : public OperatorDef {
   TanhGradientOpDef(const constrcutor_access_key&, Tensor input,
                     Tensor grad_output, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(TanhGradientOp), {input, grad_output}, op_meta) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

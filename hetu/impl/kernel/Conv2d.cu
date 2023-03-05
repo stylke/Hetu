@@ -241,6 +241,8 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
       CUDNN_CALL(cudnnDestroyFilterDescriptor(df_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
+    //   CudaStreamSynchronize(cuda_stream);
+    //   HT_LOG_INFO << input_x << " " << input_x->data_ptr<void>();
     });
   return;
 }
@@ -355,6 +357,11 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(dx_desc));
       CUDNN_CALL(cudnnDestroyFilterDescriptor(filter_desc));
+    //   CudaStreamSynchronize(cuda_stream);
+    //   HT_LOG_INFO << "_____________up____________\n" 
+    //   << gradient_y << "\n" << gradient_x
+    //   << "\n__________down_____________";
+    // HT_LOG_INFO << gradient_x->shape() << " " << gradient_x->data_ptr<void>();
     });
   return;
 }

@@ -221,6 +221,8 @@ void ReduceSumCuda(const NDArray& in_arr, NDArray& out_arr, const int64_t* axes,
           in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
           befor_dim_size, reduce_dim_size, after_dim_size);
       });
+    CudaStreamSynchronize(cuda_stream);
+    // HT_LOG_INFO << befor_dim_size << " " << reduce_dim_size << " " << after_dim_size;
   } else {
     size_t* strides = (size_t*) malloc(ndim_input * sizeof(size_t));
     size_t* strides_rest = (size_t*) malloc(ndim_rest * sizeof(size_t));
@@ -297,6 +299,8 @@ void ReduceSumCuda(const NDArray& in_arr, NDArray& out_arr, const int64_t* axes,
           strides_rest_cu, shape_in_cu, shape_rest_cu, shape_reduce_cu,
           reduce_dims_cu, rest_dims_cu, reduce_num);
       });
+    CudaStreamSynchronize(cuda_stream);
+    // HT_LOG_INFO << ndim_input << " " << ndim_rest << " " << ndim_reduce;
     FreeToMemoryPool(rest_dims_cu_ptr);
     FreeToMemoryPool(reduce_dims_cu_ptr);
     FreeToMemoryPool(shape_in_cu_ptr);

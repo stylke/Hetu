@@ -22,18 +22,7 @@ class PadOpDef : public OperatorDef {
     _mode(mode),
     _paddings(paddings),
     _constant(constant) {
-    HTShape shape;
-    if (input->has_shape()) {
-      shape = input->shape();
-      size_t len = paddings.size();
-      for (size_t i = 0; i < 4; ++i) {
-        if (i >= (4 - len / 2)) {
-          shape[i] = shape[i] + paddings[(i - (4 - len / 2)) * 2] +
-            paddings[(i - (4 - len / 2)) * 2 + 1];
-        }
-      }
-    }
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
   const std::string& get_mode() const {
@@ -49,6 +38,8 @@ class PadOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -84,15 +75,7 @@ class PadGradientOpDef : public OperatorDef {
   : OperatorDef(quote(PadGradientOp), {grad_output}, op_meta),
     _mode(mode),
     _paddings(paddings) {
-    HTShape shape = grad_output->shape();
-    size_t len = paddings.size();
-    for (size_t i = 0; i < 4; ++i) {
-      if (i >= (4 - len / 2)) {
-        shape[i] = shape[i] - paddings[(i - (4 - len / 2)) * 2] -
-          paddings[(i - (4 - len / 2)) * 2 + 1];
-      }
-    }
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
   const std::string& get_mode() const {
@@ -104,6 +87,8 @@ class PadGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

@@ -58,6 +58,39 @@ TensorList BatchMatMulOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_a, grad_b};
 }
 
+void BatchMatMulOpDef::DoInferMeta() {
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  auto a = _inputs[0];
+  auto b = _inputs[1];
+  if (a->has_shape() && b->has_shape()) {
+    HT_ASSERT(a->ndim() >= 2 && b->ndim() >= 2)
+      << "Failed to construct the \"" << type() << "\" operation "
+      << "(with name \"" << name() << "\"): "
+      << "Dimensions must be more than 2. "
+      << "Got " << a->ndim() << ", " << b->ndim() << ".";
+    int64_t ndims = a->ndim();
+    int64_t dim_a = a->shape(trans_a() ? ndims - 2 : ndims - 1);
+    int64_t dim_b = b->shape(trans_b() ? ndims - 1 : ndims - 2);
+    HT_ASSERT(dim_a == -1 || dim_b == -1 || dim_a == dim_b)
+      << "Failed to construct the \"" << type() << "\" operation "
+      << "(with name \"" << name() << "\"): "
+      << "Dimensions must be compatible. "
+      << "Got " << dim_a << " vs. " << dim_b << ". "
+      << "Input shapes: " << a->shape() << " vs. " << b->shape() << ".";
+  }
+  HTShape shape = {};
+  if (a->has_shape() && b->has_shape()) {
+    int ndims = a->ndim();
+    for (int i = 0; i < ndims - 2; ++i) {
+      HT_ASSERT(a->shape(i) == b->shape(i));
+      shape.emplace_back(a->shape(i));
+    }
+    shape.emplace_back(a->shape(trans_a() ? ndims - 1 : ndims - 2));
+    shape.emplace_back(b->shape(trans_b() ? ndims - 2 : ndims - 1));
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList BatchMatMulOpDef::DoInferShape(const HTShapeList& input_shapes) {
   const HTShape& a = input_shapes.at(0);
   const HTShape& b = input_shapes.at(1);
@@ -70,7 +103,8 @@ HTShapeList BatchMatMulOpDef::DoInferShape(const HTShapeList& input_shapes) {
     << trans_a() << " (transpose_b) " << trans_b();
   HTShape shape = {};
   for (int i = 0; i < ndims; ++i) {
-    HT_ASSERT(a[i] == b[i]);
+    HT_ASSERT(a[i] == b[i])
+    << name() << ",a:" << a << ",b:" << b;
     shape.emplace_back(a[i]);
   }
   shape.emplace_back(a.at(trans_a() ? ndims + 1 : ndims));

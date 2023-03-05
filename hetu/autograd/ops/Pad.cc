@@ -17,6 +17,21 @@ TensorList PadOpDef::DoGradient(const TensorList& grad_outputs) {
             ->output(0)};
 }
 
+void PadOpDef::DoInferMeta() {
+  HTShape shape;
+  if (_inputs[0]->has_shape()) {
+    shape = _inputs[0]->shape();
+    size_t len = _paddings.size();
+    for (size_t i = 0; i < 4; ++i) {
+      if (i >= (4 - len / 2)) {
+        shape[i] = shape[i] + _paddings[(i - (4 - len / 2)) * 2] +
+          _paddings[(i - (4 - len / 2)) * 2 + 1];
+      }
+    }
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList PadOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   HTShape Infer = input_shapes.at(0);
@@ -36,6 +51,18 @@ void PadGradientOpDef::DoCompute(const NDArrayList& inputs,
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::PadGradient, inputs.at(0),
     outputs.at(0), get_paddings(), stream(), get_mode());
+}
+
+void PadGradientOpDef::DoInferMeta() {
+  HTShape shape = _inputs[0]->shape();
+  size_t len = _paddings.size();
+  for (size_t i = 0; i < 4; ++i) {
+    if (i >= (4 - len / 2)) {
+      shape[i] = shape[i] - _paddings[(i - (4 - len / 2)) * 2] -
+        _paddings[(i - (4 - len / 2)) * 2 + 1];
+    }
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
 }
 
 HTShapeList PadGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {

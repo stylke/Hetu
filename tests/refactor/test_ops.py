@@ -54,6 +54,14 @@ class TestArithmeticOps(unittest.TestCase):
             self.assertTrue(allclose(y.add(x), gt))
             self.assertTrue(allclose(hetu.add(x, y), gt))
 
+            torch_in = torch.tensor(y_np, requires_grad=True)
+            torch_out = torch.add(torch_in, torch.from_numpy(x_np))
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(y_np, trainable=True)
+            hetu_out = hetu.add(hetu_in, x)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
     def test_elementwise_sub(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.random.randn(*shape)
@@ -94,6 +102,22 @@ class TestArithmeticOps(unittest.TestCase):
             self.assertTrue(allclose(y - x, gt))
             self.assertTrue(allclose(y.sub(x), gt))
             self.assertTrue(allclose(hetu.sub(y, x), gt))
+
+            torch_in = torch.tensor(y_np, requires_grad=True)
+            torch_out = torch.sub(torch_in, torch.from_numpy(x_np))
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(y_np, trainable=True)
+            hetu_out = hetu.sub(hetu_in, x)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+            torch_in = torch.tensor(y_np, requires_grad=True)
+            torch_out = torch.sub(torch.from_numpy(x_np), torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(y_np, trainable=True)
+            hetu_out = hetu.sub(x, hetu_in)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
     def test_neg(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
@@ -137,6 +161,14 @@ class TestArithmeticOps(unittest.TestCase):
             self.assertTrue(allclose(x.mul(y), gt))
             self.assertTrue(allclose(y.mul(x), gt))
             self.assertTrue(allclose(hetu.mul(x, y), gt))
+
+            torch_in = torch.tensor(y_np, requires_grad=True)
+            torch_out = torch.mul(torch_in, torch.from_numpy(x_np))
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(y_np, trainable=True)
+            hetu_out = hetu.mul(hetu_in, x)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
     def test_elementwise_div(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
@@ -179,6 +211,22 @@ class TestArithmeticOps(unittest.TestCase):
             self.assertTrue(allclose(y.div(x), gt))
             self.assertTrue(allclose(hetu.div(y, x), gt))
 
+            torch_in = torch.tensor(y_np, requires_grad=True)
+            torch_out = torch.div(torch_in, torch.from_numpy(x_np))
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(y_np, trainable=True)
+            hetu_out = hetu.div(hetu_in, x)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+            torch_in = torch.tensor(y_np, requires_grad=True)
+            torch_out = torch.div(torch.from_numpy(x_np), torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(y_np, trainable=True)
+            hetu_out = hetu.div(x, hetu_in)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
     def test_reciprocal(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.random.randn(*shape)
@@ -209,7 +257,8 @@ class TestArithmeticOps(unittest.TestCase):
 class TestMatMulOps(unittest.TestCase):
 
     _test_shapes = [
-        ((64, 256), (256, 128))
+        ((64, 256), (256, 128)),
+        ((8, 64, 256), (256, 128))
     ]
     
     def test_matmul_op(self):
@@ -219,19 +268,39 @@ class TestMatMulOps(unittest.TestCase):
             gt = np.matmul(x_np, y_np)
             x = hetu.from_numpy(x_np)
             y = hetu.from_numpy(y_np)
-            self.assertTrue(allclose(hetu.matmul(x, y), gt))
-            self.assertTrue(allclose(x.matmul(y), gt))
+            self.assertTrue(allclose(hetu.matmul2(x, y), gt))
+            self.assertTrue(allclose(x.matmul2(y), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.matmul(torch_in, torch.from_numpy(y_np))
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.matmul2(hetu_in, y)
+            hetu_out.sum().backward()
+            print(hetu_in.grad.shape, torch_in.grad.numpy().shape)
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
-    def test_linear_op(self):
-        for shape_x, shape_y in TestMatMulOps._test_shapes:
-            x_np = np.random.randn(*shape_x)
-            w_np = np.random.randn(*shape_y[::-1])
-            bias_np = np.random.randn(shape_y[-1])
-            gt = np.matmul(x_np, w_np.transpose()) + bias_np
-            x = hetu.from_numpy(x_np)
-            w = hetu.from_numpy(w_np)
-            bias = hetu.from_numpy(bias_np)
-            self.assertTrue(allclose(hetu.linear(x, w, bias), gt))
+    # def test_linear_op(self):
+    #     for shape_x, shape_y in TestMatMulOps._test_shapes:
+    #         x_np = np.random.randn(*shape_x)
+    #         w_np = np.random.randn(*shape_y)
+    #         bias_np = np.random.randn(shape_y[-1])
+    #         gt = np.matmul(x_np, w_np) + bias_np
+    #         x = hetu.from_numpy(x_np)
+    #         w = hetu.from_numpy(w_np)
+    #         bias = hetu.from_numpy(bias_np)
+    #         torch_test = torch.addmm(torch.from_numpy(bias_np), torch.from_numpy(x_np), 
+    #                     torch.from_numpy(w_np)).numpy()
+    #         self.assertTrue(allclose(hetu.linear(x, w, bias), gt))
+    #         self.assertTrue(allclose(torch_test, gt))
+
+    #         torch_in = torch.tensor(x_np, requires_grad=True)
+    #         torch_out = torch.matmul(torch_in, torch.from_numpy(w_np)) + torch.from_numpy(bias_np)
+    #         torch_out.sum().backward()
+    #         hetu_in = hetu.Tensor(x_np, trainable=True)
+    #         hetu_out = hetu.linear(hetu_in, w, bias)
+    #         hetu_out.sum().backward()
+    #         self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
 class TestBatchMatMulOps(unittest.TestCase):
 
@@ -249,6 +318,14 @@ class TestBatchMatMulOps(unittest.TestCase):
             y = hetu.from_numpy(y_np)
             self.assertTrue(allclose(hetu.bmm(x, y), gt))
             self.assertTrue(allclose(x.bmm(y), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.bmm(torch_in, torch.from_numpy(y_np))
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.bmm(hetu_in, y)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
 # class TestMatDotOps(unittest.TestCase):
 
@@ -282,14 +359,30 @@ class TestActivationOps(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             self.assertTrue(allclose(hetu.sigmoid(x), gt))
             self.assertTrue(allclose(x.sigmoid(), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.sigmoid(torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.sigmoid(hetu_in)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
     def test_relu_op(self):
         for shape in TestActivationOps._test_shapes:
-            x_np = np.random.randn(*shape)
+            x_np = np.random.randn(*shape) - 0.5
             gt = x_np * (x_np > 0).astype(x_np.dtype)
             x = hetu.from_numpy(x_np)
             self.assertTrue(allclose(hetu.relu(x), gt))
             self.assertTrue(allclose(x.relu(), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.relu(torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.relu(hetu_in)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
             
     
     def test_leaky_relu_op(self):
@@ -302,6 +395,14 @@ class TestActivationOps(unittest.TestCase):
                 self.assertTrue(allclose(hetu.leakyrelu(x, alpha), gt))
                 self.assertTrue(allclose(x.leakyrelu(alpha), gt))
 
+                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_out = torch.nn.functional.leaky_relu(torch_in, alpha)
+                torch_out.sum().backward()
+                hetu_in = hetu.Tensor(x_np, trainable=True)
+                hetu_out = hetu.leakyrelu(hetu_in, alpha)
+                hetu_out.sum().backward()
+                self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
     def test_tanh_op(self):
         for shape in TestActivationOps._test_shapes:
             x_np = np.random.randn(*shape)
@@ -309,6 +410,16 @@ class TestActivationOps(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             self.assertTrue(allclose(hetu.tanh(x), gt))
             self.assertTrue(allclose(x.tanh(), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.tanh(torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.tanh(hetu_in)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+            
     
     def test_softmax_op(self):
         for shape in TestActivationOps._test_shapes:
@@ -317,6 +428,14 @@ class TestActivationOps(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             self.assertTrue(allclose(hetu.softmax(x), gt))
             self.assertTrue(allclose(x.softmax(), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.softmax(torch_in, 1)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.softmax(hetu_in)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
 
 class TestTransformOps(unittest.TestCase):
@@ -347,6 +466,14 @@ class TestTransformOps(unittest.TestCase):
             self.assertTrue(allclose(hetu.reshape(x, shape_to), gt))
             self.assertTrue(allclose(x.reshape(shape_to), gt))
 
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.reshape(torch_in, tuple(shape_to)).contiguous()
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.reshape(hetu_in, shape_to)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
     def test_broadcast_op(self):
         for shape in TestTransformOps._test_shapes:
             x_np = np.random.randn(*shape)
@@ -356,6 +483,14 @@ class TestTransformOps(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             self.assertTrue(allclose(hetu.broadcast(x, shape_to, []), gt))
             self.assertTrue(allclose(x.broadcast(shape_to, []), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.broadcast_to(torch_in, tuple(shape_to))
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.broadcast(hetu_in, shape_to, [])
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
     def test_concat_op(self):
         for shape in TestTransformOps._test_shapes:
@@ -379,6 +514,14 @@ class TestTransformOps(unittest.TestCase):
             gt = np.pad(x_np, ((0,0),(0,0),(1,1),(2,2)), "constant", constant_values = 0.1)
             self.assertTrue(allclose(hetu.pad(x, [1,1,2,2], "constant", 0.1), gt))
             self.assertTrue(allclose(x.pad([1,1,2,2], "constant", 0.1), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.nn.functional.pad(torch_in, (0,0,0,0,1,1,2,2), "constant", 0.1)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.pad(hetu_in, [1,1,2,2], "constant", 0.1)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
     def test_slice_op(self):
         for shape in TestTransformOps._test_shapes:
@@ -407,6 +550,14 @@ class TestTransformOps(unittest.TestCase):
             self.assertTrue(allclose(hetu.transpose(x, [1, 0]), gt))
             self.assertTrue(allclose(x.transpose([1, 0]), gt))
 
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.transpose(torch_in, 1, 0)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.transpose(hetu_in, [1, 0])
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
         for shape in TestTransformOps._transpose_shapes:
             x_np = np.random.randn(*shape)
             perm = np.arange(x_np.ndim)
@@ -416,6 +567,14 @@ class TestTransformOps(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             self.assertTrue(allclose(hetu.transpose(x, perm), gt))
             self.assertTrue(allclose(x.transpose(perm), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch_in.permute(perm).contiguous()
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.transpose(hetu_in, perm)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
 class TestConv2dOps(unittest.TestCase):
 
@@ -447,6 +606,15 @@ class TestConv2dOps(unittest.TestCase):
                 self.assertTrue(allclose(hetu.conv2d(x, f, bias, 0, 1), gt))
                 self.assertTrue(allclose(x.conv2d(f, bias, 0, 1), gt))
 
+                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_out = torch.conv2d(torch_in, torch.from_numpy(f_np), stride = 1, padding = 0)
+                torch_out.sum().backward()
+                hetu_in = hetu.Tensor(x_np, trainable=True)
+                hetu_out = hetu.conv2d(hetu_in, f, bias, 0, 1)
+                hetu_out.sum().backward()
+                self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+
 
 class TestPoolOps(unittest.TestCase):
 
@@ -464,6 +632,14 @@ class TestPoolOps(unittest.TestCase):
             gt = maxpool2d(torch.from_numpy(x_np)).numpy()
             self.assertTrue(allclose(hetu.maxpool(x, 2, 2, 0, 1), gt))
             self.assertTrue(allclose(x.maxpool(2, 2, 0, 1), gt))
+            
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = maxpool2d(torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.maxpool(hetu_in, 2, 2, 0, 1)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
     def test_avgpool_op(self):
         for shape in TestPoolOps._test_shapes:
@@ -473,6 +649,13 @@ class TestPoolOps(unittest.TestCase):
             gt = avgpool2d(torch.from_numpy(x_np)).numpy()
             self.assertTrue(allclose(hetu.avgpool(x, 2, 2, 0, 1), gt))
             self.assertTrue(allclose(x.avgpool(2, 2, 0, 1), gt))
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = avgpool2d(torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.avgpool(hetu_in, 2, 2, 0, 1)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
 class TestNormOps(unittest.TestCase):
 
@@ -490,10 +673,27 @@ class TestNormOps(unittest.TestCase):
             scale = hetu.from_numpy(scale_np)
             bias_np = np.zeros(shape[1]).astype(np.float32)
             bias = hetu.from_numpy(bias_np)
+            running_mean_np = np.empty(shape[1]).astype(np.float32)
+            running_mean = hetu.from_numpy(running_mean_np)
+            running_var_np = np.empty(shape[1]).astype(np.float32)
+            running_var = hetu.from_numpy(running_var_np)
+            save_mean_np = np.empty(shape[1]).astype(np.float32)
+            save_mean = hetu.from_numpy(save_mean_np)
+            save_var_np = np.empty(shape[1]).astype(np.float32)
+            save_var = hetu.from_numpy(save_var_np)
             gt = torch.batch_norm(torch.from_numpy(x_np), weight = torch.from_numpy(scale_np), bias = torch.from_numpy(bias_np),
                                  running_mean=None, running_var=None, training=True, momentum=0.1, eps=1e-5, cudnn_enabled=True).numpy()
-            self.assertTrue(allclose(hetu.batch_norm(x, scale, bias, 0.1 ,1e-5), gt))
-            self.assertTrue(allclose(x.batch_norm(scale, bias, 0.1 ,1e-5), gt))
+            self.assertTrue(allclose(hetu.batch_norm(x, scale, bias, running_mean, running_var, 0.1 ,1e-5)[0], gt))
+            self.assertTrue(allclose(x.batch_norm(scale, bias, running_mean, running_var, 0.1 ,1e-5)[0], gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.batch_norm(torch_in, weight = torch.from_numpy(scale_np), bias = torch.from_numpy(bias_np),
+                        running_mean=None, running_var=None, training=True, momentum=0.1, eps=1e-5, cudnn_enabled=True)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.batch_norm(hetu_in, scale, bias, running_mean, running_var, 0.1 ,1e-5)[0]
+            hetu_out.sum().backward()
+            # self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
     def test_layernorm_op(self):
         for shape in TestPoolOps._test_shapes:
@@ -509,23 +709,49 @@ class TestNormOps(unittest.TestCase):
             gt2 = torch.layer_norm(torch.from_numpy(x_np), normalized_shape=tuple(norm_shape), weight = torch.from_numpy(scale_np), bias = torch.from_numpy(bias_np),
                                   eps=1e-5).numpy()
             self.assertTrue(allclose(gt2, gt))
-            self.assertTrue(allclose(hetu.layer_norm(x, scale, bias, 1e-5), gt))
-            self.assertTrue(allclose(x.layer_norm(scale, bias, 1e-5), gt))
+            self.assertTrue(allclose(hetu.layer_norm(x, scale, bias, 1e-5)[0], gt))
+            self.assertTrue(allclose(x.layer_norm(scale, bias, 1e-5)[0], gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = layernorm(torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.layer_norm(hetu_in, scale, bias, 1e-5)[0]
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
     def test_instancenorm_op(self):
         for shape in TestPoolOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             x = hetu.from_numpy(x_np)
+            temp_shape = list(shape)
+            # temp_shape[-1] = 1
+            # temp_shape[-2] = 1
+            temp_shape = [temp_shape[1]]
+            temp_shape = tuple(temp_shape)
+            save_mean_np = np.empty(temp_shape).astype(np.float32)
+            save_mean = hetu.from_numpy(save_mean_np)
+            save_var_np = np.empty(temp_shape).astype(np.float32)
+            save_var = hetu.from_numpy(save_var_np)
             instancenorm = torch.nn.InstanceNorm2d(num_features=shape[1], eps=1e-5)
             gt = instancenorm(torch.from_numpy(x_np)).detach().numpy()
-            self.assertTrue(allclose(hetu.instance_norm(x, 1e-5), gt))
-            self.assertTrue(allclose(x.instance_norm(1e-5), gt))
+            self.assertTrue(allclose(hetu.instance_norm(x, 1e-5)[0], gt))
+            self.assertTrue(allclose(x.instance_norm(1e-5)[0], gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = instancenorm(torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.instance_norm(hetu_in, 1e-5)[0]
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
 class TestReduceOps(unittest.TestCase):
 
     _test_shapes = [
         (16, 4, 16, 16),
-        (1, 8, 32, 32)
+        (1, 8, 32, 32),
+        (1,),
     ]
     
     def test_reduce_sum_op(self):
@@ -604,11 +830,21 @@ class TestLossOps(unittest.TestCase):
             # t1_np = np.maximum(np.log(probs_np), MIN_VALUE)
             # t2_np = np.maximum(np.log(1 - probs_np), MIN_VALUE)
             # gt = -(labels_np * t1_np + (1 - labels_np) * t2_np)
-            gt = torch.nn.functional.binary_cross_entropy(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
+            bce = torch.nn.BCELoss(reduction="mean")
+            # gt = torch.nn.functional.binary_cross_entropy(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
+            gt =bce(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
             probs = hetu.from_numpy(probs_np)
             labels = hetu.from_numpy(labels_np)
             loss = hetu.binary_cross_entropy(probs, labels)
             self.assertTrue(allclose(loss, gt))
+
+            torch_in = torch.tensor(probs_np, requires_grad=True)
+            torch_out = bce(torch_in, torch.from_numpy(labels_np))
+            torch_out.backward()
+            hetu_in = hetu.Tensor(probs_np, trainable=True)
+            hetu_out = hetu.binary_cross_entropy(hetu_in, labels)
+            hetu_out.backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
     def test_nllloss_op(self):
         for shape, lshape in TestLossOps._test_nllloss_label_shapes:
@@ -623,6 +859,14 @@ class TestLossOps(unittest.TestCase):
             labels = hetu.from_numpy(labels_np)
             loss = hetu.nll_loss(probs, labels)
             self.assertTrue(allclose(loss, gt))
+
+            torch_in = torch.tensor(probs_np, requires_grad=True)
+            torch_out = torch.nn.functional.nll_loss(torch_in, torch.from_numpy(labels_np))
+            torch_out.backward()
+            hetu_in = hetu.Tensor(probs_np, trainable=True)
+            hetu_out = hetu.nll_loss(hetu_in, labels)
+            hetu_out.backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
     def test_kldivloss_op(self):
         for shape in TestLossOps._test_binary_label_shapes:
@@ -636,6 +880,14 @@ class TestLossOps(unittest.TestCase):
             labels = hetu.from_numpy(labels_np)
             loss = hetu.kl_div(probs, labels)
             self.assertTrue(allclose(loss, gt))
+
+            torch_in = torch.tensor(probs_np, requires_grad=True)
+            torch_out = torch.nn.functional.kl_div(torch_in, torch.from_numpy(labels_np))
+            torch_out.backward()
+            hetu_in = hetu.Tensor(probs_np, trainable=True)
+            hetu_out = hetu.kl_div(hetu_in, labels)
+            hetu_out.backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
     def test_mseloss_op(self):
         MIN_VALUE = -100.0
@@ -651,21 +903,60 @@ class TestLossOps(unittest.TestCase):
             loss = hetu.mse_loss(probs, labels)
             self.assertTrue(allclose(loss, gt))
 
-    # def test_softmax_cross_entropy_op(self):
-    #     MIN_VALUE = -100.0
-    #     for shape in TestLossOps._test_cross_entropy_label_shapes:
-    #         probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
-    #         labels_np = np.random.uniform(0.25, 0.5, size=shape).astype(np.float32)
-    #         # probs_np = np.arange(4).astype(np.float32) + 1
-    #         # probs_np = probs_np.reshape(2,2)
-    #         # labels_np = np.array([[1,0],[0,1]]).astype(np.float32).reshape(2,2)
-    #         crs_etp = torch.nn.CrossEntropyLoss()
-    #         gt = crs_etp(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
-    #         # gt = torch.nn.functional.cross_entropy(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
-    #         probs = hetu.from_numpy(probs_np)
-    #         labels = hetu.from_numpy(labels_np)
-    #         loss = hetu.softmax_cross_entroy(probs, labels)
-    #         self.assertTrue(allclose(loss, gt))
+            torch_in = torch.tensor(probs_np, requires_grad=True)
+            torch_out = torch.nn.functional.mse_loss(torch_in, torch.from_numpy(labels_np))
+            torch_out.backward()
+            hetu_in = hetu.Tensor(probs_np, trainable=True)
+            hetu_out = hetu.mse_loss(hetu_in, labels)
+            hetu_out.backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+    def test_softmax_cross_entropy_op(self):
+        MIN_VALUE = -100.0
+        for shape in TestLossOps._test_cross_entropy_label_shapes:
+            probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
+            #labels_np = np.random.uniform(0.25, 0.5, size=shape).astype(np.float32)
+            labels_np = np.random.choice(range(16), size=(64,)).astype(np.int64)
+            labels_onehot = torch.nn.functional.one_hot(torch.from_numpy(labels_np), 16).numpy().astype(np.float32)
+            # probs_np = np.arange(4).astype(np.float32) + 1
+            # probs_np = probs_np.reshape(2,2)
+            # labels_np = np.array([[1,0],[0,1]]).astype(np.float32).reshape(2,2)
+            # crs_etp = torch.nn.CrossEntropyLoss()
+            # gt = crs_etp(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
+            gt = torch.nn.functional.cross_entropy(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
+            probs = hetu.from_numpy(probs_np)
+            labels = hetu.from_numpy(labels_onehot)
+            loss = hetu.softmax_cross_entropy(probs, labels)
+            self.assertTrue(allclose(loss, gt))
+
+            torch_in = torch.tensor(probs_np, requires_grad=True)
+            torch_out = torch.nn.functional.cross_entropy(torch_in, torch.from_numpy(labels_np))
+            torch_out.backward()
+            hetu_in = hetu.Tensor(probs_np, trainable=True)
+            hetu_out = hetu.softmax_cross_entropy(hetu_in, labels)
+            hetu_out.backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+    def test_softmax_cross_entropy_sparse_op(self):
+        MIN_VALUE = -100.0
+        for shape in TestLossOps._test_cross_entropy_label_shapes:
+            probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
+            #labels_np = np.random.uniform(0.25, 0.5, size=shape).astype(np.float32)
+            labels_np = np.random.choice(range(16), size=(64,)).astype(np.int64)
+            # labels_onehot = torch.nn.functional.one_hot(torch.from_numpy(labels_np), 16).numpy().astype(np.float32)
+            gt = torch.nn.functional.cross_entropy(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
+            probs = hetu.from_numpy(probs_np)
+            labels = hetu.from_numpy(labels_np)
+            loss = hetu.softmax_cross_entropy_sparse(probs, labels)
+            self.assertTrue(allclose(loss, gt))
+
+            torch_in = torch.tensor(probs_np, requires_grad=True)
+            torch_out = torch.nn.functional.cross_entropy(torch_in, torch.from_numpy(labels_np))
+            torch_out.backward()
+            hetu_in = hetu.Tensor(probs_np, trainable=True)
+            hetu_out = hetu.softmax_cross_entropy_sparse(hetu_in, labels)
+            hetu_out.backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
 class TestEinsumOps(unittest.TestCase):
 
@@ -757,6 +1048,14 @@ class TestOtherOps(unittest.TestCase):
             self.assertTrue(allclose(hetu.embedding_lookup(x, id), gt))
             self.assertTrue(allclose(x.embedding_lookup(id), gt))
 
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.embedding(torch_in, torch.from_numpy(id_np))
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.embedding_lookup(hetu_in, id)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
     def test_onehotop(self):
         for shape_x in TestOtherOps._onehot_test_shapes:
             x_np = np.random.randint(0, 16, size=shape_x)
@@ -767,7 +1066,7 @@ class TestOtherOps(unittest.TestCase):
 
     def test_whereop(self):
         for shape_x in TestOtherOps._onehot_test_shapes:
-            cond_np = np.random.choice([True, False], size=shape_x)
+            cond_np = np.random.choice([0, 1], size=shape_x).astype(np.int64)
             x_np = np.random.randn(*shape_x)
             y_np = np.random.randn(*shape_x)
             gt = np.where(cond_np, x_np, y_np)

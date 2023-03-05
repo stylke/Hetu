@@ -10,10 +10,6 @@ namespace impl {
 void AvgPoolCuda(const NDArray& input, const size_t kernel_H,
                  const size_t kernel_W, NDArray& output, const size_t padding,
                  const size_t stride, const Stream& stream) {
-  HT_ASSERT_CUDA_DEVICE(input);
-  HT_ASSERT_CUDA_DEVICE(output);
-  HT_ASSERT_SAME_DEVICE(input, output);
-
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
@@ -42,9 +38,8 @@ void AvgPoolCuda(const NDArray& input, const size_t kernel_H,
       cudnnPoolingDescriptor_t avgpool_desc;
       CUDNN_CALL(cudnnCreatePoolingDescriptor(&avgpool_desc));
       CUDNN_CALL(cudnnSetPooling2dDescriptor(
-        avgpool_desc, CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
-        CUDNN_PROPAGATE_NAN, kernel_H, kernel_W, padding, padding, stride,
-        stride));
+        avgpool_desc, CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING, CUDNN_PROPAGATE_NAN,
+        kernel_H, kernel_W, padding, padding, stride, stride));
 
       // input descriptor
       cudnnTensorDescriptor_t input_desc;
@@ -78,15 +73,8 @@ void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
                          const size_t kernel_W, NDArray& gradient_X,
                          const size_t padding, const size_t stride,
                          const Stream& stream) {
-  HT_ASSERT_CUDA_DEVICE(output_Y);
-  HT_ASSERT_CUDA_DEVICE(gradient_Y);
-  HT_ASSERT_CUDA_DEVICE(input_X);
-  HT_ASSERT_CUDA_DEVICE(gradient_X);
-  HT_ASSERT_SAME_DEVICE(output_Y, gradient_Y);
-  HT_ASSERT_SAME_DEVICE(output_Y, input_X);
-  HT_ASSERT_SAME_DEVICE(output_Y, gradient_X);
-
   CUDAStream cuda_stream(stream);
+  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
   // input
@@ -103,8 +91,6 @@ void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
     datatype = CUDNN_DATA_FLOAT;
   } else if (output_Y->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
-  } else {
-    HT_VALUE_ERROR << "Invalid Datatype.";
   }
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
@@ -118,9 +104,8 @@ void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
       cudnnPoolingDescriptor_t avgpool_desc;
       CUDNN_CALL(cudnnCreatePoolingDescriptor(&avgpool_desc));
       CUDNN_CALL(cudnnSetPooling2dDescriptor(
-        avgpool_desc, CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
-        CUDNN_PROPAGATE_NAN, kernel_H, kernel_W, padding, padding, stride,
-        stride));
+        avgpool_desc, CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING, CUDNN_PROPAGATE_NAN,
+        kernel_H, kernel_W, padding, padding, stride, stride));
 
       // input descriptor
       cudnnTensorDescriptor_t input_desc;

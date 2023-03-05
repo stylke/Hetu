@@ -17,14 +17,11 @@ class KLDivLossOpDef : public OperatorDef {
 
  public:
   KLDivLossOpDef(const constrcutor_access_key&, Tensor preds,
-                          Tensor labels, ReductionType reduction = kMEAN,
-                          const OpMeta& op_meta = OpMeta())
+                 Tensor labels, ReductionType reduction = kMEAN,
+                 const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(KLDivLossOp), {preds, labels}, op_meta),
     _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-    AddOutput(preds->meta());
+    DoInferMeta();
   }
 
   ReductionType reduction() const {
@@ -32,6 +29,8 @@ class KLDivLossOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -72,10 +71,7 @@ class KLDivLossGradientOpDef : public OperatorDef {
   : OperatorDef(quote(KLDivLossGradientOp),
                 {preds, labels, grad_output}, op_meta),
     _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-    AddOutput(preds->meta());
+    DoInferMeta();
   }
 
   ReductionType reduction() const {
@@ -83,6 +79,8 @@ class KLDivLossGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

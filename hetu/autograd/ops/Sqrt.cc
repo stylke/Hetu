@@ -23,6 +23,10 @@ TensorList SqrtOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_input};
 }
 
+void SqrtOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList SqrtOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(0)};
@@ -33,6 +37,10 @@ void ReciprocalSqrtOpDef::DoCompute(const NDArrayList& inputs,
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::ReciprocalSqrt, inputs.at(0),
                                   outputs.at(0), stream());
+}
+
+void ReciprocalSqrtOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
 }
 
 HTShapeList ReciprocalSqrtOpDef::DoInferShape(const HTShapeList& input_shapes) {

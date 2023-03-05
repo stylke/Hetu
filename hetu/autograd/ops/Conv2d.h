@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hetu/autograd/operator.h"
+#include "hetu/autograd/utils/tensor_utils.h"
 
 namespace hetu {
 namespace autograd {
@@ -25,20 +26,7 @@ class Conv2dOpDef : public OperatorDef {
   : OperatorDef(quote(Conv2dOp), {input, filter}, op_meta) {
     _padding = {padding, padding};
     _stride = {stride, stride};
-
-    HTShape shape;
-    if (input->has_shape() && filter->has_shape()) {
-      int64_t N = input->shape(0);
-      int64_t H = input->shape(2);
-      int64_t W = input->shape(3);
-      int64_t f_O = filter->shape(0);
-      int64_t f_H = filter->shape(2);
-      int64_t f_W = filter->shape(3);
-      int64_t out_H = (H + 2 * padding - f_H) / stride + 1;
-      int64_t out_W = (W + 2 * padding - f_W) / stride + 1;
-      shape = {N, f_O, out_H, out_W};
-    }
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
   HTShape get_padding() const {
@@ -50,6 +38,8 @@ class Conv2dOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -87,7 +77,7 @@ class Conv2dGradientofFilterOpDef : public OperatorDef {
                 op_meta),
     _padding(padding),
     _stride(stride) {
-    AddOutput(filter->meta());
+    DoInferMeta();
   }
 
   HTShape get_padding() const {
@@ -99,6 +89,8 @@ class Conv2dGradientofFilterOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -137,7 +129,7 @@ class Conv2dGradientofDataOpDef : public OperatorDef {
                 op_meta),
     _padding(padding),
     _stride(stride) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   HTShape get_padding() const {
@@ -149,6 +141,8 @@ class Conv2dGradientofDataOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -184,16 +178,7 @@ class Conv2dAddBiasOpDef : public OperatorDef {
   : OperatorDef(quote(Conv2dAddBiasOp), {input, filter, bias}, op_meta) {
     _padding = {padding, padding};
     _stride = {stride, stride};
-    int64_t N = input->shape(0);
-    int64_t H = input->shape(2);
-    int64_t W = input->shape(3);
-    int64_t f_O = filter->shape(0);
-    int64_t f_H = filter->shape(2);
-    int64_t f_W = filter->shape(3);
-    int64_t out_H = (H + 2 * padding - f_H) / stride + 1;
-    int64_t out_W = (W + 2 * padding - f_W) / stride + 1;
-    HTShape shape = {N, f_O, out_H, out_W};
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
   HTShape get_padding() const {
@@ -205,6 +190,8 @@ class Conv2dAddBiasOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

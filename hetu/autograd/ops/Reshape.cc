@@ -13,9 +13,18 @@ void ArrayReshapeOpDef::DoCompute(const NDArrayList& inputs,
 
 TensorList ArrayReshapeOpDef::DoGradient(const TensorList& grad_outputs) {
   auto& self = reinterpret_cast<ArrayReshapeOp&>(get_self());
-  return {ArrayReshapeGradientOp(grad_outputs.at(0), self,
-                                 grad_op_meta().set_name(grad_name()))
-            ->output(0)};
+  if (grad_outputs.at(0).is_defined() && grad_outputs.at(0)->is_tensor())
+    return {ArrayReshapeGradientOp(grad_outputs.at(0), _inputs[0],
+                                  grad_op_meta().set_name(grad_name()))
+              ->output(0)};
+  else 
+    return { Tensor() };
+}
+
+void ArrayReshapeOpDef::DoInferMeta() {
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(_output_shape).set_device(_inputs[0]->device()));
+  if (_inputs[0]->has_shape())
+    set_input_shape(_inputs[0]->shape());
 }
 
 HTShapeList ArrayReshapeOpDef::DoInferShape(const HTShapeList& input_shapes) {
@@ -40,6 +49,7 @@ HTShapeList ArrayReshapeOpDef::DoInferShape(const HTShapeList& input_shapes) {
     }
     output_size *= output_shape[i];
   }
+  // HT_LOG_INFO << input_shape << " " << output_shape;
   if (idx == -1) {
     HT_ASSERT(input_size == output_size) << "Invalid output size.";
   } else {
@@ -59,10 +69,14 @@ void ArrayReshapeGradientOpDef::DoCompute(const NDArrayList& inputs,
                                   outputs.at(0), stream());
 }
 
+void ArrayReshapeGradientOpDef::DoInferMeta() {
+  AddOutput(_inputs[1]->meta());
+}
+
 HTShapeList
 ArrayReshapeGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
-  return {get_input_node()->get_input_shape()};
+  return {input_shapes.at(1)};
 }
 
 } // namespace autograd

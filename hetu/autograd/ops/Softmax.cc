@@ -16,6 +16,10 @@ TensorList SoftmaxOpDef::DoGradient(const TensorList& grad_outputs) {
             ->output(0)};
 }
 
+void SoftmaxOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList SoftmaxOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(0)};
@@ -27,6 +31,10 @@ void SoftmaxGradientOpDef::DoCompute(const NDArrayList& inputs,
   HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(),
                                hetu::impl::SoftmaxGradient, inputs.at(0),
                                inputs.at(1), outputs.at(0), stream());
+}
+
+void SoftmaxGradientOpDef::DoInferMeta() {
+  AddOutput(_inputs[1]->meta());
 }
 
 HTShapeList

@@ -17,12 +17,7 @@ class OnehotOpDef : public OperatorDef {
   OnehotOpDef(const constrcutor_access_key&, Tensor input, size_t num_classes,
               const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(OnehotOp), {input}, op_meta), _classes(num_classes) {
-    HTShape shape;
-    if (input->has_shape()) {
-      shape = input->shape();
-      shape.emplace_back(num_classes);
-    }
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
   size_t num_classes() const {
@@ -30,6 +25,8 @@ class OnehotOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

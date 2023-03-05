@@ -15,6 +15,10 @@ TensorList ScalarLikeOpDef::DoGradient(const TensorList& grad_outputs) {
   return {Tensor()};
 }
 
+void ScalarLikeOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList ScalarLikeOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }

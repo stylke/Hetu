@@ -72,7 +72,7 @@ void LeakyReluGradientCuda(const NDArray& input, const NDArray& output_grad,
     input->dtype(), spec_t, "LeakyReluGradientCuda", [&]() {
       leaky_relu_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(),
-        static_cast<spec_t>(1.0 / alpha), size, input_grad->data_ptr<spec_t>());
+        static_cast<spec_t>(alpha), size, input_grad->data_ptr<spec_t>());
     });
 }
 

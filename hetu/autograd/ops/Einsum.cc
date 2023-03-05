@@ -492,6 +492,12 @@ TensorList EinsumOpDef::DoGradient(const TensorList& grad_outputs) {
   return grad_inputs;
 }
 
+void EinsumOpDef::DoInferMeta() {
+  ParseMsg();
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_device(_inputs[0]->device()));
+}
+
 HTShapeList EinsumOpDef::DoInferShape(const HTShapeList& input_shapes) {
   LabelMap label_to_size;
   HTShape output_shape(output_size);
@@ -548,7 +554,7 @@ HTShapeList EinsumOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
-void EinsumGradientOpDef::ParseMsg() {
+void EinsumGradientOpDef::ParseMsg(const HTShapeList& input_shapes) {
   input_dims = {};
   output_dims = {};
   _input_msgs = {};
@@ -616,8 +622,7 @@ void EinsumGradientOpDef::ParseMsg() {
     if (_inputs[i]->has_shape())
       input_shape = _inputs[i]->shape();
     else {
-      EinsumOp& input_ptr = reinterpret_cast<EinsumOp&>(pred->producer());
-      input_shape = input_ptr->get_grad_shape();
+      input_shape = input_shapes.at(0);
     }
     OpDim input_dim = input_dims.at(i);
     int ndims = input_shape.size();
@@ -888,8 +893,13 @@ void EinsumGradientOpDef::DoCompute(const NDArrayList& inputs,
                                   outputs.at(0), stream());
 }
 
+void EinsumGradientOpDef::DoInferMeta() {
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_device(_inputs[0]->device()));
+}
+
 HTShapeList EinsumGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
-  ParseMsg();
+  ParseMsg(input_shapes);
   return {pred_in->shape()};
 }
 

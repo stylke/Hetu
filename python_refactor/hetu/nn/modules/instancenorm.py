@@ -17,5 +17,5 @@ class InstanceNorm(NormBase):
         super(InstanceNorm, self).__init__(num_features, eps, 0)
 
     def forward(self, input: Tensor) -> Tensor:
-        return hetu.instance_norm(input, self.eps)
+        return hetu.instance_norm(input, self.eps)[0]
 

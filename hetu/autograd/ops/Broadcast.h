@@ -17,7 +17,7 @@ class BroadcastOpDef : public OperatorDef {
   BroadcastOpDef(const constrcutor_access_key&, Tensor input, Tensor output,
                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(BroadcastOp), {input, output}, op_meta), _mode(0) {
-    AddOutput(output->meta());
+    DoInferMeta();
   }
 
   BroadcastOpDef(const constrcutor_access_key&, Tensor input,
@@ -27,7 +27,7 @@ class BroadcastOpDef : public OperatorDef {
     _mode(1),
     _shape(shape),
     _add_axes(add_axes) {
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
   const HTShape& get_shape() const {
@@ -67,6 +67,8 @@ class BroadcastOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -106,44 +108,14 @@ class BroadcastGradientOpDef : public OperatorDef {
 
  public:
   BroadcastGradientOpDef(const constrcutor_access_key&, Tensor input,
-                         Tensor ori_input, const HTShape& axes,
+                         Tensor ori_input, Tensor ori_output, const HTShape& axes,
                          const HTKeepDims& keepdims,
                          const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(BroadcastGradientOp), {input, ori_input}, op_meta),
+  : OperatorDef(quote(BroadcastGradientOp), {input, ori_input, ori_output}, op_meta),
     _axes(axes),
     _keepdims(keepdims) {
-    HT_ASSERT(keepdims.size() == axes.size() || keepdims.size() == 1);
-    if (keepdims.size() == 1) {
-      int len = axes.size();
-      bool keepdim = keepdims[0];
-      for (int i = 1; i < len; ++i) {
-        _keepdims.emplace_back(keepdim);
-      }
-    }
-    int ndim = input->ndim();
-    HTShape tmp_axes = axes;
-    HTShape input_shape = input->shape();
-    int len = axes.size();
-    for (int i = 0; i < len; ++i) {
-      if (tmp_axes[i] < 0) {
-        tmp_axes[i] += ndim;
-      }
-      HT_ASSERT(tmp_axes[i] >= 0 && tmp_axes[i] < ndim)
-        << "axes:" << tmp_axes[i] << " ,ndims:" << ndim;
-      if (keepdims[i] == true)
-        input_shape[tmp_axes[i]] = 1;
-      else
-        input_shape[tmp_axes[i]] = 0;
-    }
-    HTShape output_shape(0);
-    for (int i = 0; i < ndim; ++i) {
-      if (input_shape[i] > 0)
-        output_shape.emplace_back(input_shape[i]);
-    }
-    if (output_shape.size() == 0)
-      output_shape.emplace_back(1);
-    AddOutput(
-      NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+        // HT_LOG_INFO << ori_input->shape();
+    DoInferMeta();
   }
 
   const HTShape& get_axes() const {
@@ -189,6 +161,8 @@ class BroadcastGradientOpDef : public OperatorDef {
   Operator grad, grad_;
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -207,11 +181,11 @@ class BroadcastGradientOpDef : public OperatorDef {
 
 class BroadcastGradientOp final : public OpWrapper<BroadcastGradientOpDef> {
  public:
-  BroadcastGradientOp(Tensor input, Tensor ori_input, const HTShape& axes,
+  BroadcastGradientOp(Tensor input, Tensor ori_input, Tensor ori_output, const HTShape& axes,
                       const HTKeepDims& keepdims,
                       const OpMeta& op_meta = OpMeta())
   : OpWrapper<BroadcastGradientOpDef>(make_ptr<BroadcastGradientOpDef>(
-      BroadcastGradientOpDef::constrcutor_access_key(), input, ori_input, axes,
+      BroadcastGradientOpDef::constrcutor_access_key(), input, ori_input, ori_output, axes,
       keepdims, op_meta)) {}
 };
 

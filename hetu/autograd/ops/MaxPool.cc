@@ -19,6 +19,20 @@ TensorList MaxPoolOpDef::DoGradient(const TensorList& grad_outputs) {
             ->output(0)};
 }
 
+void MaxPoolOpDef::DoInferMeta() {
+  HTShape shape = {-1, -1, -1, -1};
+  if (_inputs[0]->has_shape()) {
+    int64_t N = _inputs[0]->shape(0);
+    int64_t C = _inputs[0]->shape(1);
+    int64_t H = _inputs[0]->shape(2);
+    int64_t W = _inputs[0]->shape(3);
+    int64_t p_H = (H + 2 * get_padding() - get_kernel_H()) / get_stride() + 1;
+    int64_t p_W = (W + 2 * get_padding() - get_kernel_W()) / get_stride() + 1;
+    shape = {N, C, p_H, p_W};
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList MaxPoolOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   int64_t N = input_shapes.at(0)[0];
@@ -37,6 +51,10 @@ void MaxPoolGradientOpDef::DoCompute(const NDArrayList& inputs,
     placement().type(), type(), hetu::impl::MaxPoolGradient, inputs.at(0),
     inputs.at(1), inputs.at(2), get_kernel_H(), get_kernel_W(), outputs.at(0),
     get_padding(), get_stride(), stream());
+}
+
+void MaxPoolGradientOpDef::DoInferMeta() {
+  AddOutput(_inputs[2]->meta());
 }
 
 HTShapeList

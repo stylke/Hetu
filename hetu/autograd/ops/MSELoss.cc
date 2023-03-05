@@ -29,6 +29,16 @@ TensorList MSEOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_input, Tensor()};
 }
 
+void MSEOpDef::DoInferMeta() {
+  HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
+  if (_reduction != kNONE)
+    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape({1}).set_device(_inputs[0]->device()));
+  else
+    AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList MSEOpDef::DoInferShape(const HTShapeList& input_shapes) {
   HT_ASSERT_GE(input_shapes.at(0).size(), 2)
     << "Invalid shape for " << type() << ": " << input_shapes.at(0);
@@ -45,7 +55,7 @@ void MSEGradOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
   if (reduction() == kMEAN) {
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       placement().type(), type(), hetu::impl::BroadcastShapeMul, inputs.at(2),
-      broadcasted->numel(), broadcasted, HTAxes(), stream());
+      1.0f / broadcasted->numel(), broadcasted, HTAxes(), stream());
   } else if (reduction() == kSUM) {
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                     hetu::impl::BroadcastShape, inputs.at(2),
@@ -54,6 +64,13 @@ void MSEGradOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::MSELossGradient,
     inputs.at(0), inputs.at(1), broadcasted, outputs.at(0), stream());
+}
+
+void MSEGradOpDef::DoInferMeta() {
+  HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+    << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+    << " operators. Expected: [\'mean\', \'sum\', \'none\']";
+  AddOutput(_inputs[0]->meta());
 }
 
 HTShapeList MSEGradOpDef::DoInferShape(const HTShapeList& input_shapes) {

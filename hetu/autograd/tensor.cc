@@ -78,7 +78,7 @@ void TensorDef::AccumulateGrad(const Tensor& grad) {
 
   HT_ASSERT(grad->shape() == shape())
     << "Gradient shape " << grad->shape() << " does not match variable shape "
-    << shape();
+    << shape() << name();
   if (_grad.is_defined()) {
     // // TODO: add in place
     // _grad = AddElewiseOp(_grad, grad)->output(0);
@@ -109,8 +109,10 @@ void TensorDef::Backward(const Tensor& grad) {
   HT_ASSERT_EQ(grads.size(), vars.size())
     << "Only " << grads.size() << " gradients are returned for " << vars.size()
     << " variables.";
+//   HT_LOG_INFO << grads.size() << " " << name();
   for (size_t i = 0; i < grads.size(); i++) {
     vars[i]->AccumulateGrad(grads[i]);
+    // HT_LOG_INFO << vars[i]->name() << " " << grads[i]->GetOrCompute();
   }
 }
 

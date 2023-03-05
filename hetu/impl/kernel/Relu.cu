@@ -42,6 +42,8 @@ void ReluCuda(const NDArray& input, NDArray& output, const Stream& stream) {
       relu_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
     });
+        // CudaStreamSynchronize(cuda_stream);
+    //   HT_LOG_INFO << output->data_ptr<void>();
 }
 
 void ReluGradientCuda(const NDArray& input, const NDArray& output_grad,
@@ -66,6 +68,10 @@ void ReluGradientCuda(const NDArray& input, const NDArray& output_grad,
         input->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(), size,
         input_grad->data_ptr<spec_t>());
     });
+    // CudaStreamSynchronize(cuda_stream);
+    //   HT_LOG_INFO << "_____________up____________\n" << output_grad << 
+    //   "\n" << input_grad
+    //   << "\n__________down_____________";
 }
 
 } // namespace impl

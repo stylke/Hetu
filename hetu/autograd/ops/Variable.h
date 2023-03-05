@@ -112,20 +112,21 @@ class VariableOpDef : public PlaceholderBaseOpDef {
  private:
   friend class Optimizer;
   friend class VariableOp;
+  int _inited;
   struct constrcutor_access_key {};
 
  public:
   VariableOpDef(const constrcutor_access_key&, const NDArray& data,
                 bool trainable = false, const OpMeta& op_meta = OpMeta())
   : PlaceholderBaseOpDef(quote(VariableOp), data, nullptr, data->shape(),
-                         trainable, data->dtype(), op_meta) {}
+                         trainable, data->dtype(), op_meta), _inited(0) {}
 
   VariableOpDef(const constrcutor_access_key&, const HTShape& shape,
                 const Initializer& init, DataType dtype = kFloat32,
                 bool trainable = false, const OpMeta& op_meta = OpMeta())
   : PlaceholderBaseOpDef(quote(VariableOp), NDArray(),
                          std::shared_ptr<Initializer>(init.copy()), shape,
-                         trainable, dtype, op_meta) {}
+                         trainable, dtype, op_meta), _inited(0) {}
 
   bool DoPlaceToLocalDevice(const Device& placement,
                             StreamIndex stream_id) override;

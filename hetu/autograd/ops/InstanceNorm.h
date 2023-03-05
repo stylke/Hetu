@@ -19,7 +19,7 @@ class InstanceNormOpDef : public OperatorDef {
   InstanceNormOpDef(const constrcutor_access_key&, Tensor input,
                     double eps = 1e-7, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(InstanceNormOp), {input}, op_meta), _eps(eps) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   double get_momentum() const {
@@ -38,11 +38,9 @@ class InstanceNormOpDef : public OperatorDef {
     _shape = shape;
   }
 
-  NDArray save_mean;
-
-  NDArray save_var;
-
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -72,32 +70,25 @@ class InstanceNormGradientOpDef : public OperatorDef {
 
  public:
   InstanceNormGradientOpDef(const constrcutor_access_key&, Tensor output_grad,
-                            Tensor input, InstanceNormOp forward_node,
+                            Tensor input, Tensor save_mean, Tensor save_var,
+                            double eps = 1e-7,
                             const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(InstanceNormGradientOp), {output_grad, input}, op_meta),
-    _forward_node(forward_node) {
-    AddOutput(output_grad->meta());
-  }
-
-  InstanceNormOp get_forward_node() const {
-    return _forward_node;
+  : OperatorDef(quote(InstanceNormGradientOp), {output_grad, input, save_mean, save_var}, op_meta),
+  _eps(eps) {
+    DoInferMeta();
   }
 
   double get_eps() const {
     return _eps;
   }
 
-  NDArray tmp_gradient_bn_scale;
-
-  NDArray tmp_gradient_bn_bias;
-
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
-
-  InstanceNormOp _forward_node;
 
   double _eps;
 };
@@ -106,11 +97,12 @@ class InstanceNormGradientOp final
 : public OpWrapper<InstanceNormGradientOpDef> {
  public:
   InstanceNormGradientOp(Tensor output_grad, Tensor input,
-                         InstanceNormOp forward_node,
+                         Tensor save_mean, Tensor save_var,
+                         double eps = 1e-7,
                          const OpMeta& op_meta = OpMeta())
   : OpWrapper<InstanceNormGradientOpDef>(make_ptr<InstanceNormGradientOpDef>(
       InstanceNormGradientOpDef::constrcutor_access_key(), output_grad, input,
-      forward_node, op_meta)) {}
+      save_mean, save_var, eps, op_meta)) {}
 };
 
 } // namespace autograd

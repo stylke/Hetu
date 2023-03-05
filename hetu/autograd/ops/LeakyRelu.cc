@@ -17,6 +17,10 @@ TensorList LeakyReluOpDef::DoGradient(const TensorList& grad_outputs) {
             ->output(0)};
 }
 
+void LeakyReluOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList LeakyReluOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }
@@ -27,6 +31,10 @@ void LeakyReluGradientOpDef::DoCompute(const NDArrayList& inputs,
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::LeakyReluGradient, inputs.at(0),
     inputs.at(1), get_alpha(), outputs.at(0), stream());
+}
+
+void LeakyReluGradientOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
 }
 
 HTShapeList

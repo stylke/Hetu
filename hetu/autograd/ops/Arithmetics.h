@@ -36,6 +36,15 @@ class DivFromConstOp;
 class ReciprocalOpDef;
 class ReciprocalOp;
 
+class AddElewiseGradientOpDef;
+class AddElewiseGradientOp;
+class SubElewiseGradientOpDef;
+class SubElewiseGradientOp;
+class MulElewiseGradientOpDef;
+class MulElewiseGradientOp;
+class DivElewiseGradientOpDef;
+class DivElewiseGradientOp;
+
 class AddElewiseOpDef : public OperatorDef {
  private:
   friend class AddElewiseOp;
@@ -45,12 +54,12 @@ class AddElewiseOpDef : public OperatorDef {
   AddElewiseOpDef(const constrcutor_access_key&, Tensor a, Tensor b,
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(AddElewiseOp), {a, b}, op_meta) {
-    HTShape shape = Broadcast(_inputs[0]->shape(), _inputs[1]->shape());
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -75,7 +84,7 @@ class AddByConstOpDef : public OperatorDef {
   AddByConstOpDef(const constrcutor_access_key&, Tensor input, double value,
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(AddByConstOp), {input}, op_meta), _value(value) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   inline double const_value() const {
@@ -83,6 +92,8 @@ class AddByConstOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -113,12 +124,12 @@ class SubElewiseOpDef : public OperatorDef {
   SubElewiseOpDef(const constrcutor_access_key&, Tensor a, Tensor b,
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SubElewiseOp), {a, b}, op_meta) {
-    HTShape shape = Broadcast(_inputs[0]->shape(), _inputs[1]->shape());
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -143,7 +154,7 @@ class SubByConstOpDef : public OperatorDef {
   SubByConstOpDef(const constrcutor_access_key&, Tensor input, double value,
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SubByConstOp), {input}, op_meta), _value(value) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   inline double const_value() const {
@@ -151,6 +162,8 @@ class SubByConstOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -177,7 +190,7 @@ class SubFromConstOpDef : public OperatorDef {
   SubFromConstOpDef(const constrcutor_access_key&, double value, Tensor input,
                     const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SubFromConstOp), {input}, op_meta), _value(value) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   inline double const_value() const {
@@ -185,6 +198,8 @@ class SubFromConstOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -211,10 +226,12 @@ class NegateOpDef : public OperatorDef {
   NegateOpDef(const constrcutor_access_key&, Tensor input,
               const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(NegateOp), {input}, op_meta) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -239,12 +256,12 @@ class MulElewiseOpDef : public OperatorDef {
   MulElewiseOpDef(const constrcutor_access_key&, Tensor a, Tensor b,
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(MulElewiseOp), {a, b}, op_meta) {
-    HTShape shape = Broadcast(_inputs[0]->shape(), _inputs[1]->shape());
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -269,7 +286,7 @@ class MulByConstOpDef : public OperatorDef {
   MulByConstOpDef(const constrcutor_access_key&, Tensor input, double value,
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(MulByConstOp), {input}, op_meta), _value(value) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   inline double const_value() const {
@@ -277,6 +294,8 @@ class MulByConstOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -307,12 +326,12 @@ class DivElewiseOpDef : public OperatorDef {
   DivElewiseOpDef(const constrcutor_access_key&, Tensor a, Tensor b,
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DivElewiseOp), {a, b}, op_meta) {
-    HTShape shape = Broadcast(_inputs[0]->shape(), _inputs[1]->shape());
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -337,7 +356,7 @@ class DivByConstOpDef : public OperatorDef {
   DivByConstOpDef(const constrcutor_access_key&, Tensor input, double value,
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DivByConstOp), {input}, op_meta), _value(value) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   inline double const_value() const {
@@ -345,6 +364,8 @@ class DivByConstOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -371,7 +392,7 @@ class DivFromConstOpDef : public OperatorDef {
   DivFromConstOpDef(const constrcutor_access_key&, double value, Tensor input,
                     const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DivFromConstOp), {input}, op_meta), _value(value) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   inline double const_value() const {
@@ -379,6 +400,8 @@ class DivFromConstOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -405,10 +428,12 @@ class ReciprocalOpDef : public OperatorDef {
   ReciprocalOpDef(const constrcutor_access_key&, Tensor input,
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReciprocalOp), {input}, op_meta) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -422,6 +447,235 @@ class ReciprocalOp final : public OpWrapper<ReciprocalOpDef> {
   ReciprocalOp(Tensor input, const OpMeta& op_meta = OpMeta())
   : OpWrapper<ReciprocalOpDef>(make_ptr<ReciprocalOpDef>(
       ReciprocalOpDef::constrcutor_access_key(), input, op_meta)) {}
+};
+
+
+class AddElewiseGradientOpDef : public OperatorDef {
+ private:
+  friend class AddElewiseGradientOp;
+  struct constrcutor_access_key {};
+
+ public:
+  AddElewiseGradientOpDef(const constrcutor_access_key&, Tensor a, Tensor b,
+                          Tensor input, Tensor output, int index, 
+                          const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(AddElewiseGradientOp), {a, b, input, output}, op_meta),
+  _index(index) {
+    DoInferMeta();
+  }
+
+  void set_axes(HTAxes axe) {
+    _add_axes = axe;
+  }
+
+  void set_keep_dims(HTKeepDims keep_dims) {
+    _keep_dims = keep_dims;
+  }
+
+  HTAxes axes() const {
+    return _add_axes;
+  }
+
+  HTKeepDims keep_dims() const{
+    return _keep_dims;
+  }
+
+  int index() const {
+    return _index;
+  }
+
+ protected:
+  void DoInferMeta() override;
+
+  void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  HTAxes _add_axes;
+
+  HTKeepDims _keep_dims;
+
+  int _index;
+};
+
+class AddElewiseGradientOp final : public OpWrapper<AddElewiseGradientOpDef> {
+ public:
+  AddElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
+                       const OpMeta& op_meta = OpMeta())
+  : OpWrapper<AddElewiseGradientOpDef>(make_ptr<AddElewiseGradientOpDef>(
+      AddElewiseGradientOpDef::constrcutor_access_key(), a, b, input, output, index, op_meta)) {}
+};
+
+class SubElewiseGradientOpDef : public OperatorDef {
+ private:
+  friend class SubElewiseGradientOp;
+  struct constrcutor_access_key {};
+
+ public:
+  SubElewiseGradientOpDef(const constrcutor_access_key&, Tensor a, Tensor b,
+                          Tensor input, Tensor output, int index, 
+                          const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(SubElewiseGradientOp), {a, b, input, output}, op_meta),
+  _index(index) {
+    DoInferMeta();
+  }
+
+  void set_axes(HTAxes axe) {
+    _add_axes = axe;
+  }
+
+  void set_keep_dims(HTKeepDims keep_dims) {
+    _keep_dims = keep_dims;
+  }
+
+  HTAxes axes() const {
+    return _add_axes;
+  }
+
+  HTKeepDims keep_dims() const{
+    return _keep_dims;
+  }
+
+  int index() const {
+    return _index;
+  }
+
+ protected:
+  void DoInferMeta() override;
+
+  void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  HTAxes _add_axes;
+
+  HTKeepDims _keep_dims;
+
+  int _index;
+};
+
+class SubElewiseGradientOp final : public OpWrapper<SubElewiseGradientOpDef> {
+ public:
+  SubElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
+                       const OpMeta& op_meta = OpMeta())
+  : OpWrapper<SubElewiseGradientOpDef>(make_ptr<SubElewiseGradientOpDef>(
+      SubElewiseGradientOpDef::constrcutor_access_key(), a, b, input, output, index, op_meta)) {}
+};
+
+class MulElewiseGradientOpDef : public OperatorDef {
+ private:
+  friend class MulElewiseGradientOp;
+  struct constrcutor_access_key {};
+
+ public:
+  MulElewiseGradientOpDef(const constrcutor_access_key&, Tensor a, Tensor b,
+                          Tensor input, Tensor output, int index, 
+                          const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(MulElewiseGradientOp), {a, b, input, output}, op_meta),
+  _index(index) {
+    DoInferMeta();
+  }
+
+  void set_axes(HTAxes axe) {
+    _add_axes = axe;
+  }
+
+  void set_keep_dims(HTKeepDims keep_dims) {
+    _keep_dims = keep_dims;
+  }
+
+  HTAxes axes() const {
+    return _add_axes;
+  }
+
+  HTKeepDims keep_dims() const{
+    return _keep_dims;
+  }
+
+  int index() const {
+    return _index;
+  }
+
+ protected:
+  void DoInferMeta() override;
+
+  void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  HTAxes _add_axes;
+
+  HTKeepDims _keep_dims;
+
+  int _index;
+};
+
+class MulElewiseGradientOp final : public OpWrapper<MulElewiseGradientOpDef> {
+ public:
+  MulElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
+                       const OpMeta& op_meta = OpMeta())
+  : OpWrapper<MulElewiseGradientOpDef>(make_ptr<MulElewiseGradientOpDef>(
+      MulElewiseGradientOpDef::constrcutor_access_key(), a, b, input, output, index, op_meta)) {}
+};
+
+class DivElewiseGradientOpDef : public OperatorDef {
+ private:
+  friend class DivElewiseGradientOp;
+  struct constrcutor_access_key {};
+
+ public:
+  DivElewiseGradientOpDef(const constrcutor_access_key&, Tensor a, Tensor b,
+                          Tensor input, Tensor output, int index, 
+                          const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(DivElewiseGradientOp), {a, b, input, output}, op_meta),
+  _index(index) {
+    DoInferMeta();
+  }
+
+  void set_axes(HTAxes axe) {
+    _add_axes = axe;
+  }
+
+  void set_keep_dims(HTKeepDims keep_dims) {
+    _keep_dims = keep_dims;
+  }
+
+  HTAxes axes() const {
+    return _add_axes;
+  }
+
+  HTKeepDims keep_dims() const{
+    return _keep_dims;
+  }
+
+  int index() const {
+    return _index;
+  }
+
+ protected:
+  void DoInferMeta() override;
+
+  void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  HTAxes _add_axes;
+
+  HTKeepDims _keep_dims;
+
+  int _index;
+};
+
+class DivElewiseGradientOp final : public OpWrapper<DivElewiseGradientOpDef> {
+ public:
+  DivElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
+                       const OpMeta& op_meta = OpMeta())
+  : OpWrapper<DivElewiseGradientOpDef>(make_ptr<DivElewiseGradientOpDef>(
+      DivElewiseGradientOpDef::constrcutor_access_key(), a, b, input, output, index, op_meta)) {}
 };
 
 } // namespace autograd

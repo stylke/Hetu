@@ -42,7 +42,7 @@ void ConcatenateCuda(const NDArray& input, NDArray& output, size_t axis,
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
-  size_t size = output->numel();
+  size_t size = input->numel();
   int now_ndim = output->ndim();
   HT_ASSERT(input->ndim() == now_ndim);
   int num_concats = 1;
@@ -109,6 +109,11 @@ void ConcatenateGradientCuda(const NDArray& output_grad, NDArray& input_grad,
         output_grad->data_ptr<spec_t>(), input_grad->data_ptr<spec_t>(),
         input_width, output_width, offset, concat_size, size);
     });
+    // CudaStreamSynchronize(cuda_stream);
+    // HT_LOG_INFO << output_grad << "\n" << input_grad << "\n"
+    // << input_width << " " << output_width << " " << offset << " "
+    // << concat_size << " " << size;
+    // HT_LOG_INFO << output_grad->shape() << " " << output_grad->data_ptr<void>();
 }
 
 } // namespace impl

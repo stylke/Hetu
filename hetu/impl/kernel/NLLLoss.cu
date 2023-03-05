@@ -29,10 +29,13 @@ nllloss_gradient_kernel(const spec_t* pred, const int64_t* label,
   if (idx >= n_rows)
     return;
   int64_t id = label[idx];
+  for (int i = 0; i < n_cols; ++i) {
+    output[n_cols * idx + i] = 0; 
+  }
   if (id < 0 || id >= n_cols) {
     output[n_cols * idx + id] = 0;
   } else {
-    output[n_cols * idx + id] = - grad_loss[idx];
+    output[n_cols * idx + id] = - grad_loss[idx] * n_cols;
   }
 }
 
@@ -83,7 +86,7 @@ void NLLLossGradientCuda(const NDArray& pred, const NDArray& label,
 
   size_t n_rows = 1, n_cols;
   for (size_t i = 0; i < pred->ndim() - 1; ++i)
-    n_rows *= label->shape(i);
+    n_rows *= pred->shape(i);
   n_cols = pred->shape(pred->ndim() - 1);
   if (n_rows == 0)
     return;

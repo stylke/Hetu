@@ -24,5 +24,5 @@ class LayerNorm(Module):
         self.bias = hetu.nn.Parameter(hetu.zeros(self.normalized_shape))
 
     def forward(self, input: Tensor) -> Tensor:
-        return hetu.layer_norm(input, self.weight, self.bias, self.eps)
+        return hetu.layer_norm(input, self.weight, self.bias, self.eps)[0]
 

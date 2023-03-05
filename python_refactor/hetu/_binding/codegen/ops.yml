@@ -157,10 +157,15 @@
 
 - name: linear
   op: LinearOp
-  args: Tensor a, Tensor b, Tensor bias=None, bool trans_a=False, bool trans_b=True
+  args: Tensor a, Tensor b, Tensor bias=None, bool trans_a=False, bool trans_b=False
 
 - name: matmul
   op: MatMulOp
+  args: Tensor input, Tensor other, bool trans_a=False, bool trans_b=False
+  self: input
+
+- name: matmul2
+  op: MatMul2Op
   args: Tensor input, Tensor other, bool trans_a=False, bool trans_b=False
   self: input
 
@@ -194,9 +199,13 @@
   op: KLDivLossOp
   args: Tensor preds, Tensor labels, std::string reduction=\"mean\"
 
-- name: softmax_cross_entroy
+- name: softmax_cross_entropy
   op: SoftmaxCrossEntropyOp
   args: Tensor preds, Tensor labels, std::string reduction=\"mean\"
+
+- name: softmax_cross_entropy_sparse
+  op: SoftmaxCrossEntropySparseOp
+  args: Tensor preds, Tensor labels, int64_t ignored_index=-1, std::string reduction=\"mean\"
 
 #######################################################
 # CNN Related
@@ -228,7 +237,7 @@
 
 - name: batch_norm
   op: BatchNormOp
-  args: Tensor input, Tensor bn_scale, Tensor bn_bias, double momentum=0.1, double eps=1e-5
+  args: Tensor input, Tensor bn_scale, Tensor bn_bias, Tensor running_mean, Tensor running_var, double momentum=0.1, double eps=1e-5
   self: input
 
 - name: instance_norm

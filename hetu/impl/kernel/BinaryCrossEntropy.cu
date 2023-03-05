@@ -31,7 +31,7 @@ binary_cross_entropy_gradient_kernel(const spec_t* pred, const spec_t* label,
   if (idx >= n_rows)
     return;
   spec_t denominator = pred[idx] * (1 - pred[idx]);
-  output[idx] = (pred[idx] - label[idx]) / MAX(denominator, 1e-12);
+  output[idx] = grad_loss[idx] * (pred[idx] - label[idx]) / MAX(denominator, 1e-12);
 }
 
 void BinaryCrossEntropyCuda(const NDArray& pred, const NDArray& label,

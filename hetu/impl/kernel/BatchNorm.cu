@@ -167,6 +167,7 @@ void BatchNormGradientCuda(const NDArray& gradient_Y, const NDArray& input_X,
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(bnScaleBiasMeanVar_desc));
+    //   HT_LOG_INFO << gradient_X->shape() << " " << gradient_X->data_ptr<void>();
     });
 }
 

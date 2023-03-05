@@ -59,6 +59,8 @@ class Optimizer(object):
         else:
             for v in var_list:
                 assert v.trainable, f"Variable {v} is not trainable"
+        # for v in var_list:
+        #     print(v, " ", v.trainable)
         grad_list = hetu.gradients(loss, var_list, grad_loss)
         assert len(grad_list) == len(var_list), \
             f"Only {len(grad_list)} gradients are returned for " + \

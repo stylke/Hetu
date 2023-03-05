@@ -24,17 +24,7 @@ class AvgPoolOpDef : public OperatorDef {
     _kernel_W(kernel_W),
     _padding(padding),
     _stride(stride) {
-    HTShape shape = {-1, -1, -1, -1};
-    if (input->has_shape()) {
-      int64_t N = input->shape(0);
-      int64_t C = input->shape(1);
-      int64_t H = input->shape(2);
-      int64_t W = input->shape(3);
-      int64_t p_H = (H + 2 * get_padding() - get_kernel_H()) / get_stride() + 1;
-      int64_t p_W = (W + 2 * get_padding() - get_kernel_W()) / get_stride() + 1;
-      shape = {N, C, p_H, p_W};
-    }
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DoInferMeta();
   }
 
   size_t get_kernel_H() const {
@@ -54,6 +44,8 @@ class AvgPoolOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -95,7 +87,7 @@ class AvgPoolGradientOpDef : public OperatorDef {
     _kernel_W(kernel_W),
     _padding(padding),
     _stride(stride) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
   size_t get_kernel_H() const {
@@ -115,6 +107,8 @@ class AvgPoolGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

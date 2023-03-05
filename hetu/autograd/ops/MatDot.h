@@ -18,8 +18,7 @@ class MatDotOpDef : public OperatorDef {
   MatDotOpDef(const constrcutor_access_key&, Tensor a, Tensor b,
               int64_t axes = 0, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(MatDotOp), {a, b}, op_meta) {
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(a->meta());
+    DoInferMeta();
   }
 
   int64_t get_axes() const {
@@ -27,6 +26,8 @@ class MatDotOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

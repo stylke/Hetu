@@ -184,7 +184,6 @@ PyObject* PyNDArray_to_numpy(PyNDArray* self, PyObject* args,
   HT_PY_FUNC_BEGIN
   HT_VALUE_ERROR_IF(!self->ndarray.is_defined()) 
     << "NDArray is not defined";
-  
   static PyArgParser parser({
     "numpy(bool force=false)"
   });

@@ -253,6 +253,11 @@ class OperatorDef : public shared_ptr_target {
     return {};
   }
 
+  virtual void DoInferMeta() {
+    HT_NOT_IMPLEMENTED << "InferMeta fn of op \"" << type()
+                       << "\" is not defined";
+  }
+
   virtual HTShapeList DoInferShape(const HTShapeList& input_shapes) {
     if (num_outputs() == 0)
       return {};

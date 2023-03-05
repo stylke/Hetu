@@ -17,26 +17,7 @@ class TransposeOpDef : public OperatorDef {
   TransposeOpDef(const constrcutor_access_key&, Tensor input, HTShape perms,
                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(TransposeOp), {input}, op_meta), _perms(perms) {
-    HTShape res_shape = {};
-    if (input->has_shape()) {
-      HTShape ori_shape = input->shape();
-      HTShape perm = perms;
-      HT_ASSERT(perm.size() == ori_shape.size())
-        << "Invalid perm size:" << perms << ",expect:" << input->shape();
-      int ndim = perm.size();
-      HTShape vis(ndim);
-      for (int i = 0; i < ndim; ++i) {
-        HT_ASSERT(perm[i] < ndim);
-        HT_ASSERT(vis[perm[i]] == 0);
-        vis[perm[i]]++;
-      }
-      res_shape = ori_shape;
-      for (int i = 0; i < ndim; ++i) {
-        res_shape[i] = ori_shape[perm[i]];
-      }
-    }
-    AddOutput(
-      NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(res_shape));
+    DoInferMeta();
   }
 
   HTShape get_perms() const {
@@ -44,6 +25,8 @@ class TransposeOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

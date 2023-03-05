@@ -20,50 +20,24 @@ class ConcatenateOpDef : public OperatorDef {
   ConcatenateOpDef(const constrcutor_access_key&, const TensorList& inputs,
                    size_t axis = 0, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ConcatenateOp), inputs, op_meta), _axis(axis) {
-    int len = inputs.size();
-    grad_inputs.resize(len);
-
-    bool flag = true;
-    for (int i = 0; i < len; ++i) {
-      if (!inputs.at(i)->has_shape()) {
-        flag = false;
-        break;
-      }
-    }
-    HTShape out_shape = {};
-    if (flag) {
-      out_shape = inputs.at(0)->shape();
-      int n_dim = out_shape.size();
-      int out_dim = out_shape[axis];
-      int ind = 0;
-      ind += 1;
-      for (int i = 1; i < len; ++i) {
-        HTShape shape = inputs.at(i)->shape();
-        HT_ASSERT(shape.size() == out_shape.size());
-        for (int j = 0; j < n_dim; ++j) {
-          if (j != (int) axis) {
-            HT_ASSERT(shape[j] == out_shape[j] || shape[j] == -1 ||
-                      out_shape[j] == -1);
-          } else {
-            ind += 1;
-            out_dim += shape[j];
-          }
-        }
-      }
-      out_shape[axis] = out_dim;
-    }
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(
-      NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(out_shape));
+    DoInferMeta();
   }
 
   size_t get_axis() const {
     return _axis;
   }
 
-  std::vector<ConcatenateGradientOp> grad_inputs;
+  int64_t get_grad_offset(size_t idx) const {
+    return grad_offsets[idx];
+  }
+
+  size_t grad_num() const {
+    return grad_offsets.size();
+  }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -72,6 +46,8 @@ class ConcatenateOpDef : public OperatorDef {
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
   size_t _axis;
+
+  std::vector<int64_t> grad_offsets;
 };
 
 class ConcatenateOp final : public OpWrapper<ConcatenateOpDef> {
@@ -88,12 +64,12 @@ class ConcatenateGradientOpDef : public OperatorDef {
   struct constrcutor_access_key {};
 
  public:
-  ConcatenateGradientOpDef(const constrcutor_access_key&, Tensor input,
-                           Tensor grad_output, size_t axis,
+  ConcatenateGradientOpDef(const constrcutor_access_key&, Tensor input, Tensor output,
+                           Tensor grad_output, size_t axis, size_t offset,
                            const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(ConcatenateGradientOp), {input, grad_output}, op_meta),
-    _axis(axis) {
-    AddOutput(input->meta());
+  : OperatorDef(quote(ConcatenateGradientOp), {input, output, grad_output}, op_meta),
+    _axis(axis), _offset(offset) {
+    DoInferMeta();
   }
 
   size_t get_axis() const {
@@ -109,6 +85,8 @@ class ConcatenateGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -122,11 +100,11 @@ class ConcatenateGradientOpDef : public OperatorDef {
 class ConcatenateGradientOp final : public OpWrapper<ConcatenateGradientOpDef> {
  public:
   ConcatenateGradientOp() : OpWrapper<ConcatenateGradientOpDef>() {}
-  ConcatenateGradientOp(Tensor input, Tensor grad_output, size_t axis,
+  ConcatenateGradientOp(Tensor input, Tensor output, Tensor grad_output, size_t axis, size_t offset,
                         const OpMeta& op_meta = OpMeta())
   : OpWrapper<ConcatenateGradientOpDef>(make_ptr<ConcatenateGradientOpDef>(
-      ConcatenateGradientOpDef::constrcutor_access_key(), input, grad_output,
-      axis, op_meta)) {}
+      ConcatenateGradientOpDef::constrcutor_access_key(), input, output, grad_output,
+      axis, offset, op_meta)) {}
 };
 
 } // namespace autograd

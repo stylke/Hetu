@@ -247,8 +247,10 @@ class TestNormModules(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             scale_np = np.ones(shape[1]).astype(np.float32)
             bias_np = np.zeros(shape[1]).astype(np.float32)
+            # ssf = torch.nn.BatchNorm2d(shape[1])
             gt = torch.batch_norm(torch.from_numpy(x_np), weight = torch.from_numpy(scale_np), bias = torch.from_numpy(bias_np),
                                  running_mean=None, running_var=None, training=True, momentum=0.1, eps=1e-5, cudnn_enabled=True).numpy()
+            # gt = ssf(torch.from_numpy(x_np)).detach().numpy()
             nn_batchnorm = hetu.nn.BatchNorm(shape[1], 1e-5, 0.1)
             self.assertTrue(allclose(nn_batchnorm(x), gt))
 
@@ -268,9 +270,9 @@ class TestNormModules(unittest.TestCase):
         for shape in TestPoolOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             x = hetu.from_numpy(x_np)
-            instancenorm = torch.nn.InstanceNorm2d(num_features=shape[1], eps=1e-5)
+            instancenorm = torch.nn.InstanceNorm2d(num_features=shape[1], eps=0)
             gt = instancenorm(torch.from_numpy(x_np)).detach().numpy()
-            nn_instancenorm = hetu.nn.InstanceNorm(shape[1], eps=1e-5)
+            nn_instancenorm = hetu.nn.InstanceNorm(shape[1], eps=0)
             self.assertTrue(allclose(nn_instancenorm(x), gt))
 
 class TestReduceOps(unittest.TestCase):

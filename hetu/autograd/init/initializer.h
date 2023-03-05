@@ -14,6 +14,7 @@ class Initializer {
                     StreamIndex stream_id = NDArray::DEFAULT_STREAM) const = 0;
 
   virtual Initializer* copy() const = 0;
+
 };
 
 class VoidifiedInitializer : public Initializer {

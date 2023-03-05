@@ -24,7 +24,22 @@ TensorList ConcatOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_inputA, grad_inputB};
 }
 
-HTShapeList ConcatOpDef::DoInferShape(const HTShapeList& input_shapes) {
+void ConcatOpDef::DoInferMeta() {
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  HTShape shape;
+  if (_inputs[0]->has_shape() && _inputs[1]->has_shape()) {
+    for (int i = 0; i < _inputs[0]->ndim(); ++i) {
+      if (i != get_axis())
+        HT_ASSERT(_inputs[0]->shape(i) == _inputs[1]->shape(i));
+      }
+    HT_ASSERT(_inputs[0]->shape(get_axis()) >= 0 && _inputs[1]->shape(get_axis()) >= 0);
+    shape = _inputs[0]->shape();
+    shape[get_axis()] += _inputs[1]->shape(get_axis());
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape).set_device(_inputs[0]->device()));
+}
+
+HTShapeList ConcatOpDef::DoInferShape(const HTShapeList& input_shapes) { 
   HTShape shapeA = input_shapes.at(0);
   shapeA[get_axis()] += input_shapes.at(1)[get_axis()];
   return {shapeA};
@@ -33,12 +48,17 @@ HTShapeList ConcatOpDef::DoInferShape(const HTShapeList& input_shapes) {
 void ConcatGradientOpDef::DoCompute(const NDArrayList& inputs,
                                     NDArrayList& outputs, RuntimeContext& ctx) {
   if (placement().is_cuda()) {
-    hetu::impl::ConcatGradientCuda(inputs.at(0), outputs.at(0), get_axis(),
+    hetu::impl::ConcatGradientCuda(inputs.at(1), outputs.at(0), get_axis(),
                                    get_id(), stream());
   } else {
-    hetu::impl::ConcatGradientCpu(inputs.at(0), outputs.at(0), get_axis(),
+    hetu::impl::ConcatGradientCpu(inputs.at(1), outputs.at(0), get_axis(),
                                   get_id(), stream());
   }
+}
+
+void ConcatGradientOpDef::DoInferMeta() {
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(_inputs[0]->meta());
 }
 
 HTShapeList ConcatGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {

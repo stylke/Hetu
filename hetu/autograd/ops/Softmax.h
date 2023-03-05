@@ -19,10 +19,12 @@ class SoftmaxOpDef : public OperatorDef {
   SoftmaxOpDef(const constrcutor_access_key&, Tensor input,
                const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SoftmaxOp), {input}, op_meta) {
-    AddOutput(input->meta());
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -47,10 +49,12 @@ class SoftmaxGradientOpDef : public OperatorDef {
   SoftmaxGradientOpDef(const constrcutor_access_key&, Tensor input,
                        Tensor grad_output, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SoftmaxGradientOp), {input, grad_output}, op_meta) {
-    AddOutput(grad_output->meta());
+    DoInferMeta();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

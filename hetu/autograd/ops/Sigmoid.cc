@@ -26,6 +26,10 @@ TensorList SigmoidOpDef::DoGradient(const TensorList& grad_outputs) {
             ->output(0)};
 }
 
+void SigmoidOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList SigmoidOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(0)};

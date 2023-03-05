@@ -24,9 +24,9 @@ class Linear(Module):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.weight = hetu.nn.Parameter(hetu.empty([out_features, in_features]))
+        self.weight = hetu.nn.Parameter(hetu.empty([out_features, in_features], trainable=True))
         if bias:
-            self.bias = hetu.nn.Parameter(hetu.empty([out_features]))
+            self.bias = hetu.nn.Parameter(hetu.empty([out_features], trainable=True))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
@@ -39,4 +39,4 @@ class Linear(Module):
             hetu.nn.init.uniform_(self.bias, -bound, bound)
     
     def forward(self, input: Tensor) -> Tensor:
-        return hetu.linear(input, self.weight, self.bias)
+        return hetu.linear(input, self.weight, self.bias, trans_b=True)
