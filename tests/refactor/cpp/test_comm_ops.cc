@@ -25,12 +25,6 @@ void TestDARAllReduceOp(DeviceType device_type, DataType dtype = kFloat32, const
   auto all_devices = GetGlobalDeviceGroup();
   auto local_rank = all_devices.get_index(local_device);
   auto world_size = all_devices.num_devices();
-  CommunicationGroup group;
-  if (local_device.is_cpu())
-    group = MPICommunicationGroup::GetOrCreate({});
-    // group = MPICommunicationGroup::GetOrCreate(DeviceGroupToWorldRanks(all_devices));
-  else
-    group = NCCLCommunicationGroup::GetOrCreate({}, local_device);
   if(local_rank == 0){
     HT_LOG_INFO << "Testing AllReduceOp for device " << device_type
                 << " and type " << dtype << "...";
@@ -89,8 +83,10 @@ void TestDARReduceCommOp(DeviceType device_type, DataType dtype = kFloat32, cons
   int reducer = world_size / 2;
   auto comm_op = ReduceCommOp(input_tensor, reducer, OpMeta().set_device_group(all_devices));
   auto output_tensor = comm_op->output(0);
+  auto comm_grad_op = ReduceCommGradientOp(output_tensor, reducer, OpMeta().set_device_group(all_devices));
+  auto input_grad = comm_grad_op->output(0);
 
-  DARExecutor exec(local_device, all_devices, {output_tensor});
+  DARExecutor exec(local_device, all_devices, {output_tensor, input_grad});
 
   const double a = 1.23, b = 3.141;
   std::vector<double> v;
@@ -109,16 +105,20 @@ void TestDARReduceCommOp(DeviceType device_type, DataType dtype = kFloat32, cons
     HT_LOG_INFO << local_device << ": init data = " << data;
   }
   FeedDict feed_dict = {{input_tensor->id(), data}};
-  auto result = exec.Run({output_tensor}, feed_dict); 
+  auto result = exec.Run({output_tensor, input_grad}, feed_dict); 
   SynchronizeAllStreams();
-  auto output_array = result[0];
+  auto output_array = result[0], input_grad_array = result[1];
   if(print_result){
     HT_LOG_INFO << local_device << ": result = " << output_array;
+    HT_LOG_INFO << local_device << ": input_grad = " << input_grad_array;
   }
   if((int)local_rank == reducer){
     assert_fuzzy_eq(output_array, ground_truth);
-    HT_LOG_INFO << "Testing ReduceCommOp for device " << device_type
-              << " and type " << dtype << "done";
+  }
+  assert_fuzzy_eq(input_grad_array, ground_truth);
+  if(local_rank == 0){
+  HT_LOG_INFO << "Testing ReduceCommOp for device " << device_type
+          << " and type " << dtype << "done";
   }
 }
 
@@ -138,8 +138,10 @@ void TestDARBroadcastCommOp(DeviceType device_type, DataType dtype = kFloat32, c
   int broadcaster = world_size / 2;
   auto comm_op = BroadcastCommOp(input_tensor, broadcaster, OpMeta().set_device_group(all_devices));
   auto output_tensor = comm_op->output(0);
+  auto comm_grad_op = BroadcastCommGradientOp(output_tensor, broadcaster, OpMeta().set_device_group(all_devices));
+  auto input_grad = comm_grad_op->output(0);
 
-  DARExecutor exec(local_device, all_devices, {output_tensor});
+  DARExecutor exec(local_device, all_devices, {output_tensor, input_grad});
 
   const double a = 1.23, b = 3.141;
   std::vector<double> v;
@@ -158,14 +160,16 @@ void TestDARBroadcastCommOp(DeviceType device_type, DataType dtype = kFloat32, c
     HT_LOG_INFO << local_device << ": init data = " << data;
   }
   FeedDict feed_dict = {{input_tensor->id(), data}};
-  auto result = exec.Run({output_tensor}, feed_dict); 
+  auto result = exec.Run({output_tensor, input_grad}, feed_dict); 
   SynchronizeAllStreams();
-  auto output_array = result[0];
+  auto output_array = result[0], input_grad_array = result[1];
   if(print_result){
     HT_LOG_INFO << local_device << ": result = " << output_array;
+    HT_LOG_INFO << local_device << ": input_grad = " << input_grad_array;
   } 
   assert_fuzzy_eq(output_array, ground_truth);
-  if(local_rank == 0){
+  if((int)local_rank == broadcaster){
+    assert_fuzzy_eq(input_grad_array, value * world_size);
     HT_LOG_INFO << "Testing BroadcastCommOp for device " << device_type
                 << " and type " << dtype << "done";
   }
@@ -186,8 +190,10 @@ void TestDARAllGatherOp(DeviceType device_type, DataType dtype = kFloat32, const
   auto input_tensor = placeholder_op->output(0);
   auto comm_op = AllGatherOp(input_tensor, OpMeta().set_device_group(all_devices));
   auto output_tensor = comm_op->output(0);
+  auto comm_grad_op = AllGatherGradientOp(output_tensor, OpMeta().set_device_group(all_devices));
+  auto input_grad = comm_grad_op->output(0);
 
-  DARExecutor exec(local_device, all_devices, {output_tensor});
+  DARExecutor exec(local_device, all_devices, {output_tensor, input_grad});
 
   const double a = 1.23, b = 3.141;
   std::vector<double> v;
@@ -202,16 +208,18 @@ void TestDARAllGatherOp(DeviceType device_type, DataType dtype = kFloat32, const
     HT_LOG_INFO << local_device << ": init data = " << data;
   }
   FeedDict feed_dict = {{input_tensor->id(), data}};
-  auto result = exec.Run({output_tensor}, feed_dict); 
+  auto result = exec.Run({output_tensor, input_grad}, feed_dict); 
   SynchronizeAllStreams();
-  auto output_array = result[0];
+  auto output_array = result[0], input_grad_array = result[1];
   auto splits = NDArray::split(output_array, world_size, 0);
   if(print_result){
     HT_LOG_INFO << local_device << ": result = " << output_array;
+    HT_LOG_INFO << local_device << ": input_grad = " << input_grad_array;
   }
   for (unsigned int r = 0; r < world_size; r++) {
     assert_fuzzy_eq(splits[r], v[r]);
   }
+  assert_fuzzy_eq(input_grad_array, value);
   if(local_rank == 0){
     HT_LOG_INFO << "Testing AllGatherOp for device " << device_type
                 << " and type " << dtype << " done";
@@ -233,8 +241,10 @@ void TestDARReduceScatterOp(DeviceType device_type, DataType dtype = kFloat32, c
   auto input_tensor = placeholder_op->output(0);
   auto comm_op = ReduceScatterOp(input_tensor, OpMeta().set_device_group(all_devices));
   auto output_tensor = comm_op->output(0);
+  auto comm_grad_op = ReduceScatterGradientOp(output_tensor, OpMeta().set_device_group(all_devices));
+  auto input_grad = comm_grad_op->output(0);
 
-  DARExecutor exec(local_device, all_devices, {output_tensor});
+  DARExecutor exec(local_device, all_devices, {output_tensor, input_grad});
 
   const double a = 1.23, b = 3.141;
   std::vector<double> v;
@@ -253,13 +263,15 @@ void TestDARReduceScatterOp(DeviceType device_type, DataType dtype = kFloat32, c
     HT_LOG_INFO << local_device << ": init data = " << data;
   }
   FeedDict feed_dict = {{input_tensor->id(), data}};
-  auto result = exec.Run({output_tensor}, feed_dict); 
+  auto result = exec.Run({output_tensor, input_grad}, feed_dict); 
   SynchronizeAllStreams();
-  auto output_array = result[0]; 
+  auto output_array = result[0], input_grad_array = result[1];
   if(print_result){
     HT_LOG_INFO << local_device << ": result = " << output_array;
+    HT_LOG_INFO << local_device << ": input_grad = " << input_grad_array;
   }
   assert_fuzzy_eq(output_array, ground_truth);
+  assert_fuzzy_eq(input_grad_array, ground_truth);
   if(local_rank == 0){
     HT_LOG_INFO << "Testing ReduceScatterOp for device " << device_type
                 << " and type " << dtype << " done";
@@ -282,8 +294,10 @@ void TestDARGatherOp(DeviceType device_type, DataType dtype = kFloat32, const HT
   int gatherer = world_size / 2;
   auto comm_op = GatherOp(input_tensor, gatherer, OpMeta().set_device_group(all_devices));
   auto output_tensor = comm_op->output(0);
+  auto comm_grad_op = GatherGradientOp(output_tensor, gatherer, OpMeta().set_device_group(all_devices));
+  auto input_grad = comm_grad_op->output(0);
 
-  DARExecutor exec(local_device, all_devices, {output_tensor});
+  DARExecutor exec(local_device, all_devices, {output_tensor, input_grad});
 
   const double a = 1.23, b = 3.141;
   std::vector<double> v;
@@ -298,17 +312,21 @@ void TestDARGatherOp(DeviceType device_type, DataType dtype = kFloat32, const HT
     HT_LOG_INFO << local_device << ": init data = " << data;
   }
   FeedDict feed_dict = {{input_tensor->id(), data}};
-  auto result = exec.Run({output_tensor}, feed_dict); 
+  auto result = exec.Run({output_tensor, input_grad}, feed_dict); 
   SynchronizeAllStreams();
-  auto output_array = result[0];  
+  auto output_array = result[0], input_grad_array = result[1];
   if(print_result){
     HT_LOG_INFO << local_device << ": result = " << output_array;
+    HT_LOG_INFO << local_device << ": input_grad = " << input_grad_array;
   }
   if((int)local_rank == gatherer){
     auto splits = NDArray::split(output_array, world_size, 0);
     for (unsigned int r = 0; r < world_size; r++) {
       assert_fuzzy_eq(splits[r], v[r]);
     }
+  }
+  assert_fuzzy_eq(input_grad_array, value);
+  if(local_rank == 0){
     HT_LOG_INFO << "Testing GatherOp for device " << device_type
                 << " and type " << dtype << " done";
   }
@@ -330,8 +348,10 @@ void TestDARScatterOp(DeviceType device_type, DataType dtype = kFloat32, const H
   int scatterer = world_size / 2;
   auto comm_op = ScatterOp(input_tensor, scatterer, OpMeta().set_device_group(all_devices));
   auto output_tensor = comm_op->output(0);
+  auto comm_grad_op = ScatterGradientOp(output_tensor, scatterer, OpMeta().set_device_group(all_devices));
+  auto input_grad = comm_grad_op->output(0);
 
-  DARExecutor exec(local_device, all_devices, {output_tensor});
+  DARExecutor exec(local_device, all_devices, {output_tensor, input_grad});
 
   const double a = 1.23, b = 3.141;
   std::vector<double> v;
@@ -350,14 +370,16 @@ void TestDARScatterOp(DeviceType device_type, DataType dtype = kFloat32, const H
     HT_LOG_INFO << local_device << ": init data = " << data;
   }
   FeedDict feed_dict = {{input_tensor->id(), data}};
-  auto result = exec.Run({output_tensor}, feed_dict); 
+  auto result = exec.Run({output_tensor, input_grad}, feed_dict); 
   SynchronizeAllStreams();
-  auto output_array = result[0];  
+  auto output_array = result[0], input_grad_array = result[1];
   if(print_result){
     HT_LOG_INFO << local_device << ": result = " << output_array;
+    HT_LOG_INFO << local_device << ": input_grad = " << input_grad_array;
   }
   assert_fuzzy_eq(output_array, ground_truth);
   if((int)local_rank == scatterer){
+    assert_fuzzy_eq(input_grad_array, ground_truth);
     HT_LOG_INFO << "Testing ScatterOp for device " << device_type
                 << " and type " << dtype << " done";
   }

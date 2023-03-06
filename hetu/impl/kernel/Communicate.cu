@@ -18,6 +18,7 @@ void BroadcastCommCuda(const NDArray& input, NDArray& output, int broadcaster,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
+  comm_group->Sync();
   size_t size = output->numel();
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);

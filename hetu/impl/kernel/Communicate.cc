@@ -22,6 +22,7 @@ void BroadcastCommCpu(const NDArray& input, NDArray& output, int broadcaster,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
+  comm_group->Sync();
   size_t size = output->numel();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "ReshapeCpu", [&]() {
