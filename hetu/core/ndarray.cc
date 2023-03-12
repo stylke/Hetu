@@ -323,7 +323,7 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
     << " (transpose = " << trans_left << ") vs. " << y->shape()
     << " (transpose = " << trans_right << "). ";
   NDArray out = output.is_defined()
-    ? out
+    ? output
     : NDArray::empty(
         {x->shape(trans_left ? 1 : 0), y->shape(trans_right ? 0 : 1)},
         x->device(), x->dtype());
@@ -353,8 +353,9 @@ NDArray NDArray::batchmatmul(const NDArray& x, const NDArray& y,
   }
   shape.emplace_back(a.at(trans_left ? ndims + 1 : ndims));
   shape.emplace_back(b.at(trans_right ? ndims : ndims + 1));
-  NDArray out =
-    output.is_defined() ? out : NDArray::empty(shape, x->device(), x->dtype());
+  NDArray out = output.is_defined()
+    ? output
+    : NDArray::empty(shape, x->device(), x->dtype());
   Stream stream(x->device(), stream_id);
   HT_DISPATCH_KERNEL_CUDA_ONLY(x->device().type(), __FUNCTION__,
                                hetu::impl::BatchMatMul, x, trans_left, y,

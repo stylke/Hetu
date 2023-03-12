@@ -52,6 +52,11 @@ class NDArrayMeta {
   NDArrayMeta& operator=(NDArrayMeta&&) = default;
   NDArrayMeta& operator=(const NDArrayMeta&) = default;
 
+  inline bool operator==(const NDArrayMeta& meta) const {
+    return dtype == meta.dtype && device == meta.device &&
+      shape == meta.shape && stride == meta.stride;
+  }
+
   void view(const HTShape& view_shape);
 
   void unsqueeze(int64_t dim);

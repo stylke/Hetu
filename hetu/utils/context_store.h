@@ -8,6 +8,15 @@ class ContextStore {
  public:
   ContextStore() {}
 
+  void put_bool(const std::string& key, bool value) {
+    _ctx.insert({key, value ? "true" : "false"});
+  }
+
+  bool get_bool(const std::string& key, bool default_value = false) const {
+    auto it = _ctx.find(key);
+    return it != _ctx.end() ? (it->second == "true") : default_value;
+  }
+
   void put_int32(const std::string& key, int32_t value) {
     _ctx.insert({key, std::to_string(value)});
   }
