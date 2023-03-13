@@ -55,11 +55,17 @@ NDArrayList BroadcastCommOpDef::DoCompute(const NDArrayList& inputs,
   return outputs;
 }
 
+// Reduce type backward
 TensorList BroadcastCommOpDef::DoGradient(const TensorList& grad_outputs) {
   return {BroadcastCommGradientOp(grad_outputs.at(0), broadcaster(),
             grad_op_meta().set_name(grad_name()))
             ->output(0)};
 }
+
+// // Copy type backward
+// TensorList BroadcastCommOpDef::DoGradient(const TensorList& grad_outputs) {
+//   return {grad_outputs.at(0)};
+// }
 
 HTShapeList BroadcastCommOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
@@ -211,6 +217,17 @@ bool AllGatherGradientOpDef::DoMapToParallelDevices(const DeviceGroup& pg) {
   return OperatorDef::DoMapToParallelDevices(pg);
 }
 
+// // Reduce-Scatter type backward
+// NDArrayList AllGatherGradientOpDef::DoCompute(const NDArrayList& inputs,
+//                                       RuntimeContext& ctx) {
+//   NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));
+//   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+//                                   hetu::impl::ReduceScatter, inputs.at(0),
+//                                   outputs.at(0), placement_group(), stream());
+//   return outputs;
+// }
+
+// Split type backward
 NDArrayList AllGatherGradientOpDef::DoCompute(const NDArrayList& inputs,
                                       RuntimeContext& ctx) {
   NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));

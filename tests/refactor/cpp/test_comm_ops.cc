@@ -190,10 +190,11 @@ void TestDARAllGatherOp(DeviceType device_type, DataType dtype = kFloat32, const
   auto input_tensor = placeholder_op->output(0);
   auto comm_op = AllGatherOp(input_tensor, OpMeta().set_device_group(all_devices));
   auto output_tensor = comm_op->output(0);
-  auto comm_grad_op = AllGatherGradientOp(output_tensor, OpMeta().set_device_group(all_devices));
-  auto input_grad = comm_grad_op->output(0);
+  // auto comm_grad_op = AllGatherGradientOp(output_tensor, OpMeta().set_device_group(all_devices));
+  // auto input_grad = comm_grad_op->output(0);
 
-  DARExecutor exec(local_device, all_devices, {output_tensor, input_grad});
+  DARExecutor exec(local_device, all_devices, {output_tensor});
+  // DARExecutor exec(local_device, all_devices, {output_tensor, input_grad});
 
   const double a = 1.23, b = 3.141;
   std::vector<double> v;
@@ -208,20 +209,68 @@ void TestDARAllGatherOp(DeviceType device_type, DataType dtype = kFloat32, const
     HT_LOG_INFO << local_device << ": init data = " << data;
   }
   FeedDict feed_dict = {{input_tensor->id(), data}};
-  auto result = exec.Run({output_tensor, input_grad}, feed_dict); 
+  auto result = exec.Run({output_tensor}, feed_dict); 
+  // auto result = exec.Run({output_tensor, input_grad}, feed_dict); 
   SynchronizeAllStreams();
-  auto output_array = result[0], input_grad_array = result[1];
+  auto output_array = result[0];
+  // auto output_array = result[0], input_grad_array = result[1];
   auto splits = NDArray::split(output_array, world_size, 0);
   if(print_result){
     HT_LOG_INFO << local_device << ": result = " << output_array;
-    HT_LOG_INFO << local_device << ": input_grad = " << input_grad_array;
+    // HT_LOG_INFO << local_device << ": input_grad = " << input_grad_array;
   }
   for (unsigned int r = 0; r < world_size; r++) {
     assert_fuzzy_eq(splits[r], v[r]);
   }
-  assert_fuzzy_eq(input_grad_array, value);
+  // assert_fuzzy_eq(input_grad_array, value); // Split type backward
+  // assert_fuzzy_eq(input_grad_array, value * world_size); // Reduce-Scatter type backward
   if(local_rank == 0){
     HT_LOG_INFO << "Testing AllGatherOp for device " << device_type
+                << " and type " << dtype << " done";
+  }
+}
+
+void TestDARAllGatherGradientOp(DeviceType device_type, DataType dtype = kFloat32, const HTShape& shape = {1024, 1024}, bool print_result = false) {
+  auto local_device = GetLocalDevice();
+  auto all_devices = GetGlobalDeviceGroup();
+  auto local_rank = all_devices.get_index(local_device);
+  auto world_size = all_devices.num_devices();
+  if(local_rank == 0){
+    HT_LOG_INFO << "Testing AllGatherGradientOp for device " << device_type
+                << " and type " << dtype << "...";
+  }
+  HT_ASSERT(world_size >= 2) << "device num must >= 2 !";
+  
+  auto placeholder_op = PlaceholderOp(dtype, shape, OpMeta().set_device_group(all_devices)); 
+  auto input_tensor = placeholder_op->output(0);
+  auto comm_grad_op = AllGatherGradientOp(input_tensor, OpMeta().set_device_group(all_devices));
+  auto input_grad = comm_grad_op->output(0);
+
+  DARExecutor exec(local_device, all_devices, {input_grad});
+
+  const double a = 1.23, b = 3.141;
+  std::vector<double> v;
+  for(unsigned int i = 0; i < world_size; ++i){
+    v.push_back(a + b * i);
+  }
+  double value = v[local_rank];
+  NDArray data = NDArray::full(shape, value, local_device, dtype);
+
+  SynchronizeAllStreams();
+  if(print_result){
+    HT_LOG_INFO << local_device << ": init data = " << data;
+  }
+  FeedDict feed_dict = {{input_tensor->id(), data}};
+  auto result = exec.Run({input_grad}, feed_dict); 
+  SynchronizeAllStreams();
+  auto input_grad_array = result[0];
+  if(print_result){
+    HT_LOG_INFO << local_device << ": input_grad = " << input_grad_array;
+  }
+  assert_fuzzy_eq(input_grad_array, value); // Split type backward
+  // assert_fuzzy_eq(input_grad_array, std::accumulate(v.begin(), v.end(), 0.000)); // Reduce-Scatter type backward
+  if(local_rank == 0){
+    HT_LOG_INFO << "Testing AllGatherGradientOp for device " << device_type
                 << " and type " << dtype << " done";
   }
 }
@@ -401,6 +450,7 @@ int main(int argc, char** argv) {
     TestDARReduceCommOp(device_type, dtype, shape, print_result);
     TestDARBroadcastCommOp(device_type, dtype, shape, print_result);
     TestDARAllGatherOp(device_type, dtype, shape, print_result);
+    TestDARAllGatherGradientOp(device_type, dtype, shape, print_result);
     TestDARReduceScatterOp(device_type, dtype, shape, print_result);
     TestDARGatherOp(device_type, dtype, shape, print_result);
     TestDARScatterOp(device_type, dtype, shape, print_result);
