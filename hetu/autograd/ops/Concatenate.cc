@@ -6,14 +6,21 @@ namespace autograd {
 
 void ConcatenateOpDef::DoCompute(const NDArrayList& inputs,
                                  NDArrayList& outputs, RuntimeContext& ctx) {
-  int num = num_inputs();
-  size_t offset = 0;
-  size_t axis = get_axis();
-  for (int i = 0; i < num; ++i) {
-    HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
-                                    hetu::impl::Concatenate, inputs.at(i),
-                                    outputs.at(0), axis, offset, stream());
-    offset += inputs.at(i)->shape(axis);
+if (placement().type() == DeviceType::CPU) {
+    HT_DISPATCH_KERNEL_CPU_ONLY(placement().type(), type(),
+                                hetu::impl::Concatenate, inputs,
+                                outputs.at(0), get_axis(), stream());
+  }
+  else {
+    int num = num_inputs();
+    size_t offset = 0;
+    size_t axis = get_axis();
+    for (int i = 0; i < num; ++i) {
+      HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(),
+                                  hetu::impl::Concatenate, inputs.at(i),
+                                  outputs.at(0), axis, offset, stream());
+      offset += inputs.at(i)->shape(axis);
+    }
   }
 }
 

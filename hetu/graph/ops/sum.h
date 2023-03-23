@@ -15,11 +15,13 @@ class SumOpImpl final : public OpInterface {
   DoInferMeta(const TensorList& inputs) const override {
     HT_VALUE_ERROR_IF(inputs.empty()) << "No inputs are provided";
     // TODO: support broadcast
-    for (size_t i = 1; i < inputs.size(); i++) {
-      HT_NOT_IMPLEMENTED_IF(inputs[0]->meta().shape != inputs[i]->meta().shape)
-        << "Broadcast is not implemented in " << type();
+    int len = inputs.size();
+    HTShape output_shape = inputs[0]->shape();
+    for (int i = 1; i < len; ++i) {
+      output_shape = Broadcast(output_shape, inputs[i]->shape());
     }
-    return {inputs.front()->meta()};
+    auto output_meta = NDArrayMeta(output_shape, inputs[0]->dtype(), inputs[0]->device());
+    return {output_meta};
   }
 
   TensorList DoGradient(Operator& op,
@@ -27,18 +29,19 @@ class SumOpImpl final : public OpInterface {
     TensorList grad_inputs;
     grad_inputs.reserve(op->num_inputs());
     for (size_t i = 0; i < op->num_inputs(); i++)
-      grad_inputs.push_back(grad_outputs.front());
+      grad_inputs.push_back(op->require_grad(i) ? grad_outputs.front() : Tensor());
     return grad_inputs;
   }
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override {
     // TODO: support broadcast
-    for (size_t i = 1; i < input_shapes.size(); i++) {
-      HT_NOT_IMPLEMENTED_IF(input_shapes[0] != input_shapes[i])
-        << "Broadcast is not implemented in " << type();
+    int len = input_shapes.size();
+    HTShape output_shape = input_shapes[0];
+    for (int i = 1; i < len; ++i) {
+      output_shape = Broadcast(output_shape, input_shapes[i]);
     }
-    return {input_shapes.front()};
+    return {output_shape};
   }
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,

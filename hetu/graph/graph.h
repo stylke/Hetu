@@ -116,6 +116,18 @@ class Graph {
     Operator op(OpIdentifier{id(), next_op_id()}, std::move(body),
                 std::move(inputs), std::move(op_meta));
     AddOp(op);
+    bool require_flag = false;
+    for (size_t i = 0; i < op->num_inputs(); i++) {
+      if (op->require_grad(i))
+        require_flag = true;  
+      // HT_LOG_INFO << op << ", input" << i << ", require grad:" << op->require_grad(i);
+    }
+    for (size_t i = 0; i < op->num_outputs(); i++) {
+      op->output(i)->set_require_grad(false);
+      // HT_LOG_INFO << op << ", output" << i;
+    }
+    if (require_flag && op->num_outputs() > 0)
+      op->output(0)->set_require_grad(true);
     return _op_indexing[op->id()];
   }
 

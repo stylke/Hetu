@@ -23,9 +23,10 @@ class LayerNormOpDef : public OperatorDef {
 
  public:
   LayerNormOpDef(const constrcutor_access_key&, Tensor input, Tensor ln_scale,
-                 Tensor ln_bias, double eps = 0.01,
+                 Tensor ln_bias, const HTShape& normalized_shape, double eps = 0.01,
                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(LayerNormOp), {input, ln_scale, ln_bias}, op_meta),
+    _normalized_shape(normalized_shape),
     _eps(eps) {
     DoInferMeta();
   }
@@ -38,13 +39,10 @@ class LayerNormOpDef : public OperatorDef {
     return _eps;
   }
 
-  HTShape get_shape() const {
-    return _shape;
+  HTShape normalized_shape() const {
+    return _normalized_shape;
   }
 
-  void set_shape(HTShape shape) {
-    _shape = shape;
-  }
 
  protected:
   void DoInferMeta() override;
@@ -58,18 +56,20 @@ class LayerNormOpDef : public OperatorDef {
 
   double _momentum;
 
+  HTShape _normalized_shape;
+
   double _eps;
 
-  HTShape _shape;
 };
 
 class LayerNormOp final : public OpWrapper<LayerNormOpDef> {
  public:
-  LayerNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias, double eps = 0.01,
+  LayerNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias,
+              const HTShape& normalized_shape, double eps = 0.01,
               const OpMeta& op_meta = OpMeta())
   : OpWrapper<LayerNormOpDef>(
       make_ptr<LayerNormOpDef>(LayerNormOpDef::constrcutor_access_key(), input,
-                               bn_scale, bn_bias, eps, op_meta)) {}
+                               bn_scale, bn_bias, normalized_shape, eps, op_meta)) {}
 };
 
 class LayerNormGradientOpDef : public OperatorDef {
@@ -79,13 +79,18 @@ class LayerNormGradientOpDef : public OperatorDef {
 
  public:
   LayerNormGradientOpDef(const constrcutor_access_key&, Tensor output_grad,
-                         Tensor input, Tensor bn_scale,
-                         Tensor save_mean, Tensor save_var, double eps,
+                         Tensor input, Tensor bn_scale, Tensor save_mean, Tensor save_var, 
+                         const HTShape& normalized_shape, double eps,
                          const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(LayerNormGradientOp), {output_grad, input, bn_scale, save_mean, save_var},
                 op_meta),
+    _normalized_shape(normalized_shape),
     _eps(eps) {
     DoInferMeta();
+  }
+
+  HTShape normalized_shape() const {
+    return _normalized_shape;
   }
 
   double get_eps() const {
@@ -100,17 +105,20 @@ class LayerNormGradientOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
+  HTShape _normalized_shape;
+
   double _eps;
 };
 
 class LayerNormGradientOp final : public OpWrapper<LayerNormGradientOpDef> {
  public:
   LayerNormGradientOp(Tensor output_grad, Tensor input, Tensor bn_scale,
-                      Tensor save_mean, Tensor save_var, double eps,
+                      Tensor save_mean, Tensor save_var,
+                      const HTShape& normalized_shape, double eps,
                       const OpMeta& op_meta = OpMeta())
   : OpWrapper<LayerNormGradientOpDef>(make_ptr<LayerNormGradientOpDef>(
       LayerNormGradientOpDef::constrcutor_access_key(), output_grad, input,
-      bn_scale, save_mean, save_var, eps, op_meta)) {}
+      bn_scale, save_mean, save_var, normalized_shape, eps, op_meta)) {}
 };
 
 

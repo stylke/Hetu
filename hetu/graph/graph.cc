@@ -135,7 +135,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
 
   // traverse the forward graph in the reversed topo order
   auto topo = Graph::TopoSort(ys, num_ops_hint);
-  for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
+  for (auto it = topo.rbegin(); it != topo.rend(); ++it) {  
     auto& op = it->get();
     TensorList grad_outputs;
     if (op->num_outputs() > 0) {
@@ -160,6 +160,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
           it->second.push_back(grad_inputs[i]);
       }
     }
+
   }
 
   TensorList ret;

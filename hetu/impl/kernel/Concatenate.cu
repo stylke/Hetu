@@ -109,11 +109,6 @@ void ConcatenateGradientCuda(const NDArray& output_grad, NDArray& input_grad,
         output_grad->data_ptr<spec_t>(), input_grad->data_ptr<spec_t>(),
         input_width, output_width, offset, concat_size, size);
     });
-    // CudaStreamSynchronize(cuda_stream);
-    // HT_LOG_INFO << output_grad << "\n" << input_grad << "\n"
-    // << input_width << " " << output_width << " " << offset << " "
-    // << concat_size << " " << size;
-    // HT_LOG_INFO << output_grad->shape() << " " << output_grad->data_ptr<void>();
 }
 
 } // namespace impl

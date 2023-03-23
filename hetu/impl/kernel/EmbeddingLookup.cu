@@ -2,24 +2,10 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/cuda_math.h"
 
 namespace hetu {
 namespace impl {
-
-__device__ void AtomicAdd(float* address, float val) {
-    atomicAdd(address, val);
-}
-
-__device__ void AtomicAdd(double* address, double val) {
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull, assumed;
-    do {
-        assumed = old;
-        old = atomicCAS(address_as_ull, assumed,
-                __double_as_longlong(val + __longlong_as_double(assumed)));
-    } while (assumed != old);
-    // return __longlong_as_double(old);
-}
 
 template <typename spec_t>
 __global__ void embedding_lookup_kernel(const spec_t* input, const int64_t* ids,
@@ -56,7 +42,7 @@ __global__ void embedding_lookup_gradient_kernel(const spec_t* output_grad,
     return;
   int id = int(ids[idx]);
   for (int i = 0; i < length; i++) {
-    AtomicAdd((input_grad + length * id + i), (output_grad[length * idx + i]));
+    hetu::cuda::AtomicAdd((input_grad + length * id + i), (output_grad[length * idx + i]));
   }
 }
 

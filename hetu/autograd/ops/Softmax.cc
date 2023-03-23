@@ -6,12 +6,12 @@ namespace autograd {
 
 void SoftmaxOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(), hetu::impl::Softmax,
-                               inputs.at(0), outputs.at(0), stream());
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), hetu::impl::Softmax,
+                                  inputs.at(0), outputs.at(0), get_dim(), stream());
 }
 
 TensorList SoftmaxOpDef::DoGradient(const TensorList& grad_outputs) {
-  return {SoftmaxGradientOp(_outputs[0], grad_outputs.at(0),
+  return {SoftmaxGradientOp(_outputs[0], grad_outputs.at(0), get_dim(),
                             grad_op_meta().set_name(grad_name()))
             ->output(0)};
 }
@@ -28,9 +28,9 @@ HTShapeList SoftmaxOpDef::DoInferShape(const HTShapeList& input_shapes) {
 void SoftmaxGradientOpDef::DoCompute(const NDArrayList& inputs,
                                      NDArrayList& outputs,
                                      RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(),
-                               hetu::impl::SoftmaxGradient, inputs.at(0),
-                               inputs.at(1), outputs.at(0), stream());
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
+                                  hetu::impl::SoftmaxGradient, inputs.at(0),
+                                  inputs.at(1), outputs.at(0), get_dim(), stream());
 }
 
 void SoftmaxGradientOpDef::DoInferMeta() {

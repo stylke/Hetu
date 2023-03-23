@@ -104,9 +104,6 @@ void ConcatGradientCuda(const NDArray& output_grad, NDArray& input_grad,
         output_grad->data_ptr<spec_t>(), size, concat_size, concat_offset,
         small_offset, big_offset, input_grad->data_ptr<spec_t>());
     });
-    // HT_LOG_INFO << "_____________up____________\n" << output_grad << 
-    // "\n" << id << "\n" << input_grad
-    // << "\n__________down_____________";
 }
 
 } // namespace impl

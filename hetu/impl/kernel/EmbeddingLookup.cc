@@ -43,12 +43,11 @@ void embedding_lookup_gradient_cpu(const spec_t* output_grad, const int64_t* ids
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-  for (size_t idx = 0; idx < size; ++idx) {
-    int64_t id = ids[idx];
-    const spec_t* output_grad_ptr = output_grad + length * idx;
-    spec_t* input_grad_ptr = input_grad + length * id;
-    for (size_t i = 0; i < length; i++)
-      *(input_grad_ptr + i) += *(output_grad_ptr + i);
+  for (size_t idx = 0; idx < size / length; ++idx) {
+    int id = int(ids[idx]);
+    for (int i = 0; i < length; i++) {
+      input_grad[length * id + i] +=  output_grad[length * idx + i];
+    }
   }
 }
 
@@ -104,7 +103,7 @@ void EmbeddingLookupGradientCpu(const NDArray& output_grad, const NDArray& id,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_grad->dtype(), spec_t, "EmbeddingLookupGradientCuda", [&]() {
       embedding_lookup_gradient_cpu(output_grad->data_ptr<spec_t>(),
-                                    id->data_ptr<int64_t>(), size, length,
+                                    id->data_ptr<int64_t>(), output_grad->numel(), length,
                                     input_grad->data_ptr<spec_t>());
     });
 }

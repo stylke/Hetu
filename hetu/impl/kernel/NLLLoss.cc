@@ -9,12 +9,12 @@ namespace impl {
 template <typename spec_t>
 void nllloss_cpu(const spec_t* pred, const int64_t* label, 
                     size_t n_rows, size_t n_cols, spec_t* loss) {
-  for (int idx = 0; idx < n_rows; ++idx) {
+  for (size_t idx = 0; idx < n_rows; ++idx) {
     int64_t id = label[idx];
     if (id < 0 || id >= n_cols) {
       loss[idx] = 0;
     } else {
-      loss[idx] = -pred[n_cols * idx + id];
+      loss[idx] = - pred[n_cols * idx + id];
     }
   }
 }
@@ -25,10 +25,13 @@ void nllloss_gradient_cpu(const spec_t* pred, const int64_t* label,
                           spec_t* output) {
   for (int idx = 0; idx < n_rows; ++idx) {
     int64_t id = label[idx];
+    for (int i = 0; i < n_cols; ++i) {
+      output[n_cols * idx + i] = 0; 
+    }
     if (id < 0 || id >= n_cols) {
       output[n_cols * idx + id] = 0;
     } else {
-      output[n_cols * idx + id] = - grad_loss[idx];
+      output[n_cols * idx + id] = - grad_loss[idx] * n_cols;
     }
   }
 }
@@ -36,7 +39,7 @@ void nllloss_gradient_cpu(const spec_t* pred, const int64_t* label,
 
 void NLLLossCpu(const NDArray& pred, const NDArray& label,
                 NDArray& loss, const Stream& stream) {
-  HT_ASSERT_CUDA_DEVICE(pred);
+  HT_ASSERT_CPU_DEVICE(pred);
   HT_ASSERT_SAME_DEVICE(pred, label);
   HT_ASSERT_SAME_DEVICE(pred, loss);
   HT_ASSERT_SAME_SHAPE(label, loss);
@@ -59,20 +62,29 @@ void NLLLossCpu(const NDArray& pred, const NDArray& label,
     });
 }
 
+template <typename spec_t>
+void array_zero_set_cpu(spec_t* input, size_t size) {
+  for (size_t idx = 0; idx < size; ++idx)
+    input[idx] = 0;
+}
+
 void NLLLossGradientCpu(const NDArray& pred, const NDArray& label,
                         const NDArray& grad_loss, NDArray& output,
                         const Stream& stream) {
-  HT_ASSERT_CUDA_DEVICE(pred);
+  HT_ASSERT_CPU_DEVICE(pred);
   HT_ASSERT_SAME_DEVICE(pred, label);
   HT_ASSERT_SAME_DEVICE(pred, grad_loss);
   HT_ASSERT_SAME_DEVICE(pred, output);
 
   size_t n_rows = 1, n_cols;
-  for (size_t i = 0; i < pred->ndim(); i++)
-    n_rows *= label->shape(i);
+  for (size_t i = 0; i < pred->ndim() - 1; ++i)
+    n_rows *= pred->shape(i);
   n_cols = pred->shape(pred->ndim() - 1);
   if (n_rows == 0)
     return;
+  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+    pred->dtype(), spec_t, "ArrayZeroSet",
+    [&]() { array_zero_set_cpu(output->data_ptr<spec_t>(), output->numel()); });
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "NLLLossGradientCpu", [&]() {
       nllloss_gradient_cpu(

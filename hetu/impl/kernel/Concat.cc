@@ -66,11 +66,43 @@ void ConcatCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
   }
   if (size == 0 || offset1 == 0 || offset2 == 0)
     return;
+
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
+  dnnl::stream engine_stream(eng);  
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     inputA->dtype(), spec_t, "ConcatCpu", [&]() {
-      Concat_cpu<spec_t>(inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(),
-                         size, concat_size, offset1, offset2,
-                         output->data_ptr<spec_t>());
+      auto srcA_md = dnnl::memory::desc(inputA->shape(), dnnl::memory::data_type::f32, inputA->stride());
+      auto srcB_md = dnnl::memory::desc(inputB->shape(), dnnl::memory::data_type::f32, inputB->stride());
+      auto srcA_mem = dnnl::memory(srcA_md, eng);
+      auto srcB_mem = dnnl::memory(srcB_md, eng);
+
+      // Write data to memory object's handle.
+      hetu::omp::write_to_dnnl_memory(inputA->data_ptr<spec_t>(), srcA_mem);
+      hetu::omp::write_to_dnnl_memory(inputB->data_ptr<spec_t>(), srcB_mem);
+    
+      // Create primitive descriptor.
+      auto concat_pd = dnnl::concat::primitive_desc(eng, axis, {srcA_md, srcB_md});
+
+      // Create destination (dst) memory object using the memory descriptor
+      // created by the primitive.
+      auto dst_mem = dnnl::memory(concat_pd.dst_desc(), eng);
+
+      // Create the primitive.
+      auto concat_prim = dnnl::concat(concat_pd);
+
+      // Primitive arguments.
+      std::unordered_map<int, dnnl::memory> concat_args;
+      concat_args.insert({DNNL_ARG_MULTIPLE_SRC, srcA_mem});
+      concat_args.insert({DNNL_ARG_MULTIPLE_SRC + 1, srcB_mem});
+      concat_args.insert({DNNL_ARG_DST, dst_mem});
+
+      // Primitive execution: concatenation.
+      concat_prim.execute(engine_stream, concat_args);
+
+      // Wait for the computation to finalize.
+      engine_stream.wait();
+      
+      hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
     });
 }
 

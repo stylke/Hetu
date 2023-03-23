@@ -8,9 +8,9 @@ namespace graph {
 TensorList
 BinaryCrossEntropyOpImpl::DoGradient(Operator& op,
                                      const TensorList& grad_outputs) const {
-  auto grad_probs =
-    MakeBCEGradOp(op->input(0), op->input(1), grad_outputs.front(), reduction(),
-                  op->grad_op_meta().set_name(op->grad_name()));
+  auto grad_probs = op->require_grad(0) ? MakeBCEGradOp(op->input(0), op->input(1), grad_outputs.front(), reduction(),
+                                          op->grad_op_meta().set_name(op->grad_name()))
+                                        : Tensor();
   return {grad_probs, Tensor()};
 }
 

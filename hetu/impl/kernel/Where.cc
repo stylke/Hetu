@@ -7,7 +7,7 @@ namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-void where_cpu(const bool* cond, const spec_t* arr1, const spec_t* arr2,
+void where_cpu(const int64_t* cond, const spec_t* arr1, const spec_t* arr2,
                spec_t* output, size_t size) {
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
@@ -28,7 +28,7 @@ void WhereCpu(const NDArray& cond, const NDArray& inputA, const NDArray& inputB,
   size_t size = cond->numel();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     inputA->dtype(), spec_t, "WhereCpu", [&]() {
-      where_cpu<spec_t>(cond->data_ptr<bool>(), inputA->data_ptr<spec_t>(),
+      where_cpu<spec_t>(cond->data_ptr<int64_t>(), inputA->data_ptr<spec_t>(),
                         inputB->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
                         size);
     });

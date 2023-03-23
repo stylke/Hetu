@@ -131,8 +131,14 @@ HTShape NDArrayMeta::Reduce(const HTShape& shape, const HTAxes& axes,
   } else if (parsed_axes.size() == num_dim) {
     return {1};
   } else {
+    HTShape reduced_shape_pre = reduced_shape;
     for (auto axis : parsed_axes)
-      reduced_shape.erase(reduced_shape.begin() + axis);
+      reduced_shape_pre[axis] = 0;
+    reduced_shape = {};
+    for (int i = 0; i < num_dim; i++) {
+      if (reduced_shape_pre[i] != 0)
+        reduced_shape.emplace_back(reduced_shape_pre[i]);
+    }
   }
   return reduced_shape;
 }

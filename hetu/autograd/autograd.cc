@@ -50,7 +50,6 @@ TensorList Gradients(const TensorList& ys, const TensorList& xs,
           edge2grads[in_edge->id()] = {grad_inputs[i]};
         else
           it->second.push_back(grad_inputs[i]);
-        // HT_LOG_INFO << node->name() << " " << node->input(i)->name() << " " << node->input(i)->shape();
       }
     }
   }
@@ -64,7 +63,7 @@ TensorList Gradients(const TensorList& ys, const TensorList& xs,
     else
       ret.emplace_back();
   }
-  
+
   return ret;
 }
 

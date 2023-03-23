@@ -83,7 +83,7 @@
   args: Tensor input
   self: input
 
-- name: sum
+- name: add
   op: SumOp
   args: TensorList inputs
 
@@ -247,7 +247,7 @@
 
 - name: layer_norm
   op: LayerNormOp
-  args: Tensor input, Tensor ln_scale, Tensor ln_bias, double eps=0.01
+  args: Tensor input, Tensor ln_scale, Tensor ln_bias, HTShape normalized_shape, double eps=0.01
   self: input
 
 #######################################################
@@ -292,14 +292,24 @@
   args: Tensor input
   self: input
 
+- name: sin
+  op: SinOp
+  args: Tensor input
+  self: input
+
 - name: softmax
   op: SoftmaxOp
-  args: Tensor input
+  args: Tensor input, int64_t dim=0
   self: input
 
 - name: tanh
   op: TanhOp
   args: Tensor input
+  self: input
+
+- name: triu
+  op: TriuTrilOp
+  args: Tensor input, bool lower=False, int64_t diagonal=0
   self: input
 
 #######################################################
@@ -322,9 +332,48 @@
 # Others
 #######################################################
 
+- name: arange
+  op: ArangeOp
+  args: double start, double end, double step
+
 - name: embedding_lookup
   op: EmbeddingLookupOp
   args: Tensor input, Tensor id
+  self: input
+
+- name: gather
+  op: GatherOp
+  args: Tensor input, int64_t dim, Tensor id
+  self: input
+
+- name: interpolate
+  op: InterpolateOp
+  args: Tensor input, HTShape outshape, bool align_corners=False, double scale_factor=0
+  self: input
+
+- name: masked_fill
+  op: MaskedfillOp
+  args: Tensor input, Tensor mask, double val=0
+  self: input
+
+- name: norm
+  op: NormOp
+  args: Tensor input, int64_t p=1, int64_t dim=0, bool keepdim=False
+  self: input
+
+- name: as_strided
+  op: AsStridedOp
+  args: Tensor input, HTShape outshape, HTShape stride
+  self: input
+
+- name: repeat
+  op: RepeatOp
+  args: Tensor input, HTShape repeats
+  self: input
+
+- name: roll
+  op: RollOp
+  args: Tensor input, HTShape shifts, HTAxes dims
   self: input
 
 - name: onehot

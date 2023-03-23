@@ -147,6 +147,14 @@ class TensorDef : public shared_ptr_target {
     _meta.set_device(p);
   }
 
+  const bool require_grad() const {
+    return _require_grad;
+  }
+
+  void set_require_grad(bool new_require_grad) {
+    _require_grad = new_require_grad;
+  }
+
   NDArray& get_or_compute();
 
  protected:
@@ -163,6 +171,7 @@ class TensorDef : public shared_ptr_target {
   const TensorName _name;
   NDArrayMeta _meta;
   OpRefList _consumers;
+  bool _require_grad;
   bool _inform_graph_on_destruction;
 };
 

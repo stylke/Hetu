@@ -9,9 +9,6 @@ namespace impl {
 template <typename spec_t>
 void binary_cross_entropy_cpu(const spec_t* pred, const spec_t* label,
                               size_t n_rows, spec_t* loss) {
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
   for (size_t idx = 0; idx < n_rows; idx++) {
     spec_t v1 = std::log(pred[idx]);
     spec_t v2 = std::log(1 - pred[idx]);
@@ -31,7 +28,7 @@ void binary_cross_entropy_gradient_cpu(const spec_t* pred, const spec_t* label,
 #endif
   for (size_t idx = 0; idx < n_rows; idx++) {
     spec_t denominator = pred[idx] * (1 - pred[idx]);
-    output[idx] = (pred[idx] - label[idx]) / MAX(denominator, 1e-12);
+    output[idx] = grad_loss[idx] * (pred[idx] - label[idx]) / MAX(denominator, 1e-12);
   }
 }
 

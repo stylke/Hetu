@@ -471,6 +471,10 @@ class OpDef : public shared_ptr_target {
     return false;
   }
 
+  bool require_grad(size_t i) const {
+    return _inputs[i]->require_grad();
+  }
+
  protected:
   // Walkaround methods to get the corresponding wrapper
   Operator& get_self();

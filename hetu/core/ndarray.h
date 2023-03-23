@@ -236,10 +236,10 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                         StreamIndex stream_id = DEFAULT_STREAM,
                         NDArray& output = EMPTY);
 
-  static NDArray batchmatmul(const NDArray& x, const NDArray& y,
-                             bool trans_left = false, bool trans_right = false,
-                             StreamIndex stream_id = DEFAULT_STREAM,
-                             NDArray& output = EMPTY);
+  static NDArray bmm(const NDArray& x, const NDArray& y,
+                     bool trans_left = false, bool trans_right = false,
+                     StreamIndex stream_id = DEFAULT_STREAM,
+                     NDArray& output = EMPTY);
 
   static NDArray dot(const NDArray& x, const NDArray& y,
                      StreamIndex stream_id = DEFAULT_STREAM,
@@ -293,8 +293,147 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                            int64_t axis = 0,
                            StreamIndex stream_id = DEFAULT_STREAM);
 
+//____________________________________________________________________________________________
+
+  static NDArray arrayset(NDArray& input, double value,
+                          StreamIndex stream_id = DEFAULT_STREAM);
+
+
+  static NDArray avgpool(const NDArray& input, const size_t kernel_H,
+                         const size_t kernel_W, const size_t padding,
+                         const size_t stride,
+                         StreamIndex stream_id = DEFAULT_STREAM,
+                         NDArray& output = EMPTY);
+
+  static NDArrayList batchnorm(const NDArray& input, const NDArray& bn_scale, const NDArray& bn_bias,
+                               NDArray& running_mean, NDArray& running_var,
+                               double momentum = 0.1, double eps = 1e-5,
+                               StreamIndex stream_id = DEFAULT_STREAM,
+                               NDArray& output = EMPTY,
+                               NDArray& save_mean = EMPTY,
+                               NDArray& save_var = EMPTY);
+   
+  static NDArray broadcast(const NDArray& input, const HTShape& shape,
+                           StreamIndex stream_id = DEFAULT_STREAM,
+                           NDArray& output = EMPTY);
+
+  static NDArray broadcast(const NDArray& input, const HTShape& shape,
+                           const HTAxes& add_axes,
+                           StreamIndex stream_id = DEFAULT_STREAM,
+                           NDArray& output = EMPTY);
+
+  static NDArray conv2d(const NDArray& input, const NDArray& filter, 
+                        const HTShape& padding, const HTShape& stride,
+                        StreamIndex stream_id = DEFAULT_STREAM,
+                        NDArray& output = EMPTY);
+
+  static NDArray embedding(const NDArray& input, const NDArray& id,
+                           StreamIndex stream_id = DEFAULT_STREAM,
+                           NDArray& output = EMPTY);
+
+  static NDArray gather(const NDArray& input, const NDArray& id, int64_t dim,
+                        StreamIndex stream_id = DEFAULT_STREAM,
+                        NDArray& output = EMPTY);
+
+  static NDArrayList instancenorm(const NDArray& input, double eps = 1e-7,
+                                  StreamIndex stream_id = DEFAULT_STREAM,
+                                  NDArray& output = EMPTY,
+                                  NDArray& save_mean = EMPTY,
+                                  NDArray& save_var = EMPTY);
+
+  static NDArray kldiv(const NDArray& preds, const NDArray& labels,
+                       ReductionType reduction = kMEAN,
+                       StreamIndex stream_id = DEFAULT_STREAM,
+                       NDArray& output = EMPTY);
+
+  static NDArrayList layernorm(const NDArray& input, const NDArray& bn_scale, const NDArray& bn_bias, 
+                               const HTShape& normalized_shape, double eps = 0.01,
+                               StreamIndex stream_id = DEFAULT_STREAM,
+                               NDArray& output = EMPTY,
+                               NDArray& save_mean = EMPTY,
+                               NDArray& save_var = EMPTY);
+
+  static NDArray leakyrelu(const NDArray& input, double alpha,
+                           StreamIndex stream_id = DEFAULT_STREAM,
+                           NDArray& output = EMPTY);
+
+  static NDArray linear(const NDArray& a, const NDArray& b, const NDArray& bias, 
+                        bool trans_a = false, bool trans_b = true,
+                        StreamIndex stream_id = DEFAULT_STREAM,
+                        NDArray& output = EMPTY);
+
+  static NDArray maxpool(const NDArray& input, const size_t kernel_H,
+                         const size_t kernel_W, const size_t padding,
+                         const size_t stride,
+                         StreamIndex stream_id = DEFAULT_STREAM,
+                         NDArray& output = EMPTY);
+
+  static NDArray mseloss(const NDArray& preds, const NDArray& labels,
+                         ReductionType reduction = kMEAN,
+                         StreamIndex stream_id = DEFAULT_STREAM,
+                         NDArray& output = EMPTY);
+
+  static NDArray nllloss(const NDArray& preds, const NDArray& labels,
+                         ReductionType reduction = kMEAN,
+                         StreamIndex stream_id = DEFAULT_STREAM,
+                         NDArray& output = EMPTY);
+
+  static NDArray norm(const NDArray& input, int64_t p = 1, int64_t dim = 0, 
+                      bool keepdim = false,
+                      StreamIndex stream_id = DEFAULT_STREAM,
+                      NDArray& output = EMPTY);
+
+  static NDArray onehot(const NDArray& input, size_t num_classes,
+                        StreamIndex stream_id = DEFAULT_STREAM,
+                        NDArray& output = EMPTY);
+
+  static NDArray pad(const NDArray& input, const HTShape& paddings, 
+                     std::string mode, double constant,
+                     StreamIndex stream_id = DEFAULT_STREAM,
+                     NDArray& output = EMPTY);
+
+  static NDArray repeat(const NDArray& input, HTShape repeats,
+                        StreamIndex stream_id = DEFAULT_STREAM,
+                        NDArray& output = EMPTY);
+
+  static NDArray roll(const NDArray& input, HTShape shifts, HTAxes dims,
+                      StreamIndex stream_id = DEFAULT_STREAM,
+                      NDArray& output = EMPTY);
+
+  static NDArray sin(const NDArray& input,
+                     StreamIndex stream_id = DEFAULT_STREAM,
+                     NDArray& output = EMPTY);
+
+  static NDArray slice(const NDArray& input, const HTShape& begin_pos, const HTShape& output_shape,
+                       StreamIndex stream_id = DEFAULT_STREAM,
+                       NDArray& output = EMPTY);
+
+  static NDArray softmax(const NDArray& input, int64_t dim,
+                         StreamIndex stream_id = DEFAULT_STREAM,
+                         NDArray& output = EMPTY);
+
+  static NDArray sceloss(const NDArray& preds, const NDArray& labels,
+                         ReductionType reduction = kMEAN,
+                         StreamIndex stream_id = DEFAULT_STREAM,
+                         NDArray& output = EMPTY);     
+
+  static NDArray sceloss(const NDArray& preds, const NDArray& labels, const int64_t ignored_index = -1, 
+                         ReductionType reduction = kMEAN,
+                         StreamIndex stream_id = DEFAULT_STREAM,
+                         NDArray& output = EMPTY);                     
+
+  static NDArray triu(const NDArray& input, bool lower = false, int64_t diagonal = 0, 
+                      StreamIndex stream_id = DEFAULT_STREAM,
+                      NDArray& output = EMPTY);   
+
+  static NDArray where(const NDArray& cond, const NDArray& x, const NDArray& y, 
+                       StreamIndex stream_id = DEFAULT_STREAM,
+                       NDArray& output = EMPTY); 
+//____________________________________________________________________________________________
+
   static NDArray cat(const NDArrayList& inputs, int axis = 0,
-                     StreamIndex stream_id = DEFAULT_STREAM);
+                     StreamIndex stream_id = DEFAULT_STREAM,
+                     NDArray& output = EMPTY);
 
   static inline NDArray zeros(const HTShape& shape,
                               const Device& device = Device(kCPU),

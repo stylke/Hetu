@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hetu/autograd/operator.h"
+#include "hetu/autograd/utils/tensor_utils.h"
 
 namespace hetu {
 namespace autograd {
@@ -18,7 +19,12 @@ class SumOpDef : public OperatorDef {
            const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SumOp), inputs, op_meta) {
     HT_ASSERT(_inputs.size() > 0) << "No inputs are provided";
-    AddOutput(_inputs[0]->meta());
+    int len = inputs.size();
+    HTShape output_shape = inputs[0]->shape();
+    for (int i = 1; i < len; ++i) {
+      output_shape = Broadcast(output_shape, inputs[i]->shape());
+    }
+    AddOutput(NDArrayMeta(output_shape, inputs[0]->dtype(), inputs[0]->device()));
   }
 
  protected:

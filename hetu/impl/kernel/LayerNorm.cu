@@ -80,15 +80,18 @@ __global__ void layer_norm_kernel(const spec_t* x, const spec_t* scale,
 
 void LayerNormCuda(const NDArray& in_arr, const NDArray& ln_scale,
                    const NDArray& ln_bias, NDArray& mean_arr, NDArray& var_arr,
-                   NDArray& out_arr, float eps, const Stream& stream) {
+                   NDArray& out_arr, int64_t reduce_dims, 
+                   float eps, const Stream& stream) {
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
   int ndim = in_arr->ndim();
-  int base_dim = 1, last_dim = in_arr->shape(ndim - 1);
-  for (int i = 0; i < ndim - 1; ++i)
+  int base_dim = 1, last_dim = 1;
+  for (int i = 0; i < ndim - reduce_dims; ++i)
     base_dim *= in_arr->shape(i);
+  for (int i = ndim - reduce_dims; i < ndim; ++i)
+    last_dim *= in_arr->shape(i);
   // int BlockDim = (last_dim >= 1024 ? 1024: 64);
   dim3 blocks, threads;
   threads.x = (last_dim >= 1024 ? 1024 : 64);
@@ -142,7 +145,7 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
                            const NDArray& ln_scale, NDArray& grad_arr,
                            NDArray& grad_scale, NDArray& grad_bias,
                            const NDArray& mean_arr, const NDArray& var_arr,
-                           float eps, const Stream& stream) {
+                           int64_t reduce_dims, float eps, const Stream& stream) {
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
@@ -176,8 +179,8 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
 
   for (int i = ndim - 1; i >= 0; --i) {
     dimA[i] = (int) in_arr->shape(i);
-    dimB[i] = i == in_arr->ndim() - 1 ? (int) in_arr->shape(i) : 1;
-    dimC[i] = i < in_arr->ndim() - 1 ? (int) in_arr->shape(i) : 1;
+    dimB[i] = i >= in_arr->ndim() - reduce_dims ? (int) in_arr->shape(i) : 1;
+    dimC[i] = i < in_arr->ndim() - reduce_dims ? (int) in_arr->shape(i) : 1;
     strideA[i] = temp_strideA;
     strideB[i] = temp_strideB;
     strideC[i] = temp_strideC;
@@ -188,7 +191,10 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
 
   for (int i = 0; i < ndim; ++i)
     total_elements *= out_grads->shape(i);
-  int lastdim = out_grads->shape(ndim - 1);
+  int lastdim = 1;
+  for (size_t i = 0; i < reduce_dims; ++i) {
+    lastdim *= out_grads->shape(ndim - 1 -i);
+  }
 
   size_t size = total_elements;
   if (size == 0)
@@ -281,9 +287,13 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
       FreeToMemoryPool(dy_mul_x_ptr);
       FreeToMemoryPool(gscale_ptr);
       FreeToMemoryPool(workspace_ptr);
-      // CudaStreamSynchronize(cuda_stream);
-      // HT_LOG_INFO << out_grads << "\n" << grad_arr;
     });
+    free(dimA);
+    free(strideA);
+    free(dimB);
+    free(strideB);
+    free(dimC);
+    free(strideC);
 }
 
 } // namespace impl

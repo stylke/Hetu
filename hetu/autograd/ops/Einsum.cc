@@ -132,7 +132,7 @@ NDArray sumproduct_pair(NDArray& left_, NDArray& right_, HTShape sum_dims_,
 
   right = NDArray::reshape(right, rs);
 
-  NDArray result = NDArray::batchmatmul(left, right, false, false);
+  NDArray result = NDArray::bmm(left, right, false, false);
   HTShape os(out_size.size());
   for (size_t i = 0; i < out_size.size(); ++i) {
     os[i] = out_size[i];
@@ -888,6 +888,7 @@ void EinsumGradientOpDef::DoCompute(const NDArrayList& inputs,
       output_idx += 1;
     }
   }
+  HT_LOG_INFO << output_tensor << " " << outputs.at(0);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::Reshape, output_tensor,
                                   outputs.at(0), stream());

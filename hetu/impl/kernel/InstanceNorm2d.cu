@@ -267,18 +267,20 @@ void InstanceNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
         adesc, (const void*) dy_mul_x, &zero, cdesc,
         (void*) dscale));  
         
-      CudaStreamSynchronize(cuda_stream);
       calculate_grad_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
         dscale, dbias,
         grad_arr->data_ptr<spec_t>(), last2dim, eps, size);
-      CudaStreamSynchronize(cuda_stream);
       FreeToMemoryPool(dscale_ptr);
       FreeToMemoryPool(dbias_ptr);
       FreeToMemoryPool(dy_mul_x_ptr);
       FreeToMemoryPool(workspace_ptr);
     });
+  free(dimA);
+  free(strideA);
+  free(dimC);
+  free(strideC);
 }
 
 } // namespace impl

@@ -8,7 +8,7 @@ namespace impl {
 
 template <typename spec_t>
 void softmax_cross_entropy_sparse_cpu(const spec_t* pred,
-                                      const spec_t* label, 
+                                      const int64_t* label, 
                                       size_t n_rows, size_t n_cols,
                                       const int64_t ignored_index,
                                       spec_t* loss) {
@@ -36,7 +36,7 @@ void softmax_cross_entropy_sparse_cpu(const spec_t* pred,
 }
 
 template <typename spec_t>
-void softmax_cross_entropy_sparse_gradient_cpu(const spec_t* pred, const spec_t* label,
+void softmax_cross_entropy_sparse_gradient_cpu(const spec_t* pred, const int64_t* label,
                                                const spec_t* grad_loss, size_t n_rows, size_t n_cols,
                                                const int64_t ignored_index,
                                                spec_t* output) {
@@ -55,14 +55,14 @@ void softmax_cross_entropy_sparse_gradient_cpu(const spec_t* pred, const spec_t*
     spec_t maxval = pred[idx * n_cols];
 
     for (size_t i = 1; i < n_cols; ++i) {
-      maxval = std::max(maxval, pred[idx * n_cols + i]);
+        maxval = MAX(maxval, pred[idx * n_cols + i]);
     }
 
     spec_t sum = 0;
-    for (size_t i = 1; i < n_cols; ++i) {
-      sum += std::exp(pred[idx * n_cols + i] - maxval);
+    for (size_t i = 0; i < n_cols; ++i) {
+        sum += std::exp(pred[idx * n_cols + i] - maxval);
     }
-    for (size_t i = 1; i < n_cols; ++i) {
+    for (size_t i = 0; i < n_cols; ++i) {
         size_t curid = idx * n_cols + i;
         if(i == int64_t(label[idx]))
           output[curid] = (std::exp(pred[curid] - maxval) / sum - 1.0) * grad_loss[idx];
@@ -85,7 +85,7 @@ void SoftmaxCrossEntropySparseCpu(const NDArray& pred, const NDArray& label,
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "SoftmaxCrossEntropySparseCpu", [&]() {
       softmax_cross_entropy_sparse_cpu(
-        pred->data_ptr<spec_t>(), label->data_ptr<spec_t>(), n_rows, n_cols,
+        pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(), n_rows, n_cols,
         ignored_index, loss->data_ptr<spec_t>());
     });
 }
@@ -104,7 +104,7 @@ void SoftmaxCrossEntropySparseGradientCpu(const NDArray& pred, const NDArray& la
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "SoftmaxCrossEntropySparseGradientCpu", [&]() {
       softmax_cross_entropy_sparse_gradient_cpu(
-        pred->data_ptr<spec_t>(), label->data_ptr<spec_t>(),
+        pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(),
         grad_loss->data_ptr<spec_t>(), n_rows, n_cols,
         ignored_index, output->data_ptr<spec_t>());
     });
