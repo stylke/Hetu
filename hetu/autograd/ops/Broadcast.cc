@@ -55,7 +55,7 @@ HTShapeList BroadcastOpDef::DoInferShape(const HTShapeList& input_shapes) {
 void BroadcastGradientOpDef::DoCompute(const NDArrayList& inputs,
                                        NDArrayList& outputs,
                                        RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::ReduceSum, inputs.at(0),
     outputs.at(0), get_axes().data(), get_axes().size(), stream());
 }
@@ -105,11 +105,11 @@ BroadcastGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   HTKeepDims keepdims = get_keepdims();
   set_grad_shape(input_shape);
   add_axes = {};
-  for (int i = 0; i < len; ++i) {
+  for (size_t i = 0; i < len; ++i) {
     if (axes[i] < 0) {
       axes[i] += ndim;
     }
-    HT_ASSERT(axes[i] >= 0 && axes[i] < ndim);
+    HT_ASSERT(axes[i] >= 0 && axes[i] < int64_t(ndim));
     if (keepdims[i] == true)
       input_shape[axes[i]] = 1;
     else {
@@ -119,7 +119,7 @@ BroadcastGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   }
   set_grad_axes(add_axes);
   output_shape = {};
-  for (int i = 0; i < ndim; ++i) {
+  for (size_t i = 0; i < ndim; ++i) {
     if (input_shape[i] > 0)
       output_shape.emplace_back(input_shape[i]);
   }

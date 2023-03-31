@@ -8,10 +8,6 @@ namespace graph {
 void AvgPoolOpImpl::DoCompute(Operator& op,
                               const NDArrayList& inputs, NDArrayList& outputs,
                               RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::AvgPool,
-  //                              inputs.at(0), get_kernel_H(), get_kernel_W(),
-  //                              outputs.at(0), get_padding(), get_stride(),
-  //                              op->instantiation_ctx().stream());
   NDArray::avgpool(inputs.at(0), get_kernel_H(), get_kernel_W(), get_padding(), get_stride(), 
                    op->instantiation_ctx().stream_index, outputs.at(0));
 }
@@ -67,7 +63,7 @@ Tensor MakeAvgPoolGradientOp(Tensor output, Tensor output_grad, Tensor input,
                              size_t stride, OpMeta op_meta) {
   return Graph::MakeOp(
            std::make_shared<AvgPoolGradientOpImpl>(kernel_H, kernel_W, padding, stride),
-           {std::move(output), std::move(output_grad)},
+           {std::move(output), std::move(output_grad), std::move(input)},
            std::move(op_meta))->output(0);
 }
 

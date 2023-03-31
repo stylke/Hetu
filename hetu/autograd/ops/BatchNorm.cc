@@ -7,13 +7,12 @@ namespace autograd {
 void BatchNormOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                                RuntimeContext& ctx) {
   // TODO: Convert these states to VariableOps
-  int64_t channels = inputs.at(0)->shape(1);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::ArraySet, const_cast<NDArray&>(inputs.at(3)), 0,
                                   stream());
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::ArraySet, const_cast<NDArray&>(inputs.at(4)), 1, stream());
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::BatchNorm, inputs.at(0),
     inputs.at(1), inputs.at(2), outputs.at(0), get_momentum(), get_eps(),
     const_cast<NDArray&>(inputs.at(3)), const_cast<NDArray&>(inputs.at(4)), 
@@ -46,7 +45,7 @@ HTShapeList BatchNormOpDef::DoInferShape(const HTShapeList& input_shapes) {
 void BatchNormGradientOpDef::DoCompute(const NDArrayList& inputs,
                                        NDArrayList& outputs,
                                        RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::BatchNormGradient, inputs.at(0),
     inputs.at(1), inputs.at(2), outputs.at(0), outputs.at(1),
     outputs.at(2), get_eps(), const_cast<NDArray&>(inputs.at(3)),

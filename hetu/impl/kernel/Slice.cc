@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -60,6 +61,10 @@ void SliceCpu(const NDArray& input, NDArray& output, int64_t* begin_pos,
     << output->device();
   HT_ASSERT(input->ndim() == output->ndim())
     << "input and output has different dims. ";
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t ndim = input->ndim();
   size_t o_size = 1;
   for (size_t i = 0; i < ndim; ++i) {
@@ -79,13 +84,17 @@ void SliceCpu(const NDArray& input, NDArray& output, int64_t* begin_pos,
   memcpy(o_shape, (void*) output->shape().data(), alloc_size);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "SliceCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, o_shape, i_shape, pos, ndim, size]() {
       slice_cpu<spec_t>(input->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
                         (const int64_t*) o_shape, (const int64_t*) i_shape,
                         (const int64_t*) pos, ndim, size);
+      free(o_shape);
+      free(i_shape);
+      free(pos);
+      }, "Slice");
+      //cpu_stream.Sync();
     });
-  free(o_shape);
-  free(i_shape);
-  free(pos);
 }
 
 void SliceGradientCpu(const NDArray& output_grad, NDArray& input_grad,
@@ -98,6 +107,10 @@ void SliceGradientCpu(const NDArray& output_grad, NDArray& input_grad,
     << output_grad->device();
   HT_ASSERT(input_grad->ndim() == output_grad->ndim())
     << "input and output grad has different dims. ";
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  
   size_t ndim = output_grad->ndim();
   size_t o_size = 1;
   for (size_t i = 0; i < ndim; ++i) {
@@ -117,14 +130,18 @@ void SliceGradientCpu(const NDArray& output_grad, NDArray& input_grad,
   memcpy(o_shape, (void*) input_grad->shape().data(), alloc_size);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     output_grad->dtype(), spec_t, "SliceGradientCuda", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input_grad, output_grad, o_shape, i_shape, pos, ndim, size]() {
       slice_gradient_cpu<spec_t>(
         output_grad->data_ptr<spec_t>(), input_grad->data_ptr<spec_t>(),
         (const int64_t*) o_shape, (const int64_t*) i_shape,
         (const int64_t*) pos, ndim, size);
+      free(o_shape);
+      free(i_shape);
+      free(pos);
+      }, "SliceGradient");
+      //cpu_stream.Sync();
     });
-  free(o_shape);
-  free(i_shape);
-  free(pos);
 }
 
 } // namespace impl

@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
 
 namespace hetu {
@@ -152,6 +153,9 @@ void InterpolateCpu(const NDArray& input, NDArray& output,
                     bool align_corners, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
+
+  CPUStream cpu_stream(stream);
+
   int64_t input_N = input->shape(0);
   int64_t input_C = input->shape(1);
   int64_t input_H = input->shape(2);
@@ -173,9 +177,14 @@ void InterpolateCpu(const NDArray& input, NDArray& output,
     return;
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "InterpolateCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, input_N, input_C, input_H, input_W,
+      output_H, output_W, ratio_h, ratio_w, align_corners, size]() {
       interpolate_cpu<spec_t>(
         input->data_ptr<spec_t>(), input_N, input_C, input_H, input_W, output->data_ptr<spec_t>(),
         output_H, output_W, static_cast<spec_t>(ratio_h), static_cast<spec_t>(ratio_w), align_corners, size);
+      },"Interpolate");
+      //cpu_stream.Sync();
     });
 }
 
@@ -183,6 +192,9 @@ void InterpolateGradientCpu(const NDArray& output, NDArray& input,
                             bool align_corners, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
+
+  CPUStream cpu_stream(stream);
+  
   int64_t input_N = input->shape(0);
   int64_t input_C = input->shape(1);
   int64_t input_H = input->shape(2);
@@ -202,16 +214,19 @@ void InterpolateGradientCpu(const NDArray& output, NDArray& input,
   int64_t size = input_N * input_C * output_H * output_W;
   if (size == 0)
     return;
-  HT_DISPATCH_FLOATING_TYPES(
-    input->dtype(), spec_t, "ArraySetZeroCpu", [&]() {
-      array_zero_set_cpu<spec_t>(
-        input->data_ptr<spec_t>(), input->numel());
-    });
+
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "InterpolateGradientCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, input_N, input_C, input_H, input_W,
+      output_H, output_W, ratio_h, ratio_w, align_corners, size]() {
+      array_zero_set_cpu<spec_t>(
+        input->data_ptr<spec_t>(), input->numel());
       interpolate_gradient_cpu<spec_t>(
         output->data_ptr<spec_t>(), input_N, input_C, input_H, input_W, input->data_ptr<spec_t>(),
         output_H, output_W, static_cast<spec_t>(ratio_h), static_cast<spec_t>(ratio_w), align_corners, size);
+      },"Interpolate");
+      //cpu_stream.Sync();
     });
 }
 

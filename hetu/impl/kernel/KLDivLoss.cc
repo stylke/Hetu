@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
 
 namespace hetu {
@@ -35,6 +36,8 @@ void KLDivLossCpu(const NDArray& pred, const NDArray& label,
   HT_ASSERT_SAME_NDIM(pred, label);
   HT_ASSERT_SAME_NDIM(pred, loss);
 
+  CPUStream cpu_stream(stream);
+
   size_t n_rows = 1;
   for (size_t i = 0; i < pred->ndim(); i++)
     n_rows *= pred->shape(i);
@@ -42,9 +45,13 @@ void KLDivLossCpu(const NDArray& pred, const NDArray& label,
     return;
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "KLDivLossCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [pred, label, loss, n_rows]() {
       kldivloss_cpu<spec_t>(
         pred->data_ptr<spec_t>(), label->data_ptr<spec_t>(), n_rows,
         loss->data_ptr<spec_t>());
+      },"KLDivLoss");
+      //cpu_stream.Sync();
     });
 }
 
@@ -59,6 +66,8 @@ void KLDivLossGradientCpu(const NDArray& pred, const NDArray& label,
   HT_ASSERT_SAME_NDIM(pred, grad_loss);
   HT_ASSERT_SAME_NDIM(pred, output);
 
+  CPUStream cpu_stream(stream);
+
   size_t n_rows = 1;
   for (size_t i = 0; i < pred->ndim(); i++)
     n_rows *= pred->shape(i);
@@ -66,9 +75,13 @@ void KLDivLossGradientCpu(const NDArray& pred, const NDArray& label,
     return;
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "KLDivLossGradientCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [pred, label, grad_loss, output, n_rows]() {
       kldivloss_gradient_cpu<spec_t>(
         pred->data_ptr<spec_t>(), label->data_ptr<spec_t>(),
         grad_loss->data_ptr<spec_t>(), n_rows, output->data_ptr<spec_t>());
+      },"KLDivLossGradient");
+      //cpu_stream.Sync();
     });
 }
 

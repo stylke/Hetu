@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
 
 namespace hetu {
@@ -22,26 +23,32 @@ void SigmoidCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT_EXCHANGABLE(input, output);
 
+  CPUStream cpu_stream(stream);
+
   size_t size = output->numel();
   if (size == 0)
     return;
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);  
+
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "SigmoidCpu", [&]() {
-      auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
-      auto src_mem = dnnl::memory(mat_md, eng);
-      auto dst_mem = dnnl::memory(mat_md, eng);
-      hetu::omp::write_to_dnnl_memory(input->data_ptr<spec_t>(), src_mem);
+      auto _future = cpu_stream.EnqueueTask(
+        [stream, input, output]() {
+          dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+          auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+          auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
+          auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 
-      auto Reciprocal_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
-                           dnnl::algorithm::eltwise_logistic, mat_md, mat_md, float(0.0), float(0.0));
-      auto Reciprocal = dnnl::eltwise_forward(Reciprocal_pd);
+          auto Sigmoid_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
+                              dnnl::algorithm::eltwise_logistic, mat_md, mat_md, float(0.0), float(0.0));
+          auto Sigmoid = dnnl::eltwise_forward(Sigmoid_pd);
 
-      Reciprocal.execute(engine_stream,
-                        {{DNNL_ARG_SRC, src_mem}, {DNNL_ARG_DST, dst_mem}});
-      engine_stream.wait();
-      hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
+          std::unordered_map<int, dnnl::memory> sigmoid_args;
+          sigmoid_args.insert({DNNL_ARG_SRC, src_mem});
+          sigmoid_args.insert({DNNL_ARG_DST, dst_mem});
+          dnnl::stream engine_stream(eng);
+          Sigmoid.execute(engine_stream, sigmoid_args);
+      }, "Sigmoid");
+      //cpu_stream.Sync();
     });
 }
 

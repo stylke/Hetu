@@ -30,10 +30,12 @@ class SliceOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HT_ASSERT(_begin_pos.size() == _output_shape.size());
+    HT_ASSERT(inputs[0]->ndim() == _begin_pos.size() && 
+              inputs[0]->ndim() == _output_shape.size());
     int len = _begin_pos.size();
     for (int i = 0; i < len; ++i) {
-      HT_ASSERT(_begin_pos[i] >= 0);
+      HT_ASSERT(_begin_pos[i] >= 0 && _output_shape[i] > 0);
+      HT_ASSERT(_begin_pos[i] + _output_shape[i] <= inputs[0]->shape(i));
     }
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(_output_shape)

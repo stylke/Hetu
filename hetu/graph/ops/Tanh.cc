@@ -8,8 +8,6 @@ namespace graph {
 void TanhOpImpl::DoCompute(Operator& op, 
                            const NDArrayList& inputs, NDArrayList& outputs,
                            RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), hetu::impl::Tanh,
-  //                                 inputs.at(0), outputs.at(0), op->instantiation_ctx().stream());
   NDArray::tanh(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
 }
 

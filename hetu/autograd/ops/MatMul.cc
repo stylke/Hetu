@@ -6,7 +6,7 @@ namespace autograd {
 
 void MatMulOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                             RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(), hetu::impl::MatMul,
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), hetu::impl::MatMul,
                                inputs.at(0), trans_a(), inputs.at(1), trans_b(),
                                outputs.at(0), stream());
 }

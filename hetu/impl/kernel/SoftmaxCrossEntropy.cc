@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -20,7 +21,7 @@ void SoftmaxCrossEntropyCpu(const NDArray& input, const NDArray& label,
     << "Indim is " << indim << ", Label dim is " << label->ndim()
     << ", Output dim is " << output->ndim();
   int n_ = 1;
-  for (int i = 0; i < indim - 1; ++i) {
+  for (size_t i = 0; i < indim - 1; ++i) {
     n_ *= input->shape(i);
   }
   int c_ = input->shape(indim - 1);
@@ -29,83 +30,70 @@ void SoftmaxCrossEntropyCpu(const NDArray& input, const NDArray& label,
   if (size == 0)
     return;
 
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);
+  CPUStream cpu_stream(stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
-      DataPtr temp_data_ptr = AllocFromMemoryPool(input->device(), size * sizeof(spec_t));
-      void* temp_data = temp_data_ptr.ptr;
+      auto _future = cpu_stream.EnqueueTask(
+        [input, label, output, stream, size]() {
+        dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+        DataPtr temp_data_ptr = AllocFromMemoryPool(input->device(), size * sizeof(spec_t));
+        void* temp_data = temp_data_ptr.ptr;
+        dnnl::stream engine_stream(eng);
+        auto src_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+        auto dst_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+        auto src_mem = dnnl::memory(src_md, eng, input->data_ptr<spec_t>());
+        auto dst_mem = dnnl::memory(dst_md, eng, temp_data);
 
-      auto src_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
-      auto dst_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
-      auto src_mem = dnnl::memory(src_md, eng);
-      auto dst_mem = dnnl::memory(dst_md, eng);
+        // Softmax axis.
+        const int axis = 1;
+        auto softmax_pd = dnnl::softmax_forward::primitive_desc(eng,
+                          dnnl::prop_kind::forward_training, 
+                          dnnl::algorithm::softmax_log, 
+                          src_md, dst_md, axis);
 
-      hetu::omp::write_to_dnnl_memory(input->data_ptr<spec_t>(), src_mem);
+        auto softmax_prim = dnnl::softmax_forward(softmax_pd);
 
-      // Softmax axis.
-      const int axis = 1;
-      auto softmax_pd = dnnl::softmax_forward::primitive_desc(eng,
-                        dnnl::prop_kind::forward_training, 
-                        dnnl::algorithm::softmax_log, 
-                        src_md, dst_md, axis);
+        std::unordered_map<int, dnnl::memory> softmax_args;
+        softmax_args.insert({DNNL_ARG_SRC, src_mem});
+        softmax_args.insert({DNNL_ARG_DST, dst_mem});
 
-      auto softmax_prim = dnnl::softmax_forward(softmax_pd);
-
-      std::unordered_map<int, dnnl::memory> softmax_args;
-      softmax_args.insert({DNNL_ARG_SRC, src_mem});
-      softmax_args.insert({DNNL_ARG_DST, dst_mem});
-
-      // Primitive execution.
-      softmax_prim.execute(engine_stream, softmax_args);
-
-      // Wait for the computation to finalize.
-      engine_stream.wait();
-
-      // Read data from dnnl::memory object's handle.
-      hetu::omp::read_from_dnnl_memory(temp_data, dst_mem);
+        // Primitive execution.
+        softmax_prim.execute(engine_stream, softmax_args);
 
 
-      softmax_cross_entropy_cpu<spec_t>(
-        (const spec_t*) temp_data, label->data_ptr<spec_t>(),
-        (spec_t*) temp_data, size);
+        softmax_cross_entropy_cpu<spec_t>(
+          (const spec_t*) temp_data, label->data_ptr<spec_t>(),
+          (spec_t*) temp_data, size);
 
-      HTShape outshape = output->shape(); outshape.emplace_back(1);
-      HTShape outstride = output->stride(); outstride.emplace_back(1);
-      auto rsrc_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
-      auto rdst_md = dnnl::memory::desc(outshape, dnnl::memory::data_type::f32, outstride);
+        HTShape outshape = output->shape(); outshape.emplace_back(1);
+        HTShape outstride = output->stride(); outstride.emplace_back(1);
+        auto rsrc_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+        auto rdst_md = dnnl::memory::desc(outshape, dnnl::memory::data_type::f32, outstride);
 
-      auto rsrc_mem = dnnl::memory(rsrc_md, eng);
-      auto rdst_mem = dnnl::memory(rdst_md, eng);
+        auto rsrc_mem = dnnl::memory(rsrc_md, eng, temp_data);
+        auto rdst_mem = dnnl::memory(rdst_md, eng, output->data_ptr<spec_t>());
 
-      // Write data to memory object's handle.
-      hetu::omp::write_to_dnnl_memory(temp_data, rsrc_mem);
-      if (input->shape() == outshape)
-        hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), rsrc_mem);
-      else {
-        // Create primitive descriptor.
-        auto reduction_pd = dnnl::reduction::primitive_desc(
-                eng, dnnl::algorithm::reduction_sum, rsrc_md, rdst_md, float(0.f), float(0.f));
+        if (input->shape() == outshape)
+          hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), rsrc_mem);
+        else {
+          // Create primitive descriptor.
+          auto reduction_pd = dnnl::reduction::primitive_desc(
+                  eng, dnnl::algorithm::reduction_sum, rsrc_md, rdst_md, float(0.f), float(0.f));
 
-        // Create the primitive.
-        auto reduction_prim = dnnl::reduction(reduction_pd);
+          // Create the primitive.
+          auto reduction_prim = dnnl::reduction(reduction_pd);
 
-        // Primitive arguments.
-        std::unordered_map<int, dnnl::memory> reduction_args;
-        reduction_args.insert({DNNL_ARG_SRC, rsrc_mem});
-        reduction_args.insert({DNNL_ARG_DST, rdst_mem});
+          // Primitive arguments.
+          std::unordered_map<int, dnnl::memory> reduction_args;
+          reduction_args.insert({DNNL_ARG_SRC, rsrc_mem});
+          reduction_args.insert({DNNL_ARG_DST, rdst_mem});
 
-        // Primitive execution: Reduction (Sum).
-        reduction_prim.execute(engine_stream, reduction_args);
-
-        // Wait for the computation to finalize.
-        engine_stream.wait();
-
-        // Read data from memory object's handle.
-        hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), rdst_mem);
-
-      }
-      FreeToMemoryPool(temp_data_ptr);
+          // Primitive execution: Reduction (Sum).
+          reduction_prim.execute(engine_stream, reduction_args);
+          FreeToMemoryPool(temp_data_ptr);
+        }
+        },"SoftmaxCrossEntropy");
+      //cpu_stream.Sync();
   });
 } 
 
@@ -126,61 +114,50 @@ void SoftmaxCrossEntropyGradientCpu(const NDArray& input_y,
     << "Indim is " << indim << ", Label dim is " << label->ndim()
     << ", Output dim is " << output->ndim();
   int n_ = 1;
-  for (int i = 0; i < indim - 1; ++i) {
+  for (size_t i = 0; i < indim - 1; ++i) {
     n_ *= input_y->shape(i);
   }
   int c_ = input_y->shape(indim - 1);
   size_t size = n_ * c_;
 
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);
+  CPUStream cpu_stream(stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_y->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
-      const spec_t* grad_data = (const spec_t*) grad->data_ptr<spec_t>();
-      const spec_t* y_data = (const spec_t*) input_y->data_ptr<spec_t>();
-      const spec_t* label_data = (const spec_t*) label->data_ptr<spec_t>();
-      spec_t* output_data = (spec_t*) output->data_ptr<spec_t>();
+      auto _future = cpu_stream.EnqueueTask(
+        [input_y, label, grad, output, stream, c_, size]() {
+        dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+        DataPtr temp_data_ptr =
+          AllocFromMemoryPool(grad->device(), size * sizeof(spec_t));
+        void* temp_data = temp_data_ptr.ptr;
+        dnnl::stream engine_stream(eng);
 
-      DataPtr temp_data_ptr =
-        AllocFromMemoryPool(grad->device(), size * sizeof(spec_t));
-      void* temp_data = temp_data_ptr.ptr;
+        auto src_md = dnnl::memory::desc(input_y->shape(), dnnl::memory::data_type::f32, input_y->stride());
+        auto dst_md = dnnl::memory::desc(input_y->shape(), dnnl::memory::data_type::f32, input_y->stride());
+        auto src_mem = dnnl::memory(src_md, eng, input_y->data_ptr<spec_t>());
+        auto dst_mem = dnnl::memory(dst_md, eng, temp_data);
 
-      spec_t alpha = 1.0;
-      spec_t beta = 0.0;
-      auto src_md = dnnl::memory::desc(input_y->shape(), dnnl::memory::data_type::f32, input_y->stride());
-      auto dst_md = dnnl::memory::desc(input_y->shape(), dnnl::memory::data_type::f32, input_y->stride());
-      auto src_mem = dnnl::memory(src_md, eng);
-      auto dst_mem = dnnl::memory(dst_md, eng);
+        // Softmax axis.
+        const int axis = 1;
+        auto softmax_pd = dnnl::softmax_forward::primitive_desc(eng,
+                          dnnl::prop_kind::forward_training, 
+                          dnnl::algorithm::softmax_accurate, 
+                          src_md, dst_md, axis);
 
-      hetu::omp::write_to_dnnl_memory(input_y->data_ptr<spec_t>(), src_mem);
+        auto softmax_prim = dnnl::softmax_forward(softmax_pd);
 
-      // Softmax axis.
-      const int axis = 1;
-      auto softmax_pd = dnnl::softmax_forward::primitive_desc(eng,
-                        dnnl::prop_kind::forward_training, 
-                        dnnl::algorithm::softmax_accurate, 
-                        src_md, dst_md, axis);
+        std::unordered_map<int, dnnl::memory> softmax_args;
+        softmax_args.insert({DNNL_ARG_SRC, src_mem});
+        softmax_args.insert({DNNL_ARG_DST, dst_mem});
 
-      auto softmax_prim = dnnl::softmax_forward(softmax_pd);
+        // Primitive execution.
+        softmax_prim.execute(engine_stream, softmax_args);
 
-      std::unordered_map<int, dnnl::memory> softmax_args;
-      softmax_args.insert({DNNL_ARG_SRC, src_mem});
-      softmax_args.insert({DNNL_ARG_DST, dst_mem});
-
-      // Primitive execution.
-      softmax_prim.execute(engine_stream, softmax_args);
-
-      // Wait for the computation to finalize.
-      engine_stream.wait();
-
-      // Read data from dnnl::memory object's handle.
-      hetu::omp::read_from_dnnl_memory(temp_data, dst_mem);
-
-      softmax_cross_entropy_gradient_cpu<spec_t>(
-          (const spec_t*) temp_data, label->data_ptr<spec_t>(),
-          grad->data_ptr<spec_t>(), output->data_ptr<spec_t>(), c_, size);
-
-      FreeToMemoryPool(temp_data_ptr);
+        softmax_cross_entropy_gradient_cpu<spec_t>(
+            (const spec_t*) temp_data, label->data_ptr<spec_t>(),
+            grad->data_ptr<spec_t>(), output->data_ptr<spec_t>(), c_, size);
+        FreeToMemoryPool(temp_data_ptr);
+        },"SoftmaxCrossEntropyGradient");
+      //cpu_stream.Sync();
     });
 }
 } // namespace impl

@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -28,6 +29,9 @@ void BroadcastShapeCpu(const NDArray& input, NDArray& output,
                        const HTShape& add_axes, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
 
   size_t size = output->numel();
   size_t input_size = input->numel();
@@ -72,13 +76,17 @@ void BroadcastShapeCpu(const NDArray& input, NDArray& output,
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "BroadcastShapeCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, out_strides, in_dims, output_dim, size]() {
       broadcast_shape_cpu<spec_t>(input->data_ptr<spec_t>(),
                                   output->data_ptr<spec_t>(), out_strides,
                                   in_dims, output_dim, size);
+      free(out_strides);
+      free(in_dims);
+      },
+      "BroadcastShape");
+      //cpu_stream.Sync();
     });
-
-  free(out_strides);
-  free(in_dims);
 }
 
 template <typename spec_t>
@@ -105,6 +113,9 @@ void BroadcastShapeMulCpu(const NDArray& input, double const_value,
                           const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
 
   size_t size = output->numel();
   size_t input_size = input->numel();
@@ -149,12 +160,17 @@ void BroadcastShapeMulCpu(const NDArray& input, double const_value,
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "BroadcastShapeMulCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, out_strides, const_value, in_dims, output_dim, size]() {
       broadcast_shape_mul_cpu<spec_t>(
         input->data_ptr<spec_t>(), static_cast<spec_t>(const_value),
         output->data_ptr<spec_t>(), out_strides, in_dims, output_dim, size);
+      free(out_strides);
+      free(in_dims);
+      },
+      "BroadcastShapeMul");
+      //cpu_stream.Sync();
     });
-  free(out_strides);
-  free(in_dims);
 }
 
 } // namespace impl

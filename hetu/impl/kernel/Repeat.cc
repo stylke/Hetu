@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -27,12 +28,15 @@ void RepeatCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = output->numel();
   int ndim = output->ndim();
   int64_t *stride_tmp = new int64_t[ndim];
   int64_t *shape_tmp = new int64_t[ndim];
   for (int i = 0; i < ndim; i++) {
-      if (i < (ndim - input->ndim())) {
+      if (i < int(ndim - input->ndim())) {
           stride_tmp[i] = input->stride()[0];
           shape_tmp[i] = 1;
       } else {
@@ -44,12 +48,16 @@ void RepeatCpu(const NDArray& input, NDArray& output, const Stream& stream) {
     return;
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "RepeatCuda", [&]() {
-      repeat_cpu<spec_t>(
+      auto _future = cpu_stream.EnqueueTask(
+        [input, output, size, stride_tmp, shape_tmp, ndim]() {
+        repeat_cpu<spec_t>(
         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size, stride_tmp, 
         output->stride().data(), shape_tmp, ndim);
+        free(stride_tmp);
+        free(shape_tmp);
+        },"Repeat");
+      //cpu_stream.Sync();
     });
-  free(stride_tmp);
-  free(shape_tmp);
 }
 
 template <typename spec_t>
@@ -78,12 +86,15 @@ void RepeatGradientCpu(const NDArray& output, NDArray& input, const Stream& stre
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = output->numel();
   int ndim = output->ndim();
   int64_t *stride_tmp = new int64_t[ndim];
   int64_t *shape_tmp = new int64_t[ndim];
   for (int i = 0; i < ndim; i++) {
-      if (i < (ndim - input->ndim())) {
+      if (i < int(ndim - input->ndim())) {
           stride_tmp[i] = input->stride()[0];
           shape_tmp[i] = 1;
       } else {
@@ -93,19 +104,21 @@ void RepeatGradientCpu(const NDArray& output, NDArray& input, const Stream& stre
   }
   if (size == 0)
     return;
-  HT_DISPATCH_FLOATING_TYPES(
-    output->dtype(), spec_t, "ArraySetZeroCuda", [&]() {
-      array_zero_set_cpu<spec_t>(
-        input->data_ptr<spec_t>(), input->numel());
-    });
+
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "RepeatGradientCuda", [&]() {
-      repeat_gradient_cpu<spec_t>(
+      auto _future = cpu_stream.EnqueueTask(
+        [input, output, size, stride_tmp, shape_tmp, ndim]() {
+        array_zero_set_cpu<spec_t>(
+                input->data_ptr<spec_t>(), input->numel());
+        repeat_gradient_cpu<spec_t>(
         output->data_ptr<spec_t>(), input->data_ptr<spec_t>(), size, stride_tmp, 
         output->stride().data(), shape_tmp, ndim);
+        free(stride_tmp);
+        free(shape_tmp);
+        },"RepeatGradient");
+      //cpu_stream.Sync();
     });
-  free(stride_tmp);
-  free(shape_tmp);
 }
 
 

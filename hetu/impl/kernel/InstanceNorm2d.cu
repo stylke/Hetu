@@ -40,6 +40,11 @@ __global__ void std_normal_transform(const spec_t* in_arr,
 void InstanceNormCuda(const NDArray& in_arr, NDArray& mean_arr,
                       NDArray& var_arr, NDArray& out_arr, float eps,
                       const Stream& stream) {
+  HT_ASSERT_CUDA_DEVICE(in_arr);
+  HT_ASSERT_SAME_DEVICE(in_arr, mean_arr); 
+  HT_ASSERT_SAME_DEVICE(in_arr, var_arr); 
+  HT_ASSERT_SAME_DEVICE(in_arr, out_arr);   
+
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
@@ -160,10 +165,12 @@ void InstanceNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
                               NDArray& grad_arr, const NDArray& mean_arr,
                               const NDArray& var_arr, float eps,
                               const Stream& stream) {
-  /*
-    already have mean and var, we directly get y = x-u / sigma
-    the grad_arr = out_grad * (1 - 1/WH - y^2) / sigma
-  */
+  HT_ASSERT_CUDA_DEVICE(out_grads);
+  HT_ASSERT_SAME_DEVICE(out_grads, in_arr); 
+  HT_ASSERT_SAME_DEVICE(out_grads, grad_arr); 
+  HT_ASSERT_SAME_DEVICE(out_grads, mean_arr);   
+  HT_ASSERT_SAME_DEVICE(out_grads, var_arr); 
+
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
@@ -171,8 +178,6 @@ void InstanceNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
   int ndim = out_grads->ndim();
   HT_ASSERT(ndim == 4);
   size_t total_elements = 1;
-  // CudaStreamSynchronize(cuda_stream);
-  // HT_LOG_INFO << "abcd";
 
   cudnnDataType_t datatype;
   cudnnIndicesType_t indicetype;

@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -25,42 +26,44 @@ void BatchMatMulCpu(const NDArray& a, bool trans_a, const NDArray& b,
     batchCount *= a->shape(i);
   }
 
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);  
+  CPUStream cpu_stream(stream);
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "BatchMatMul", [&]() {
-    spec_t alpha = 1, beta = 0;
-    dnnl::memory::desc srcA_md, srcB_md, dst_md;
-    if (!trans_a)
-        srcA_md = dnnl::memory::desc({batchCount, m, k}, dnnl::memory::data_type::f32, 
-                                      dnnl::memory::format_tag::abc);
-    else
-        srcA_md = dnnl::memory::desc({batchCount, m, k}, dnnl::memory::data_type::f32, 
-                                      dnnl::memory::format_tag::acb);
-    if (!trans_b)
-        srcB_md = dnnl::memory::desc({batchCount, k, n}, dnnl::memory::data_type::f32, 
-                                      dnnl::memory::format_tag::abc);
-    else
-        srcB_md = dnnl::memory::desc({batchCount, k, n}, dnnl::memory::data_type::f32, 
-                                      dnnl::memory::format_tag::acb);
-    dst_md = dnnl::memory::desc({batchCount, m, n}, dnnl::memory::data_type::f32, 
-                                dnnl::memory::format_tag::abc);
-                        
-    auto srcA_mem = dnnl::memory(srcA_md, eng);
-    auto srcB_mem = dnnl::memory(srcB_md, eng);
-    auto dst_mem = dnnl::memory(dst_md, eng);
+    auto _future = cpu_stream.EnqueueTask(
+    [stream, a, b, trans_a, trans_b, output, m, n, k, batchCount]() {
+      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::memory::desc srcA_md, srcB_md, dst_md;
+      if (!trans_a)
+          srcA_md = dnnl::memory::desc({batchCount, m, k}, dnnl::memory::data_type::f32, 
+                                        dnnl::memory::format_tag::abc);
+      else
+          srcA_md = dnnl::memory::desc({batchCount, m, k}, dnnl::memory::data_type::f32, 
+                                        dnnl::memory::format_tag::acb);
+      if (!trans_b)
+          srcB_md = dnnl::memory::desc({batchCount, k, n}, dnnl::memory::data_type::f32, 
+                                        dnnl::memory::format_tag::abc);
+      else
+          srcB_md = dnnl::memory::desc({batchCount, k, n}, dnnl::memory::data_type::f32, 
+                                        dnnl::memory::format_tag::acb);
+      dst_md = dnnl::memory::desc({batchCount, m, n}, dnnl::memory::data_type::f32, 
+                                  dnnl::memory::format_tag::abc);
+                          
+      auto srcA_mem = dnnl::memory(srcA_md, eng, a->data_ptr<spec_t>());
+      auto srcB_mem = dnnl::memory(srcB_md, eng, b->data_ptr<spec_t>());
+      auto dst_mem = dnnl::memory(dst_md, eng, output->data_ptr<spec_t>());
 
-    hetu::omp::write_to_dnnl_memory(a->data_ptr<spec_t>(), srcA_mem);
-    hetu::omp::write_to_dnnl_memory(b->data_ptr<spec_t>(), srcB_mem);
+      auto Matmul_pd = dnnl::matmul::primitive_desc(eng, srcA_md, srcB_md, dst_md);
+      auto Matmul = dnnl::matmul(Matmul_pd);
 
-    auto Matmul_pd = dnnl::matmul::primitive_desc(eng, srcA_md, srcB_md, dst_md);
-    auto Matmul = dnnl::matmul(Matmul_pd);
+      std::unordered_map<int, dnnl::memory> bmm_args;
+      bmm_args.insert({DNNL_ARG_SRC, srcA_mem});
+      bmm_args.insert({DNNL_ARG_WEIGHTS, srcB_mem});
+      bmm_args.insert({DNNL_ARG_DST, dst_mem});
 
-    Matmul.execute(engine_stream, {{DNNL_ARG_SRC, srcA_mem},
-                                   {DNNL_ARG_WEIGHTS, srcB_mem},
-                                   {DNNL_ARG_DST, dst_mem}});
-
-    engine_stream.wait();
-    hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
+      dnnl::stream engine_stream(eng);
+      Matmul.execute(engine_stream, bmm_args);
+    },
+    "BatchMatmul");
+    //cpu_stream.Sync();
   });
 }
 

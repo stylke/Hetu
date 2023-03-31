@@ -622,7 +622,7 @@ void EinsumGradientOpDef::ParseMsg(const HTShapeList& input_shapes) {
     if (_inputs[i]->has_shape())
       input_shape = _inputs[i]->shape();
     else {
-      input_shape = input_shapes.at(0);
+      input_shape = input_shapes.at(i);
     }
     OpDim input_dim = input_dims.at(i);
     int ndims = input_shape.size();
@@ -647,7 +647,8 @@ void EinsumGradientOpDef::ParseMsg(const HTShapeList& input_shapes) {
         << "num of dims is not equal to num of labels.";
     } else {
       HT_ASSERT(nlabels == ndims)
-        << "num of dims is not equal to num of labels.";
+        << "num of dims is not equal to num of labels."
+        << nlabels << "vs" << ndims << " of input" << i;
     }
   }
 
@@ -691,7 +692,7 @@ void EinsumGradientOpDef::ParseMsg(const HTShapeList& input_shapes) {
           elli_pos = output_idx;
           output_idx += elli_len;
           if (output_ellis > elli_len) {
-            for (int idx = 0; idx < output_ellis - elli_len; ++idx) {
+            for (int64_t idx = 0; idx < output_ellis - elli_len; ++idx) {
               std::string label = "UNDEFINED" + std::to_string(idx);
               undefined_labels.emplace(label, 0);
               output_labels_idx.emplace(label, output_idx++);
@@ -888,7 +889,7 @@ void EinsumGradientOpDef::DoCompute(const NDArrayList& inputs,
       output_idx += 1;
     }
   }
-  HT_LOG_INFO << output_tensor << " " << outputs.at(0);
+  
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::Reshape, output_tensor,
                                   outputs.at(0), stream());
@@ -896,7 +897,9 @@ void EinsumGradientOpDef::DoCompute(const NDArrayList& inputs,
 
 void EinsumGradientOpDef::DoInferMeta() {
   HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_device(_inputs[0]->device()));
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype())
+                         .set_device(_inputs[0]->device())
+                         .set_shape(pred_in->shape()));
 }
 
 HTShapeList EinsumGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {

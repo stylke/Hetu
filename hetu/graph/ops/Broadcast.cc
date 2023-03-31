@@ -54,7 +54,7 @@ void BroadcastGradientOpImpl::DoCompute(Operator& op,
                                         const NDArrayList& inputs,
                                         NDArrayList& outputs,
                                         RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CUDA_ONLY(
+  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(
   //   op->instantiation_ctx().placement.type(), type(), hetu::impl::ReduceSum, inputs.at(0),
   //   outputs.at(0), get_axes().data(), get_axes().size(), op->instantiation_ctx().stream());
   NDArray::sum(inputs.at(0), get_axes(), false, 

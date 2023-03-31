@@ -21,6 +21,7 @@ class BinaryCrossEntropyOpImpl final : public OpInterface {
  protected:
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
+    HT_ASSERT_TENSORS_SAME_SHAPE(inputs[0], inputs[1]);
     NDArrayMeta output_meta = inputs.front()->meta();
     if (reduction() != kNONE)
       output_meta.shape =
@@ -71,12 +72,23 @@ class BinaryCrossEntropyGradientOpImpl final : public OpInterface {
  protected:
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
-    return {inputs.front()->meta()};
+    HT_ASSERT_TENSORS_SAME_SHAPE(inputs[0], inputs[1]);
+    NDArrayMeta output_meta;
+    if (_reduction != kNONE)
+      output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype()).set_shape({1}).set_device(inputs[0]->device());
+    else
+      output_meta = inputs[0]->meta();
+    return {output_meta};
   }
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override {
-    return {input_shapes.front()};
+    HT_ASSERT_GE(input_shapes.at(0).size(), 2)
+      << "Invalid shape for " << type() << ": " << input_shapes.at(0);
+    if (reduction() != kNONE)
+      return {{1}};
+    else 
+      return {input_shapes.at(0)};
   }
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,

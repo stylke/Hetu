@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -25,12 +26,19 @@ void WhereCpu(const NDArray& cond, const NDArray& inputA, const NDArray& inputB,
   HT_ASSERT_SAME_DEVICE(cond, output);
   HT_ASSERT_EXCHANGABLE(inputA, inputB);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = cond->numel();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     inputA->dtype(), spec_t, "WhereCpu", [&]() {
-      where_cpu<spec_t>(cond->data_ptr<int64_t>(), inputA->data_ptr<spec_t>(),
-                        inputB->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
-                        size);
+      auto _future = cpu_stream.EnqueueTask(
+        [cond, inputA, inputB, output, size]() {
+        where_cpu<spec_t>(cond->data_ptr<int64_t>(), inputA->data_ptr<spec_t>(),
+                          inputB->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
+                          size);
+        },"Where");
+      //cpu_stream.Sync();
     });
 }
 

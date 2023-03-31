@@ -8,7 +8,7 @@ namespace graph {
 void AsStridedOpImpl::DoCompute(Operator& op,
                                 const NDArrayList& inputs, NDArrayList& outputs,
                                 RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                hetu::impl::AsStrided, inputs.at(0),
                                outputs.at(0), get_stride(), op->instantiation_ctx().stream());
 }
@@ -31,7 +31,7 @@ void AsStridedGradientOpImpl::DoCompute(Operator& op,
                                         const NDArrayList& inputs,
                                         NDArrayList& outputs,
                                         RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::AsStridedGradient,
     inputs.at(0), outputs.at(0), get_stride(), op->instantiation_ctx().stream());
 }

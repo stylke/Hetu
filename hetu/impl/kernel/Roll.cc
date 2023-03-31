@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -31,6 +32,9 @@ void RollCpu(const NDArray& input, const HTShape& shift, const HTAxes& axis,
              NDArray& output, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
 
   size_t len = input->numel();
   int64_t nums = shift.size();
@@ -66,14 +70,17 @@ void RollCpu(const NDArray& input, const HTShape& shift, const HTAxes& axis,
 
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "RollCpu", [&]() {
-      roll_cpu<spec_t>(
-        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
-        len, nums, shifts, strides, sizes);
+      auto _future = cpu_stream.EnqueueTask(
+        [input, output, len, nums, shifts, strides, sizes]() {
+        roll_cpu<spec_t>(
+          input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
+          len, nums, shifts, strides, sizes);
+        free(shifts);
+        free(strides);
+        free(sizes);
+        },"Roll");
+      //cpu_stream.Sync();
     });
-
-  free(shifts);
-  free(strides);
-  free(sizes);
 }
 
 } // namespace impl

@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -24,6 +25,7 @@ void asstrided_cpu(const spec_t *input, spec_t *output, size_t size,
 void AsStridedCpu(const NDArray& input, NDArray& output, HTShape stride, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
+  CPUStream cpu_stream(stream);
 
   size_t size = output->numel();
   int ndim = output->ndim();
@@ -32,9 +34,13 @@ void AsStridedCpu(const NDArray& input, NDArray& output, HTShape stride, const S
     return;
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "AsStridedCpu", [&]() {
-      asstrided_cpu<spec_t>(
-        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size, 
-        stride.data(), output->stride().data(), ndim);
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, stride, size, ndim]() {
+        asstrided_cpu<spec_t>(
+          input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size, 
+          stride.data(), output->stride().data(), ndim);
+      },"AsStrided");
+      //cpu_stream.Sync();
     });
 }
 
@@ -67,21 +73,24 @@ void AsStridedGradientCpu(const NDArray& output, NDArray& input, HTShape stride,
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
+  CPUStream cpu_stream(stream);
   size_t size = output->numel();
   int ndim = output->ndim();
 
   if (size == 0)
     return;
   HT_DISPATCH_FLOATING_TYPES(
-    output->dtype(), spec_t, "ArraySetZeroCuda", [&]() {
-      array_zero_set_cpu<spec_t>(
-        input->data_ptr<spec_t>(), input->numel());
-    });
-  HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "AsStridedGradientCuda", [&]() {
-      asstrided_gradient_cpu<spec_t>(
-        output->data_ptr<spec_t>(), input->data_ptr<spec_t>(), size, 
-        stride.data(), output->stride().data(), ndim);
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, stride, size, ndim]() {
+        array_zero_set_cpu<spec_t>(
+          input->data_ptr<spec_t>(), input->numel());
+        asstrided_gradient_cpu<spec_t>(
+          output->data_ptr<spec_t>(), input->data_ptr<spec_t>(), size, 
+          stride.data(), output->stride().data(), ndim);
+      },
+      "AsStridedGradient");
+      //cpu_stream.Sync();
     });
 }
 

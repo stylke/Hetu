@@ -36,7 +36,7 @@ protected:
     auto a = inputs[0];
     auto b = inputs[1];
     if (a->has_shape() && b->has_shape()) {
-      HT_ASSERT(a->ndim() >= 2 && b->ndim() >= 2);
+      HT_ASSERT(a->ndim() >= 2 && b->ndim() >= 2 && a->ndim() == b->ndim());
       int64_t ndims = a->ndim();
       int64_t dim_a = a->shape(trans_a() ? ndims - 2 : ndims - 1);
       int64_t dim_b = b->shape(trans_b() ? ndims - 1 : ndims - 2);

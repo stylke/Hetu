@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -55,6 +56,9 @@ void ConcatCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
   HT_ASSERT_SAME_DEVICE(inputA, inputB);
   HT_ASSERT_SAME_DEVICE(inputA, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = output->numel();
   size_t offset1 = inputA->shape(axis);
   size_t offset2 = inputB->shape(axis);
@@ -67,42 +71,31 @@ void ConcatCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
   if (size == 0 || offset1 == 0 || offset2 == 0)
     return;
 
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);  
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     inputA->dtype(), spec_t, "ConcatCpu", [&]() {
-      auto srcA_md = dnnl::memory::desc(inputA->shape(), dnnl::memory::data_type::f32, inputA->stride());
-      auto srcB_md = dnnl::memory::desc(inputB->shape(), dnnl::memory::data_type::f32, inputB->stride());
-      auto srcA_mem = dnnl::memory(srcA_md, eng);
-      auto srcB_mem = dnnl::memory(srcB_md, eng);
-
-      // Write data to memory object's handle.
-      hetu::omp::write_to_dnnl_memory(inputA->data_ptr<spec_t>(), srcA_mem);
-      hetu::omp::write_to_dnnl_memory(inputB->data_ptr<spec_t>(), srcB_mem);
-    
-      // Create primitive descriptor.
-      auto concat_pd = dnnl::concat::primitive_desc(eng, axis, {srcA_md, srcB_md});
-
-      // Create destination (dst) memory object using the memory descriptor
-      // created by the primitive.
-      auto dst_mem = dnnl::memory(concat_pd.dst_desc(), eng);
-
-      // Create the primitive.
-      auto concat_prim = dnnl::concat(concat_pd);
-
-      // Primitive arguments.
-      std::unordered_map<int, dnnl::memory> concat_args;
-      concat_args.insert({DNNL_ARG_MULTIPLE_SRC, srcA_mem});
-      concat_args.insert({DNNL_ARG_MULTIPLE_SRC + 1, srcB_mem});
-      concat_args.insert({DNNL_ARG_DST, dst_mem});
-
-      // Primitive execution: concatenation.
-      concat_prim.execute(engine_stream, concat_args);
-
-      // Wait for the computation to finalize.
-      engine_stream.wait();
+      auto _future = cpu_stream.EnqueueTask(
+      [inputA, inputB, output, axis, eng]() {
+        auto srcA_md = dnnl::memory::desc(inputA->shape(), dnnl::memory::data_type::f32, inputA->stride());
+        auto srcB_md = dnnl::memory::desc(inputB->shape(), dnnl::memory::data_type::f32, inputB->stride());
+        auto srcA_mem = dnnl::memory(srcA_md, eng, inputA->data_ptr<spec_t>());
+        auto srcB_mem = dnnl::memory(srcB_md, eng, inputB->data_ptr<spec_t>());
       
-      hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
+        auto concat_pd = dnnl::concat::primitive_desc(eng, axis, {srcA_md, srcB_md});
+
+        auto dst_mem = dnnl::memory(concat_pd.dst_desc(), eng, output->data_ptr<spec_t>());
+
+        auto concat_prim = dnnl::concat(concat_pd);
+
+        std::unordered_map<int, dnnl::memory> concat_args;
+        concat_args.insert({DNNL_ARG_MULTIPLE_SRC, srcA_mem});
+        concat_args.insert({DNNL_ARG_MULTIPLE_SRC + 1, srcB_mem});
+        concat_args.insert({DNNL_ARG_DST, dst_mem});
+
+        dnnl::stream engine_stream(eng);
+        concat_prim.execute(engine_stream, concat_args);
+      },
+      "Concat");
+      //cpu_stream.Sync();
     });
 }
 
@@ -110,6 +103,9 @@ void ConcatGradientCpu(const NDArray& output_grad, NDArray& input_grad,
                        size_t axis, size_t id, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(output_grad);
   HT_ASSERT_SAME_DEVICE(output_grad, input_grad);
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
 
   size_t size = input_grad->numel();
   size_t big_offset = output_grad->shape(axis);
@@ -126,9 +122,14 @@ void ConcatGradientCpu(const NDArray& output_grad, NDArray& input_grad,
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_grad->dtype(), spec_t, "ConcatGradientCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [output_grad, input_grad, size, concat_size, concat_offset, small_offset, big_offset]() {
       Concat_gradient_cpu<spec_t>(output_grad->data_ptr<spec_t>(), size,
                                   concat_size, concat_offset, small_offset,
                                   big_offset, input_grad->data_ptr<spec_t>());
+      },
+      "ConcatGradient");
+      //cpu_stream.Sync();
     });
 }
 

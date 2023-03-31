@@ -18,7 +18,8 @@ class SumOpImpl final : public OpInterface {
     int len = inputs.size();
     HTShape output_shape = inputs[0]->shape();
     for (int i = 1; i < len; ++i) {
-      output_shape = Broadcast(output_shape, inputs[i]->shape());
+      if (inputs[i]->has_shape())
+        output_shape = Broadcast(output_shape, inputs[i]->shape());
     }
     auto output_meta = NDArrayMeta(output_shape, inputs[0]->dtype(), inputs[0]->device());
     return {output_meta};

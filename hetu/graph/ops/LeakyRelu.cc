@@ -8,9 +8,6 @@ namespace graph {
 void LeakyReluOpImpl::DoCompute(Operator& op,
                                 const NDArrayList& inputs, NDArrayList& outputs,
                                 RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-  //                                 hetu::impl::LeakyRelu, inputs.at(0),
-  //                                 get_alpha(), outputs.at(0), op->instantiation_ctx().stream());
   NDArray::leakyrelu(inputs.at(0), get_alpha(),
                      op->instantiation_ctx().stream_index, outputs.at(0));
 }

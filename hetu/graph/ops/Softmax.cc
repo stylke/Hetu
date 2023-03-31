@@ -8,7 +8,7 @@ namespace graph {
 void SoftmaxOpImpl::DoCompute(Operator& op, 
                               const NDArrayList& inputs, NDArrayList& outputs,
                               RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::Softmax,
+  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), hetu::impl::Softmax,
   //                              inputs.at(0), outputs.at(0), op->instantiation_ctx().stream());
   NDArray::softmax(inputs.at(0), get_dim(), op->instantiation_ctx().stream_index, outputs.at(0));
 }
@@ -29,7 +29,7 @@ void SoftmaxGradientOpImpl::DoCompute(Operator& op,
                                       const NDArrayList& inputs,
                                       NDArrayList& outputs,
                                       RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                hetu::impl::SoftmaxGradient, inputs.at(0),
                                inputs.at(1), outputs.at(0),
                                get_dim(), op->instantiation_ctx().stream());

@@ -65,9 +65,6 @@ void BinaryElewiseToolCuda(const NDArray& inputA, const NDArray& inputB,
           inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size, op,
           output->data_ptr<spec_t>());
       });
-    // CudaStreamSynchronize(cuda_stream);
-    // HT_LOG_INFO << "YES!" << inputA->data_ptr<void>() << " " <<
-    // inputB->data_ptr<void>() << " " << output->data_ptr<void>();
   } else {
     size_t allocated = output->ndim() * sizeof(uint);
     uint* A_dims = (uint*) malloc(allocated);
@@ -110,12 +107,12 @@ void BinaryElewiseToolCuda(const NDArray& inputA, const NDArray& inputB,
       AllocFromMemoryPool(inputA->device(), allocated);
     uint* gpu_output_strides = (uint*) gpu_output_strides_ptr.ptr;
 
-    CUDA_CALL(cudaMemcpyAsync(gpu_dimsA, A_dims, allocated,
-                              cudaMemcpyHostToDevice, cuda_stream));
-    CUDA_CALL(cudaMemcpyAsync(gpu_dimsB, B_dims, allocated,
-                              cudaMemcpyHostToDevice, cuda_stream));
-    CUDA_CALL(cudaMemcpyAsync(gpu_output_strides, out_strides, allocated,
-                              cudaMemcpyHostToDevice, cuda_stream));
+    CudaMemcpyAsync(gpu_dimsA, A_dims, allocated,
+                    cudaMemcpyHostToDevice, cuda_stream);
+    CudaMemcpyAsync(gpu_dimsB, B_dims, allocated,
+                    cudaMemcpyHostToDevice, cuda_stream);
+    CudaMemcpyAsync(gpu_output_strides, out_strides, allocated,
+                    cudaMemcpyHostToDevice, cuda_stream);
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       inputA->dtype(), spec_t, "BinaryElewiseCuda", [&]() {
         binary_elewise_broadcast_kernel<spec_t>
@@ -125,9 +122,6 @@ void BinaryElewiseToolCuda(const NDArray& inputA, const NDArray& inputB,
             (size_t) inputA->ndim(), (size_t) inputB->ndim(),
             gpu_output_strides, output_dim);
       });
-    // CudaStreamSynchronize(cuda_stream);
-    // HT_LOG_INFO << "YES!" << inputA->data_ptr<void>() << " " <<
-    // inputB->data_ptr<void>() << " " << output->data_ptr<void>();
     FreeToMemoryPool(gpu_dimsA_ptr);
     FreeToMemoryPool(gpu_dimsB_ptr);
     FreeToMemoryPool(gpu_output_strides_ptr);

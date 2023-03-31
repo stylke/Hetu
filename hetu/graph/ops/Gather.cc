@@ -9,9 +9,6 @@ void GatherOpImpl::DoCompute(Operator& op,
                              const NDArrayList& inputs,
                              NDArrayList& outputs,
                              RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-  //                                 hetu::impl::Gather, inputs.at(0),
-  //                                 inputs.at(1), outputs.at(0), get_dim(), op->instantiation_ctx().stream());
   NDArray::gather(inputs.at(0), inputs.at(1), get_dim(), 
                   op->instantiation_ctx().stream_index, outputs.at(0));
 }

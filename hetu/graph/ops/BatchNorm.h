@@ -36,6 +36,8 @@ protected:
     int64_t channels = inputs[0]->shape(1);
     HTShape shape = {channels};
     HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    HT_ASSERT_HAS_DIMS(inputs[0], 4);
+    HT_ASSERT_TENSORS_SAME_SHAPE(inputs[1], inputs[2]);
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(shape)
                                            .set_device(inputs[0]->device());

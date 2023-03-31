@@ -8,7 +8,7 @@ namespace autograd {
 
 void LinearOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                             RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(), hetu::impl::Linear,
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), hetu::impl::Linear,
                                inputs.at(0), trans_a(), inputs.at(1), trans_b(),
                                inputs.at(2), outputs.at(0), stream());
 }

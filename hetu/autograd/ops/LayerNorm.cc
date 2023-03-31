@@ -21,7 +21,7 @@ TensorList LayerNormOpDef::DoGradient(const TensorList& grad_outputs) {
 }
 
 void LayerNormOpDef::DoInferMeta() {
-  int dim = normalized_shape().size();
+  size_t dim = normalized_shape().size();
   HTShape output_shape = _inputs[0]->shape();
   for (size_t i = 0; i < dim; ++i) {
     HT_ASSERT(normalized_shape()[dim - 1 - i] == _inputs[0]->shape(_inputs[0]->ndim() - 1 - i))
@@ -36,7 +36,7 @@ void LayerNormOpDef::DoInferMeta() {
 
 HTShapeList LayerNormOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
-  int dim = normalized_shape().size();
+  size_t dim = normalized_shape().size();
   HTShape output_shape = input_shapes.at(0);
   for (size_t i = 0; i < dim; ++i) {
     HT_ASSERT(normalized_shape()[dim - 1 - i] == input_shapes.at(0)[input_shapes.at(0).size() - 1 - i])

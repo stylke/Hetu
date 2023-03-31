@@ -18,6 +18,8 @@ class NormOpImpl : public OpInterface {
   _p(p),
   _dim(dim),
   _keepdim(keepdim) {
+    HT_ASSERT(p > 0)
+    << "p is " << p << "and it should be greater than 0.";
   }
 
   inline int64_t getp() const{
@@ -36,11 +38,16 @@ class NormOpImpl : public OpInterface {
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
     HTShape outshape = inputs[0]->shape();
-    int64_t axi = dim() >= 0? dim(): dim() + outshape.size();
-    if (keepdim()) 
-      outshape[axi] = 1;
-    else 
-      outshape.erase(outshape.begin() + axi);
+    if (inputs[0]->has_shape()) {
+      int64_t axi = dim() >= 0? dim(): dim() + outshape.size();
+      HT_ASSERT(axi >= 0 && axi < int64_t(outshape.size()))
+      << "reduce dim should in [0, " << outshape.size() 
+      << "], but now it is " << axi;
+      if (keepdim()) 
+        outshape[axi] = 1;
+      else 
+        outshape.erase(outshape.begin() + axi);
+    }
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(outshape)
                                            .set_device(inputs[0]->device());

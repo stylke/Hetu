@@ -9,6 +9,7 @@
 #include "hetu/graph/ops/Conv2d.h"
 #include "hetu/graph/ops/data_transfer.h"
 #include "hetu/graph/ops/Dropout.h"
+#include "hetu/graph/ops/Einsum.h"
 #include "hetu/graph/ops/EmbeddingLookup.h"
 #include "hetu/graph/ops/Gather.h"
 #include "hetu/graph/ops/group.h"

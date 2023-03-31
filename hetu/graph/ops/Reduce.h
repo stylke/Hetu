@@ -21,6 +21,10 @@ protected:
     _axes(axes),
     _keepdims(keepdims),
     _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kMAX 
+              || _reduction == kMIN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'max\', \'min\', \'none\']";
   }
 
  public:
@@ -115,6 +119,22 @@ Tensor MakeReduceOp(Tensor input, const std::string& mode, const HTAxes& axes = 
                     const HTKeepDims& keepdims = {false},
                     const OpMeta& op_meta = OpMeta());
 
+Tensor MakeReduceMeanOp(Tensor input, const HTAxes& axes,
+                        const HTKeepDims& keepdims,
+                        const OpMeta& op_meta);
+
+Tensor MakeReduceSumOp(Tensor input, const HTAxes& axes,
+                       const HTKeepDims& keepdims,
+                       const OpMeta& op_meta);
+
+Tensor MakeReduceMaxOp(Tensor input, const HTAxes& axes,
+                       const HTKeepDims& keepdims,
+                       const OpMeta& op_meta);
+
+Tensor MakeReduceMinOp(Tensor input, const HTAxes& axes,
+                       const HTKeepDims& keepdims,
+                       const OpMeta& op_meta);
+
 class ReduceGradientOpImpl : public OpInterface {
  public:
   ReduceGradientOpImpl(const HTShape& shape,
@@ -127,8 +147,8 @@ class ReduceGradientOpImpl : public OpInterface {
     _shape(shape),
     _axes(add_axes),
     _keepdims(keepdims),
-    _reduction(reduction),
-    _constant(value) {
+    _constant(value),
+    _reduction(reduction) {
   }
 
   const HTShape& get_shape() const {

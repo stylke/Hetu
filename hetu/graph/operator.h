@@ -5,6 +5,8 @@
 #include "hetu/graph/common.h"
 #include "hetu/graph/tensor.h"
 #include "hetu/utils/context_store.h"
+#include "hetu/impl/stream/CUDAStream.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace graph {

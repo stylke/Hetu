@@ -18,9 +18,6 @@ template <typename spec_t>
 __global__ void norm_kernel(const spec_t* input, spec_t* output, size_t size, 
                             int64_t p, size_t before_dim_size, size_t reduce_dim_size, 
                             size_t after_dim_size) {
-//   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-//   if (idx >= size)
-//     return;
   __shared__ spec_t shared_sum[32];
 
   size_t x = blockIdx.x / after_dim_size;

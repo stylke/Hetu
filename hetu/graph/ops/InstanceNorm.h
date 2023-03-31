@@ -24,8 +24,8 @@ class InstanceNormOpImpl : public OpInterface {
 protected:
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
+    HT_ASSERT_HAS_DIMS(inputs[0], 4);
     HTShape local_shape = inputs[0]->shape();
-    HT_ASSERT(local_shape.size() == 4);
     local_shape[3] = 1;
     local_shape[2] = 1;
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
@@ -55,7 +55,7 @@ protected:
 };
 
 TensorList MakeInstanceNormOp(Tensor input, double eps = 1e-7,
-                          const OpMeta& op_meta = OpMeta());
+                              const OpMeta& op_meta = OpMeta());
 
 class InstanceNormGradientOpImpl : public OpInterface {
 

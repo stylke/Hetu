@@ -13,7 +13,7 @@ __global__ void leaky_relu_kernel(const spec_t* input, spec_t alpha,
   if (idx >= size)
     return;
   output[idx] = input[idx];
-  if (input[idx] < 0)
+  if (double(input[idx]) < 0)
     output[idx] *= alpha;
 }
 
@@ -26,7 +26,7 @@ __global__ void leaky_relu_gradient_kernel(const spec_t* input,
   if (idx >= size)
     return;
   output[idx] = output_grad[idx];
-  if (input[idx] < 0)
+  if (double(input[idx]) < 0)
     output[idx] *= alpha_reciprocal;
 }
 

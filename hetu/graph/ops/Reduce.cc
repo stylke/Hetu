@@ -11,11 +11,11 @@ void ReduceOpImpl::DoCompute(Operator& op,
                              const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) const {
   // if (reduction() == ReductionType::MEAN) {
-  //   HT_DISPATCH_KERNEL_CUDA_ONLY(
+  //   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
   //     op->instantiation_ctx().placement.type(), type(), hetu::impl::ReduceMean, inputs.at(0),
   //     outputs.at(0), get_axes().data(), get_axes().size(), op->instantiation_ctx().stream());
   // } else if (reduction() == ReductionType::SUM) {
-  //   HT_DISPATCH_KERNEL_CUDA_ONLY(
+  //   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
   //     op->instantiation_ctx().placement.type(), type(), hetu::impl::ReduceSum, inputs.at(0),
   //     outputs.at(0), get_axes().data(), get_axes().size(), op->instantiation_ctx().stream());
   // }
@@ -114,27 +114,31 @@ Tensor MakeReduceOp(Tensor input, ReductionType reduction, const HTAxes& axes,
 Tensor MakeReduceOp(Tensor input, const std::string& mode, const HTAxes& axes,
                     const HTKeepDims& keepdims,
                     const OpMeta& op_meta) {
-  HTAxes parsed_axes = axes;
-  HTKeepDims parsed_keepdims = keepdims;
-  if (parsed_axes.size() == 0) {
-      parsed_axes.reserve(input->ndim());
-      for (size_t i = 0; i < input->ndim(); ++i) {
-        parsed_axes.push_back(i);
-      }
-    }
-  parsed_axes = NDArrayMeta::ParseAxes(parsed_axes, input->ndim());
-  HT_ASSERT(parsed_keepdims.size() == parsed_axes.size() || parsed_keepdims.size() == 1);
-  if (parsed_keepdims.size() == 1) {
-    int len = parsed_axes.size();
-    bool keepdim = parsed_keepdims[0];
-    for (int i = 1; i < len; ++i) {
-      parsed_keepdims.emplace_back(keepdim);
-    }
-  }     
-  return Graph::MakeOp(
-          std::make_shared<ReduceOpImpl>(Str2ReductionType(mode), parsed_axes, parsed_keepdims),
-          {std::move(input)},
-          std::move(op_meta))->output(0);       
+  return MakeReduceOp(std::move(input), Str2ReductionType(mode), axes, keepdims, op_meta);
+}
+
+Tensor MakeReduceMeanOp(Tensor input, const HTAxes& axes,
+                        const HTKeepDims& keepdims,
+                        const OpMeta& op_meta) {
+  return MakeReduceOp(std::move(input), ReductionType::MEAN, axes, keepdims, op_meta);     
+}
+
+Tensor MakeReduceSumOp(Tensor input, const HTAxes& axes,
+                       const HTKeepDims& keepdims,
+                       const OpMeta& op_meta) {
+  return MakeReduceOp(std::move(input), ReductionType::SUM, axes, keepdims, op_meta);          
+}
+
+Tensor MakeReduceMaxOp(Tensor input, const HTAxes& axes,
+                       const HTKeepDims& keepdims,
+                       const OpMeta& op_meta) {
+  return MakeReduceOp(std::move(input), ReductionType::MAX, axes, keepdims, op_meta);          
+}
+
+Tensor MakeReduceMinOp(Tensor input, const HTAxes& axes,
+                       const HTKeepDims& keepdims,
+                       const OpMeta& op_meta) {
+  return MakeReduceOp(std::move(input), ReductionType::MIN, axes, keepdims, op_meta);          
 }
 
 Tensor MakeReduceGradientOp(Tensor input, Tensor ori_output, Tensor ori_input, const HTShape& shape,

@@ -35,6 +35,8 @@ class ArangeOpImpl : public OpInterface {
   DoInferMeta(const TensorList& inputs) const override {
     HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     int64_t length = (end() - start()) / step();
+    HT_ASSERT(length > 0)
+    << "Arange length is " << length << ", but it should be greater than zero.";
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(DataType::FLOAT64).set_shape({length});
     return {output_meta};
   }

@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -20,6 +21,9 @@ void ReshapeCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t input_size = input->numel();
   size_t size = output->numel();
   HT_ASSERT(input_size == size) << "input size and output size are different. ";
@@ -27,8 +31,12 @@ void ReshapeCpu(const NDArray& input, NDArray& output, const Stream& stream) {
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "ReshapeCpu", [&]() {
-      memory_copy_cpu<spec_t>(input->data_ptr<spec_t>(),
-                              output->data_ptr<spec_t>(), size);
+      auto _future = cpu_stream.EnqueueTask(
+        [input, output, size]() {
+        memory_copy_cpu<spec_t>(input->data_ptr<spec_t>(),
+                                output->data_ptr<spec_t>(), size);
+        },"Reshape");
+      //cpu_stream.Sync();
     });
 }
 

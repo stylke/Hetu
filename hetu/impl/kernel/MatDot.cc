@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -23,14 +24,21 @@ void MatDotCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
   HT_ASSERT_SAME_DEVICE(inputB, output);
   HT_ASSERT_EXCHANGABLE(inputA, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = inputA->numel();
   size_t size2 = inputB->numel();
   if (size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     inputA->dtype(), spec_t, "MatDotCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [inputA, inputB, output, size, size2]() {
       dot_cpu<spec_t>(inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(),
                       size, size2, output->data_ptr<spec_t>());
+      },"MatDot");
+      //cpu_stream.Sync();
     });
 }
 

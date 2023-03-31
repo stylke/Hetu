@@ -1,170 +1,225 @@
-// #pragma once
+#pragma once
 
-// #include "hetu/graph/operator.h"
-// #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/operator.h"
+#include "hetu/graph/utils/tensor_utils.h"
 
-// namespace hetu {
-// namespace graph {
+namespace hetu {
+namespace graph {
 
-// using OpDim = std::vector<std::string>;
-// using OpDimList = std::vector<OpDim>;
-// using LabelMap = std::unordered_map<std::string, int>;
+using OpDim = std::vector<std::string>;
+using OpDimList = std::vector<OpDim>;
+using LabelMap = std::unordered_map<std::string, int>;
 
-// class EinsumOpImpl;
-// class EinsumOp;
-// class EinsumGradientOpImpl;
-// class EinsumGradientOp;
+class EinsumOpImpl;
+class EinsumOp;
+class EinsumGradientOpImpl;
+class EinsumGradientOp;
 
-// class EinsumOpImpl : public OpInterface {
-//  public:
-//   EinsumOpImpl(const std::string& msg)
-//   : OpInterface(quote(EinsumOp)),
-//     _msg(msg),
-//     input_dims(),
-//     output_dims() {
-//   }
+struct EinsumParameters {
+  std::string _msg;
 
-//   inline std::string fetch_msg() const {
-//     return _msg;
-//   }
+  std::vector<std::string> _input_msgs;
 
-//   inline HTShape get_grad_shape() const {
-//     return _grad_shape;
-//   }
+  std::string _output_msg;
 
-//   void set_grad_shape(HTShape shape) {
-//     _grad_shape = shape;
-//   }
+  OpDimList input_dims;
 
-//  protected:
-//   void ParseMsg();
+  OpDimList output_dims;
 
-//   std::vector<NDArrayMeta>
-//   DoInferMeta(const TensorList& inputs) const override {
-    
-//     return {output_meta};
-//   }
+  LabelMap num_labels;
 
-//   TensorList DoGradient(Operator& op,
-//                         const TensorList& grad_outputs) const override;
+  LabelMap output_labels_idx;
 
-//   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
-//                            RuntimeContext& runtime_ctx) const override;
+  LabelMap undefined_labels;  // only used in gradient
 
-//   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-//                  RuntimeContext& runtime_ctx) const override;
+  int output_size;
 
-//   std::string _msg;
+  int num_output_labels;
 
-//   std::vector<std::string> _input_msgs;
+  int elli_len;
 
-//   std::string _output_msg;
+  std::vector<int> input_elli_len;
 
-//   OpDimList input_dims;
+  int elli_pos;
 
-//   OpDimList output_dims;
+  friend bool operator==(const EinsumParameters& l, const EinsumParameters& r);
+};
 
-//   LabelMap num_labels;
+bool operator==(const EinsumParameters& l, const EinsumParameters& r) {
+    return (l._msg == r._msg
+            && l._input_msgs == r._input_msgs
+            && l._output_msg == r._output_msg
+            && l.input_dims == r.input_dims
+            && l.output_dims == r.output_dims
+            && l.num_labels == r.num_labels
+            && l.output_labels_idx == r.output_labels_idx
+            && l.undefined_labels == r.undefined_labels
+            && l.output_size == r.output_size
+            && l.num_output_labels == r.num_output_labels
+            && l.elli_len == r.elli_len
+            && l.input_elli_len == r.input_elli_len
+            && l.elli_pos == r.elli_pos);
+  }
 
-//   LabelMap output_labels_idx;
+class EinsumOpImpl : public OpInterface {
+ public:
+  EinsumOpImpl(const EinsumParameters& params)
+  : OpInterface(quote(EinsumOp)),
+    _params(params) {
+  }
 
-//   int output_size;
+  inline std::string fetch_msg() const {
+    return _params._msg;
+  }
 
-//   int num_output_labels;
+  inline EinsumParameters params() const {
+    return _params;
+  }
 
-//   int elli_len;
+ protected:
+  EinsumParameters ParseMsg();
 
-//   std::vector<int> input_elli_len;
+  std::vector<NDArrayMeta>
+  DoInferMeta(const TensorList& inputs) const override {
+    EinsumParameters para = params();
+    LabelMap label_to_size;
+    HTShape output_shape(para.output_size);
+    std::vector<int> elli_size(para.elli_len, -1);
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      int input_idx = 0;
+      HTShape perm_shape(para.num_output_labels, 0);
+      OpDim input_labels = para.input_dims[i];
+      HTShape input_shape = inputs[i]->shape();
+      for (const auto& label : input_labels) {
+        if (label == "...") {
+          if (para.input_elli_len[i] == para.elli_len) {
+            for (int k = 0; k < para.elli_len; ++k) {
+              if (elli_size[k] == -1) {
+                elli_size[k] = input_shape[input_idx + k];
+              } else {
+                // HT_ASSERT(elli_size[k] == input_shape[input_idx + k]);
+              }
+            }
+          }
+          input_idx += para.elli_len;
+        } else {
+          if (label_to_size.find(label) == label_to_size.end()) {
+            label_to_size[label] = input_shape[input_idx];
+          } else {
+            HT_ASSERT(label_to_size[label] == input_shape[input_idx])
+              << label << ":" << label_to_size[label] << ","
+              << input_shape[input_idx] << std::endl;
+          }
+          input_idx += 1;
+        }
+      }
+    }
+    if (para.output_dims.empty()) {
+      output_shape = {1};
+    } else {
+      int output_idx = 0;
+      for (const auto& label : para.output_dims.at(0)) {
+        if (label == "...") {
+          for (int k = 0; k < para.elli_len; ++k) {
+            output_shape[para.elli_pos + k] = elli_size[k];
+          }
+          output_idx += para.elli_len;
+        } else {
+          output_shape[output_idx] = label_to_size[label];
+          output_idx += 1;
+        }
+      }
+      if (output_shape.size() == 0) {
+        output_shape = {1};
+      }
+    }
+    NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
+                                           .set_shape(output_shape)
+                                           .set_device(inputs[0]->device());    
+    return {output_meta};
+  }
 
-//   int elli_pos;
+  TensorList DoGradient(Operator& op,
+                        const TensorList& grad_outputs) const override;
 
-//   HTShape _grad_shape;
-// };
+  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
+                           RuntimeContext& runtime_ctx) const override;
 
-// class EinsumOp final : public OpWrapper<EinsumOpImpl> {
-//  public:
-//   EinsumOp(const std::string& msg, const TensorList& inputs,
-//            const OpMeta& op_meta = OpMeta())
-//   : OpWrapper<EinsumOpImpl>(make_ptr<EinsumOpImpl>(
-//       EinsumOpImpl::constrcutor_access_key(), msg, inputs, op_meta)) {}
-// };
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& runtime_ctx) const override;
 
-// class EinsumGradientOpImpl : public OpInterface {
-//  private:
-//   friend class EinsumGradientOp;
-//   struct constrcutor_access_key {};
+  EinsumParameters _params;
 
-//  public:
-//   EinsumGradientOpImpl(const constrcutor_access_key&, const std::string& msg,
-//                       const TensorList& inputs, Tensor ori_output,
-//                       Tensor ori_input, const OpMeta& op_meta = OpMeta())
-//   : OpInterface(quote(EinsumGradientOp), inputs, op_meta),
-//     pred(ori_output),
-//     pred_in(ori_input),
-//     _msg(msg),
-//     input_dims(),
-//     output_dims() {
-//     // HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-//     // AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()));
-//     DoInferMeta();
-//   }
+ public:
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const EinsumOpImpl&>(rhs);
+      return (params() == rhs_.params());
+    }
+    return false;
+  }
 
-//   inline std::string fetch_msg() const {
-//     return _msg;
-//   }
+};
 
-//   Tensor pred;
+EinsumParameters EinsumParseMsg(const TensorList& inputs,
+                                std::string cmd);
 
-//   Tensor pred_in;
+Tensor MakeEinsumOp(const std::string& msg, TensorList inputs,
+                    const OpMeta& op_meta = OpMeta());
 
-//  protected:
-//   void ParseMsg(const HTShapeList& input_shapes);
+class EinsumGradientOpImpl : public OpInterface {
 
-//   void DoInferMeta() override;
+ public:
+  EinsumGradientOpImpl(EinsumParameters params)
+  : OpInterface(quote(EinsumGradientOp)),
+    _params(params) {
+  }
 
-//   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
-//                  RuntimeContext& ctx) override;
+  inline std::string fetch_msg() const {
+    return _params._msg;
+  }
 
-//   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+  inline EinsumParameters params() const {
+    return _params;
+  }
 
-//   std::string _msg;
+  Tensor pred;
 
-//   std::vector<std::string> _input_msgs;
+  Tensor pred_in;
 
-//   std::string _output_msg;
+ protected:
 
-//   OpDimList input_dims;
+  std::vector<NDArrayMeta>
+  DoInferMeta(const TensorList& inputs) const override {
+    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    return {inputs[inputs.size() - 1]->meta()};
+  }
 
-//   OpDimList output_dims;
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) const override;
 
-//   LabelMap undefined_labels;
+  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
+                           RuntimeContext& ctx) const override;
 
-//   LabelMap num_labels;
+  EinsumParameters _params;
 
-//   LabelMap output_labels_idx;
+ public:
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const EinsumGradientOpImpl&>(rhs);
+      return (params() == rhs_.params());
+    }
+    return false;
+  }
 
-//   int output_size;
+};
 
-//   int ori_output_size;
+EinsumParameters EinsumGradientParseMsg(const TensorList& inputs,
+                                        std::string cmd, size_t outdim);
 
-//   int num_output_labels;
+Tensor MakeEinsumGradientOp(const std::string& msg, TensorList inputs,
+                            Tensor ori_output, Tensor ori_input,
+                            const OpMeta& op_meta = OpMeta());
 
-//   int elli_len;
-
-//   std::vector<int> input_elli_len;
-
-//   int elli_pos;
-// };
-
-// class EinsumGradientOp final : public OpWrapper<EinsumGradientOpImpl> {
-//  public:
-//   EinsumGradientOp(const std::string& msg, const TensorList& inputs,
-//                    Tensor ori_output, Tensor ori_input,
-//                    const OpMeta& op_meta = OpMeta())
-//   : OpWrapper<EinsumGradientOpImpl>(make_ptr<EinsumGradientOpImpl>(
-//       EinsumGradientOpImpl::constrcutor_access_key(), msg, inputs, ori_output,
-//       ori_input, op_meta)) {}
-// };
-
-// } // namespace autograd
-// } // namespace hetu
+} // namespace autograd
+} // namespace hetu

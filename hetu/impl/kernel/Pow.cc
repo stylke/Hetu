@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include "cmath"
 
 namespace hetu {
@@ -27,23 +28,28 @@ void PowCpu(const NDArray& input, double exponent, NDArray& output,
   size_t size = output->numel();
   if (size == 0)
     return;
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);  
+  CPUStream cpu_stream(stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "PowCpu", [&]() {
-      auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
-      auto src_mem = dnnl::memory(mat_md, eng);
-      auto dst_mem = dnnl::memory(mat_md, eng);
-      hetu::omp::write_to_dnnl_memory(input->data_ptr<spec_t>(), src_mem);
+      auto _future = cpu_stream.EnqueueTask(
+        [stream, input, output, exponent]() {
+        dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+        auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+        auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
+        auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 
-      auto Reciprocal_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
-                           dnnl::algorithm::eltwise_pow, mat_md, mat_md, float(1.0), float(exponent));
-      auto Reciprocal = dnnl::eltwise_forward(Reciprocal_pd);
+        auto Pow_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
+                      dnnl::algorithm::eltwise_pow, mat_md, mat_md, float(1.0), float(exponent));
+        auto Pow = dnnl::eltwise_forward(Pow_pd);
 
-      Reciprocal.execute(engine_stream,
-                        {{DNNL_ARG_SRC, src_mem}, {DNNL_ARG_DST, dst_mem}});
-      engine_stream.wait();
-      hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
+        std::unordered_map<int, dnnl::memory> pow_args;
+        pow_args.insert({DNNL_ARG_SRC, src_mem});
+        pow_args.insert({DNNL_ARG_DST, dst_mem});      
+
+        dnnl::stream engine_stream(eng);
+        Pow.execute(engine_stream, pow_args);
+      },"Pow");
+      //cpu_stream.Sync();
     });
 }
 

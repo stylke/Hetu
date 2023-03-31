@@ -8,7 +8,7 @@ namespace autograd {
 void AsStridedOpDef::DoCompute(const NDArrayList& inputs,
                                      NDArrayList& outputs,
                                      RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(),
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                hetu::impl::AsStrided, inputs.at(0),
                                outputs.at(0), get_stride(), stream());
 }
@@ -32,7 +32,7 @@ AsStridedOpDef::DoInferShape(const HTShapeList& input_shapes) {
 void AsStridedGradientOpDef::DoCompute(const NDArrayList& inputs,
                                              NDArrayList& outputs,
                                              RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::AsStridedGradient,
     inputs.at(0), outputs.at(0), get_stride(), stream());
 }

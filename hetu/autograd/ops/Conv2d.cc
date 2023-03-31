@@ -7,7 +7,7 @@ namespace autograd {
 
 void Conv2dOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                             RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(), hetu::impl::Conv2d,
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), hetu::impl::Conv2d,
                                inputs.at(0), inputs.at(1), outputs.at(0),
                                get_padding()[0], get_padding()[1],
                                get_stride()[0], get_stride()[1], stream());
@@ -61,7 +61,7 @@ HTShapeList Conv2dOpDef::DoInferShape(const HTShapeList& input_shapes) {
 void Conv2dGradientofFilterOpDef::DoCompute(const NDArrayList& inputs,
                                             NDArrayList& outputs,
                                             RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::Conv2dGradientofFilter,
     inputs.at(0), inputs.at(1), outputs.at(0), get_padding()[0],
     get_padding()[1], get_stride()[0], get_stride()[1], stream());
@@ -81,7 +81,7 @@ Conv2dGradientofFilterOpDef::DoInferShape(const HTShapeList& input_shapes) {
 void Conv2dGradientofDataOpDef::DoCompute(const NDArrayList& inputs,
                                           NDArrayList& outputs,
                                           RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::Conv2dGradientofData, inputs.at(0),
     inputs.at(1), outputs.at(0), get_padding()[0], get_padding()[1],
     get_stride()[0], get_stride()[1], stream());
@@ -100,7 +100,7 @@ Conv2dGradientofDataOpDef::DoInferShape(const HTShapeList& input_shapes) {
 
 void Conv2dAddBiasOpDef::DoCompute(const NDArrayList& inputs,
                                    NDArrayList& outputs, RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::Conv2dAddBias, inputs.at(0),
     inputs.at(1), inputs.at(2), outputs.at(0), get_padding()[0],
     get_padding()[1], get_stride()[0], get_stride()[1], stream());

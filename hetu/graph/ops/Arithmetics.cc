@@ -68,6 +68,7 @@ HTShapeList AddElewiseOpImpl::DoInferShape(Operator& op, const HTShapeList& inpu
 void AddByConstOpImpl::DoCompute(Operator& op,
                                  const NDArrayList& inputs, NDArrayList& outputs,
                                  RuntimeContext& ctx) const {
+  HT_LOG_INFO << op->instantiation_ctx().stream_index << " " << op->instantiation_ctx().stream().device_type() ;
   NDArray::add(inputs.at(0), const_value(), 
                op->instantiation_ctx().stream_index, outputs.at(0));
 }
@@ -438,42 +439,42 @@ Tensor MakeAddByConstOp(double value, Tensor input, OpMeta op_meta) {
 
 Tensor MakeSubByConstOp(Tensor input, double value, OpMeta op_meta) {
   return Graph::MakeOp(
-           std::make_shared<AddByConstOpImpl>(value),
+           std::make_shared<SubByConstOpImpl>(value),
            {std::move(input)},
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeSubFromConstOp(double value, Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
-           std::make_shared<AddByConstOpImpl>(value),
+           std::make_shared<SubFromConstOpImpl>(value),
            {std::move(input)},
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeMulByConstOp(Tensor input, double value, OpMeta op_meta) {
   return Graph::MakeOp(
-           std::make_shared<AddByConstOpImpl>(value),
+           std::make_shared<MulByConstOpImpl>(value),
            {std::move(input)},
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeMulByConstOp(double value, Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
-           std::make_shared<AddByConstOpImpl>(value),
+           std::make_shared<MulByConstOpImpl>(value),
            {std::move(input)},
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeDivByConstOp(Tensor input, double value, OpMeta op_meta) {
   return Graph::MakeOp(
-           std::make_shared<AddByConstOpImpl>(value),
+           std::make_shared<DivByConstOpImpl>(value),
            {std::move(input)},
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeDivFromConstOp(double value, Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
-           std::make_shared<AddByConstOpImpl>(value),
+           std::make_shared<DivFromConstOpImpl>(value),
            {std::move(input)},
            std::move(op_meta))->output(0);
 }

@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -28,47 +29,48 @@ void LinearCpu(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
   int32_t n = output->shape(1);
   int32_t k = trans_a ? a->shape(0) : a->shape(1);
 
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);  
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "Linear", [&]() {
-    spec_t alpha = 1, beta = 0;
-    dnnl::memory::desc srcA_md, srcB_md, bias_md, dst_md;
-    if (!trans_a)
-        srcA_md = dnnl::memory::desc({m, k}, dnnl::memory::data_type::f32, 
-                                      dnnl::memory::format_tag::ab);
-    else
-        srcA_md = dnnl::memory::desc({m, k}, dnnl::memory::data_type::f32, 
-                                      dnnl::memory::format_tag::ba);
-    if (!trans_b)
-        srcB_md = dnnl::memory::desc({k, n}, dnnl::memory::data_type::f32, 
-                                      dnnl::memory::format_tag::ab);
-    else
-        srcB_md = dnnl::memory::desc({k, n}, dnnl::memory::data_type::f32, 
-                                      dnnl::memory::format_tag::ba);
-    bias_md = dnnl::memory::desc({m, n}, dnnl::memory::data_type::f32,
+    auto _future = cpu_stream.EnqueueTask(
+    [stream, a, b, bias, trans_a, trans_b, output, m, n, k]() {
+      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::memory::desc srcA_md, srcB_md, bias_md, dst_md;
+      if (!trans_a)
+          srcA_md = dnnl::memory::desc({m, k}, dnnl::memory::data_type::f32, 
+                                        dnnl::memory::format_tag::ab);
+      else
+          srcA_md = dnnl::memory::desc({m, k}, dnnl::memory::data_type::f32, 
+                                        dnnl::memory::format_tag::ba);
+      if (!trans_b)
+          srcB_md = dnnl::memory::desc({k, n}, dnnl::memory::data_type::f32, 
+                                        dnnl::memory::format_tag::ab);
+      else
+          srcB_md = dnnl::memory::desc({k, n}, dnnl::memory::data_type::f32, 
+                                        dnnl::memory::format_tag::ba);
+      bias_md = dnnl::memory::desc({m, n}, dnnl::memory::data_type::f32,
+                                    dnnl::memory::format_tag::ab);
+      dst_md = dnnl::memory::desc({m, n}, dnnl::memory::data_type::f32, 
                                   dnnl::memory::format_tag::ab);
-    dst_md = dnnl::memory::desc({m, n}, dnnl::memory::data_type::f32, 
-                                dnnl::memory::format_tag::ab);
-                        
-    auto srcA_mem = dnnl::memory(srcA_md, eng);
-    auto srcB_mem = dnnl::memory(srcB_md, eng);
-    auto bias_mem = dnnl::memory(bias_md, eng);
-    auto dst_mem = dnnl::memory(dst_md, eng);
+                          
+      auto srcA_mem = dnnl::memory(srcA_md, eng, a->data_ptr<spec_t>());
+      auto srcB_mem = dnnl::memory(srcB_md, eng, b->data_ptr<spec_t>());
+      auto bias_mem = dnnl::memory(bias_md, eng, bias->data_ptr<spec_t>());
+      auto dst_mem = dnnl::memory(dst_md, eng, output->data_ptr<spec_t>());
 
-    hetu::omp::write_to_dnnl_memory(a->data_ptr<spec_t>(), srcA_mem);
-    hetu::omp::write_to_dnnl_memory(b->data_ptr<spec_t>(), srcB_mem);
-    hetu::omp::write_to_dnnl_memory(bias->data_ptr<spec_t>(), bias_mem);
+      auto Matmul_pd = dnnl::matmul::primitive_desc(eng, srcA_md, srcB_md, bias_md, dst_md);
+      auto Matmul = dnnl::matmul(Matmul_pd);
 
-    auto Matmul_pd = dnnl::matmul::primitive_desc(eng, srcA_md, srcB_md, bias_md, dst_md);
-    auto Matmul = dnnl::matmul(Matmul_pd);
+      std::unordered_map<int, dnnl::memory> matmul_args;
+      matmul_args.insert({DNNL_ARG_SRC, srcA_mem});
+      matmul_args.insert({DNNL_ARG_WEIGHTS, srcB_mem});
+      matmul_args.insert({DNNL_ARG_BIAS, bias_mem});
+      matmul_args.insert({DNNL_ARG_DST, dst_mem});
 
-    // Matmul.execute(engine_stream, {{DNNL_ARG_SRC, srcA_mem},
-    //                                {DNNL_ARG_WEIGHTS, srcB_mem},
-    //                                {DNNL_ARG_BIAS, bias_mem},
-    //                                {DNNL_ARG_DST, dst_mem}});
-
-    // engine_stream.wait();
-    hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
+      dnnl::stream engine_stream(eng);
+      Matmul.execute(engine_stream, matmul_args);
+    },"Linear");
+    //cpu_stream.Sync();
   });
 }
 

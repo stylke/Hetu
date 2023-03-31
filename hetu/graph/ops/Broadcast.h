@@ -56,6 +56,7 @@ class BroadcastOpImpl : public OpInterface {
       output_meta = inputs[1]->meta();
     }
     else {
+        // HT_ASSERT_CHECK_AXES(get_add_axes(), inputs[0]->ndim()); 
       output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype()).set_shape(get_shape()).set_device(inputs[0]->device());
     }
     return {output_meta};

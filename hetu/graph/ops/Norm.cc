@@ -7,7 +7,7 @@ namespace graph {
 
 void NormOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                           RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::Norm,
+  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), hetu::impl::Norm,
   //                              inputs.at(0), outputs.at(0), dim(), getp(), op->instantiation_ctx().stream());
   NDArray::norm(inputs.at(0), getp(), dim(), keepdim(),
                 op->instantiation_ctx().stream_index, outputs.at(0));
@@ -32,7 +32,7 @@ HTShapeList NormOpImpl::DoInferShape(Operator& op, const HTShapeList& input_shap
 void NormGradientOpImpl::DoCompute(Operator& op,
                                    const NDArrayList& inputs, NDArrayList& outputs,
                                    RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                hetu::impl::NormGradient, inputs.at(0),
                                inputs.at(1), inputs.at(2), outputs.at(0), dim(), getp(), 
                                op->instantiation_ctx().stream());

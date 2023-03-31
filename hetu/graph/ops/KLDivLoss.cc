@@ -12,15 +12,6 @@ using KLDivGradOpImpl = KLDivLossGradientOpImpl;
 void KLDivOpImpl::DoCompute(Operator& op,
                             const NDArrayList& inputs, NDArrayList& outputs,
                             RuntimeContext& ctx) const {
-  // NDArray unreduced =
-  //   reduction() == kNONE ? outputs.at(0) : NDArray::empty_like(inputs.at(0));
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-  //                                 hetu::impl::KLDivLoss, inputs.at(0),
-  //                                 inputs.at(1), unreduced, op->instantiation_ctx().stream());
-  // if (reduction() != kNONE) {
-  //   NDArray::reduce(unreduced, reduction(), HTAxes(), false, op->instantiation_ctx().stream_index,
-  //                   outputs.at(0));
-  // }
   NDArray::kldiv(inputs.at(0), inputs.at(1), reduction(), 
                  op->instantiation_ctx().stream_index, outputs.at(0));
 }

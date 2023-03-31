@@ -22,6 +22,7 @@ protected:
   DoInferMeta(const TensorList& inputs) const override {
     HTShape shape;
     if (inputs[0]->has_shape() && inputs[1]->has_shape()) {
+      HT_ASSERT_HAS_DIMS(inputs[0], 2);
       shape = inputs[1]->shape();
       shape.emplace_back(inputs[0]->shape(1));
     }

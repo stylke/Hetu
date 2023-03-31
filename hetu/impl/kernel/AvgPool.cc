@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -73,70 +74,55 @@ void avgpool_gradient_cpu(const size_t threads, const spec_t* input_data,
 void AvgPoolCpu(const NDArray& input, const size_t kernel_H,
                 const size_t kernel_W, NDArray& output, const size_t padding,
                 const size_t stride, const Stream& stream) {
-  HT_ASSERT(input->is_cpu()) << "Input is not on a host device.";
-  HT_ASSERT(output->is_cpu()) << "Output is not on a host device.";
-  HT_ASSERT(input->device() == output->device())
-    << "input and output are not on the same host device. "
-    << "Devices: (input) " << input->device() << " vs. (output) "
-    << output->device();
+  HT_ASSERT_CPU_DEVICE(input);
+  HT_ASSERT_SAME_DEVICE(input, output);
+
   size_t input_N = input->shape(0);
   size_t input_C = input->shape(1);
-  size_t input_H = input->shape(2);
-  size_t input_W = input->shape(3);
   size_t output_H = output->shape(2);
   size_t output_W = output->shape(3);
-  size_t pooled_H = (input_H + 2 * padding - kernel_H) / stride + 1;
-  size_t pooled_W = (input_W + 2 * padding - kernel_W) / stride + 1;
   size_t output_size = input_N * input_C * output_H * output_W;
 
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  
   if (output_size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "AvgPoolCpu", [&]() {
-      auto src_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
-      auto src_mem = dnnl::memory(src_md, eng);
+      auto _future = cpu_stream.EnqueueTask(
+        [eng, input, output, kernel_H, kernel_W,
+        padding, stride]() {
+        auto src_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto src_mem = dnnl::memory(src_md, eng, input->data_ptr<spec_t>());
 
-      auto dst_md = dnnl::memory::desc(output->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
-      auto dst_mem = dnnl::memory(dst_md, eng);
+        auto dst_md = dnnl::memory::desc(output->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto dst_mem = dnnl::memory(dst_md, eng, output->data_ptr<spec_t>());
 
-      // Write data to memory object's handle.
-      hetu::omp::write_to_dnnl_memory(input->data_ptr<spec_t>(), src_mem);
+        // Create primitive descriptor.
+        dnnl::memory::dims strides_dims = {int(stride), int(stride)};
+        dnnl::memory::dims kernel_dims = {int(kernel_H), int(kernel_W)};
+        dnnl::memory::dims dilation = {0, 0};
+        dnnl::memory::dims padding_dims_l = {int(padding), int(padding)};
+        dnnl::memory::dims padding_dims_r = {int(padding), int(padding)};
+        auto pooling_pd = dnnl::pooling_forward::primitive_desc(eng,
+                dnnl::prop_kind::forward_training, dnnl::algorithm::pooling_avg_include_padding, 
+                src_md, dst_md, strides_dims, kernel_dims, dilation, padding_dims_l, padding_dims_r);
 
-      // Create primitive descriptor.
-      dnnl::memory::dims strides_dims = {int(stride), int(stride)};
-      dnnl::memory::dims kernel_dims = {int(kernel_H), int(kernel_W)};
-      dnnl::memory::dims dilation = {0, 0};
-      dnnl::memory::dims padding_dims_l = {int(padding), int(padding)};
-      dnnl::memory::dims padding_dims_r = {int(padding), int(padding)};
-      auto pooling_pd = dnnl::pooling_forward::primitive_desc(eng,
-              dnnl::prop_kind::forward_training, dnnl::algorithm::pooling_avg_include_padding, 
-              src_md, dst_md, strides_dims, kernel_dims, dilation, padding_dims_l, padding_dims_r);
+        auto workspace_mem = dnnl::memory(pooling_pd.workspace_desc(), eng);
 
-      // Create workspace memory objects using memory descriptor created by the
-      // primitive descriptor.
-      // NOTE: Here, the workspace is required to save the indices where maximum
-      // was found, and is used in backward pooling to perform upsampling.
-      auto workspace_mem = dnnl::memory(pooling_pd.workspace_desc(), eng);
+        auto pooling_prim = dnnl::pooling_forward(pooling_pd);
 
-      // Create the primitive.
-      auto pooling_prim = dnnl::pooling_forward(pooling_pd);
+        std::unordered_map<int, dnnl::memory> pooling_args;
+        pooling_args.insert({DNNL_ARG_SRC, src_mem});
+        pooling_args.insert({DNNL_ARG_DST, dst_mem});
+        pooling_args.insert({DNNL_ARG_WORKSPACE, workspace_mem});
 
-      // Primitive arguments. Set up in-place execution by assigning src as DST.
-      std::unordered_map<int, dnnl::memory> pooling_args;
-      pooling_args.insert({DNNL_ARG_SRC, src_mem});
-      pooling_args.insert({DNNL_ARG_DST, dst_mem});
-      pooling_args.insert({DNNL_ARG_WORKSPACE, workspace_mem});
-
-      // Primitive execution: pooling.
-      pooling_prim.execute(engine_stream, pooling_args);
-
-      // Wait for the computation to finalize.
-      engine_stream.wait();
-
-      // // Read data from memory object's handle.
-      hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
+        dnnl::stream engine_stream(eng);
+        pooling_prim.execute(engine_stream, pooling_args);
+      },
+      "AvgPool");
+      //cpu_stream.Sync();
     });
 }
 
@@ -145,80 +131,63 @@ void AvgPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
                         const size_t kernel_W, NDArray& gradient_X,
                         const size_t padding, const size_t stride,
                         const Stream& stream) {
-  HT_ASSERT(output_Y->is_cpu()) << "Output is not on a host device.";
-  HT_ASSERT(gradient_Y->is_cpu()) << "Output_grad is not on a host device.";
-  HT_ASSERT(input_X->is_cpu()) << "Input is not on a host device.";
-  HT_ASSERT(gradient_X->is_cpu()) << "Input_grad is not on a host device.";
+  HT_ASSERT_CPU_DEVICE(output_Y);
+  HT_ASSERT_SAME_DEVICE(output_Y, gradient_Y);
+  HT_ASSERT_SAME_DEVICE(output_Y, input_X);
+  HT_ASSERT_SAME_DEVICE(output_Y, gradient_X);
 
-  size_t N = gradient_Y->shape(0);
-  size_t C = gradient_Y->shape(1);
-  size_t H = gradient_Y->shape(2);
-  size_t W = gradient_Y->shape(3);
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
 
-  size_t pooled_H = gradient_X->shape(2);
-  size_t pooled_W = gradient_X->shape(3);
-
-  size_t output_size = N * C * pooled_H * pooled_W;
-
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_X->dtype(), spec_t, "AvgPoolGradientCpu", [&]() {
-      auto src_md = dnnl::memory::desc(input_X->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
-      auto src_mem = dnnl::memory(src_md, eng);
+      auto _future = cpu_stream.EnqueueTask(
+        [eng, output_Y, gradient_Y,
+        input_X, gradient_X, kernel_H, kernel_W,
+        padding, stride]() {
+        auto src_md = dnnl::memory::desc(input_X->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto src_mem = dnnl::memory(src_md, eng, input_X->data_ptr<spec_t>());
 
-      auto dst_md = dnnl::memory::desc(output_Y->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
-      auto dst_mem = dnnl::memory(dst_md, eng);
+        auto dst_md = dnnl::memory::desc(output_Y->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto dst_mem = dnnl::memory(dst_md, eng, output_Y->data_ptr<spec_t>());
 
-      auto gdst_md = dnnl::memory::desc(gradient_Y->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
-      auto gdst_mem = dnnl::memory(gdst_md, eng);
-    
-      auto gsrc_md = dnnl::memory::desc(gradient_X->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
-      auto gsrc_mem = dnnl::memory(gsrc_md, eng);
-
-      // Write data to memory object's handle.
-      hetu::omp::write_to_dnnl_memory(input_X->data_ptr<spec_t>(), src_mem);
-      hetu::omp::write_to_dnnl_memory(output_Y->data_ptr<spec_t>(), dst_mem);
-      hetu::omp::write_to_dnnl_memory(gradient_Y->data_ptr<spec_t>(), gdst_mem);
-
-      // Create primitive descriptor.
-      dnnl::memory::dims strides_dims = {int(stride), int(stride)};
-      dnnl::memory::dims kernel_dims = {int(kernel_H), int(kernel_W)};
-      dnnl::memory::dims dilation = {0, 0};
-      dnnl::memory::dims padding_dims_l = {int(padding), int(padding)};
-      dnnl::memory::dims padding_dims_r = {int(padding), int(padding)};
-      auto pooling_pd = dnnl::pooling_forward::primitive_desc(eng,
-              dnnl::prop_kind::forward_training, dnnl::algorithm::pooling_avg_include_padding, 
-              src_md, dst_md, strides_dims, kernel_dims, dilation, padding_dims_l, padding_dims_r);
+        auto gdst_md = dnnl::memory::desc(gradient_Y->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto gdst_mem = dnnl::memory(gdst_md, eng, gradient_Y->data_ptr<spec_t>());
       
-      auto pooling_bwd_pd = dnnl::pooling_backward::primitive_desc(eng,
-              dnnl::algorithm::pooling_avg_include_padding, 
-              gsrc_md, gdst_md, strides_dims, kernel_dims, dilation, 
-              padding_dims_l, padding_dims_r, pooling_pd);
+        auto gsrc_md = dnnl::memory::desc(gradient_X->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto gsrc_mem = dnnl::memory(gsrc_md, eng, gradient_X->data_ptr<spec_t>());
 
-      // Create workspace memory objects using memory descriptor created by the
-      // primitive descriptor.
-      // NOTE: Here, the workspace is required to save the indices where maximum
-      // was found, and is used in backward pooling to perform upsampling.
-      auto workspace_mem = dnnl::memory(pooling_pd.workspace_desc(), eng);
+        // Create primitive descriptor.
+        dnnl::memory::dims strides_dims = {int(stride), int(stride)};
+        dnnl::memory::dims kernel_dims = {int(kernel_H), int(kernel_W)};
+        dnnl::memory::dims dilation = {0, 0};
+        dnnl::memory::dims padding_dims_l = {int(padding), int(padding)};
+        dnnl::memory::dims padding_dims_r = {int(padding), int(padding)};
+        auto pooling_pd = dnnl::pooling_forward::primitive_desc(eng,
+                dnnl::prop_kind::forward_training, dnnl::algorithm::pooling_avg_include_padding, 
+                src_md, dst_md, strides_dims, kernel_dims, dilation, padding_dims_l, padding_dims_r);
+        
+        auto pooling_bwd_pd = dnnl::pooling_backward::primitive_desc(eng,
+                dnnl::algorithm::pooling_avg_include_padding, 
+                gsrc_md, gdst_md, strides_dims, kernel_dims, dilation, 
+                padding_dims_l, padding_dims_r, pooling_pd);
 
-      // Create the primitive.
-      auto pooling_prim = dnnl::pooling_backward(pooling_bwd_pd);
+        auto workspace_mem = dnnl::memory(pooling_pd.workspace_desc(), eng);
 
-      // Primitive arguments. Set up in-place execution by assigning src as DST.
-      std::unordered_map<int, dnnl::memory> pooling_args;
-      pooling_args.insert({DNNL_ARG_SRC, src_mem});
-      pooling_args.insert({DNNL_ARG_DST, dst_mem});
-      pooling_args.insert({DNNL_ARG_DIFF_SRC, gsrc_mem});
-      pooling_args.insert({DNNL_ARG_DIFF_DST, gdst_mem});
-      pooling_args.insert({DNNL_ARG_WORKSPACE, workspace_mem});
+        auto pooling_prim = dnnl::pooling_backward(pooling_bwd_pd);
 
-      // Primitive execution: pooling.
-      pooling_prim.execute(engine_stream, pooling_args);
+        std::unordered_map<int, dnnl::memory> pooling_args;
+        pooling_args.insert({DNNL_ARG_SRC, src_mem});
+        pooling_args.insert({DNNL_ARG_DST, dst_mem});
+        pooling_args.insert({DNNL_ARG_DIFF_SRC, gsrc_mem});
+        pooling_args.insert({DNNL_ARG_DIFF_DST, gdst_mem});
+        pooling_args.insert({DNNL_ARG_WORKSPACE, workspace_mem});
 
-      // Wait for the computation to finalize.
-      engine_stream.wait();
-      hetu::omp::read_from_dnnl_memory(gradient_X->data_ptr<spec_t>(), gsrc_mem);
+        dnnl::stream engine_stream(eng);
+        pooling_prim.execute(engine_stream, pooling_args);
+      },
+      "AvgPoolGradient");
+      //cpu_stream.Sync();
     });
 }
 

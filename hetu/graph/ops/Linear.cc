@@ -9,7 +9,7 @@ namespace graph {
 
 void LinearOpImpl::DoCompute(Operator& op,const NDArrayList& inputs, NDArrayList& outputs,
                             RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::Linear,
+  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), hetu::impl::Linear,
   //                              inputs.at(0), trans_a(), inputs.at(1), trans_b(),
   //                              inputs.at(2), outputs.at(0), op->instantiation_ctx().stream());
   NDArray::linear(inputs.at(0), inputs.at(1), inputs.at(2), trans_a(), trans_b(),

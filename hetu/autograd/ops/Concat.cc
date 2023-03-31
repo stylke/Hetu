@@ -28,7 +28,7 @@ void ConcatOpDef::DoInferMeta() {
   HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
   HTShape shape;
   if (_inputs[0]->has_shape() && _inputs[1]->has_shape()) {
-    for (int i = 0; i < _inputs[0]->ndim(); ++i) {
+    for (size_t i = 0; i < _inputs[0]->ndim(); ++i) {
       if (i != get_axis())
         HT_ASSERT(_inputs[0]->shape(i) == _inputs[1]->shape(i));
       }

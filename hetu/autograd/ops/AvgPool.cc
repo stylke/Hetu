@@ -6,7 +6,7 @@ namespace autograd {
 
 void AvgPoolOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(), hetu::impl::AvgPool,
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), hetu::impl::AvgPool,
                                inputs.at(0), get_kernel_H(), get_kernel_W(),
                                outputs.at(0), get_padding(), get_stride(),
                                stream());

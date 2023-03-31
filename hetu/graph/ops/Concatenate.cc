@@ -8,16 +8,23 @@ namespace graph {
 void ConcatenateOpImpl::DoCompute(Operator& op,
                                   const NDArrayList& inputs,
                                   NDArrayList& outputs, RuntimeContext& ctx) const {
-  // int num = inputs.size();
-  // size_t offset = 0;
-  // size_t axis = get_axis();
-  // for (int i = 0; i < num; ++i) {
-  //   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-  //                                   hetu::impl::Concatenate, inputs.at(i),
-  //                                   outputs.at(0), axis, offset, op->instantiation_ctx().stream());
-  //   offset += inputs.at(i)->shape(axis);
-  // }
-  NDArray::cat(inputs, get_axis(), op->instantiation_ctx().stream_index, outputs.at(0));
+  if (op->instantiation_ctx().placement.is_cpu()) {
+    HT_DISPATCH_KERNEL_CPU_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                hetu::impl::Concatenate, inputs,
+                                outputs.at(0), get_axis(), op->instantiation_ctx().stream());
+  }
+  else {
+    int num = op->num_inputs();
+    size_t offset = 0;
+    size_t axis = get_axis();
+    for (int i = 0; i < num; ++i) {
+      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                  hetu::impl::Concatenate, inputs.at(i),
+                                  outputs.at(0), axis, offset, op->instantiation_ctx().stream());
+      offset += inputs.at(i)->shape(axis);
+    }
+  }
+  // NDArray::cat(inputs, get_axis(), op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList ConcatenateOpImpl::DoGradient(Operator& op,

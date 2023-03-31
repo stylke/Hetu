@@ -3,6 +3,7 @@
 #include "hetu/graph/tensor.h"
 #include "hetu/core/ndarray_meta.h"
 #include <algorithm>
+#include <map>
 
 namespace hetu {
 namespace graph {
@@ -57,9 +58,58 @@ inline bool SameDataType(const TensorList& tensors) {
   return true;
 }
 
+inline bool CheckAxes(const HTAxes& axes, int64_t ndim) {
+  std::unordered_set<int64_t> mset;
+  for (size_t i = 0; i < axes.size(); ++i) {
+    if (axes[i] < -ndim || axes[i] >= ndim)
+      return false;
+    int64_t axi = axes[i] > 0 ? axes[i] : axes[i] + ndim;
+    if (mset.find(axi) != mset.end())
+      return false;
+    mset.insert(axi);
+  }
+  return true;
+}
+
+inline bool CheckShape(const Tensor& input) {
+  for (size_t i = 0; i < input->ndim(); ++i) {
+    if (input->shape(i) <= 0)
+      return false;
+  }
+}
+
+inline bool CheckDim(const Tensor& input, int64_t ndim) {
+  if (int64_t(input->ndim()) == ndim)
+    return true;
+  else
+    return false;
+}
+
 #define HT_ASSERT_TENSORS_SAME_DTYPE(tensors)                                  \
   HT_ASSERT(SameDataType(tensors))                                             \
     << "Tensors are not with the same data type: " << _get_dtypes(tensors)
 
+#define HT_ASSERT_CHECK_AXES(axes, ndim)                                  \
+  HT_ASSERT(CheckAxes(axes, ndim))                                        \
+    << "Invalid axes:" << axes;
+
+#define HT_ASSERT_VALID_SHAPE(tensor)                                  \
+  HT_ASSERT(CheckShape(tensor))                                        \
+    << "Invalid shape:" << tensor->shape();
+
+
+#define HT_ASSERT_HAS_DIMS(tensor, dim)                                  \
+  HT_ASSERT(CheckDim(tensor, dim))                                       \
+    << "Incorrect Input dims:" << tensor->ndim();
+
+#define HT_ASSERT_TENSORS_SAME_SHAPE(tensor1, tensor2)            \
+  HT_ASSERT(tensor1->shape() == tensor2->shape())                 \
+    << "Tensors have different shapes "                           \
+    << tensor1->shape() << " and " << tensor2->shape();
+
+#define HT_ASSERT_TENSORS_SAME_NDIM(tensor1, tensor2)            \
+  HT_ASSERT(tensor1->ndim() == tensor2->mdim())                  \
+    << "Tensors have different dims "                            \
+    << tensor1->ndim() << " and " << tensor2->ndim();
 } // namespace graph
 } // namespace hetu

@@ -22,7 +22,7 @@ void MatMul2OpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                     hetu::impl::BroadcastShape, inputs.at(1),
                                     broadcast_b, HTAxes(), stream());
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(), hetu::impl::BatchMatMul,
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), hetu::impl::BatchMatMul,
                                broadcast_a, trans_a(), broadcast_b, trans_b(),
                                outputs.at(0), stream());
 }
@@ -115,7 +115,7 @@ HTShapeList MatMul2OpDef::DoInferShape(const HTShapeList& input_shapes) {
   bshape_a.emplace_back(a.at(a.size() - 1));
   bshape_b.emplace_back(b.at(b.size() - 2));
   bshape_b.emplace_back(b.at(b.size() - 1));
-  for (int idx = 0; idx < 2; ++idx) {
+  for (size_t idx = 0; idx < 2; ++idx) {
     HTShape input_shape = input_shapes[idx];
     HTShape output_shape = idx ? bshape_b : bshape_a;
     size_t ndim = output_shape.size();
@@ -178,11 +178,11 @@ void MatMul2GradientOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& out
                                     broadcast_b, HTAxes(), stream());
   }
   NDArray unreduced = axes().empty() ? outputs.at(0) : NDArray::empty(out, inputs.at(0)->device(), inputs.at(0)->dtype());
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(), hetu::impl::BatchMatMul,
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), hetu::impl::BatchMatMul,
                                broadcast_a, trans_a(), broadcast_b, trans_b(),
                                unreduced, stream());
   if (!axes().empty()) {
-    HT_DISPATCH_KERNEL_CUDA_ONLY(
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::ReduceSum, unreduced,
     outputs.at(0), axes().data(), axes().size(), stream());
   }

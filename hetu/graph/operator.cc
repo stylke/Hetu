@@ -22,8 +22,8 @@ bool OpInterface::DoInstantiate(Operator& op, const Device& placement,
     inst_ctx.start = std::make_unique<hetu::impl::CUDAEvent>(placement);
     inst_ctx.stop = std::make_unique<hetu::impl::CUDAEvent>(placement);
   } else {
-    inst_ctx.start = std::make_unique<DefaultEvent>(placement);
-    inst_ctx.stop = std::make_unique<DefaultEvent>(placement);
+    inst_ctx.start = std::make_unique<hetu::impl::CPUEvent>();
+    inst_ctx.stop = std::make_unique<hetu::impl::CPUEvent>();
   }
   Operator::for_each_output_tensor(
     op, [&](Tensor& tensor) { tensor->set_placement(placement); });
@@ -108,6 +108,7 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
       TensorIdentifier{_ids.graph_id, _ids.op_id, 0, graph.next_tensor_id()},
       _op_meta.name, output_meta);
   } else if (output_meta_list.size() > 1) {
+    _outputs.reserve(output_meta_list.size());
     for (int i = 0; i < static_cast<int>(output_meta_list.size()); i++) {
       // (TensorIdentifier ids, TensorName name, NDArrayMeta meta)
       auto& output_meta = output_meta_list[i];

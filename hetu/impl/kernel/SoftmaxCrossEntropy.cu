@@ -53,9 +53,6 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
-      const spec_t* y_data = (const spec_t*) (input->data_ptr<spec_t>());
-      spec_t* label_data = (spec_t*) (label->data_ptr<spec_t>());
-      spec_t* output_data = (spec_t*) (output->data_ptr<spec_t>());
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
       cudnnTensorDescriptor_t desc;
@@ -68,7 +65,7 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
 
       CUDNN_CALL(cudnnSoftmaxForward(
         handle, CUDNN_SOFTMAX_LOG, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha, desc,
-        (const void*) y_data, &beta, desc, temp_data));
+        (const void*) input->data_ptr<spec_t>(), &beta, desc, temp_data));
 
       softmax_cross_entropy_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         (const spec_t*) temp_data, label->data_ptr<spec_t>(),
@@ -86,7 +83,7 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
                                             datatype, n_, 1, 1, 1));
       CUDNN_CALL(cudnnReduceTensor(
         handle, rtd, NULL, 0, temp_data, size * sizeof(spec_t), &alpha, desc,
-        (const void*) temp_data, &beta, new_desc, (void*) output_data));
+        (const void*) temp_data, &beta, new_desc, output->data_ptr<spec_t>()));
 
       CUDNN_CALL(cudnnDestroyReduceTensorDescriptor(rtd));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(new_desc));
@@ -136,10 +133,6 @@ void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_y->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
-      const spec_t* grad_data = (const spec_t*) grad->data_ptr<spec_t>();
-      const spec_t* y_data = (const spec_t*) input_y->data_ptr<spec_t>();
-      const spec_t* label_data = (const spec_t*) label->data_ptr<spec_t>();
-      spec_t* output_data = (spec_t*) output->data_ptr<spec_t>();
       int dev_id = cuda_stream.device_id();
 
       DataPtr temp_data_ptr =
@@ -154,7 +147,7 @@ void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
                                             n_, c_, 1, 1));
       CUDNN_CALL(cudnnSoftmaxForward(
         handle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
-        desc, (const void*) y_data, &beta, desc, temp_data));
+        desc, input_y->data_ptr<spec_t>(), &beta, desc, temp_data));
 
       softmax_cross_entropy_gradient_kernel<spec_t>
         <<<blocks, threads, 0, cuda_stream>>>(

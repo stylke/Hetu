@@ -1,6 +1,8 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
 
 namespace hetu {
@@ -26,7 +28,7 @@ void softmax_cross_entropy_sparse_cpu(const spec_t* pred,
     }
 
     spec_t sum = 0;
-    for (int i = 0; i < n_cols; ++i) {
+    for (size_t i = 0; i < n_cols; ++i) {
       sum += std::exp(pred[idx * n_cols + i] - maxval);
     }
 
@@ -64,7 +66,7 @@ void softmax_cross_entropy_sparse_gradient_cpu(const spec_t* pred, const int64_t
     }
     for (size_t i = 0; i < n_cols; ++i) {
         size_t curid = idx * n_cols + i;
-        if(i == int64_t(label[idx]))
+        if(int64_t(i) == int64_t(label[idx]))
           output[curid] = (std::exp(pred[curid] - maxval) / sum - 1.0) * grad_loss[idx];
         else
           output[curid] = (std::exp(pred[curid] - maxval) / sum) * grad_loss[idx];
@@ -80,13 +82,20 @@ void SoftmaxCrossEntropySparseCpu(const NDArray& pred, const NDArray& label,
   for (size_t i = 0; i < pred->ndim() - 1; i++)
     n_rows *= pred->shape(i);
   size_t n_cols = pred->shape(pred->ndim() - 1);
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
   if (n_rows == 0)
     return;
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "SoftmaxCrossEntropySparseCpu", [&]() {
-      softmax_cross_entropy_sparse_cpu(
-        pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(), n_rows, n_cols,
-        ignored_index, loss->data_ptr<spec_t>());
+      auto _future = cpu_stream.EnqueueTask(
+        [pred, label, loss, n_rows, n_cols, ignored_index]() {
+        softmax_cross_entropy_sparse_cpu(
+          pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(), n_rows, n_cols,
+          ignored_index, loss->data_ptr<spec_t>());
+        },"SoftmaxCrossEntropySparse");
+      //cpu_stream.Sync();
     });
 }
 
@@ -99,14 +108,21 @@ void SoftmaxCrossEntropySparseGradientCpu(const NDArray& pred, const NDArray& la
   for (size_t i = 0; i < pred->ndim() - 1; i++)
     n_rows *= pred->shape(i);
   size_t n_cols = pred->shape(pred->ndim() - 1);
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
   if (n_rows == 0)
     return;
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "SoftmaxCrossEntropySparseGradientCpu", [&]() {
-      softmax_cross_entropy_sparse_gradient_cpu(
-        pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(),
-        grad_loss->data_ptr<spec_t>(), n_rows, n_cols,
-        ignored_index, output->data_ptr<spec_t>());
+      auto _future = cpu_stream.EnqueueTask(
+        [pred, label, grad_loss, output, n_rows, n_cols, ignored_index]() {
+        softmax_cross_entropy_sparse_gradient_cpu(
+          pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(),
+          grad_loss->data_ptr<spec_t>(), n_rows, n_cols,
+          ignored_index, output->data_ptr<spec_t>());
+        },"SoftmaxCrossEntropySparseGradient");
+      //cpu_stream.Sync();
     });
 }
 

@@ -8,10 +8,6 @@ namespace graph {
 void MaxPoolOpImpl::DoCompute(Operator& op,
                               const NDArrayList& inputs, NDArrayList& outputs,
                               RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::MaxPool,
-  //                              inputs.at(0), get_kernel_H(), get_kernel_W(),
-  //                              outputs.at(0), get_padding(), get_stride(),
-  //                              op->instantiation_ctx().stream());
   NDArray::maxpool(inputs.at(0), get_kernel_H(), get_kernel_W(), get_padding(), get_stride(), 
                    op->instantiation_ctx().stream_index, outputs.at(0));
 }
@@ -40,7 +36,7 @@ void MaxPoolGradientOpImpl::DoCompute(Operator& op,
                                       const NDArrayList& inputs,
                                       NDArrayList& outputs,
                                       RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::MaxPoolGradient, inputs.at(0),
     inputs.at(1), inputs.at(2), get_kernel_H(), get_kernel_W(), outputs.at(0),
     get_padding(), get_stride(), op->instantiation_ctx().stream());
@@ -67,7 +63,7 @@ Tensor MakeMaxPoolGradientOp(Tensor output, Tensor output_grad, Tensor input,
                              size_t stride, OpMeta op_meta) {
   return Graph::MakeOp(
            std::make_shared<MaxPoolGradientOpImpl>(kernel_H, kernel_W, padding, stride),
-           {std::move(output), std::move(output_grad)},
+           {std::move(output), std::move(output_grad), std::move(input)},
            std::move(op_meta))->output(0);
 }
 

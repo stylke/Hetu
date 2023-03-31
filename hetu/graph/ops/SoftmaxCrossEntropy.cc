@@ -12,17 +12,6 @@ using SCEGradOpImpl = SoftmaxCrossEntropyGradientOpImpl;
 void SCEOpImpl::DoCompute(Operator& op, 
                           const NDArrayList& inputs, NDArrayList& outputs,
                           RuntimeContext& ctx) const {
-  // HTShape output_shape = HTShape(inputs.at(0)->shape().begin(), inputs.at(0)->shape().end() - 1);
-  // NDArray unreduced =
-  //   reduction() == kNONE ? outputs.at(0) : NDArray::empty(output_shape, 
-  //                                          inputs.at(0)->device(), inputs.at(0)->dtype());
-  // HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-  //                                 hetu::impl::SoftmaxCrossEntropy, inputs.at(0),
-  //                                 inputs.at(1), unreduced, op->instantiation_ctx().stream());
-  // if (reduction() != kNONE) {
-  //   NDArray::reduce(unreduced, reduction(), HTAxes(), false, op->instantiation_ctx().stream_index,
-  //                   outputs.at(0));
-  // }
   NDArray::sceloss(inputs.at(0), inputs.at(1), reduction(),
                    op->instantiation_ctx().stream_index, outputs.at(0));
 }
@@ -58,15 +47,15 @@ void SCEGradOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, NDArrayLi
     reduction() == kNONE ? inputs.at(2) : NDArray::empty(output_shape, 
                                            inputs.at(0)->device(), inputs.at(0)->dtype());
   if (reduction() == kMEAN) {
-    HT_DISPATCH_KERNEL_CUDA_ONLY(
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       op->instantiation_ctx().placement.type(), type(), hetu::impl::BroadcastShapeMul, inputs.at(2),
       1.0f / broadcasted->numel(), broadcasted, HTAxes(), op->instantiation_ctx().stream());
   } else if (reduction() == kSUM) {
-    HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                     hetu::impl::BroadcastShape, inputs.at(2),
                                     broadcasted, HTAxes(), op->instantiation_ctx().stream());
   }
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::SoftmaxCrossEntropyGradient,
     inputs.at(0), inputs.at(1), broadcasted, outputs.at(0), op->instantiation_ctx().stream());
 }

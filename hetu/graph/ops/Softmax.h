@@ -29,6 +29,7 @@ class SoftmaxOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
+    HT_ASSERT(-int64_t(inputs[0]->ndim()) <= get_dim() && get_dim() < int64_t(inputs[0]->ndim()));
     return {inputs[0]->meta()};
   };
 

@@ -8,66 +8,66 @@
 namespace hetu {
 namespace impl {
 
-const int TILE_SIZE = 32;
-const int BLOCK_ROWS = 8;
+// const int TILE_SIZE = 32;
+// const int BLOCK_ROWS = 8;
 
-template <typename spec_t>
-__global__ void batch_transpose_kernel(const spec_t* input, spec_t* output,
-                                       int64_t rows, int64_t cols,
-                                       int64_t num_tile_rows,
-                                       int64_t num_tile_cols,
-                                       int64_t block_nums, int64_t tile_size) {
-  const int64_t src_rows = rows;
-  const int64_t src_cols = cols;
-  const int64_t dst_rows = cols;
-  const int64_t dst_cols = rows;
-  __shared__ spec_t tile[TILE_SIZE][TILE_SIZE + 1]; // To avoid bank conflict.
+// template <typename spec_t>
+// __global__ void batch_transpose_kernel(const spec_t* input, spec_t* output,
+//                                        int64_t rows, int64_t cols,
+//                                        int64_t num_tile_rows,
+//                                        int64_t num_tile_cols,
+//                                        int64_t block_nums, int64_t tile_size) {
+//   const int64_t src_rows = rows;
+//   const int64_t src_cols = cols;
+//   const int64_t dst_rows = cols;
+//   const int64_t dst_cols = rows;
+//   __shared__ spec_t tile[TILE_SIZE][TILE_SIZE + 1]; // To avoid bank conflict.
 
-  int64_t batch_num_tile = num_tile_rows * num_tile_cols;
-  for (int i = blockIdx.x, step = gridDim.x; i < block_nums; i += step) {
-    const int64_t batch_index = i / batch_num_tile; // the index of batch.
-    const int64_t tile_index = i -
-      batch_index *
-        batch_num_tile; // equal to i % (num_tile_rows*num_tile_cols). the
-                        // flatten index of tile in a batch.
+//   int64_t batch_num_tile = num_tile_rows * num_tile_cols;
+//   for (int i = blockIdx.x, step = gridDim.x; i < block_nums; i += step) {
+//     const int64_t batch_index = i / batch_num_tile; // the index of batch.
+//     const int64_t tile_index = i -
+//       batch_index *
+//         batch_num_tile; // equal to i % (num_tile_rows*num_tile_cols). the
+//                         // flatten index of tile in a batch.
 
-    const int64_t tile_row_index =
-      tile_index / num_tile_cols; // the row index of tile in a batch.
-    const int64_t tile_col_index = tile_index -
-      tile_row_index * num_tile_cols; // equal to k % num_tile_cols. the col
-                                      // index of tile in a batch.
+//     const int64_t tile_row_index =
+//       tile_index / num_tile_cols; // the row index of tile in a batch.
+//     const int64_t tile_col_index = tile_index -
+//       tile_row_index * num_tile_cols; // equal to k % num_tile_cols. the col
+//                                       // index of tile in a batch.
 
-    const int64_t offset = batch_index * src_rows * src_cols;
-    {
-      int64_t col_in_tile = threadIdx.x;
-      int64_t col_in_matrix = tile_col_index * tile_size + threadIdx.x;
-#pragma unroll
-      for (int64_t row_in_tile = threadIdx.y; row_in_tile < tile_size;
-           row_in_tile += BLOCK_ROWS) {
-        int64_t row_in_matrix = row_in_tile + tile_row_index * tile_size;
-        if (col_in_matrix < src_cols && row_in_matrix < src_rows) {
-          tile[row_in_tile][col_in_tile] =
-            input[offset + row_in_matrix * src_cols + col_in_matrix];
-        }
-      }
-    }
-    __syncthreads();
-    {
-      int64_t col_in_tile = threadIdx.x;
-      int64_t col_in_matrix = tile_row_index * tile_size + threadIdx.x;
-#pragma unroll
-      for (int64_t row_in_tile = threadIdx.y; row_in_tile < tile_size;
-           row_in_tile += BLOCK_ROWS) {
-        int64_t row_in_matrix = row_in_tile + tile_col_index * tile_size;
-        if (col_in_matrix < dst_cols && row_in_matrix < dst_rows) {
-          output[offset + row_in_matrix * dst_cols + col_in_matrix] =
-            tile[col_in_tile][row_in_tile];
-        }
-      }
-    }
-    __syncthreads();
-  }
-}
+//     const int64_t offset = batch_index * src_rows * src_cols;
+//     {
+//       int64_t col_in_tile = threadIdx.x;
+//       int64_t col_in_matrix = tile_col_index * tile_size + threadIdx.x;
+// #pragma unroll
+//       for (int64_t row_in_tile = threadIdx.y; row_in_tile < tile_size;
+//            row_in_tile += BLOCK_ROWS) {
+//         int64_t row_in_matrix = row_in_tile + tile_row_index * tile_size;
+//         if (col_in_matrix < src_cols && row_in_matrix < src_rows) {
+//           tile[row_in_tile][col_in_tile] =
+//             input[offset + row_in_matrix * src_cols + col_in_matrix];
+//         }
+//       }
+//     }
+//     __syncthreads();
+//     {
+//       int64_t col_in_tile = threadIdx.x;
+//       int64_t col_in_matrix = tile_row_index * tile_size + threadIdx.x;
+// #pragma unroll
+//       for (int64_t row_in_tile = threadIdx.y; row_in_tile < tile_size;
+//            row_in_tile += BLOCK_ROWS) {
+//         int64_t row_in_matrix = row_in_tile + tile_col_index * tile_size;
+//         if (col_in_matrix < dst_cols && row_in_matrix < dst_rows) {
+//           output[offset + row_in_matrix * dst_cols + col_in_matrix] =
+//             tile[col_in_tile][row_in_tile];
+//         }
+//       }
+//     }
+//     __syncthreads();
+//   }
+// }
 
 template <typename spec_t>
 __global__ void transpose_kernel(const spec_t* input, spec_t* output,

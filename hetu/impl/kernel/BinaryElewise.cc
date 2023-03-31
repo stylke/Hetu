@@ -12,17 +12,9 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
   HT_ASSERT_CPU_DEVICE(inputA);
   HT_ASSERT_SAME_DEVICE(inputA, output);
   HT_ASSERT_SAME_DEVICE(inputB, output);
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
 
-  size_t size;
-  size_t sizeA = inputA->numel();
-  size_t sizeB = inputB->numel();
-  dnnl::memory::data_type mtype;
-  if (inputA->dtype() == DataType::FLOAT32)
-    mtype = dnnl::memory::data_type::f32;
-  else
-    mtype = dnnl::memory::data_type::f64;
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);
   dnnl::memory::dims A_dims(output->ndim());
   dnnl::memory::dims A_stride(output->ndim());
   dnnl::memory::dims B_dims(output->ndim());
@@ -59,18 +51,22 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     inputA->dtype(), spec_t, "BinaryElewiseCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+        [eng, inputA, inputB, output, A_dims, A_stride,
+         B_dims, B_stride, out_strides, op]() {
+          dnnl::memory::data_type mtype;
+          if (inputA->dtype() == DataType::FLOAT32)
+            mtype = dnnl::memory::data_type::f32;
+          else
+            mtype = dnnl::memory::data_type::f64;
           auto src_A_md = dnnl::memory::desc(A_dims, mtype, A_stride);
           auto src_B_md = dnnl::memory::desc(B_dims, mtype, B_stride);
           auto dst_md = dnnl::memory::desc(output->shape(), mtype, out_strides);
 
           // Create src memory objects.
-          auto src_A_mem = dnnl::memory(src_A_md, eng);
-          auto src_B_mem = dnnl::memory(src_B_md, eng);
-          auto dst_mem = dnnl::memory(dst_md, eng);
-
-          // Write data to memory object's handle.
-          hetu::omp::write_to_dnnl_memory(inputA->data_ptr<spec_t>(), src_A_mem);
-          hetu::omp::write_to_dnnl_memory(inputB->data_ptr<spec_t>(), src_B_mem);
+          auto src_A_mem = dnnl::memory(src_A_md, eng, inputA->data_ptr<spec_t>());
+          auto src_B_mem = dnnl::memory(src_B_md, eng, inputB->data_ptr<spec_t>());
+          auto dst_mem = dnnl::memory(dst_md, eng, output->data_ptr<spec_t>());
 
           auto binary_pd = dnnl::binary::primitive_desc(eng, op,
                   src_A_md, src_B_md, dst_md);
@@ -83,52 +79,35 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
           binary_args.insert({DNNL_ARG_SRC_0, src_A_mem});
           binary_args.insert({DNNL_ARG_SRC_1, src_B_mem});
           binary_args.insert({DNNL_ARG_DST, dst_mem});
-
-          // Primitive execution: binary with ReLU.
+        // dnnl::stream engine_stream(eng);
+        // binary_prim.execute(engine_stream, binary_args);
+          dnnl::stream engine_stream(eng);
           binary_prim.execute(engine_stream, binary_args);
-
-          // Wait for the computation to finalize.
           engine_stream.wait();
-
-          // Read data from memory object's handle.
-          hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
+        },
+        "BinaryEleWise");
+        cpu_stream.Sync();
     });
 }
 
 void AddElewiseCpu(const NDArray& inputA, const NDArray& inputB,
                     NDArray& output, const Stream& stream) {
-
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-      inputA->dtype(), spec_t, "AddElewiseCpu", [&]() {
-        BinaryElewiseToolCpu(inputA, inputB, output, dnnl::algorithm::binary_add, stream);
-      }); 
+  BinaryElewiseToolCpu(inputA, inputB, output, dnnl::algorithm::binary_add, stream);
 }
 
 void SubElewiseCpu(const NDArray& inputA, const NDArray& inputB,
                     NDArray& output, const Stream& stream) {
-
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-      inputA->dtype(), spec_t, "SubElewiseCpu", [&]() {
-        BinaryElewiseToolCpu(inputA, inputB, output, dnnl::algorithm::binary_sub, stream);
-      }); 
+  BinaryElewiseToolCpu(inputA, inputB, output, dnnl::algorithm::binary_sub, stream);
 }
 
 void MulElewiseCpu(const NDArray& inputA, const NDArray& inputB,
                     NDArray& output, const Stream& stream) {
-
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-      inputA->dtype(), spec_t, "MulElewiseCpu", [&]() {
-        BinaryElewiseToolCpu(inputA, inputB, output, dnnl::algorithm::binary_mul, stream);
-      }); 
+  BinaryElewiseToolCpu(inputA, inputB, output, dnnl::algorithm::binary_mul, stream);
 }
 
 void DivElewiseCpu(const NDArray& inputA, const NDArray& inputB,
                     NDArray& output, const Stream& stream) {
-
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-      inputA->dtype(), spec_t, "DivElewiseCpu", [&]() {
-        BinaryElewiseToolCpu(inputA, inputB, output, dnnl::algorithm::binary_div, stream);
-      }); 
+  BinaryElewiseToolCpu(inputA, inputB, output, dnnl::algorithm::binary_div, stream); 
 }
 
 } // namespace impl

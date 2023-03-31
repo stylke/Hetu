@@ -16,6 +16,9 @@ class MSELossOpImpl : public OpInterface {
   MSELossOpImpl(ReductionType reduction = kMEAN)
   : OpInterface(quote(MSELossOp)),
     _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
   }
 
   ReductionType reduction() const {
@@ -25,9 +28,7 @@ class MSELossOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
+    HT_ASSERT_TENSORS_SAME_SHAPE(inputs[0], inputs[1]);
     NDArrayMeta output_meta;
     if (_reduction != kNONE)
       output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype()).set_shape({1}).set_device(inputs[0]->device());

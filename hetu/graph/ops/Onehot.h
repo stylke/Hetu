@@ -25,6 +25,9 @@ class OnehotOpImpl : public OpInterface {
     HTShape shape;
     if (inputs[0]->has_shape()) {
       shape = inputs[0]->shape();
+      HT_ASSERT(num_classes() > 0)
+      << "num_classes = " << num_classes()
+      << ", but it's supposed to be greater than 0.";
       shape.emplace_back(num_classes());
     }
     NDArrayMeta output_meta =  NDArrayMeta().set_dtype(inputs[0]->dtype())

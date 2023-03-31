@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -30,14 +31,22 @@ void BroadcastCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = output->numel();
   size_t input_size = input->numel();
   if (size == 0 || input_size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "BroadcastCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, input_size, size]() {
       broadcast_cpu<spec_t>(input->data_ptr<spec_t>(), input_size, size,
                             output->data_ptr<spec_t>());
+      },
+      "Broadcast");
+      //cpu_stream.Sync();
     });
 }
 
@@ -46,14 +55,22 @@ void BroadcastGradientCpu(const NDArray& input, NDArray& output,
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = output->numel();
   size_t input_size = input->numel();
   if (size == 0 || input_size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "BroadcastGradientCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, input_size, size]() {
       broadcast_gradient_cpu<spec_t>(input->data_ptr<spec_t>(), input_size,
                                      size, output->data_ptr<spec_t>());
+      },
+      "BroadcastGradient");
+      //cpu_stream.Sync();
     });
 }
 

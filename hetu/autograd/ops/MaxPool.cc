@@ -6,7 +6,7 @@ namespace autograd {
 
 void MaxPoolOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(), hetu::impl::MaxPool,
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), hetu::impl::MaxPool,
                                inputs.at(0), get_kernel_H(), get_kernel_W(),
                                outputs.at(0), get_padding(), get_stride(),
                                stream());
@@ -47,7 +47,7 @@ HTShapeList MaxPoolOpDef::DoInferShape(const HTShapeList& input_shapes) {
 void MaxPoolGradientOpDef::DoCompute(const NDArrayList& inputs,
                                      NDArrayList& outputs,
                                      RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::MaxPoolGradient, inputs.at(0),
     inputs.at(1), inputs.at(2), get_kernel_H(), get_kernel_W(), outputs.at(0),
     get_padding(), get_stride(), stream());

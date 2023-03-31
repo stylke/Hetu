@@ -64,7 +64,7 @@ __global__ void layer_norm_kernel(const spec_t* x, const spec_t* scale,
   if (threadIdx.x == 0) {
     mean[blockIdx.x] = mean_share = mean_thread / last_dim;
     var_share = var_thread / last_dim - mean_share * mean_share;
-    if (var_share < 0)
+    if (double(var_share) < 0)
       var_share = 0;
     var[blockIdx.x] = var_share;
   }
@@ -82,6 +82,13 @@ void LayerNormCuda(const NDArray& in_arr, const NDArray& ln_scale,
                    const NDArray& ln_bias, NDArray& mean_arr, NDArray& var_arr,
                    NDArray& out_arr, int64_t reduce_dims, 
                    float eps, const Stream& stream) {
+  HT_ASSERT_CUDA_DEVICE(in_arr);
+  HT_ASSERT_SAME_DEVICE(in_arr, ln_scale);
+  HT_ASSERT_SAME_DEVICE(in_arr, ln_bias);
+  HT_ASSERT_SAME_DEVICE(in_arr, mean_arr); 
+  HT_ASSERT_SAME_DEVICE(in_arr, var_arr); 
+  HT_ASSERT_SAME_DEVICE(in_arr, out_arr);
+
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
@@ -146,6 +153,15 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
                            NDArray& grad_scale, NDArray& grad_bias,
                            const NDArray& mean_arr, const NDArray& var_arr,
                            int64_t reduce_dims, float eps, const Stream& stream) {
+  HT_ASSERT_CUDA_DEVICE(out_grads);
+  HT_ASSERT_SAME_DEVICE(out_grads, ln_scale);
+  HT_ASSERT_SAME_DEVICE(out_grads, in_arr);
+  HT_ASSERT_SAME_DEVICE(out_grads, mean_arr); 
+  HT_ASSERT_SAME_DEVICE(out_grads, var_arr); 
+  HT_ASSERT_SAME_DEVICE(out_grads, grad_scale);
+  HT_ASSERT_SAME_DEVICE(out_grads, grad_arr);
+  HT_ASSERT_SAME_DEVICE(out_grads, grad_bias);
+
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());

@@ -19,6 +19,13 @@ class PadOpImpl : public OpInterface {
     _mode(mode),
     _paddings(paddings),
     _constant(constant) {
+    HT_ASSERT(_mode == "constant")
+      << "Now we only support padding mode \'constant\'";
+    for (size_t i = 0; i < paddings.size(); ++i) {
+      HT_ASSERT(paddings[i] >= 0)
+      << "padding in dim " << i << " < 0,"
+      << "which has value" << paddings[i];
+    }
   }
 
   const std::string& get_mode() const {

@@ -20,6 +20,14 @@ class MaxPoolOpImpl : public OpInterface {
     _kernel_W(kernel_W),
     _padding(padding),
     _stride(stride) {
+    HT_ASSERT(kernel_H >= 1)
+    << "kernel_H < 1, kernel_H = " << kernel_H;
+    HT_ASSERT(kernel_W >= 1)
+    << "kernel_W < 1, kernel_W = " << kernel_W;
+    HT_ASSERT(stride >= 1)
+    << "stride < 1, stride = " << stride;
+    HT_ASSERT(padding >= 0)
+    << "padding < 0, padding = " << padding;
   }
 
   size_t get_kernel_H() const {
@@ -41,8 +49,9 @@ class MaxPoolOpImpl : public OpInterface {
 protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HTShape shape = {-1, -1, -1, -1};
+    HTShape shape;
     if (inputs[0]->has_shape()) {
+      HT_ASSERT_HAS_DIMS(inputs[0], 4);
       int64_t N = inputs[0]->shape(0);
       int64_t C = inputs[0]->shape(1);
       int64_t H = inputs[0]->shape(2);

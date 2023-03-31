@@ -9,10 +9,6 @@ namespace graph {
 void Conv2dOpImpl::DoCompute(Operator&op,
                              const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::Conv2d,
-  //                              inputs.at(0), inputs.at(1), outputs.at(0),
-  //                              get_padding()[0], get_padding()[1],
-  //                              get_stride()[0], get_stride()[1], op->instantiation_ctx().stream());
   NDArray::conv2d(inputs.at(0), inputs.at(1), get_padding(), get_stride(),
                   op->instantiation_ctx().stream_index, outputs.at(0));
 }
@@ -51,7 +47,7 @@ void Conv2dGradientofFilterOpImpl::DoCompute(Operator& op,
                                              const NDArrayList& inputs,
                                              NDArrayList& outputs,
                                              RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::Conv2dGradientofFilter,
     inputs.at(0), inputs.at(1), outputs.at(0), get_padding()[0],
     get_padding()[1], get_stride()[0], get_stride()[1], op->instantiation_ctx().stream());
@@ -68,7 +64,7 @@ void Conv2dGradientofDataOpImpl::DoCompute(Operator& op,
                                            const NDArrayList& inputs,
                                            NDArrayList& outputs,
                                            RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::Conv2dGradientofData, inputs.at(0),
     inputs.at(1), outputs.at(0), get_padding()[0], get_padding()[1],
     get_stride()[0], get_stride()[1], op->instantiation_ctx().stream());
@@ -84,7 +80,7 @@ Conv2dGradientofDataOpImpl::DoInferShape(Operator&op,
 void Conv2dAddBiasOpImpl::DoCompute(Operator& op,
                                     const NDArrayList& inputs,
                                     NDArrayList& outputs, RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::Conv2dAddBias, inputs.at(0),
     inputs.at(1), inputs.at(2), outputs.at(0), get_padding()[0],
     get_padding()[1], get_stride()[0], get_stride()[1], op->instantiation_ctx().stream());

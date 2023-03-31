@@ -59,9 +59,9 @@ void RepeatCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  CUDA_CALL(cudaMemcpyAsync(stride_in, (void*) stride_tmp, buf_size, cudaMemcpyHostToDevice, cuda_stream));
-  CUDA_CALL(cudaMemcpyAsync(stride_out, (void*) output->stride().data(), buf_size, cudaMemcpyHostToDevice, cuda_stream));
-  CUDA_CALL(cudaMemcpyAsync(dim, (void*) shape_tmp, buf_size, cudaMemcpyHostToDevice, cuda_stream));
+  CudaMemcpyAsync(stride_in, (void*) stride_tmp, buf_size, cudaMemcpyHostToDevice, cuda_stream);
+  CudaMemcpyAsync(stride_out, (void*) output->stride().data(), buf_size, cudaMemcpyHostToDevice, cuda_stream);
+  CudaMemcpyAsync(dim, (void*) shape_tmp, buf_size, cudaMemcpyHostToDevice, cuda_stream);
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "RepeatCuda", [&]() {
       repeat_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(

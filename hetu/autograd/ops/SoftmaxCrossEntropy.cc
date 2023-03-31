@@ -14,7 +14,7 @@ void SCEOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
   NDArray unreduced =
     reduction() == kNONE ? outputs.at(0) : NDArray::empty(output_shape, 
                                            inputs.at(0)->device(), inputs.at(0)->dtype());
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(),
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::SoftmaxCrossEntropy, inputs.at(0),
                                   inputs.at(1), unreduced, stream());
   if (reduction() != kNONE) {
@@ -68,15 +68,15 @@ void SCEGradOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
     reduction() == kNONE ? inputs.at(2) : NDArray::empty(output_shape, 
                                            inputs.at(0)->device(), inputs.at(0)->dtype());
   if (reduction() == kMEAN) {
-    HT_DISPATCH_KERNEL_CUDA_ONLY(
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       placement().type(), type(), hetu::impl::BroadcastShapeMul, inputs.at(2),
       1.0f / broadcasted->numel(), broadcasted, HTAxes(), stream());
   } else if (reduction() == kSUM) {
-    HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(),
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                     hetu::impl::BroadcastShape, inputs.at(2),
                                     broadcasted, HTAxes(), stream());
   }
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::SoftmaxCrossEntropyGradient,
     inputs.at(0), inputs.at(1), broadcasted, outputs.at(0), stream());
 }

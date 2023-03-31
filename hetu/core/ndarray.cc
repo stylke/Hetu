@@ -623,6 +623,7 @@ NDArray NDArray::arrayset(NDArray& input, double value,
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       input->device().type(), __FUNCTION__, hetu::impl::ArraySet, 
       input, value, stream);  
+  return input;
 }
 
 NDArrayList NDArray::batchnorm(const NDArray& input, const NDArray& bn_scale, const NDArray& bn_bias,

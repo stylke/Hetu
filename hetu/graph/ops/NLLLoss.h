@@ -28,9 +28,14 @@ class NLLLossOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-    << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-    << " operators. Expected: [\'mean\', \'sum\', \'none\']";
+    if (inputs[0]->has_shape() && inputs[1]->has_shape()) {
+      HT_ASSERT(inputs[0]->ndim() == inputs[1]->ndim() + 1)
+      << "Input's dims should be 1 more than label's."
+      << "Input dims: " << inputs[0]->ndim()
+      << ". Label dims: " << inputs[1]->ndim();
+      for (size_t i = 0; i < inputs[1]->ndim(); i++)
+        HT_ASSERT(inputs[0]->shape(i) == inputs[1]->shape(i));
+    }
     NDArrayMeta output_meta;
     if (_reduction != kNONE)
       output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype()).set_shape({1}).set_device(inputs[0]->device());

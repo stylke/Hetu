@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -32,6 +33,9 @@ void TransposeCpu(const NDArray& input, NDArray& output, int64_t* perm,
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   uint ndim = uint(input->ndim());
   uint ndim_ = uint(output->ndim());
   HT_ASSERT(ndim == ndim_);
@@ -53,10 +57,14 @@ void TransposeCpu(const NDArray& input, NDArray& output, int64_t* perm,
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "TransposeCpu", [&]() {
-      transpose_cpu<spec_t>(input->data_ptr<spec_t>(),
-                            output->data_ptr<spec_t>(), buf, ndim, size);
+      auto _future = cpu_stream.EnqueueTask(
+        [input, output, buf, ndim ,size]() {
+        transpose_cpu<spec_t>(input->data_ptr<spec_t>(),
+                              output->data_ptr<spec_t>(), buf, ndim, size);
+        free(buf);
+        },"Transpose");
+      //cpu_stream.Sync();
     });
-  free(buf);
 }
 
 } // namespace impl

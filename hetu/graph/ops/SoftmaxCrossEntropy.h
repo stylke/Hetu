@@ -17,6 +17,9 @@ class SoftmaxCrossEntropyOpImpl : public OpInterface {
   SoftmaxCrossEntropyOpImpl(ReductionType reduction = kMEAN)
   : OpInterface(quote(SoftmaxCrossEntropyOp)),
     _reduction(reduction) {
+    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
+    << "Unsupported reduction type \'" << _reduction << "\' for " << type()
+    << " operators. Expected: [\'mean\', \'sum\', \'none\']";
   }
 
   ReductionType reduction() const {
@@ -26,9 +29,6 @@ class SoftmaxCrossEntropyOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-    << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-    << " operators. Expected: [\'mean\', \'sum\', \'none\']";
     HTShape output_shape = {};
     for (size_t i = 0; i < inputs[0]->ndim() - 1; ++i) {
       output_shape.emplace_back(inputs[0]->shape(i));

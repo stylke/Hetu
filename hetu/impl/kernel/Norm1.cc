@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
 
 namespace hetu {
@@ -11,53 +12,49 @@ void NormCpu(const NDArray& input, NDArray& output, int64_t dim, int64_t p, cons
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);
+  CPUStream cpu_stream(stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
   input->dtype(), spec_t, "NormCpu", [&]() {
-    dnnl::memory::dims in_shape = input->shape();
-    dnnl::memory::dims in_stride = input->stride();
-    dnnl::memory::dims out_shape = input->shape();
-    dnnl::memory::dims out_stride(input->ndim());
-    out_shape[dim] = 1;
-    size_t stride_size = 1;
-    for (int i = input->ndim() - 1; i >= 0; i--) {
-      out_stride[i] = stride_size;
-      stride_size *= out_shape[i];
+    auto _future = cpu_stream.EnqueueTask(
+    [stream, input, output, dim, p]() {
+      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::memory::dims in_shape = input->shape();
+      dnnl::memory::dims in_stride = input->stride();
+      dnnl::memory::dims out_shape = input->shape();
+      dnnl::memory::dims out_stride(input->ndim());
+      out_shape[dim] = 1;
+      size_t stride_size = 1;
+      for (int i = input->ndim() - 1; i >= 0; i--) {
+        out_stride[i] = stride_size;
+        stride_size *= out_shape[i];
+      }
+      auto src_md = dnnl::memory::desc(in_shape, dnnl::memory::data_type::f32, in_stride);
+      auto dst_md = dnnl::memory::desc(out_shape, dnnl::memory::data_type::f32, out_stride);
+
+      auto src_mem = dnnl::memory(src_md, eng, input->data_ptr<spec_t>());
+      auto dst_mem = dnnl::memory(dst_md, eng, output->data_ptr<spec_t>());
+
+      if (in_shape == out_shape)
+        hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), src_mem);
+      else {
+
+        // Create primitive descriptor.
+        auto reduction_pd = dnnl::reduction::primitive_desc(
+                eng, dnnl::algorithm::reduction_norm_lp_sum, src_md, dst_md, float(p), float(0.f));
+
+        // Create the primitive.
+        auto reduction_prim = dnnl::reduction(reduction_pd);
+
+        // Primitive arguments.
+        std::unordered_map<int, dnnl::memory> reduction_args;
+        reduction_args.insert({DNNL_ARG_SRC, src_mem});
+        reduction_args.insert({DNNL_ARG_DST, dst_mem});
+
+        dnnl::stream engine_stream(eng);
+        reduction_prim.execute(engine_stream, reduction_args);
+
     }
-    auto src_md = dnnl::memory::desc(in_shape, dnnl::memory::data_type::f32, in_stride);
-    auto dst_md = dnnl::memory::desc(out_shape, dnnl::memory::data_type::f32, out_stride);
-
-    auto src_mem = dnnl::memory(src_md, eng);
-    auto dst_mem = dnnl::memory(dst_md, eng);
-
-    // Write data to memory object's handle.
-    hetu::omp::write_to_dnnl_memory(input->data_ptr<spec_t>(), src_mem);
-    if (in_shape == out_shape)
-      hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), src_mem);
-    else {
-
-      // Create primitive descriptor.
-      auto reduction_pd = dnnl::reduction::primitive_desc(
-              eng, dnnl::algorithm::reduction_norm_lp_sum, src_md, dst_md, float(p), float(0.f));
-
-      // Create the primitive.
-      auto reduction_prim = dnnl::reduction(reduction_pd);
-
-      // Primitive arguments.
-      std::unordered_map<int, dnnl::memory> reduction_args;
-      reduction_args.insert({DNNL_ARG_SRC, src_mem});
-      reduction_args.insert({DNNL_ARG_DST, dst_mem});
-
-      // Primitive execution: Reduction (Sum).
-      reduction_prim.execute(engine_stream, reduction_args);
-
-      // Wait for the computation to finalize.
-      engine_stream.wait();
-
-      // Read data from memory object's handle.
-      hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
-    }
+  },"Norm");
   });
 }
 
@@ -107,13 +104,15 @@ void NormGradientCpu(const NDArray& input, const NDArray& output, const NDArray&
   HT_ASSERT_SAME_DEVICE(input, output_grad);
   HT_ASSERT_SAME_DEVICE(input, input_grad);
 
+  CPUStream cpu_stream(stream);
+
   size_t reduce_dim_size, after_dim_size, size;
   reduce_dim_size = after_dim_size = size = 1;
-  for (int i = 0; i < input->ndim(); ++i) {
+  for (size_t i = 0; i < input->ndim(); ++i) {
       size *= input->shape(i);
-      if (i == dim)
+      if (i == size_t(dim))
           reduce_dim_size = input->shape(i);
-      else if (i > dim)
+      else if (i > size_t(dim))
           after_dim_size *= input->shape(i);
   }
 
@@ -122,9 +121,13 @@ void NormGradientCpu(const NDArray& input, const NDArray& output, const NDArray&
 
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "NormGradientCuda", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, output_grad, input_grad, p, reduce_dim_size, after_dim_size, size]() {
       norm_gradient_cpu<spec_t>(
       input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(), 
       input_grad->data_ptr<spec_t>(), p, reduce_dim_size, after_dim_size, size);
+      },"NormGradient");
+      //cpu_stream.Sync();
     });
 }
 

@@ -6,7 +6,7 @@ namespace autograd {
 
 void InstanceNormOpDef::DoCompute(const NDArrayList& inputs,
                                   NDArrayList& outputs, RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::InstanceNorm, inputs.at(0),
     outputs.at(1), outputs.at(2), outputs.at(0), get_eps(), stream());
 }
@@ -41,7 +41,7 @@ HTShapeList InstanceNormOpDef::DoInferShape(const HTShapeList& input_shapes) {
 void InstanceNormGradientOpDef::DoCompute(const NDArrayList& inputs,
                                           NDArrayList& outputs,
                                           RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     placement().type(), type(), hetu::impl::InstanceNormGradient, inputs.at(0),
     inputs.at(1), outputs.at(0), const_cast<NDArray&>(inputs.at(2)),
     const_cast<NDArray&>(inputs.at(3)), get_eps(), stream());

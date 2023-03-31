@@ -9,9 +9,6 @@ void EmbeddingLookupOpImpl::DoCompute(Operator& op,
                                       const NDArrayList& inputs,
                                       NDArrayList& outputs,
                                       RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-  //                                 hetu::impl::EmbeddingLookup, inputs.at(0),
-  //                                 inputs.at(1), outputs.at(0), op->instantiation_ctx().stream());
   NDArray::embedding(inputs.at(0), inputs.at(1), 
                      op->instantiation_ctx().stream_index, outputs.at(0));
 }

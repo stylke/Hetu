@@ -8,9 +8,6 @@ namespace graph {
 void InstanceNormOpImpl::DoCompute(Operator& op,
                                    const NDArrayList& inputs,
                                    NDArrayList& outputs, RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CUDA_ONLY(
-  //   op->instantiation_ctx().placement.type(), type(), hetu::impl::InstanceNorm, inputs.at(0),
-  //   outputs.at(1), outputs.at(2), outputs.at(0), get_eps(), op->instantiation_ctx().stream());
   NDArray::instancenorm(inputs.at(0), get_eps(), op->instantiation_ctx().stream_index,
                         outputs.at(0), outputs.at(1), outputs.at(2));
 }
@@ -36,7 +33,7 @@ void InstanceNormGradientOpImpl::DoCompute(Operator& op,
                                            const NDArrayList& inputs,
                                            NDArrayList& outputs,
                                            RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::InstanceNormGradient, inputs.at(0),
     inputs.at(1), outputs.at(0), const_cast<NDArray&>(inputs.at(2)),
     const_cast<NDArray&>(inputs.at(3)), get_eps(), op->instantiation_ctx().stream());
@@ -51,10 +48,11 @@ InstanceNormGradientOpImpl::DoInferShape(Operator& op,
 
 TensorList MakeInstanceNormOp(Tensor input, double eps,
                               const OpMeta& op_meta) {
-  return Graph::MakeOp(
+  auto ss = Graph::MakeOp(
           std::make_shared<InstanceNormOpImpl>(eps),
           {std::move(input)},
-          std::move(op_meta))->outputs();                                
+          std::move(op_meta));   
+  return ss->outputs();                             
 }
 
 Tensor MakeInstanceNormGradientOp(Tensor output_grad, Tensor input,

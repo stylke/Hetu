@@ -1,5 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -20,12 +22,18 @@ void MaskedfillCpu(const NDArray& input, const NDArray& mask,
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT_EXCHANGABLE(input, output);
 
+  CPUStream cpu_stream(stream);
+
   size_t size = input->numel();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "MaskfillCpu", [&]() {
-      maskedfill_cpu<spec_t>(
+      auto _future = cpu_stream.EnqueueTask(
+      [input, mask, output, val, size]() {
+        maskedfill_cpu<spec_t>(
         input->data_ptr<spec_t>(), mask->data_ptr<int64_t>(),
         static_cast<spec_t>(val), output->data_ptr<spec_t>(), size);
+      },"Maskfill");
+      //cpu_stream.Sync();
     });
 }
 

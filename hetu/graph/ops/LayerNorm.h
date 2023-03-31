@@ -34,12 +34,19 @@ class LayerNormOpImpl : public OpInterface {
 protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HTShape local_shape = inputs[0]->shape();
-    int ndim = local_shape.size();
-    local_shape[ndim - 1] = 1;
     HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    HT_ASSERT_TENSORS_SAME_SHAPE(inputs[1], inputs[2]);
+    size_t dim = normalized_shape().size();
+    HTShape output_shape = inputs[0]->shape();
+    if (inputs[0]->has_shape()) 
+      for (size_t i = 0; i < dim; ++i) {
+        HT_ASSERT(normalized_shape()[dim - 1 - i] == inputs[0]->shape(inputs[0]->ndim() - 1 - i))
+        << "Normalized shape's last dims should equal to input shape's.But we have normalized shape:"
+        << normalized_shape() << " and input shape:" << inputs[0]->shape();
+        output_shape[inputs[0]->ndim() - 1 - i] = 1;
+      }
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
-                                           .set_shape(local_shape)
+                                           .set_shape(output_shape)
                                            .set_device(inputs[0]->device());
     return {inputs[0]->meta(), output_meta, output_meta};
   }

@@ -9,12 +9,12 @@ namespace autograd {
 void ReduceOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                             RuntimeContext& ctx) {
   if (reduction() == ReductionType::MEAN) {
-    HT_DISPATCH_KERNEL_CUDA_ONLY(
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       placement().type(), type(), hetu::impl::ReduceMean, inputs.at(0),
       outputs.at(0), get_axes().data(), get_axes().size(), stream());
     // HT_LOG_INFO << inputs.at(0) << "\n" << outputs.at(0) << "\n" << get_axes();
   } else if (reduction() == ReductionType::SUM) {
-    HT_DISPATCH_KERNEL_CUDA_ONLY(
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       placement().type(), type(), hetu::impl::ReduceSum, inputs.at(0),
       outputs.at(0), get_axes().data(), get_axes().size(), stream());
   }

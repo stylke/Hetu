@@ -27,9 +27,12 @@ class ConcatOpImpl : public OpInterface {
     HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     HTShape shape;
     if (inputs[0]->has_shape() && inputs[1]->has_shape()) {
-      for (int i = 0; i < inputs[0]->ndim(); ++i) {
+      for (size_t i = 0; i < inputs[0]->ndim(); ++i) {
         if (i != get_axis())
-          HT_ASSERT(inputs[0]->shape(i) == inputs[1]->shape(i));
+          HT_ASSERT(inputs[0]->shape(i) == inputs[1]->shape(i))
+          << "inputA and inputB has different size at dim " << i
+          << ", inputA has " << inputs[0]->shape(i) <<  ",inputB has "
+          << inputs[1]->shape(i);
         }
       HT_ASSERT(inputs[0]->shape(get_axis()) >= 0 && inputs[1]->shape(get_axis()) >= 0);
       shape = inputs[0]->shape();

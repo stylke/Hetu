@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
 
 namespace hetu {
@@ -22,13 +23,20 @@ void SinCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT_EXCHANGABLE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = output->numel();
   if (size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "SinCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, size]() {
       sin_cpu<spec_t>(input->data_ptr<spec_t>(), size,
                       output->data_ptr<spec_t>());
+      }, "Sin");
+      //cpu_stream.Sync();
     });
 }
 
@@ -47,14 +55,20 @@ void CosCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT_EXCHANGABLE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = input->numel();
   if (size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "CosCpu", [&]() {
-      cos_cpu<spec_t>(input->data_ptr<spec_t>(),
-                               size,
-                               output->data_ptr<spec_t>());
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, size]() {
+      cos_cpu<spec_t>(input->data_ptr<spec_t>(), size,
+                      output->data_ptr<spec_t>());
+      }, "Cos");
+      //cpu_stream.Sync();
     });
 }
 

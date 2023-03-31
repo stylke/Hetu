@@ -1,5 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
+#include "hetu/impl/utils/omp_utils.h"
 
 namespace hetu {
 namespace impl {
@@ -19,14 +21,21 @@ void OuterCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output, con
   HT_ASSERT_SAME_DEVICE(inputA, inputB);
   HT_ASSERT_SAME_DEVICE(inputA, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = output->numel();
   size_t sizeB = inputB->numel();
   if (size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     inputA->dtype(), spec_t, "OuterCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [inputA, inputB, output, sizeB, size]() {
       outer_cpu<spec_t>(
         inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), sizeB, size, output->data_ptr<spec_t>());
+      },"Outer");
+      //cpu_stream.Sync();
     });
 }
 

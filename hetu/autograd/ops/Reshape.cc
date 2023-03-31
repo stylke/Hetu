@@ -12,7 +12,7 @@ void ArrayReshapeOpDef::DoCompute(const NDArrayList& inputs,
 }
 
 TensorList ArrayReshapeOpDef::DoGradient(const TensorList& grad_outputs) {
-  auto& self = reinterpret_cast<ArrayReshapeOp&>(get_self());
+  // auto& self = reinterpret_cast<ArrayReshapeOp&>(get_self());
   if (grad_outputs.at(0).is_defined() && grad_outputs.at(0)->is_tensor())
     return {ArrayReshapeGradientOp(grad_outputs.at(0), _inputs[0],
                                   grad_op_meta().set_name(grad_name()))

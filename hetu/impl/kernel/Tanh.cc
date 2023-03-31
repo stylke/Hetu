@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
 
 namespace hetu {
@@ -36,23 +37,29 @@ void TanhCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   size_t size = output->numel();
   if (size == 0)
     return;
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);  
+  CPUStream cpu_stream(stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "TanhCpu", [&]() {
-      auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
-      auto src_mem = dnnl::memory(mat_md, eng);
-      auto dst_mem = dnnl::memory(mat_md, eng);
-      hetu::omp::write_to_dnnl_memory(input->data_ptr<spec_t>(), src_mem);
+      auto _future = cpu_stream.EnqueueTask(
+        [stream, input, output, size]() {
+          dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+          auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+          auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
+          auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 
-      auto Tanh_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
-                           dnnl::algorithm::eltwise_tanh, mat_md, mat_md, float(0.0), float(0.0));
-      auto Tanh = dnnl::eltwise_forward(Tanh_pd);
+          auto Tanh_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
+                              dnnl::algorithm::eltwise_tanh, mat_md, mat_md, float(0.0), float(0.0));
+          auto Tanh = dnnl::eltwise_forward(Tanh_pd);
 
-      Tanh.execute(engine_stream,
-                        {{DNNL_ARG_SRC, src_mem}, {DNNL_ARG_DST, dst_mem}});
-      engine_stream.wait();
-      hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), dst_mem);
+          std::unordered_map<int, dnnl::memory> tanh_args;
+          tanh_args.insert({DNNL_ARG_SRC, src_mem});
+          tanh_args.insert({DNNL_ARG_DST, dst_mem});      
+
+          dnnl::stream engine_stream(eng);
+          Tanh.execute(engine_stream, tanh_args);
+          engine_stream.wait();
+        },"Tanh");
+      //cpu_stream.Sync();
     });
 }
 
@@ -68,13 +75,18 @@ void TanhGradientCpu(const NDArray& input, const NDArray& output_grad,
   if (size == 0)
     return;
 
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);  
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::stream engine_stream(eng);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "TanhGradientCpu", [&]() {
-      tanh_gradient_cpu<spec_t>(input->data_ptr<spec_t>(),
-                                output_grad->data_ptr<spec_t>(), size,
-                                input_grad->data_ptr<spec_t>());
+      auto _future = cpu_stream.EnqueueTask(
+        [input, output_grad, input_grad, size]() {
+        tanh_gradient_cpu<spec_t>(input->data_ptr<spec_t>(),
+                                  output_grad->data_ptr<spec_t>(), size,
+                                  input_grad->data_ptr<spec_t>());
+        },"TanhGradient");
+      //cpu_stream.Sync();
     });
 }
 
