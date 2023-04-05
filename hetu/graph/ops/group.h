@@ -24,5 +24,7 @@ class GroupOpImpl final : public OpInterface {
 
 Tensor MakeGroupOp(OpMeta op_meta = OpMeta());
 
+Tensor MakeGroupOp(TensorList deps, OpMeta op_meta = OpMeta());
+
 } // namespace graph
 } // namespace hetu

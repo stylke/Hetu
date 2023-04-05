@@ -8,9 +8,11 @@ namespace graph {
 TensorList
 BinaryCrossEntropyOpImpl::DoGradient(Operator& op,
                                      const TensorList& grad_outputs) const {
-  auto grad_probs = op->require_grad(0) ? MakeBCEGradOp(op->input(0), op->input(1), grad_outputs.front(), reduction(),
-                                          op->grad_op_meta().set_name(op->grad_name()))
-                                        : Tensor();
+  auto grad_probs = op->require_grad(0)
+    ? MakeBinaryCrossEntropyGradientOp(
+        op->input(0), op->input(1), grad_outputs.front(), reduction(),
+        op->grad_op_meta().set_name(op->grad_name()))
+    : Tensor();
   return {grad_probs, Tensor()};
 }
 
@@ -52,16 +54,18 @@ void BinaryCrossEntropyGradientOpImpl::DoCompute(
     broadcasted, outputs.at(0), op->instantiation_ctx().stream());
 }
 
-Tensor MakeBCEOp(Tensor probs, Tensor labels, ReductionType reduction,
-                 OpMeta op_meta) {
+Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
+                                ReductionType reduction, OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<BinaryCrossEntropyOpImpl>(reduction),
                        {std::move(probs), std::move(labels)},
                        std::move(op_meta))
     ->output(0);
 }
 
-Tensor MakeBCEGradOp(Tensor probs, Tensor labels, Tensor grad_outputs,
-                     ReductionType reduction, OpMeta op_meta) {
+Tensor MakeBinaryCrossEntropyGradientOp(Tensor probs, Tensor labels,
+                                        Tensor grad_outputs,
+                                        ReductionType reduction,
+                                        OpMeta op_meta) {
   return Graph::MakeOp(
            std::make_shared<BinaryCrossEntropyGradientOpImpl>(reduction),
            {std::move(probs), std::move(labels), std::move(grad_outputs)},

@@ -28,9 +28,8 @@ class Graph {
   friend class TensorDef;
   struct constrcutor_access_key {};
 
-  static constexpr size_t DEFAULT_GRAPH_INITIAL_CAPACITY = 4096;
-
-  Graph(size_t init_capacity) : _id{_next_graph_id()} {
+  Graph(GraphName name, size_t init_capacity)
+  : _id{_next_graph_id()}, _name(name) {
     _op_indexing.reserve(init_capacity);
     _parameter_ops.reserve(init_capacity);
     _source_ops.reserve(init_capacity);
@@ -39,6 +38,8 @@ class Graph {
   }
 
  public:
+  static constexpr size_t DEFAULT_GRAPH_INITIAL_CAPACITY = 4096;
+
   // disable copy constructor and move constructor
   Graph(const Graph&) = delete;
   Graph& operator=(const Graph&) = delete;
@@ -69,10 +70,14 @@ class Graph {
   }
 
   virtual NDArrayList Run(const TensorList& fetches,
-                          const Tensor2NDArrayMap& feed_dict = {}) = 0;
+                          const FeedDict& feed_dict = {}) = 0;
 
   GraphId id() const noexcept {
     return _id;
+  }
+
+  const GraphName& name() const noexcept {
+    return _name;
   }
 
   OpRefList topo_order() {
@@ -166,7 +171,7 @@ class Graph {
     _op_indexing.erase(op->id());
   }
 
-  virtual NDArray& GetOrCompute(Tensor& tensor) {
+  virtual NDArray GetOrCompute(Tensor& tensor) {
     auto it = _preserved_data.find(tensor->id());
     if (it != _preserved_data.end()) {
       return it->second;
@@ -197,13 +202,14 @@ class Graph {
   }
 
   const GraphId _id;
+  const GraphName _name;
   std::unordered_map<OpType, uint32_t> _op_type_cnts;
 
   std::unordered_map<OpId, Operator> _op_indexing;
   std::unordered_set<OpId> _parameter_ops;
   std::unordered_set<OpId> _source_ops;
   std::unordered_set<OpId> _sink_ops;
-  //
+  
   std::unordered_map<OpId, uint32_t> _op_out_degrees;
   Tensor2NDArrayMap _preserved_data;
 
@@ -249,6 +255,13 @@ class Graph {
     return *Graph::_global_graphs[graph_id];
   }
 
+  static inline Graph& GetGraph(const GraphName& graph_name) {
+    auto it = Graph::_name_to_graphs.find(graph_name);
+    HT_VALUE_ERROR_IF(it == Graph::_name_to_graphs.end())
+      << "Graph with name \"" << graph_name << "\" does not exist";
+    return *(it->second);
+  }
+
   static Graph& get_default_eager_graph() {
     Graph::InitOnce();
     return *Graph::_default_eager_graph;
@@ -265,6 +278,8 @@ class Graph {
   }
 
   static void push_graph_ctx(GraphId id) {
+    HT_VALUE_ERROR_IF(id >= Graph::_global_graphs.size())
+      << "Graph with id " << id << " does not exist";
     Graph::_cur_graph_ctx.push(id);
   }
 
@@ -310,6 +325,11 @@ class Graph {
     return Gradients(TensorList{y}, xs, TensorList{grad_y}, num_ops_hint);
   }
 
+  template <class T, class... Args>
+  static T& make_new_graph(Args&&... args) {
+    return *Graph::_make_new_graph<T>(std::forward<Args>(args)...);
+  }
+
  protected:
   static void InitOnce() {
     std::call_once(Graph::_init_flag, Graph::Init);
@@ -325,7 +345,11 @@ class Graph {
                                      std::forward<Args>(args)...);
     HT_VALUE_ERROR_IF(Graph::_global_graphs.size() != graph->id())
       << "Graph must be initialized using the `_make_new_graph` function";
-    Graph::_global_graphs.emplace_back(std::move(graph));
+    HT_VALUE_ERROR_IF(Graph::_name_to_graphs.find(graph->name()) !=
+                      Graph::_name_to_graphs.end())
+      << "Graph with name \"" << graph->name() << "\" already exists";
+    Graph::_global_graphs.push_back(graph);
+    Graph::_name_to_graphs[graph->name()] = graph;
     return reinterpret_cast<std::shared_ptr<T>&>(Graph::_global_graphs.back());
   }
 
@@ -335,6 +359,7 @@ class Graph {
 
   static std::once_flag _init_flag;
   static std::vector<std::shared_ptr<Graph>> _global_graphs;
+  static std::unordered_map<GraphName, std::shared_ptr<Graph>> _name_to_graphs;
   static std::shared_ptr<Graph> _default_eager_graph;
   static std::shared_ptr<Graph> _default_define_by_run_graph;
   static std::shared_ptr<Graph> _default_define_and_run_graph;

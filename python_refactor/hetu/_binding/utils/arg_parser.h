@@ -7,14 +7,13 @@
 #include "hetu/_binding/core/device.h"
 #include "hetu/_binding/core/stream.h"
 #include "hetu/_binding/core/ndarray.h"
-#include "hetu/_binding/autograd/operator.h"
-#include "hetu/_binding/autograd/tensor.h"
-#include "hetu/_binding/execution/dar_executor.h"
+#include "hetu/_binding/graph/operator.h"
+#include "hetu/_binding/graph/tensor.h"
+#include "hetu/_binding/graph/graph.h"
 
 namespace hetu {
 
-using namespace hetu::autograd;
-using namespace hetu::execution;
+using namespace hetu::graph;
 
 enum class ArgType : uint8_t {
   /* Python primitives */
@@ -280,7 +279,7 @@ class ParsedPyArgs {
   }
 
   inline optional<Device> get_device_or_peek(size_t i) const {
-    return has(i) ? optional<Device>(get_device(i)) : get_device_ctx().peek();
+    return has(i) ? optional<Device>(get_device(i)) : get_eager_device_ctx().peek();
   }
 
   inline DeviceGroup get_device_group(size_t i) const {
@@ -398,16 +397,11 @@ class PyArgParser {
   "OpName name=None"
 
 inline OpMeta parse_op_meta(const ParsedPyArgs& parsed_args, size_t offset) {
-  OpMeta ret;
-  auto stream_index_opt = parsed_args.get_stream_index_or_peek(offset);
-  if (stream_index_opt != nullopt)
-    ret.set_stream_index(*stream_index_opt);
-  auto device_group_opt = parsed_args.get_device_group_or_peek(offset + 1);
-  if (device_group_opt != nullopt)
-    ret.set_device_group(*device_group_opt);
-  ret
-    .set_extra_deps(parsed_args.get_tensor_list_or_empty(offset + 2))
-    .set_name(parsed_args.get_string_or_else(offset + 3, OpName()));
+  OpMeta ret = CurrentOpMetaCtx();
+  if (parsed_args.has(offset + 2))
+    ret.set_extra_deps(parsed_args.get_tensor_list(offset + 2));
+  if (parsed_args.has(offset + 3))
+    ret.set_name(parsed_args.get_string(offset + 3));
   return ret;
 }
 

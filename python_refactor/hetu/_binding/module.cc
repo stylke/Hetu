@@ -5,9 +5,9 @@
 #include "hetu/_binding/core/dtype.h"
 #include "hetu/_binding/core/stream.h"
 #include "hetu/_binding/core/ndarray.h"
-#include "hetu/_binding/autograd/operator.h"
-#include "hetu/_binding/autograd/tensor.h"
-#include "hetu/_binding/execution/dar_executor.h"
+#include "hetu/_binding/graph/operator.h"
+#include "hetu/_binding/graph/tensor.h"
+#include "hetu/_binding/graph/graph.h"
 
 PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::AddPyDeviceTypeToModule(m);
@@ -15,8 +15,10 @@ PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::AddPyDataTypeTypeToModule(m);
   hetu::AddPyStreamTypeToModule(m);
   hetu::AddPyNDArrayTypeToModule(m);
-  hetu::autograd::AddPyOperatorTypeToModule(m);
-  hetu::autograd::AddPyTensorTypeToModule(m);
-  hetu::autograd::AddOpContextManagingFunctionsToModule(m);
-  hetu::execution::AddPyDARExecutorTypeToModule(m);
+  hetu::graph::AddPyOperatorTypeToModule(m);
+  hetu::graph::AddPyTensorTypeToModule(m);
+  hetu::graph::AddPyGraphTypeToModule(m);
+  auto internal_sub_module = m.def_submodule("_internal_context");
+  hetu::graph::AddOpContextManagingFunctionsToModule(internal_sub_module);
+  hetu::graph::AddGraphContextManagingFunctionsToModule(internal_sub_module);
 }

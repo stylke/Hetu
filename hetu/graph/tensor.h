@@ -147,7 +147,7 @@ class TensorDef : public shared_ptr_target {
     _meta.set_device(p);
   }
 
-  const bool require_grad() const {
+  const bool require_grad() const noexcept {
     return _require_grad;
   }
 
@@ -155,7 +155,7 @@ class TensorDef : public shared_ptr_target {
     _require_grad = new_require_grad;
   }
 
-  NDArray& get_or_compute();
+  NDArray get_or_compute();
 
  protected:
   void AddConsumer(Operator& op);

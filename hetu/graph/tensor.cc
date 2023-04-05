@@ -90,7 +90,7 @@ bool TensorDef::is_parameter() const {
   return is_parameter_op(producer());
 }
 
-NDArray& TensorDef::get_or_compute() {
+NDArray TensorDef::get_or_compute() {
   return graph().GetOrCompute(get_self());
 }
 

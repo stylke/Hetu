@@ -432,9 +432,9 @@ void AddPyDeviceGroupTypeToModule(py::module_& module) {
     << "Failed to add PyDeviceGroup_Type";
 }
 
-ContextManager<Device>& get_device_ctx() {
-  static ContextManager<Device> device_ctx;
-  return device_ctx;
+ContextManager<Device>& get_eager_device_ctx() {
+  static ContextManager<Device> eager_device_ctx;
+  return eager_device_ctx;
 }
 
 ContextManager<DeviceGroup>& get_device_group_ctx() {

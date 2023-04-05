@@ -21,7 +21,7 @@ set(HETU_PY_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 # Generate operators for Python APIs
 set(GEN_OP_YAML ${HETU_PY_SRC_DIR}/hetu/_binding/codegen/ops.yml)
 set_directory_properties(PROPERTIES CMAKE_CONFIGURE_DEPENDS ${GEN_OP_YAML})
-set(GEN_OP_OUTPUT_DIR ${HETU_PY_SRC_DIR}/hetu/_binding/autograd/generated)
+set(GEN_OP_OUTPUT_DIR ${HETU_PY_SRC_DIR}/hetu/_binding/graph/generated)
 set(GEN_OP_STAGING_DIR ${GEN_OP_OUTPUT_DIR}/.staging)
 
 file(MAKE_DIRECTORY ${GEN_OP_OUTPUT_DIR})
@@ -49,6 +49,9 @@ endforeach()
 file(REMOVE_RECURSE ${GEN_OP_STAGING_DIR})
 
 file(GLOB_RECURSE HETU_PY_SRC ${HETU_PY_SRC_DIR}/hetu/*.cc)
+# TODO: remove the entire directories
+list(FILTER HETU_PY_SRC EXCLUDE REGEX "${HETU_PY_SRC_DIR}/hetu/_binding/autograd/*")
+list(FILTER HETU_PY_SRC EXCLUDE REGEX "${HETU_PY_SRC_DIR}/hetu/_binding/execution/*")
 pybind11_add_module(_hetu_core ${HETU_PY_SRC})
 target_include_directories(_hetu_core PUBLIC ${Python3_INCLUDE_DIRS})
 target_link_libraries(_hetu_core PUBLIC ${Python3_LIBRARIES})

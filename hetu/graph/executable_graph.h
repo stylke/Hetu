@@ -10,19 +10,19 @@ class ExecutableGraph : public Graph {
   friend class Graph;
   friend class Tensor;
 
-  ExecutableGraph(size_t init_capacity) : Graph(init_capacity) {}
+  ExecutableGraph(GraphName name, size_t init_capacity)
+  : Graph(name, init_capacity) {}
 
  public:
-  ExecutableGraph(const constrcutor_access_key&,
+  ExecutableGraph(const constrcutor_access_key&, GraphName name,
                   size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
-  : ExecutableGraph(init_capacity) {}
+  : ExecutableGraph(name, init_capacity) {}
 
   bool MapOpsToParallelDevices(const DeviceGroup& placement_group);
 
   bool Instantiate(const TensorList& fetches, const Device& placement);
-  
-  NDArrayList Run(const TensorList& fetches,
-                  const Tensor2NDArrayMap& feed_dict = {});
+
+  NDArrayList Run(const TensorList& fetches, const FeedDict& feed_dict = {});
 
   GraphType type() const {
     return GraphType::EXECUTABLE;

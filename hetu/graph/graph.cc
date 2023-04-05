@@ -12,6 +12,7 @@ namespace graph {
 
 std::once_flag Graph::_init_flag;
 std::vector<std::shared_ptr<Graph>> Graph::_global_graphs;
+std::unordered_map<GraphName, std::shared_ptr<Graph>> Graph::_name_to_graphs;
 std::shared_ptr<Graph> Graph::_default_eager_graph;
 std::shared_ptr<Graph> Graph::_default_define_by_run_graph;
 std::shared_ptr<Graph> Graph::_default_define_and_run_graph;
@@ -28,22 +29,29 @@ void Graph::Init() {
 
   auto concurrency = std::thread::hardware_concurrency();
   Graph::_global_graphs.reserve(MIN(concurrency, 16) * 2);
-  Graph::_default_eager_graph = Graph::_make_new_graph<EagerGraph>();
+  Graph::_name_to_graphs.reserve(MIN(concurrency, 16) * 2);
+  Graph::_default_eager_graph =
+    Graph::_make_new_graph<EagerGraph>("default_eager");
   Graph::_default_define_by_run_graph =
-    Graph::_make_new_graph<DefineByRunGraph>();
+    Graph::_make_new_graph<DefineByRunGraph>("default_define_by_run");
   Graph::_default_define_and_run_graph =
-    Graph::_make_new_graph<DefineAndRunGraph>();
+    Graph::_make_new_graph<DefineAndRunGraph>("default_define_and_run");
 }
 
 Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta) {
   Graph::InitOnce();
   if (inputs.empty() && op_meta.extra_deps.empty()) {
-    HT_VALUE_ERROR_IF(Graph::_cur_graph_ctx.empty())
-      << "The target graph must be explicitly passed or enqueued to ctx "
-      << "when making a new op with zero inputs";
-    return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
-                  Graph::GetGraph(Graph::_cur_graph_ctx.top()));
+    if (is_placeholder_op(*body)) {
+      return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
+                  Graph::get_default_define_and_run_graph());
+    } else {
+      HT_VALUE_ERROR_IF(Graph::_cur_graph_ctx.empty())
+        << "The target graph must be explicitly passed or enqueued to ctx "
+        << "when making a new op with zero inputs";
+      return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
+                    Graph::GetGraph(Graph::_cur_graph_ctx.top()));
+    }
   } else {
     GraphId target_graph_id = std::numeric_limits<GraphId>::max();
     auto find_target_graph = [&](const Tensor& input) mutable {

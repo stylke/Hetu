@@ -18,7 +18,8 @@ void DefineAndRunGraph::Instantiate() {
     return;
 
   if (_exec_graph == nullptr) {
-    _exec_graph = Graph::_make_new_graph<ExecutableGraph>();
+    _exec_graph =
+      Graph::_make_new_graph<ExecutableGraph>(name() + "_executable");
   }
   
   auto get_exec_input = [&](const Tensor& input) -> Tensor {
@@ -52,7 +53,7 @@ void DefineAndRunGraph::Instantiate() {
 }
 
 NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
-                                   const Tensor2NDArrayMap& feed_dict) {
+                                   const FeedDict& feed_dict) {
   if (!_instantiated)
     Instantiate();
   
@@ -60,7 +61,7 @@ NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
   exec_fetches.reserve(fetches.size());
   for (const auto& fetch : fetches)
     exec_fetches.push_back(_tensor_to_exec_tensor_mapping[fetch->id()]);
-  Tensor2NDArrayMap exec_feed_dict;
+  FeedDict exec_feed_dict;
   exec_feed_dict.reserve(feed_dict.size());
   for (const auto& kv : feed_dict)
     exec_feed_dict[_tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;

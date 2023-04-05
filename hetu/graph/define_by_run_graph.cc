@@ -49,7 +49,7 @@ Tensor& DefineByRunGraph::DetachEagerTensor(const Tensor& tensor) {
 
   // Question: `get_or_compute` will sync the op but we do not need to sync.
   // Instead, we only need the memory. But if not synced here, then when?
-  auto& data = tensor->get_or_compute();
+  auto data = tensor->get_or_compute();
   std::shared_ptr<OpInterface> body =
     std::make_shared<PlaceholderOpImpl>(data->meta());
   auto op_meta = OpMeta().set_name(tensor->name());
@@ -178,9 +178,9 @@ void DefineByRunGraph::PruneTensor(const Tensor& tensor) {
 }
 
 NDArrayList DefineByRunGraph::Run(const TensorList& fetches,
-                                  const Tensor2NDArrayMap& feed_dict) {
+                                  const FeedDict& feed_dict) {
   TensorList referred_tensors, exec_referred_tensors;
-  Tensor2NDArrayMap exec_feed_dict;
+  FeedDict exec_feed_dict;
   std::tie(referred_tensors, exec_referred_tensors, exec_feed_dict) =
     GenerateExecutionTargets(fetches, feed_dict);
   NDArrayList exec_results =
@@ -203,20 +203,21 @@ NDArrayList DefineByRunGraph::Run(const TensorList& fetches,
   return results;
 }
 
-NDArray& DefineByRunGraph::GetOrCompute(Tensor& tensor) {
+NDArray DefineByRunGraph::GetOrCompute(Tensor& tensor) {
   Run({tensor});
   return _preserved_data[tensor->id()];
 }
 
-std::tuple<TensorList, TensorList, Tensor2NDArrayMap>
+std::tuple<TensorList, TensorList, FeedDict>
 DefineByRunGraph::GenerateExecutionTargets(const TensorList& fetches,
-                                           const Tensor2NDArrayMap& feed_dict) {
+                                           const FeedDict& feed_dict) {
   if (_exec_graph == nullptr) {
-    _exec_graph = Graph::_make_new_graph<ExecutableGraph>();
+    _exec_graph =
+      Graph::_make_new_graph<ExecutableGraph>(name() + "_executable");
   }
 
   TensorList referred_tensors, exec_referred_tensors;
-  Tensor2NDArrayMap exec_feed_dict;
+  FeedDict exec_feed_dict;
 
   auto get_exec_input = [&](const Tensor& input) -> Tensor {
     auto it = _tensor_to_exec_tensor_mapping.find(input->id());

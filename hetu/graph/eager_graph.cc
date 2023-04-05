@@ -18,8 +18,11 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
       placement = Device(kCPU);
     }
   }
+  StreamIndex stream_id = get_suggested_stream_index(op);
 
-  bool ok = op->Instantiate(placement, get_suggested_stream_index(op));
+  HT_LOG_TRACE << "Instantiating op " << op << " (placement=" << placement
+                 << ", stream_index=" << stream_id << ")";
+  bool ok = op->Instantiate(placement, stream_id);
   HT_RUNTIME_ERROR_IF(!ok) << "Failed to place op " << op->name()
                            << " on device " << placement;
   
@@ -43,7 +46,7 @@ void EagerGraph::RemoveTensor(const Tensor& tensor) {
   }
 }
 
-NDArray& EagerGraph::GetOrCompute(Tensor& tensor) {
+NDArray EagerGraph::GetOrCompute(Tensor& tensor) {
   // This function should only be called from Tensor.
   // So we do not need to check the existence.
   tensor->producer()->Sync();

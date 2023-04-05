@@ -10,18 +10,17 @@ class EagerGraph : public Graph {
   friend class Graph;
   friend class Tensor;
 
-  EagerGraph(size_t init_capacity)
-  : Graph(init_capacity), _runtime_ctxs(init_capacity) {
+  EagerGraph(GraphName name, size_t init_capacity)
+  : Graph(name, init_capacity), _runtime_ctxs(init_capacity) {
     _op_to_num_destructed_outputs.reserve(init_capacity);
   }
 
  public:
-  EagerGraph(const constrcutor_access_key&,
+  EagerGraph(const constrcutor_access_key&, GraphName name,
              size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
-  : EagerGraph(init_capacity) {}
+  : EagerGraph(name, init_capacity) {}
 
-  NDArrayList Run(const TensorList& fetches,
-                  const Tensor2NDArrayMap& feed_dict = {});
+  NDArrayList Run(const TensorList& fetches, const FeedDict& feed_dict = {});
 
   GraphType type() const {
     return GraphType::EAGER;
@@ -31,7 +30,7 @@ class EagerGraph : public Graph {
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);
 
-  NDArray& GetOrCompute(Tensor& tensor);
+  NDArray GetOrCompute(Tensor& tensor);
   
   void RemoveTensor(const Tensor& tensor);
 

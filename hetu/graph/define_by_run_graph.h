@@ -11,7 +11,8 @@ class DefineByRunGraph : public Graph {
   friend class Graph;
   friend class Tensor;
 
-  DefineByRunGraph(size_t init_capacity) : Graph(init_capacity) {
+  DefineByRunGraph(GraphName name, size_t init_capacity)
+  : Graph(name, init_capacity) {
     _detached_ops.reserve(init_capacity);
     _reusable_ops.reserve(init_capacity);
     _op_to_exec_op_mapping.reserve(init_capacity);
@@ -20,12 +21,11 @@ class DefineByRunGraph : public Graph {
   }
 
  public:
-  DefineByRunGraph(const constrcutor_access_key&,
+  DefineByRunGraph(const constrcutor_access_key&, GraphName name,
                    size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
-  : DefineByRunGraph(init_capacity) {}
+  : DefineByRunGraph(name, init_capacity) {}
 
-  NDArrayList Run(const TensorList& fetches,
-                  const Tensor2NDArrayMap& feed_dict = {});
+  NDArrayList Run(const TensorList& fetches, const FeedDict& feed_dict = {});
 
   GraphType type() const {
     return GraphType::DEFINE_BY_RUN;
@@ -35,11 +35,11 @@ class DefineByRunGraph : public Graph {
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);
 
-  NDArray& GetOrCompute(Tensor& tensor);
+  NDArray GetOrCompute(Tensor& tensor);
 
-  std::tuple<TensorList, TensorList, Tensor2NDArrayMap>
+  std::tuple<TensorList, TensorList, FeedDict>
   GenerateExecutionTargets(const TensorList& fetches,
-                           const Tensor2NDArrayMap& feed_dict);
+                           const FeedDict& feed_dict);
 
   void RemoveOp(Operator& op) override {
     _detached_ops.erase(op->id());

@@ -112,12 +112,14 @@ class BinaryCrossEntropyGradientOpImpl final : public OpInterface {
   ReductionType _reduction;
 };
 
-Tensor MakeBCEOp(Tensor probs, Tensor labels, ReductionType reduction = kMEAN,
-                 OpMeta op_meta = OpMeta());
+Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
+                                ReductionType reduction = kMEAN,
+                                OpMeta op_meta = OpMeta());
 
-Tensor MakeBCEGradOp(Tensor probs, Tensor labels, Tensor grad_outputs,
-                     ReductionType reduction = kMEAN,
-                     OpMeta op_meta = OpMeta());
+Tensor MakeBinaryCrossEntropyGradientOp(Tensor probs, Tensor labels,
+                                        Tensor grad_outputs,
+                                        ReductionType reduction = kMEAN,
+                                        OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

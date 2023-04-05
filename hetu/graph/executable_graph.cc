@@ -28,10 +28,11 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     if (!op->placement().is_undetermined())
       continue;
 
-    HT_LOG_TRACE << "Instantiating op: " << op;
     Device placement =
       is_device_to_host_op(op) ? Device(kCPU) : preferred_device;
     StreamIndex stream_id = get_suggested_stream_index(op);
+    HT_LOG_TRACE << "Instantiating op " << op << " (placement=" << placement
+                 << ", stream_index=" << stream_id << ")";
     bool ok = op->Instantiate(placement, stream_id);
     if (!ok && !placement.is_cpu()) {
       HT_LOG_WARN << "Failed to instantiate op " << op << " on " << placement
@@ -77,7 +78,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
 }
 
 NDArrayList ExecutableGraph::Run(const TensorList& fetches,
-                                 const Tensor2NDArrayMap& feed_dict) {
+                                 const FeedDict& feed_dict) {
   // TODO: For each pair of `fetches` and `feed_dict`,
   // deduce the optimal execution plan, and cache it.
   for (auto& fetch : fetches) {
@@ -119,6 +120,14 @@ NDArrayList ExecutableGraph::Run(const TensorList& fetches,
     NDArrayList inputs;
     inputs.reserve(op->num_inputs());
     for (size_t i = 0; i < op->num_inputs(); i++) {
+      // TODO: Support async transfer. And this could be checked for once.
+      auto& data = tensor2data[op->input(i)->id()];
+      if (data->device() != op->input(i)->placement() ||
+          data->dtype() != op->input(i)->dtype()) {
+        tensor2data[op->input(i)->id()] =
+          NDArray::to(data, op->input(i)->placement(), op->input(i)->dtype(),
+                      kBlockingStream);
+      }
       inputs.push_back(tensor2data[op->input(i)->id()]);
     }
     auto outputs = op->Compute(inputs, runtime_ctx);
