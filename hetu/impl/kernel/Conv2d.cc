@@ -54,6 +54,7 @@ void Conv2dCpu(const NDArray& input_x, const NDArray& input_f, NDArray& output,
 
         dnnl::stream engine_stream(eng);
         conv_prim.execute(engine_stream, conv_args);
+        engine_stream.wait();
       },
       "Conv2d");
       //cpu_stream.Sync();
@@ -113,7 +114,8 @@ void Conv2dGradientofFilterCpu(const NDArray& input_x,
       conv_args.insert({DNNL_ARG_DIFF_DST, conv_dst_mem});
 
       dnnl::stream engine_stream(eng);
-      conv_prim.execute(engine_stream, conv_args);         
+      conv_prim.execute(engine_stream, conv_args);   
+      engine_stream.wait();      
       },
       "Conv2dFilter");
       //cpu_stream.Sync();

@@ -14,7 +14,7 @@ void NormOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList&
 }
 
 TensorList NormOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeNormGradientOp(op->input(0), op->output(0), grad_outputs.at(0), getp(), dim(),
+  return {op->requires_grad(0) ? MakeNormGradientOp(op->input(0), op->output(0), grad_outputs.at(0), getp(), dim(),
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -43,7 +43,7 @@ HTShapeList NormGradientOpImpl::DoInferShape(Operator& op, const HTShapeList& in
 }
 
 Tensor MakeNormOp(Tensor input, int64_t p, int64_t dim, 
-                  bool keepdim, const OpMeta& op_meta) {
+                  bool keepdim, OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<NormOpImpl>(p, dim, keepdim),
         {std::move(input)},
@@ -51,7 +51,7 @@ Tensor MakeNormOp(Tensor input, int64_t p, int64_t dim,
 }
 
 Tensor MakeNormGradientOp(Tensor input, Tensor output, Tensor grad_output, int64_t p, 
-                          int64_t dim, const OpMeta& op_meta) {
+                          int64_t dim, OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<NormGradientOpImpl>(p, dim),
         {std::move(input), std::move(output), std::move(grad_output)},

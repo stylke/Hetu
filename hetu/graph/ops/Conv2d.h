@@ -17,7 +17,7 @@ class Conv2dAddBiasOp;
 
 class Conv2dOpImpl : public OpInterface {
  public:
-  Conv2dOpImpl(int64_t padding, int64_t stride, const OpMeta& op_meta = OpMeta())
+  Conv2dOpImpl(int64_t padding, int64_t stride, OpMeta op_meta = OpMeta())
   : OpInterface(quote(Conv2dOp)) {
     HT_ASSERT(padding >= 0)
     << "padding < 0, padding = " << padding;
@@ -92,14 +92,14 @@ protected:
 };
 
 Tensor MakeConv2dOp(Tensor input, Tensor filter, int64_t padding, int64_t stride,
-                    const OpMeta& op_meta = OpMeta());
+                    OpMeta op_meta = OpMeta());
 
 /*——————————————————————Conv2dGradientofFilter————————————————————————*/
 
 class Conv2dGradientofFilterOpImpl : public OpInterface {
  public:
   Conv2dGradientofFilterOpImpl(const HTShape& padding, const HTStride& stride,
-                               const OpMeta& op_meta = OpMeta())
+                               OpMeta op_meta = OpMeta())
   : OpInterface(quote(Conv2dGradientofFilterOp)),
     _padding(padding),
     _stride(stride) {
@@ -145,14 +145,14 @@ protected:
 
 Tensor MakeConv2dGradientofFilterOp(Tensor input, Tensor grad_output, Tensor filter,
                                     const HTShape& padding, const HTStride& stride,
-                                    const OpMeta& op_meta = OpMeta());
+                                    OpMeta op_meta = OpMeta());
 
 /*——————————————————————Conv2dGradientofData————————————————————————*/
 
 class Conv2dGradientofDataOpImpl : public OpInterface {
  public:
   Conv2dGradientofDataOpImpl(const HTShape& padding, const HTStride& stride,
-                            const OpMeta& op_meta = OpMeta())
+                            OpMeta op_meta = OpMeta())
   : OpInterface(quote(Conv2dGradientofDataOp)),
     _padding(padding),
     _stride(stride) {
@@ -198,14 +198,14 @@ protected:
 
 Tensor MakeConv2dGradientofDataOp(Tensor filter, Tensor grad_output, Tensor input,
                                   const HTShape& padding, const HTStride& stride,
-                                  const OpMeta& op_meta = OpMeta());
+                                  OpMeta op_meta = OpMeta());
 
 /*——————————————————————Conv2dAddBias————————————————————————*/
 
 class Conv2dAddBiasOpImpl : public OpInterface {
  public:
   Conv2dAddBiasOpImpl(int64_t padding, int64_t stride,
-                      const OpMeta& op_meta = OpMeta())
+                      OpMeta op_meta = OpMeta())
   : OpInterface(quote(Conv2dAddBiasOp)) {
     _padding = {padding, padding};
     _stride = {stride, stride};
@@ -267,7 +267,7 @@ protected:
 };
 
 Tensor MakeConv2dAddBiasOp(Tensor input, Tensor filter, Tensor bias, int64_t padding,
-                           int64_t stride, const OpMeta& op_meta = OpMeta());
+                           int64_t stride, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

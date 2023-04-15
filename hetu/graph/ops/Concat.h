@@ -13,7 +13,7 @@ class ConcatGradientOp;
 
 class ConcatOpImpl : public OpInterface {
  public:
-  ConcatOpImpl(size_t axis, const OpMeta& op_meta = OpMeta())
+  ConcatOpImpl(size_t axis, OpMeta op_meta = OpMeta())
   : OpInterface(quote(ConcatOp)), _axis(axis) {
   }
 
@@ -68,12 +68,12 @@ class ConcatOpImpl : public OpInterface {
 
 
 Tensor MakeConcatOp(Tensor inputA, Tensor inputB, size_t axis,
-                    const OpMeta& op_meta = OpMeta());
+                    OpMeta op_meta = OpMeta());
 
 class ConcatGradientOpImpl : public OpInterface {
  public:
   ConcatGradientOpImpl(size_t axis, size_t id,
-                       const OpMeta& op_meta = OpMeta())
+                       OpMeta op_meta = OpMeta())
   : OpInterface(quote(ConcatGradientOp)),
     _axis(axis),
     _id(id) {
@@ -118,7 +118,7 @@ class ConcatGradientOpImpl : public OpInterface {
 };
 
 Tensor MakeConcatGradientOp(Tensor input, Tensor grad_output, size_t axis, size_t id,
-                            const OpMeta& op_meta = OpMeta());
+                            OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

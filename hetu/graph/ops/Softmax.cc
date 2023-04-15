@@ -14,7 +14,7 @@ void SoftmaxOpImpl::DoCompute(Operator& op,
 }
 
 TensorList SoftmaxOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeSoftmaxGradientOp(op->output(0), grad_outputs.at(0),
+  return {op->requires_grad(0) ? MakeSoftmaxGradientOp(op->output(0), grad_outputs.at(0),
                                 get_dim(), op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -42,7 +42,7 @@ SoftmaxGradientOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-Tensor MakeSoftmaxOp(Tensor input, int64_t dim, const OpMeta& op_meta) {
+Tensor MakeSoftmaxOp(Tensor input, int64_t dim, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SoftmaxOpImpl>(dim),
     {std::move(input)},
@@ -50,7 +50,7 @@ Tensor MakeSoftmaxOp(Tensor input, int64_t dim, const OpMeta& op_meta) {
 }
 
 Tensor MakeSoftmaxGradientOp(Tensor input, Tensor grad_output,
-                             int64_t dim, const OpMeta& op_meta) {
+                             int64_t dim, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SoftmaxGradientOpImpl>(dim),
     {std::move(input), std::move(grad_output)},

@@ -55,7 +55,7 @@ class RollOpImpl : public OpInterface {
 };
 
 Tensor MakeRollOp(Tensor input, HTShape shifts,
-                  HTAxes dims, const OpMeta& op_meta = OpMeta());
+                  HTAxes dims, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

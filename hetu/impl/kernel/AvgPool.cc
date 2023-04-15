@@ -120,6 +120,7 @@ void AvgPoolCpu(const NDArray& input, const size_t kernel_H,
 
         dnnl::stream engine_stream(eng);
         pooling_prim.execute(engine_stream, pooling_args);
+        engine_stream.wait();
       },
       "AvgPool");
       //cpu_stream.Sync();
@@ -185,6 +186,7 @@ void AvgPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
 
         dnnl::stream engine_stream(eng);
         pooling_prim.execute(engine_stream, pooling_args);
+        engine_stream.wait();
       },
       "AvgPoolGradient");
       //cpu_stream.Sync();

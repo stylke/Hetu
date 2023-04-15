@@ -14,7 +14,7 @@ void SinOpImpl::DoCompute(Operator& op,
 }
 
 TensorList SinOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeCosOp(op->input(0), 
+  return {op->requires_grad(0) ? MakeCosOp(op->input(0), 
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -39,14 +39,14 @@ HTShapeList CosOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-Tensor MakeSinOp(Tensor input, const OpMeta& op_meta) {
+Tensor MakeSinOp(Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SinOpImpl>(),
     {std::move(input)},
     std::move(op_meta))->output(0);
 }
 
-Tensor MakeCosOp(Tensor input, const OpMeta& op_meta) {
+Tensor MakeCosOp(Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<CosOpImpl>(),
     {std::move(input)},

@@ -47,6 +47,7 @@ void SigmoidCpu(const NDArray& input, NDArray& output, const Stream& stream) {
           sigmoid_args.insert({DNNL_ARG_DST, dst_mem});
           dnnl::stream engine_stream(eng);
           Sigmoid.execute(engine_stream, sigmoid_args);
+          engine_stream.wait();
       }, "Sigmoid");
       //cpu_stream.Sync();
     });

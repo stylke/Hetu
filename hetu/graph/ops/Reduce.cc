@@ -25,7 +25,7 @@ void ReduceOpImpl::DoCompute(Operator& op,
 
 TensorList ReduceOpImpl::DoGradient(Operator& op,
                                     const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeReduceGradientOp(grad_outputs.at(0), op->output(0), op->input(0), HTShape(), reduction(),
+  return {op->requires_grad(0) ? MakeReduceGradientOp(grad_outputs.at(0), op->output(0), op->input(0), HTShape(), reduction(),
                                 get_axes(), get_keepdims(), op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -87,7 +87,7 @@ HTShapeList ReduceGradientOpImpl::DoInferShape(Operator& op,
 
 Tensor MakeReduceOp(Tensor input, ReductionType reduction, const HTAxes& axes,
                     const HTKeepDims& keepdims,
-                    const OpMeta& op_meta) {
+                    OpMeta op_meta) {
   HTAxes parsed_axes = axes;
   HTKeepDims parsed_keepdims = keepdims;
   if (parsed_axes.size() == 0) {
@@ -113,37 +113,37 @@ Tensor MakeReduceOp(Tensor input, ReductionType reduction, const HTAxes& axes,
 
 Tensor MakeReduceOp(Tensor input, const std::string& mode, const HTAxes& axes,
                     const HTKeepDims& keepdims,
-                    const OpMeta& op_meta) {
+                    OpMeta op_meta) {
   return MakeReduceOp(std::move(input), Str2ReductionType(mode), axes, keepdims, op_meta);
 }
 
 Tensor MakeReduceMeanOp(Tensor input, const HTAxes& axes,
                         const HTKeepDims& keepdims,
-                        const OpMeta& op_meta) {
+                        OpMeta op_meta) {
   return MakeReduceOp(std::move(input), ReductionType::MEAN, axes, keepdims, op_meta);     
 }
 
 Tensor MakeReduceSumOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
-                       const OpMeta& op_meta) {
+                       OpMeta op_meta) {
   return MakeReduceOp(std::move(input), ReductionType::SUM, axes, keepdims, op_meta);          
 }
 
 Tensor MakeReduceMaxOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
-                       const OpMeta& op_meta) {
+                       OpMeta op_meta) {
   return MakeReduceOp(std::move(input), ReductionType::MAX, axes, keepdims, op_meta);          
 }
 
 Tensor MakeReduceMinOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
-                       const OpMeta& op_meta) {
+                       OpMeta op_meta) {
   return MakeReduceOp(std::move(input), ReductionType::MIN, axes, keepdims, op_meta);          
 }
 
 Tensor MakeReduceGradientOp(Tensor input, Tensor ori_output, Tensor ori_input, const HTShape& shape,
                             ReductionType reduction, const HTAxes add_axes, const HTKeepDims& keepdims,
-                            const OpMeta& op_meta){
+                            OpMeta op_meta){
   double const_value = 0;
   if (reduction == ReductionType::MEAN) {
     HTShape input_shape = ori_input->shape();

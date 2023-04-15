@@ -45,6 +45,7 @@ void ReciprocalCpu(const NDArray& input, NDArray& output,
 
           dnnl::stream engine_stream(eng);
           Reciprocal.execute(engine_stream, reciprocal_args);
+          engine_stream.wait();
         },"Reciprocal");
       //cpu_stream.Sync();
     });

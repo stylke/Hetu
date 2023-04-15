@@ -30,7 +30,7 @@ class SumOpImpl final : public OpInterface {
     TensorList grad_inputs;
     grad_inputs.reserve(op->num_inputs());
     for (size_t i = 0; i < op->num_inputs(); i++)
-      grad_inputs.push_back(op->require_grad(i) ? grad_outputs.front() : Tensor());
+      grad_inputs.push_back(op->requires_grad(i) ? grad_outputs.front() : Tensor());
     return grad_inputs;
   }
 

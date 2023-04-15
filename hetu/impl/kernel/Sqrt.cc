@@ -62,6 +62,7 @@ void SqrtCpu(const NDArray& input, NDArray& output, const Stream& stream) {
 
           dnnl::stream engine_stream(eng);
           Sqrt.execute(engine_stream, sqrt_args);
+          engine_stream.wait();
         },"Sqrt");
       //cpu_stream.Sync();
     });
@@ -96,6 +97,7 @@ void ReciprocalSqrtCpu(const NDArray& output_grad, NDArray& input_grad,
 
           dnnl::stream engine_stream(eng);
           Reciprocal.execute(engine_stream, sqrt_args);
+          engine_stream.wait();
         },"ReciprocalSqrt");
       //cpu_stream.Sync();
     });

@@ -86,7 +86,7 @@ class PadOpImpl : public OpInterface {
 };
 
 Tensor MakePadOp(Tensor input, const HTShape& paddings, std::string mode, double constant,
-                 const OpMeta& op_meta = OpMeta());
+                 OpMeta op_meta = OpMeta());
 
 class PadGradientOpImpl : public OpInterface {
 
@@ -143,7 +143,7 @@ class PadGradientOpImpl : public OpInterface {
 };
 
 Tensor MakePadGradientOp(Tensor grad_output, const HTShape& paddings, std::string mode,
-                         const OpMeta& op_meta = OpMeta());
+                         OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -13,6 +13,7 @@ class DefineAndRunGraph : public Graph {
 
   DefineAndRunGraph(GraphName name, size_t init_capacity)
   : Graph(name, init_capacity), _instantiated(false) {
+    std::srand(std::time(0));
     _op_to_exec_op_mapping.reserve(init_capacity);
     _tensor_to_exec_tensor_mapping.reserve(init_capacity);
   }

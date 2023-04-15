@@ -13,7 +13,7 @@ void SqrtOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList&
 
 TensorList SqrtOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_input = op->require_grad(0) ? MakeMulByConstOp(MakeMulElewiseOp(MakeReciprocalSqrtOp(
+  auto grad_input = op->requires_grad(0) ? MakeMulByConstOp(MakeMulElewiseOp(MakeReciprocalSqrtOp(
                                           op->input(0), g_op_meta), grad_outputs.at(0), g_op_meta),
                                           0.5, g_op_meta.set_name(op->grad_name()))
                                         : Tensor();
@@ -40,14 +40,14 @@ HTShapeList ReciprocalSqrtOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-Tensor MakeSqrtOp(Tensor input, const OpMeta& op_meta) {
+Tensor MakeSqrtOp(Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SqrtOpImpl>(),
     {std::move(input)},
     std::move(op_meta))->output(0);
 }
 
-Tensor MakeReciprocalSqrtOp(Tensor grad_output, const OpMeta& op_meta) {
+Tensor MakeReciprocalSqrtOp(Tensor grad_output, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SqrtOpImpl>(),
     {std::move(grad_output)},

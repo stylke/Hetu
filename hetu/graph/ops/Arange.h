@@ -68,8 +68,8 @@ class ArangeOpImpl : public OpInterface {
 };
 
 Tensor MakeArangeOp(double start, double end, double step,
-                    const OpMeta& op_meta = OpMeta());
+                    OpMeta op_meta = OpMeta());
 
 
-} // namespace autograd
+} // namespace graph
 } // namespace hetu

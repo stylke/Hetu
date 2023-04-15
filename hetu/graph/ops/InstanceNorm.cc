@@ -14,7 +14,7 @@ void InstanceNormOpImpl::DoCompute(Operator& op,
 
 TensorList InstanceNormOpImpl::DoGradient(Operator& op,
                                           const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeInstanceNormGradientOp(grad_outputs.at(0), op->input(0), op->output(1), op->output(2), get_eps(),
+  auto grad_input = op->requires_grad(0) ? MakeInstanceNormGradientOp(grad_outputs.at(0), op->input(0), op->output(1), op->output(2), get_eps(),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
   return {grad_input};
@@ -47,7 +47,7 @@ InstanceNormGradientOpImpl::DoInferShape(Operator& op,
 }
 
 TensorList MakeInstanceNormOp(Tensor input, double eps,
-                              const OpMeta& op_meta) {
+                              OpMeta op_meta) {
   auto ss = Graph::MakeOp(
           std::make_shared<InstanceNormOpImpl>(eps),
           {std::move(input)},
@@ -58,7 +58,7 @@ TensorList MakeInstanceNormOp(Tensor input, double eps,
 Tensor MakeInstanceNormGradientOp(Tensor output_grad, Tensor input,
                                   Tensor save_mean, Tensor save_var,
                                   double eps,
-                                  const OpMeta& op_meta) {
+                                  OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<InstanceNormGradientOpImpl>(eps),
           {std::move(output_grad), std::move(input), std::move(save_mean), std::move(save_var)},

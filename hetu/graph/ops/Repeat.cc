@@ -18,7 +18,7 @@ void RepeatOpImpl::DoCompute(Operator& op,
 }
 
 TensorList RepeatOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeRepeatGradientOp(grad_outputs.at(0), op->input(0),
+  auto grad_input = op->requires_grad(0) ? MakeRepeatGradientOp(grad_outputs.at(0), op->input(0),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
   return {grad_input};
@@ -49,7 +49,7 @@ RepeatGradientOpImpl::DoInferShape(Operator& op,
   return {input_shapes[1]};
 }
 
-Tensor MakeRepeatOp(Tensor input, HTShape repeats, const OpMeta& op_meta) {
+Tensor MakeRepeatOp(Tensor input, HTShape repeats, OpMeta op_meta) {
     return Graph::MakeOp(
         std::make_shared<RepeatOpImpl>(repeats),
         {std::move(input)},
@@ -57,7 +57,7 @@ Tensor MakeRepeatOp(Tensor input, HTShape repeats, const OpMeta& op_meta) {
 }
 
 Tensor MakeRepeatGradientOp(Tensor grad_output, Tensor input,
-                            const OpMeta& op_meta) {
+                            OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<RepeatGradientOpImpl>(),
         {std::move(grad_output), std::move(input)},

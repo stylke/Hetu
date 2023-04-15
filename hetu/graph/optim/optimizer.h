@@ -7,6 +7,8 @@ namespace graph {
 
 class Optimizer {
  public:
+  Optimizer() {};
+
   Optimizer(float learning_rate) : _learning_rate(learning_rate) {}
 
   Optimizer(TensorList params, float learning_rate)
@@ -43,6 +45,8 @@ class Optimizer {
 
 class SGDOptimizer : public Optimizer {
  public:
+  SGDOptimizer(): Optimizer() {};
+
   SGDOptimizer(float learning_rate, float momentum = 0.9f,
                bool nesterov = false)
   : Optimizer(learning_rate) {

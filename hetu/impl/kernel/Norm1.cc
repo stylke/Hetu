@@ -52,7 +52,7 @@ void NormCpu(const NDArray& input, NDArray& output, int64_t dim, int64_t p, cons
 
         dnnl::stream engine_stream(eng);
         reduction_prim.execute(engine_stream, reduction_args);
-
+        engine_stream.wait();
     }
   },"Norm");
   });

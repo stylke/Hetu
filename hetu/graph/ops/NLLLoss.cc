@@ -11,22 +11,12 @@ using NLLGradOpImpl = NLLLossGradientOpImpl;
 
 void NLLOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                          RuntimeContext& ctx) const {
-  // NDArray unreduced =
-  //   reduction() == kNONE ? outputs.at(0) : NDArray::empty(inputs.at(1)->shape(), 
-  //                                          inputs.at(0)->device(), inputs.at(0)->dtype());
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-  //                                 hetu::impl::NLLLoss, inputs.at(0),
-  //                                 inputs.at(1), unreduced, op->instantiation_ctx().stream());
-  // if (reduction() != kNONE) {
-  //   NDArray::reduce(unreduced, reduction(), HTAxes(), false, op->instantiation_ctx().stream_index,
-  //                   outputs.at(0));
-  // }
   NDArray::nllloss(inputs.at(0), inputs.at(1), reduction(), 
                    op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList NLLOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeNLLLossGradientOp(
+  auto grad_input = op->requires_grad(0) ? MakeNLLLossGradientOp(
                                           op->input(0), op->input(1), grad_outputs.at(0), reduction(),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
@@ -73,7 +63,7 @@ HTShapeList NLLGradOpImpl::DoInferShape(Operator& op,
 
 Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
                      ReductionType reduction,
-                     const OpMeta& op_meta) {
+                     OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<NLLLossOpImpl>(reduction),
         {std::move(preds), std::move(labels)},
@@ -82,7 +72,7 @@ Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
 
 Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
                      const std::string& reduction ,
-                     const OpMeta& op_meta) {
+                     OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<NLLLossOpImpl>(Str2ReductionType(reduction)),
         {std::move(preds), std::move(labels)},
@@ -91,7 +81,7 @@ Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
 
 Tensor MakeNLLLossGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
                              ReductionType reduction,
-                             const OpMeta& op_meta) {
+                             OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<NLLLossGradientOpImpl>(reduction),
         {std::move(preds), std::move(labels), std::move(grad_output)},

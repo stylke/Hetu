@@ -28,7 +28,7 @@ void ReduceCpu(const NDArray& input, NDArray& output, const HTAxes& axes,
       stride_size *= out_shape[i];
     }
     auto _future = cpu_stream.EnqueueTask(
-      [&stream, input, output, in_shape, in_stride, out_shape, out_stride, red_type]() {
+      [stream, input, output, in_shape, in_stride, out_shape, out_stride, red_type]() {
         dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
         auto src_md = dnnl::memory::desc(in_shape, dnnl::memory::data_type::f32, in_stride);
         auto dst_md = dnnl::memory::desc(out_shape, dnnl::memory::data_type::f32, out_stride);
@@ -44,8 +44,9 @@ void ReduceCpu(const NDArray& input, NDArray& output, const HTAxes& axes,
         else
           HT_NOT_IMPLEMENTED << "Invalid reduction type.";        
 
-        if (in_shape == out_shape)
+        if (in_shape == out_shape) {
           hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), src_mem);
+        }
         else {
           // Create primitive descriptor.
           dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
@@ -63,9 +64,10 @@ void ReduceCpu(const NDArray& input, NDArray& output, const HTAxes& axes,
           // Primitive execution: Reduction (Sum).
           dnnl::stream engine_stream(eng);
           reduction_prim.execute(engine_stream, reduction_args);
+          engine_stream.wait();
         } 
       },"Reduce");
-    // cpu_stream.Sync();  
+    //cpu_stream.Sync();  
   });
 }
 

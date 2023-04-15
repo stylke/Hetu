@@ -1,10 +1,27 @@
 #include "hetu/graph/ops/Einsum.h"
 #include "hetu/graph/headers.h"
 #include "hetu/graph/ops/kernel_links.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <bitset>
 
 namespace hetu {
 namespace graph {
+
+bool operator==(const EinsumParameters& l, const EinsumParameters& r) {
+    return (l._msg == r._msg
+            && l._input_msgs == r._input_msgs
+            && l._output_msg == r._output_msg
+            && l.input_dims == r.input_dims
+            && l.output_dims == r.output_dims
+            && l.num_labels == r.num_labels
+            && l.output_labels_idx == r.output_labels_idx
+            && l.undefined_labels == r.undefined_labels
+            && l.output_size == r.output_size
+            && l.num_output_labels == r.num_output_labels
+            && l.elli_len == r.elli_len
+            && l.input_elli_len == r.input_elli_len
+            && l.elli_pos == r.elli_pos);
+}
 
 NDArray sumproduct_pair(Operator& op, NDArray& left_, NDArray& right_, HTShape sum_dims_,
                         bool keepdim) {
@@ -155,7 +172,7 @@ void EinsumOpImpl::DoCompute(Operator& op,
     LabelMap label_dim;
     OpDim input_labels;
     HTShape input_shape;
-    NDArray input_tensor = NDArray::copy(inputs.at(i));
+    NDArray input_tensor = NDArray::copy(inputs.at(i), op->instantiation_ctx().stream_index);
     input_labels = para.input_dims[i];
     input_shape = inputs.at(i)->shape();
 
@@ -178,9 +195,9 @@ void EinsumOpImpl::DoCompute(Operator& op,
           << j << ":" << input_tensor->shape(j) << "," << dim << ":"
           << input_tensor->shape(dim);
 
-        input_tensor = NDArray::diagonal(input_tensor, dim, j);
+        input_tensor = NDArray::diagonal(input_tensor, dim, j, op->instantiation_ctx().stream_index);
 
-        input_tensor = NDArray::movedim(input_tensor, -1, dim);
+        input_tensor = NDArray::movedim(input_tensor, -1, dim, op->instantiation_ctx().stream_index);
       } else {
         // Lookup output index for label
         label_dim[label] = j;
@@ -195,9 +212,10 @@ void EinsumOpImpl::DoCompute(Operator& op,
         index = j++;
       }
     }
-    NDArray permuted_input = NDArray::permute(input_tensor, perm_shape);
+    NDArray permuted_input = NDArray::permute(input_tensor, perm_shape, op->instantiation_ctx().stream_index);
     permuted_inputs.emplace_back(permuted_input);
   }
+
 
   // Check if operands broadcast and keep track of last operand with
   // dimension size != 1 for optimizing reductions
@@ -271,7 +289,7 @@ void EinsumOpImpl::DoCompute(Operator& op,
         sumproduct_pair(op, output_tensor, permuted_input, sum_dims, false);
     }
   }
-  NDArray::reshape(output_tensor, op->output(0)->shape(), op->instantiation_ctx().stream_index);
+  outputs[0] = NDArray::reshape(output_tensor, op->output(0)->shape(), op->instantiation_ctx().stream_index);
 }
 
 TensorList EinsumOpImpl::DoGradient(Operator& op,
@@ -301,7 +319,7 @@ TensorList EinsumOpImpl::DoGradient(Operator& op,
       grad_oplinkers.emplace_back(op->input(len - 1));
     }
     grad_msg = grad_msg + para._input_msgs[i];
-    auto grad_input = op->require_grad(i) ? MakeEinsumGradientOp(grad_msg, grad_oplinkers, op->output(0), op->input(i),
+    auto grad_input = op->requires_grad(i) ? MakeEinsumGradientOp(grad_msg, grad_oplinkers, op->output(0), op->input(i),
                                             g_op_meta.set_name(op->grad_name(i)))
                                           : Tensor();
     grad_inputs.emplace_back(grad_input);
@@ -512,7 +530,7 @@ void EinsumGradientOpImpl::DoCompute(Operator& op,
       output_idx += 1;
     }
   }
-  NDArray::reshape(output_tensor, op->output(0)->shape(), op->instantiation_ctx().stream_index);
+  outputs[0] = NDArray::reshape(output_tensor, op->output(0)->shape(), op->instantiation_ctx().stream_index);
 }
 
 HTShapeList EinsumGradientOpImpl::DoInferShape(Operator& op,
@@ -894,7 +912,7 @@ EinsumParameters EinsumGradientParseMsg(const TensorList& inputs,
 
 
 Tensor MakeEinsumOp(const std::string& msg, TensorList inputs,
-                    const OpMeta& op_meta) {
+                    OpMeta op_meta) {
   for (auto& input: inputs) {
     HT_ASSERT(input->has_shape());
   }
@@ -907,7 +925,7 @@ Tensor MakeEinsumOp(const std::string& msg, TensorList inputs,
 
 Tensor MakeEinsumGradientOp(const std::string& msg, TensorList inputs,
                             Tensor ori_output, Tensor ori_input,
-                            const OpMeta& op_meta) {
+                            OpMeta op_meta) {
   auto params = EinsumGradientParseMsg(inputs, msg, ori_input->ndim());
   inputs.emplace_back(ori_input);
   return Graph::MakeOp(
@@ -916,5 +934,5 @@ Tensor MakeEinsumGradientOp(const std::string& msg, TensorList inputs,
           std::move(op_meta))->output(0);  
 }
 
-} // namespace autograd
+} // namespace graph
 } // namespace hetu

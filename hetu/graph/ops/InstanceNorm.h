@@ -55,7 +55,7 @@ protected:
 };
 
 TensorList MakeInstanceNormOp(Tensor input, double eps = 1e-7,
-                              const OpMeta& op_meta = OpMeta());
+                              OpMeta op_meta = OpMeta());
 
 class InstanceNormGradientOpImpl : public OpInterface {
 
@@ -95,7 +95,7 @@ protected:
 Tensor MakeInstanceNormGradientOp(Tensor output_grad, Tensor input,
                                   Tensor save_mean, Tensor save_var,
                                   double eps = 1e-7,
-                                  const OpMeta& op_meta = OpMeta());
+                                  OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

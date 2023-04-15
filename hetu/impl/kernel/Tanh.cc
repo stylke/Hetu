@@ -58,6 +58,7 @@ void TanhCpu(const NDArray& input, NDArray& output, const Stream& stream) {
           dnnl::stream engine_stream(eng);
           Tanh.execute(engine_stream, tanh_args);
           engine_stream.wait();
+          engine_stream.wait();
         },"Tanh");
       //cpu_stream.Sync();
     });

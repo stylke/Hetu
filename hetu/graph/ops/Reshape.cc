@@ -70,7 +70,7 @@ ArrayReshapeGradientOpImpl::DoInferShape(Operator& op, const HTShapeList& input_
 }
 
 Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
-                          const OpMeta& op_meta) {
+                          OpMeta op_meta) {
   return Graph::MakeOp(
       std::make_shared<ArrayReshapeOpImpl>(output_shape),
       {std::move(input)},
@@ -78,7 +78,7 @@ Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
 }
 
 Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input,
-                                  const OpMeta& op_meta) {
+                                  OpMeta op_meta) {
   return Graph::MakeOp(
       std::make_shared<ArrayReshapeGradientOpImpl>(),
       {std::move(grad_output), std::move(ori_input)},

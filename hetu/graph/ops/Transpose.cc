@@ -19,7 +19,7 @@ TensorList TransposeOpImpl::DoGradient(Operator& op, const TensorList& grad_outp
   for (size_t i = 0; i < perm.size(); ++i) {
     grad_perm[perm[i]] = i;
   }
-  return {op->require_grad(0) ? MakeTransposeOp(grad_outputs.at(0), grad_perm,
+  return {op->requires_grad(0) ? MakeTransposeOp(grad_outputs.at(0), grad_perm,
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -44,7 +44,7 @@ HTShapeList TransposeOpImpl::DoInferShape(Operator& op,
   return {res_shape};
 }
 
-Tensor MakeTransposeOp(Tensor input, HTShape perms, const OpMeta& op_meta) {
+Tensor MakeTransposeOp(Tensor input, HTShape perms, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<TransposeOpImpl>(perms),
     {std::move(input)},

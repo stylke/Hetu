@@ -473,8 +473,8 @@ class OpDef : public shared_ptr_target {
     return false;
   }
 
-  bool require_grad(size_t i) const {
-    return _inputs[i]->require_grad();
+  bool requires_grad(size_t i) const {
+    return _inputs[i]->requires_grad();
   }
 
  protected:

@@ -131,6 +131,7 @@ void MaxPoolCpu(const NDArray& input, const size_t kernel_H,
 
         dnnl::stream engine_stream(eng);
         pooling_prim.execute(engine_stream, pooling_args);
+        engine_stream.wait();
       },"MaxPool");
       //cpu_stream.Sync();
     });
@@ -212,6 +213,7 @@ void MaxPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
         dnnl::stream engine_stream(eng);
         pooling_fwd.execute(engine_stream, pooling_fwd_args);    
         pooling_prim.execute(engine_stream, pooling_args);
+        engine_stream.wait();
       },"MaxPoolGradient");
       //cpu_stream.Sync();
     });

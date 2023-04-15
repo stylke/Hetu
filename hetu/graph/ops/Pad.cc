@@ -16,7 +16,7 @@ void PadOpImpl::DoCompute(Operator& op,
 }
 
 TensorList PadOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakePadGradientOp(grad_outputs.at(0), get_paddings(), get_mode(),
+  return {op->requires_grad(0) ? MakePadGradientOp(grad_outputs.at(0), get_paddings(), get_mode(),
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -59,7 +59,7 @@ HTShapeList PadGradientOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakePadOp(Tensor input, const HTShape& paddings, std::string mode, double constant,
-                 const OpMeta& op_meta) {
+                 OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<PadOpImpl>(paddings, mode, constant),
         {std::move(input)},
@@ -67,7 +67,7 @@ Tensor MakePadOp(Tensor input, const HTShape& paddings, std::string mode, double
 }
 
 Tensor MakePadGradientOp(Tensor grad_output, const HTShape& paddings, std::string mode,
-                         const OpMeta& op_meta) {
+                         OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<PadGradientOpImpl>(paddings, mode),
         {std::move(grad_output)},

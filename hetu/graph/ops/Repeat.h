@@ -58,7 +58,7 @@ class RepeatOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeRepeatOp(Tensor input, HTShape repeats, const OpMeta& op_meta = OpMeta());
+Tensor MakeRepeatOp(Tensor input, HTShape repeats, OpMeta op_meta = OpMeta());
 
 class RepeatGradientOpImpl : public OpInterface {
 
@@ -86,7 +86,7 @@ class RepeatGradientOpImpl : public OpInterface {
 };
 
 Tensor MakeRepeatGradientOp(Tensor grad_output, Tensor input,
-                            const OpMeta& op_meta = OpMeta());
+                            OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

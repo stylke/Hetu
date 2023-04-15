@@ -65,7 +65,7 @@ class TransposeOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeTransposeOp(Tensor input, HTShape perms, const OpMeta& op_meta = OpMeta());
+Tensor MakeTransposeOp(Tensor input, HTShape perms, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

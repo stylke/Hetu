@@ -60,7 +60,7 @@ class AsStridedOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeAsStridedOp(Tensor input, HTShape outshape, HTShape stride, const OpMeta& op_meta = OpMeta());
+Tensor MakeAsStridedOp(Tensor input, HTShape outshape, HTShape stride, OpMeta op_meta = OpMeta());
 
 class AsStridedGradientOpImpl : public OpInterface {
 
@@ -103,7 +103,7 @@ class AsStridedGradientOpImpl : public OpInterface {
 };
 
 Tensor MakeAsStridedGradientOp(Tensor grad_output, Tensor input, HTShape stride,
-                               const OpMeta& op_meta = OpMeta());
+                               OpMeta op_meta = OpMeta());
 
-} // namespace autograd
+} // namespace graph
 } // namespace hetu

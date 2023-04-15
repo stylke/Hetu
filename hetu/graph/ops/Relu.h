@@ -40,7 +40,7 @@ class ReluOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeReluOp(Tensor input, const OpMeta& op_meta = OpMeta());
+Tensor MakeReluOp(Tensor input, OpMeta op_meta = OpMeta());
 
 class ReluGradientOpImpl : public OpInterface {
 
@@ -67,7 +67,7 @@ class ReluGradientOpImpl : public OpInterface {
 };
 
 Tensor MakeReluGradientOp(Tensor input, Tensor grad_output,
-                          const OpMeta& op_meta = OpMeta());
+                          OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

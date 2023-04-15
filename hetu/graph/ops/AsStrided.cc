@@ -14,7 +14,7 @@ void AsStridedOpImpl::DoCompute(Operator& op,
 }
 
 TensorList AsStridedOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeAsStridedGradientOp(grad_outputs.at(0), op->input(0), get_stride(),
+  auto grad_input = op->requires_grad(0) ? MakeAsStridedGradientOp(grad_outputs.at(0), op->input(0), get_stride(),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
   return {grad_input};
@@ -43,7 +43,7 @@ AsStridedGradientOpImpl::DoInferShape(Operator& op,
   return {input_shapes[1]};
 }
 
-Tensor MakeAsStridedOp(Tensor input, HTShape outshape, HTShape stride, const OpMeta& op_meta) {
+Tensor MakeAsStridedOp(Tensor input, HTShape outshape, HTShape stride, OpMeta op_meta) {
   return Graph::MakeOp(
            std::make_shared<AsStridedOpImpl>(outshape, stride),
            {std::move(input)},
@@ -51,12 +51,12 @@ Tensor MakeAsStridedOp(Tensor input, HTShape outshape, HTShape stride, const OpM
 }
 
 Tensor MakeAsStridedGradientOp(Tensor grad_output, Tensor input, HTShape stride,
-                               const OpMeta& op_meta) {
+                               OpMeta op_meta) {
   return Graph::MakeOp(
            std::make_shared<AsStridedGradientOpImpl>(stride),
            {std::move(grad_output), std::move(input)},
            std::move(op_meta))->output(0);
 }
 
-} // namespace autograd
+} // namespace graph
 } // namespace hetu

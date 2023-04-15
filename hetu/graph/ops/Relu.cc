@@ -14,7 +14,7 @@ void ReluOpImpl::DoCompute(Operator& op,
 }
 
 TensorList ReluOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeReluGradientOp(op->input(0), grad_outputs.at(0),
+  return {op->requires_grad(0) ? MakeReluGradientOp(op->input(0), grad_outputs.at(0),
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -38,7 +38,7 @@ HTShapeList ReluGradientOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-Tensor MakeReluOp(Tensor input, const OpMeta& op_meta) {
+Tensor MakeReluOp(Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<ReluOpImpl>(),
         {std::move(input)},
@@ -46,7 +46,7 @@ Tensor MakeReluOp(Tensor input, const OpMeta& op_meta) {
 }
 
 Tensor MakeReluGradientOp(Tensor input, Tensor grad_output,
-                          const OpMeta& op_meta) {
+                          OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<ReluGradientOpImpl>(),
         {std::move(input), std::move(grad_output)},

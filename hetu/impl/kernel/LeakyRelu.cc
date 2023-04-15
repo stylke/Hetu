@@ -60,6 +60,7 @@ void LeakyReluCpu(const NDArray& input, double alpha, NDArray& output,
 
       LeakyRelu.execute(engine_stream,
                         {{DNNL_ARG_SRC, src_mem}, {DNNL_ARG_DST, dst_mem}});
+      engine_stream.wait();
       },"LeakyRelu");
       //cpu_stream.Sync();
     });
@@ -102,6 +103,7 @@ void LeakyReluGradientCpu(const NDArray& input, const NDArray& output_grad,
                       {{DNNL_ARG_SRC, src_mem}, 
                        {DNNL_ARG_DIFF_DST, g_dst_mem},
                        {DNNL_ARG_DIFF_SRC, g_src_mem}});
+      engine_stream.wait();
       },"LeakyReluGradient");
       //cpu_stream.Sync();
     });

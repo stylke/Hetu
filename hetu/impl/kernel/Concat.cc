@@ -93,6 +93,7 @@ void ConcatCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
 
         dnnl::stream engine_stream(eng);
         concat_prim.execute(engine_stream, concat_args);
+        engine_stream.wait();
       },
       "Concat");
       //cpu_stream.Sync();

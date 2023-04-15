@@ -76,7 +76,7 @@ protected:
 };
 
 TensorList MakeLayerNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias, HTShape normalized_shape, 
-                           double eps = 0.01, const OpMeta& op_meta = OpMeta());
+                           double eps = 0.01, OpMeta op_meta = OpMeta());
 
 class LayerNormGradientOpImpl : public OpInterface {
  public:
@@ -100,9 +100,6 @@ protected:
     return {inputs[0]->meta(), inputs[2]->meta(), inputs[2]->meta()};
   }
 
-  TensorList DoGradient(Operator& op,
-                        const TensorList& grad_outputs) const override;
-
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;
 
@@ -125,7 +122,7 @@ protected:
 
 TensorList MakeLayerNormGradientOp(Tensor output_grad, Tensor input, Tensor bn_scale,
                                    Tensor save_mean, Tensor save_var, HTShape normalized_shape,
-                                   double eps, const OpMeta& op_meta = OpMeta());
+                                   double eps, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -17,10 +17,10 @@ void ConcatOpImpl::DoCompute(Operator& op,
 TensorList ConcatOpImpl::DoGradient(Operator &op,
                                     const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_inputA = op->require_grad(0) ? MakeConcatGradientOp(op->input(0), grad_outputs.at(0), get_axis(), 0,
+  auto grad_inputA = op->requires_grad(0) ? MakeConcatGradientOp(op->input(0), grad_outputs.at(0), get_axis(), 0,
                                            g_op_meta.set_name(op->grad_name(0)))
                                          : Tensor();
-  auto grad_inputB = op->require_grad(1) ? MakeConcatGradientOp(op->input(1), grad_outputs.at(0), get_axis(), 1,
+  auto grad_inputB = op->requires_grad(1) ? MakeConcatGradientOp(op->input(1), grad_outputs.at(0), get_axis(), 1,
                                            g_op_meta.set_name(op->grad_name(1)))
                                          : Tensor();
   return {grad_inputA, grad_inputB};
@@ -50,7 +50,7 @@ HTShapeList ConcatGradientOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeConcatOp(Tensor inputA, Tensor inputB, size_t axis,
-                    const OpMeta& op_meta) {
+                    OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<ConcatOpImpl>(axis),
           {std::move(inputA), std::move(inputB)},
@@ -58,7 +58,7 @@ Tensor MakeConcatOp(Tensor inputA, Tensor inputB, size_t axis,
 }
 
 Tensor MakeConcatGradientOp(Tensor input, Tensor grad_output, size_t axis, size_t id,
-                            const OpMeta& op_meta) {
+                            OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<ConcatGradientOpImpl>(axis, id),
           {std::move(input), std::move(grad_output)},

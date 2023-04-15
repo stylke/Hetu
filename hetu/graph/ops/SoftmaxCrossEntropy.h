@@ -62,11 +62,11 @@ class SoftmaxCrossEntropyOpImpl : public OpInterface {
 
 Tensor MakeSoftmaxCrossEntropyOp(Tensor preds, Tensor labels,
                                  ReductionType reduction = kMEAN,
-                                 const OpMeta& op_meta = OpMeta());
+                                 OpMeta op_meta = OpMeta());
 
 Tensor MakeSoftmaxCrossEntropyOp(Tensor preds, Tensor labels,
                                  const std::string& reduction = "mean",
-                                 const OpMeta& op_meta = OpMeta());
+                                 OpMeta op_meta = OpMeta());
 
 class SoftmaxCrossEntropyGradientOpImpl : public OpInterface {
  public:
@@ -107,7 +107,7 @@ class SoftmaxCrossEntropyGradientOpImpl : public OpInterface {
 
 Tensor MakeSoftmaxCrossEntropyGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
                                          ReductionType reduction = kMEAN,
-                                         const OpMeta& op_meta = OpMeta());
+                                         OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

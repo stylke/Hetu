@@ -17,7 +17,7 @@ void SigmoidOpImpl::DoCompute(Operator& op,
 
 TensorList SigmoidOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_input = op->require_grad(0) ? MakeMulElewiseOp(MakeMulElewiseOp(op->output(0),
+  auto grad_input = op->requires_grad(0) ? MakeMulElewiseOp(MakeMulElewiseOp(op->output(0),
                                           MakeAddByConstOp(MakeNegateOp(op->output(0), g_op_meta), 1, g_op_meta),
                                           g_op_meta), grad_outputs.at(0), g_op_meta.set_name(op->grad_name(0)))
                                         : Tensor();
@@ -30,7 +30,7 @@ HTShapeList SigmoidOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-Tensor MakeSigmoidOp(Tensor input, const OpMeta& op_meta) {
+Tensor MakeSigmoidOp(Tensor input, OpMeta op_meta) {
     return Graph::MakeOp(
       std::make_shared<SigmoidOpImpl>(),
       {std::move(input)},

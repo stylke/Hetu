@@ -16,7 +16,7 @@ void LayerNormOpImpl::DoCompute(Operator& op,
 TensorList LayerNormOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
   TensorList empty = {Tensor(), Tensor(), Tensor()};
-  auto grad_input = op->require_grad(0) ? MakeLayerNormGradientOp(grad_outputs.at(0), op->input(0),
+  auto grad_input = op->requires_grad(0) ? MakeLayerNormGradientOp(grad_outputs.at(0), op->input(0),
                                           op->input(1), op->output(1), op->output(2),
                                           normalized_shape(), get_eps(), g_op_meta)
                                         : empty;
@@ -53,7 +53,7 @@ LayerNormGradientOpImpl::DoInferShape(Operator& op,const HTShapeList& input_shap
 }
 
 TensorList MakeLayerNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias, HTShape normalized_shape, 
-                           double eps, const OpMeta& op_meta) {
+                           double eps, OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<LayerNormOpImpl>(normalized_shape, eps),
           {std::move(input), std::move(bn_scale), std::move(bn_bias)},
@@ -62,9 +62,9 @@ TensorList MakeLayerNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias, HTShap
 
 TensorList MakeLayerNormGradientOp(Tensor output_grad, Tensor input, Tensor bn_scale,
                                    Tensor save_mean, Tensor save_var, HTShape normalized_shape, 
-                                   double eps, const OpMeta& op_meta) {
+                                   double eps, OpMeta op_meta) {
   return Graph::MakeOp(
-          std::make_shared<LayerNormOpImpl>(normalized_shape, eps),
+          std::make_shared<LayerNormGradientOpImpl>(normalized_shape, eps),
           {std::move(output_grad), std::move(input), std::move(bn_scale), 
           std::move(save_mean), std::move(save_var)},
           std::move(op_meta))->outputs();  

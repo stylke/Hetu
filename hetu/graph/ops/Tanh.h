@@ -37,7 +37,7 @@ class TanhOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeTanhOp(Tensor input, const OpMeta& op_meta = OpMeta());
+Tensor MakeTanhOp(Tensor input, OpMeta op_meta = OpMeta());
 
 class TanhGradientOpImpl : public OpInterface {
 
@@ -63,7 +63,7 @@ class TanhGradientOpImpl : public OpInterface {
 };
 
 Tensor MakeTanhGradientOp(Tensor input, Tensor grad_output,
-                          const OpMeta& op_meta = OpMeta());
+                          OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

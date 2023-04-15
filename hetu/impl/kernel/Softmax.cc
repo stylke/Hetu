@@ -41,6 +41,7 @@ void SoftmaxCpu(const NDArray& input, NDArray& output, int64_t dim, const Stream
 
           dnnl::stream engine_stream(eng);
           softmax_prim.execute(engine_stream, softmax_args);
+          engine_stream.wait();
         },"Softmax");
       //cpu_stream.Sync();
     });
@@ -86,8 +87,8 @@ void SoftmaxGradientCpu(const NDArray& input_Y, const NDArray& output_grad,
           softmax_args.insert({DNNL_ARG_DST, dst_mem});
           dnnl::stream engine_stream(eng);
           softmax_prim.execute(engine_stream, softmax_args);
+          engine_stream.wait();
         },"SoftmaxGradient");
-      //cpu_stream.Sync();
     });
 }
 

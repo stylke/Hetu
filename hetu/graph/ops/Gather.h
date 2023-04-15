@@ -51,7 +51,7 @@ protected:
   }
 };
 
-Tensor MakeGatherOp(Tensor input, int64_t dim, Tensor id, const OpMeta& op_meta = OpMeta());
+Tensor MakeGatherOp(Tensor input, int64_t dim, Tensor id, OpMeta op_meta = OpMeta());
 
 class GatherGradientOpImpl : public OpInterface {
 
@@ -90,7 +90,7 @@ protected:
 };
 
 Tensor MakeGatherGradientOp(Tensor grad_output, int64_t dim, Tensor id, Tensor input,
-                            const OpMeta& op_meta = OpMeta());
+                            OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -37,7 +37,7 @@ TensorList BatchNormOpImpl::DoGradient(Operator& op,
                                        const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
   TensorList empty = {Tensor(), Tensor(), Tensor()};
-  auto grad = op->require_grad(0) ? MakeBatchNormGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
+  auto grad = op->requires_grad(0) ? MakeBatchNormGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
                                     op->output(1), op->output(2), get_eps(), g_op_meta)
                                   : empty;                         
   return {grad.at(0), grad.at(1), grad.at(2), Tensor(), Tensor()};
@@ -72,7 +72,7 @@ BatchNormGradientOpImpl::DoInferShape(Operator& op,
 TensorList MakeBatchNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias,
                        Tensor running_mean, Tensor running_var,
                        double momentum, double eps,
-                       const OpMeta& op_meta) {
+                       OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<BatchNormOpImpl>(momentum, eps),
         {std::move(input), std::move(bn_scale), std::move(bn_bias),
@@ -82,7 +82,7 @@ TensorList MakeBatchNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias,
 
 TensorList MakeBatchNormGradientOp(Tensor output_grad, Tensor input, Tensor bn_scale,
                                Tensor save_mean, Tensor save_var, double eps,
-                               const OpMeta& op_meta) {
+                               OpMeta op_meta) {
   return Graph::MakeOp(
                  std::make_shared<BatchNormGradientOpImpl>(eps),
                  {std::move(output_grad), std::move(input),

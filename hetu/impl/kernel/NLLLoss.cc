@@ -97,7 +97,7 @@ void NLLLossGradientCpu(const NDArray& pred, const NDArray& label,
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "NLLLossGradientCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
-      [&pred, &label, &grad_loss, output, n_rows, n_cols]() {
+      [pred, label, grad_loss, output, n_rows, n_cols]() {
       array_zero_set_cpu(output->data_ptr<spec_t>(), output->numel());
       nllloss_gradient_cpu(
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(),

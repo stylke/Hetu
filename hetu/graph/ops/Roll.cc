@@ -23,7 +23,7 @@ TensorList RollOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) 
   for (auto &bit: negshifts) {
     bit = - bit;
   }
-  auto grad_input = op->require_grad(0) ? MakeRollOp(grad_outputs.at(0), negshifts, dims(),
+  auto grad_input = op->requires_grad(0) ? MakeRollOp(grad_outputs.at(0), negshifts, dims(),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
   return {grad_input};
@@ -37,7 +37,7 @@ RollOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeRollOp(Tensor input, HTShape shifts,
-                  HTAxes dims, const OpMeta& op_meta) {
+                  HTAxes dims, OpMeta op_meta) {
   return Graph::MakeOp(
       std::make_shared<RollOpImpl>(shifts, dims),
       {std::move(input)},

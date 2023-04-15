@@ -73,22 +73,14 @@ class BinaryCrossEntropyGradientOpImpl final : public OpInterface {
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
     HT_ASSERT_TENSORS_SAME_SHAPE(inputs[0], inputs[1]);
-    NDArrayMeta output_meta;
-    if (_reduction != kNONE)
-      output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype()).set_shape({1}).set_device(inputs[0]->device());
-    else
-      output_meta = inputs[0]->meta();
-    return {output_meta};
+    return {inputs[0]->meta()};
   }
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override {
     HT_ASSERT_GE(input_shapes.at(0).size(), 2)
       << "Invalid shape for " << type() << ": " << input_shapes.at(0);
-    if (reduction() != kNONE)
-      return {{1}};
-    else 
-      return {input_shapes.at(0)};
+    return {input_shapes.at(0)};
   }
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
@@ -114,6 +106,10 @@ class BinaryCrossEntropyGradientOpImpl final : public OpInterface {
 
 Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
                                 ReductionType reduction = kMEAN,
+                                OpMeta op_meta = OpMeta());
+
+Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
+                                std::string reduction = "mean",
                                 OpMeta op_meta = OpMeta());
 
 Tensor MakeBinaryCrossEntropyGradientOp(Tensor probs, Tensor labels,

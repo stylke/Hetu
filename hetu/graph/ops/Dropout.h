@@ -74,7 +74,7 @@ protected:
 };
 
 Tensor MakeDropoutOp(Tensor input, double keep_prob, bool recompute = false,
-                     bool inplace = false, const OpMeta& op_meta = OpMeta());
+                     bool inplace = false, OpMeta op_meta = OpMeta());
 
 class DropoutGradientOpImpl : public OpInterface {
  public:
@@ -118,7 +118,7 @@ protected:
 };
 
 Tensor MakeDropoutGradientOp(Tensor grad_output, Tensor output, double keep_prob,
-                             const OpMeta& op_meta = OpMeta());
+                             OpMeta op_meta = OpMeta());
 
 class DropoutGradientWithRecomputationOpImpl : public OpInterface {
  private:
@@ -128,10 +128,12 @@ class DropoutGradientWithRecomputationOpImpl : public OpInterface {
  public:
   DropoutGradientWithRecomputationOpImpl(OpId forward_op,
                                          double keep_prob,
-                                         const OpMeta& op_meta = OpMeta())
+                                         bool inplace,
+                                         OpMeta op_meta = OpMeta())
   : OpInterface(quote(DropoutGradientWithRecomputationOp)),
     _forward_op(forward_op),
-    _keep_prob(keep_prob) {
+    _keep_prob(keep_prob),
+    _inplace(inplace) {
   }
 
   double keep_prob() const {
@@ -179,7 +181,7 @@ protected:
 };
 
 Tensor MakeDropoutGradientWithRecomputationOp(Tensor grad_output, OpId forward_op, double keep_prob,
-                                              const OpMeta& op_meta = OpMeta());
+                                              bool inplace, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

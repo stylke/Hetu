@@ -16,11 +16,11 @@ void Conv2dOpImpl::DoCompute(Operator&op,
 TensorList Conv2dOpImpl::DoGradient(Operator&op,
                                     const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_input = op->require_grad(0) ? MakeConv2dGradientofDataOp(
+  auto grad_input = op->requires_grad(0) ? MakeConv2dGradientofDataOp(
                                           op->input(1), grad_outputs.at(0), op->input(0), get_padding(),
                                           get_stride(), g_op_meta.set_name(op->grad_name(0)))
                                         : Tensor();
-  auto grad_filter = op->require_grad(1) ? MakeConv2dGradientofFilterOp(op->input(0), grad_outputs.at(0), op->input(1),
+  auto grad_filter = op->requires_grad(1) ? MakeConv2dGradientofFilterOp(op->input(0), grad_outputs.at(0), op->input(1),
                                            get_padding(), get_stride(),
                                            g_op_meta.set_name(op->grad_name(1)))
                                          : Tensor();
@@ -118,7 +118,7 @@ HTShapeList Conv2dAddBiasOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeConv2dOp(Tensor input, Tensor filter, int64_t padding, int64_t stride,
-                    const OpMeta& op_meta) {
+                    OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<Conv2dOpImpl>(padding, stride),
           {std::move(input), std::move(filter)},
@@ -127,7 +127,7 @@ Tensor MakeConv2dOp(Tensor input, Tensor filter, int64_t padding, int64_t stride
 
 Tensor MakeConv2dGradientofFilterOp(Tensor input, Tensor grad_output, Tensor filter,
                                     const HTShape& padding, const HTStride& stride,
-                                    const OpMeta& op_meta) {
+                                    OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<Conv2dGradientofFilterOpImpl>(padding, stride),
           {std::move(input), std::move(grad_output), std::move(filter)},
@@ -136,7 +136,7 @@ Tensor MakeConv2dGradientofFilterOp(Tensor input, Tensor grad_output, Tensor fil
 
 Tensor MakeConv2dGradientofDataOp(Tensor filter, Tensor grad_output, Tensor input,
                                   const HTShape& padding, const HTStride& stride,
-                                  const OpMeta& op_meta) {
+                                  OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<Conv2dGradientofDataOpImpl>(padding, stride),
           {std::move(filter), std::move(grad_output), std::move(input)},
@@ -144,7 +144,7 @@ Tensor MakeConv2dGradientofDataOp(Tensor filter, Tensor grad_output, Tensor inpu
 }
 
 Tensor MakeConv2dAddBiasOp(Tensor input, Tensor filter, Tensor bias, int64_t padding,
-                           int64_t stride, const OpMeta& op_meta) {
+                           int64_t stride, OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<Conv2dAddBiasOpImpl>(padding, stride),
           {std::move(input), std::move(filter), std::move(bias)},

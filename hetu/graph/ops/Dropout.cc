@@ -34,7 +34,7 @@ NDArrayList DropoutOpImpl::DoCompute(Operator& op,
 TensorList DropoutOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   if (recompute()) {
     return {MakeDropoutGradientWithRecomputationOp(
-              grad_outputs.at(0), op->id(), keep_prob(), op->grad_op_meta().set_name(op->grad_name()))};
+              grad_outputs.at(0), op->id(), keep_prob(), inplace(), op->grad_op_meta().set_name(op->grad_name()))};
   } else {
     return {MakeDropoutGradientOp(grad_outputs.at(0), op->output(0), keep_prob(),
                                   op->grad_op_meta().set_name(op->grad_name()))};
@@ -91,7 +91,7 @@ HTShapeList DropoutGradientWithRecomputationOpImpl::DoInferShape(
 }
 
 Tensor MakeDropoutOp(Tensor input, double keep_prob, bool recompute,
-                     bool inplace, const OpMeta& op_meta) {
+                     bool inplace, OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<DropoutOpImpl>(keep_prob, recompute, inplace),
           {std::move(input)},
@@ -99,7 +99,7 @@ Tensor MakeDropoutOp(Tensor input, double keep_prob, bool recompute,
 }
 
 Tensor MakeDropoutGradientOp(Tensor grad_output, Tensor output, double keep_prob,
-                             const OpMeta& op_meta) {
+                             OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<DropoutGradientOpImpl>(keep_prob),
           {std::move(grad_output), std::move(output)},
@@ -107,9 +107,9 @@ Tensor MakeDropoutGradientOp(Tensor grad_output, Tensor output, double keep_prob
 }
 
 Tensor MakeDropoutGradientWithRecomputationOp(Tensor grad_output, OpId forward_op, double keep_prob,
-                                              const OpMeta& op_meta) {
+                                              bool inplace, OpMeta op_meta) {
   return Graph::MakeOp(
-          std::make_shared<DropoutGradientWithRecomputationOpImpl>(forward_op, keep_prob),
+          std::make_shared<DropoutGradientWithRecomputationOpImpl>(forward_op, keep_prob, inplace),
           {std::move(grad_output)},
           std::move(op_meta))->output(0);
 }

@@ -66,7 +66,7 @@ class SliceOpImpl : public OpInterface {
 };
 
 Tensor MakeSliceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
-                   const OpMeta& op_meta = OpMeta());
+                   OpMeta op_meta = OpMeta());
 
 class SliceGradientOpImpl : public OpInterface {
 
@@ -114,7 +114,7 @@ class SliceGradientOpImpl : public OpInterface {
 
 Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
                            const HTShape& begin_pos, const HTShape& output_shape,
-                           const OpMeta& op_meta = OpMeta());
+                           OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -39,7 +39,7 @@ class WhereOpImpl : public OpInterface {
 };
 
 Tensor MakeWhereOp(Tensor cond, Tensor inputA, Tensor inputB,
-                   const OpMeta& op_meta = OpMeta());
+                   OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

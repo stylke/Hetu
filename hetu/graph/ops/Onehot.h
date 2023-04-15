@@ -55,7 +55,7 @@ class OnehotOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeOnehotOp(Tensor input, size_t num_classes, const OpMeta& op_meta = OpMeta());
+Tensor MakeOnehotOp(Tensor input, size_t num_classes, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -80,7 +80,7 @@ class NormOpImpl : public OpInterface {
 };
 
 Tensor MakeNormOp(Tensor input, int64_t p = 1, int64_t dim = 0, 
-                  bool keepdim = false, const OpMeta& op_meta = OpMeta());
+                  bool keepdim = false, OpMeta op_meta = OpMeta());
 
 class NormGradientOpImpl : public OpInterface {
  public:
@@ -125,7 +125,7 @@ class NormGradientOpImpl : public OpInterface {
 };
 
 Tensor MakeNormGradientOp(Tensor input, Tensor output, Tensor grad_output, int64_t p, 
-                          int64_t dim, const OpMeta& op_meta = OpMeta());
+                          int64_t dim, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

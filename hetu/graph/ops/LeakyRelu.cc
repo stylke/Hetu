@@ -13,7 +13,7 @@ void LeakyReluOpImpl::DoCompute(Operator& op,
 }
 
 TensorList LeakyReluOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeLeakyReluGradientOp(op->input(0), grad_outputs.at(0), get_alpha(),
+  return {op->requires_grad(0) ? MakeLeakyReluGradientOp(op->input(0), grad_outputs.at(0), get_alpha(),
                                 op->grad_op_meta().set_name(op->grad_name(0)))
                               : Tensor()};
 }
@@ -37,7 +37,7 @@ LeakyReluGradientOpImpl::DoInferShape(Operator& op,const HTShapeList& input_shap
   return {input_shapes.at(0)};
 }
 
-Tensor MakeLeakyReluOp(Tensor input, double alpha, const OpMeta& op_meta) {
+Tensor MakeLeakyReluOp(Tensor input, double alpha, OpMeta op_meta) {
   return Graph::MakeOp(
         std::make_shared<LeakyReluOpImpl>(alpha),
         {std::move(input)},
@@ -46,7 +46,7 @@ Tensor MakeLeakyReluOp(Tensor input, double alpha, const OpMeta& op_meta) {
 
 
 Tensor MakeLeakyReluGradientOp(Tensor input, Tensor grad_output, double alpha,
-                               const OpMeta& op_meta) {
+                               OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<LeakyReluGradientOpImpl>(alpha),
           {std::move(input), std::move(grad_output)},

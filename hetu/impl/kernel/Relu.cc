@@ -58,6 +58,7 @@ void ReluCpu(const NDArray& input, NDArray& output, const Stream& stream) {
 
           dnnl::stream engine_stream(eng);
           Relu.execute(engine_stream, relu_args);
+          engine_stream.wait();
         },"Relu");
       //cpu_stream.Sync();
     });
@@ -103,6 +104,7 @@ void ReluGradientCpu(const NDArray& input, const NDArray& output_grad,
         
           dnnl::stream engine_stream(eng);
           Relu_bwd.execute(engine_stream, relu_args);
+          engine_stream.wait();
         },"ReluGradient");
       //cpu_stream.Sync();
 

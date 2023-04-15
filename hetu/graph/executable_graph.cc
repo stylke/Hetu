@@ -82,10 +82,11 @@ NDArrayList ExecutableGraph::Run(const TensorList& fetches,
   // TODO: For each pair of `fetches` and `feed_dict`,
   // deduce the optimal execution plan, and cache it.
   for (auto& fetch : fetches) {
-    if (fetch->placement().is_undetermined()) {
-      Instantiate(fetches, kCUDA);
-      break;
-    }
+    Instantiate(fetches, kCUDA);
+    // if (fetch->placement().is_undetermined()) {
+    //   Instantiate(fetches, kCUDA);
+    //   break;
+    // }
   }
 
   auto is_op_computed = [&](const Operator& op) -> bool {
@@ -116,7 +117,6 @@ NDArrayList ExecutableGraph::Run(const TensorList& fetches,
     if (computed)
       continue;
 
-    HT_LOG_TRACE << "running op " << op->name();
     NDArrayList inputs;
     inputs.reserve(op->num_inputs());
     for (size_t i = 0; i < op->num_inputs(); i++) {
@@ -141,7 +141,6 @@ NDArrayList ExecutableGraph::Run(const TensorList& fetches,
     }
     // TODO: remove inputs that are no longer used
   }
-
   for (auto op_id : to_sync_op_ids) {
     _op_indexing[op_id]->Sync();
   }

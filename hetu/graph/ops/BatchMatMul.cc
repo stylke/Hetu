@@ -23,30 +23,30 @@ TensorList BatchMatMulOpImpl::DoGradient(Operator& op,
   if (!trans_a() && !trans_b()) {
     // case 1: c = BatchMatMul(a, b)
     // grad_a = BatchMatMul(grad_c, b^T), grad_b = BatchMatMul(a^T, grad_c)
-    grad_a = op->require_grad(0) ? MakeBatchMatMulOp(grad_c, b, false, true, g_op_meta.set_name(op->grad_name(0)))
+    grad_a = op->requires_grad(0) ? MakeBatchMatMulOp(grad_c, b, false, true, g_op_meta.set_name(op->grad_name(0)))
                                  : Tensor();
-    grad_b = op->require_grad(1) ? MakeBatchMatMulOp(a, grad_c, true, false, g_op_meta.set_name(op->grad_name(1)))
+    grad_b = op->requires_grad(1) ? MakeBatchMatMulOp(a, grad_c, true, false, g_op_meta.set_name(op->grad_name(1)))
                                  : Tensor();
   } else if (trans_a() && !trans_b()) {
     // case 2: c = BatchMatMul(a^T, b)
     // grad_a = BatchMatMul(b, grad_c^T), grad_b = BatchMatMul(a, grad_c)
-    grad_a = op->require_grad(0) ? MakeBatchMatMulOp(b, grad_c, false, true, g_op_meta.set_name(op->grad_name(0)))
+    grad_a = op->requires_grad(0) ? MakeBatchMatMulOp(b, grad_c, false, true, g_op_meta.set_name(op->grad_name(0)))
                                  : Tensor();
-    grad_b = op->require_grad(1) ? MakeBatchMatMulOp(a, grad_c, false, false, g_op_meta.set_name(op->grad_name(1)))
+    grad_b = op->requires_grad(1) ? MakeBatchMatMulOp(a, grad_c, false, false, g_op_meta.set_name(op->grad_name(1)))
                                  : Tensor();
   } else if (!trans_a() && trans_b()) {
     // case 3: c = BatchMatMul(a, b^T)
     // grad_a = BatchMatMul(grad_c, b), grad_b = BatchMatMul(grad_c^T, a)
-    grad_a = op->require_grad(0) ? MakeBatchMatMulOp(grad_c, b, false, false, g_op_meta.set_name(op->grad_name(0)))
+    grad_a = op->requires_grad(0) ? MakeBatchMatMulOp(grad_c, b, false, false, g_op_meta.set_name(op->grad_name(0)))
                                  : Tensor();
-    grad_b = op->require_grad(1) ? MakeBatchMatMulOp(grad_c, a, true, false, g_op_meta.set_name(op->grad_name(1)))
+    grad_b = op->requires_grad(1) ? MakeBatchMatMulOp(grad_c, a, true, false, g_op_meta.set_name(op->grad_name(1)))
                                  : Tensor();
   } else {
     // case 4: c = BatchMatMul(a^T, b^T)
     // grad_a = BatchMatMul(b^T, grad_c^T), grad_b = BatchMatMul(grad_c^T, a^T)
-    grad_a = op->require_grad(0) ? MakeBatchMatMulOp(b, grad_c, true, true, g_op_meta.set_name(op->grad_name(0)))
+    grad_a = op->requires_grad(0) ? MakeBatchMatMulOp(b, grad_c, true, true, g_op_meta.set_name(op->grad_name(0)))
                                  : Tensor();
-    grad_b = op->require_grad(1) ? MakeBatchMatMulOp(grad_c, a, true, true, g_op_meta.set_name(op->grad_name(1)))
+    grad_b = op->requires_grad(1) ? MakeBatchMatMulOp(grad_c, a, true, true, g_op_meta.set_name(op->grad_name(1)))
                                  : Tensor();
   }
   return {grad_a, grad_b};
@@ -77,7 +77,7 @@ HTShapeList BatchMatMulOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeBatchMatMulOp(Tensor a, Tensor b, bool trans_a, bool trans_b,
-                         const OpMeta& op_meta) {
+                         OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<BatchMatMulOpImpl>(trans_a, trans_b),
           {std::move(a), std::move(b)},

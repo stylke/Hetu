@@ -27,7 +27,7 @@ std::pair<HTAxes, HTKeepDims> GradInfer(const HTShapeList& input_shapes) {
     if (output_shape[i] == -1) {
       output_shape[i] = n_input_shape[i];
     }
-    HT_ASSERT(output_shape[i] > 0);
+    // HT_ASSERT(output_shape[i] > 0);
     HT_ASSERT(n_input_shape[i] == 1 || n_input_shape[i] == output_shape[i]);
     if (i >= diff && input_shape[i] == 1 && output_shape[i] > 1) {
       add_axes.emplace_back(i);
@@ -47,11 +47,11 @@ void AddElewiseOpImpl::DoCompute(Operator& op,
 TensorList AddElewiseOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_a = op->require_grad(0) ? MakeAddElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
+  auto grad_a = op->requires_grad(0) ? MakeAddElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
                                       op->output(0), 0,
                                       g_op_meta.set_name(op->grad_name(0)))
                                     : Tensor();
-  auto grad_b = op->require_grad(1) ? MakeAddElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
+  auto grad_b = op->requires_grad(1) ? MakeAddElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
                                       op->output(0), 1,
                                       g_op_meta.set_name(op->grad_name(1)))
                                     : Tensor();
@@ -68,14 +68,13 @@ HTShapeList AddElewiseOpImpl::DoInferShape(Operator& op, const HTShapeList& inpu
 void AddByConstOpImpl::DoCompute(Operator& op,
                                  const NDArrayList& inputs, NDArrayList& outputs,
                                  RuntimeContext& ctx) const {
-  HT_LOG_INFO << op->instantiation_ctx().stream_index << " " << op->instantiation_ctx().stream().device_type() ;
   NDArray::add(inputs.at(0), const_value(), 
                op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList AddByConstOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? grad_outputs.at(0) : Tensor()};
+  return {op->requires_grad(0) ? grad_outputs.at(0) : Tensor()};
 }
 
 HTShapeList AddByConstOpImpl::DoInferShape(Operator& op,
@@ -94,11 +93,11 @@ void SubElewiseOpImpl::DoCompute(Operator& op,
 TensorList SubElewiseOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_a = op->require_grad(0) ? MakeSubElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
+  auto grad_a = op->requires_grad(0) ? MakeSubElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
                                       op->output(0), 0,
                                       g_op_meta.set_name(op->grad_name(0)))
                                     : Tensor();
-  auto grad_b = op->require_grad(1) ? MakeSubElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
+  auto grad_b = op->requires_grad(1) ? MakeSubElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
                                       op->output(0), 1,
                                       g_op_meta.set_name(op->grad_name(1)))
                                     : Tensor();
@@ -121,7 +120,7 @@ void SubByConstOpImpl::DoCompute(Operator& op,
 
 TensorList SubByConstOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? grad_outputs.at(0) : Tensor()};
+  return {op->requires_grad(0) ? grad_outputs.at(0) : Tensor()};
 }
 
 HTShapeList SubByConstOpImpl::DoInferShape(Operator& op,
@@ -140,7 +139,7 @@ void SubFromConstOpImpl::DoCompute(Operator& op,
 
 TensorList SubFromConstOpImpl::DoGradient(Operator& op,
                                           const TensorList& grad_outputs) const {
-  auto grad_input =  op->require_grad(0) ? MakeNegateOp(grad_outputs.at(0), 
+  auto grad_input =  op->requires_grad(0) ? MakeNegateOp(grad_outputs.at(0), 
                                            op->grad_op_meta().set_name(op->grad_name()))
                                          : Tensor();
   return {grad_input};
@@ -160,7 +159,7 @@ void NegateOpImpl::DoCompute(Operator& op,
 
 TensorList NegateOpImpl::DoGradient(Operator& op,
                                     const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeNegateOp(grad_outputs.at(0), 
+  auto grad_input = op->requires_grad(0) ? MakeNegateOp(grad_outputs.at(0), 
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
   return {grad_input};
@@ -182,11 +181,11 @@ void MulElewiseOpImpl::DoCompute(Operator& op,
 TensorList MulElewiseOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_a = op->require_grad(0) ? MakeMulElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
+  auto grad_a = op->requires_grad(0) ? MakeMulElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
                                       op->output(0), 0,
                                       g_op_meta.set_name(op->grad_name(0)))
                                     : Tensor();
-  auto grad_b = op->require_grad(1) ? MakeMulElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
+  auto grad_b = op->requires_grad(1) ? MakeMulElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
                                       op->output(0), 1,
                                       g_op_meta.set_name(op->grad_name(1)))
                                     : Tensor();
@@ -209,7 +208,7 @@ void MulByConstOpImpl::DoCompute(Operator& op,
 
 TensorList MulByConstOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeMulByConstOp(grad_outputs.at(0), const_value(),
+  return {op->requires_grad(0) ? MakeMulByConstOp(grad_outputs.at(0), const_value(),
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -231,11 +230,11 @@ void DivElewiseOpImpl::DoCompute(Operator& op,
 TensorList DivElewiseOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_a = op->require_grad(0) ? MakeDivElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
+  auto grad_a = op->requires_grad(0) ? MakeDivElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
                                       op->output(0), 0,
                                       g_op_meta.set_name(op->grad_name(0)))
                                     : Tensor();
-  auto grad_b = op->require_grad(1) ? MakeDivElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
+  auto grad_b = op->requires_grad(1) ? MakeDivElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
                                       op->output(0), 1,
                                       g_op_meta.set_name(op->grad_name(1)))
                                     : Tensor();
@@ -258,7 +257,7 @@ void DivByConstOpImpl::DoCompute(Operator& op,
 
 TensorList DivByConstOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeDivByConstOp(grad_outputs.at(0), const_value(),
+  return {op->requires_grad(0) ? MakeDivByConstOp(grad_outputs.at(0), const_value(),
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -279,7 +278,7 @@ void DivFromConstOpImpl::DoCompute(Operator& op,
 TensorList DivFromConstOpImpl::DoGradient(Operator& op,
                                           const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_input = op->require_grad(0) ? MakeMulElewiseOp(MakeNegateOp(MakeDivElewiseOp(
+  auto grad_input = op->requires_grad(0) ? MakeMulElewiseOp(MakeNegateOp(MakeDivElewiseOp(
                                           op->output(0), op->input(1), g_op_meta),
                                           g_op_meta), grad_outputs.at(0),
                                           g_op_meta.set_name(op->grad_name(1)))
@@ -303,7 +302,7 @@ TensorList ReciprocalOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
   // 1 / (x^2) = (1 / x) * (1 / x)
-  if (!op->require_grad(0))
+  if (!op->requires_grad(0))
     return {Tensor()};
   auto ret = MakeMulElewiseOp(op->output(0), op->output(0), g_op_meta);
   ret = MakeNegateOp(ret, g_op_meta);

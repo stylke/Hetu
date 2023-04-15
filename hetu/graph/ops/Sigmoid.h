@@ -34,7 +34,7 @@ class SigmoidOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeSigmoidOp(Tensor input, const OpMeta& op_meta = OpMeta());
+Tensor MakeSigmoidOp(Tensor input, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

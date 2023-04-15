@@ -69,6 +69,7 @@ void LinearCpu(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
 
       dnnl::stream engine_stream(eng);
       Matmul.execute(engine_stream, matmul_args);
+      engine_stream.wait();
     },"Linear");
     //cpu_stream.Sync();
   });

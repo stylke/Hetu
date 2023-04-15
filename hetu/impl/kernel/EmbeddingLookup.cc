@@ -110,7 +110,7 @@ void EmbeddingLookupGradientCpu(const NDArray& output_grad, const NDArray& id,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_grad->dtype(), spec_t, "EmbeddingLookupGradientCuda", [&]() {
       auto _future = cpu_stream.EnqueueTask(
-      [input_grad, output_grad, &id, size, length]() {
+      [input_grad, output_grad, id, size, length]() {
       array_zero_set_cpu(input_grad->data_ptr<spec_t>(), size);
       embedding_lookup_gradient_cpu(output_grad->data_ptr<spec_t>(),
                                     id->data_ptr<int64_t>(), output_grad->numel(), length,

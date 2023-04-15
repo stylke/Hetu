@@ -14,7 +14,7 @@ class AvgPoolOpImpl : public OpInterface {
  public:
   AvgPoolOpImpl(size_t kernel_H, size_t kernel_W, 
                 size_t padding, size_t stride,
-                const OpMeta& op_meta = OpMeta())
+                OpMeta op_meta = OpMeta())
   : OpInterface(quote(AvgPoolOp)),
     _kernel_H(kernel_H),
     _kernel_W(kernel_W),
@@ -100,7 +100,7 @@ class AvgPoolGradientOpImpl : public OpInterface {
  public:
   AvgPoolGradientOpImpl(size_t kernel_H,
                         size_t kernel_W, size_t padding, size_t stride,
-                        const OpMeta& op_meta = OpMeta())
+                        OpMeta op_meta = OpMeta())
   : OpInterface(quote(AvgPoolGradientOp)),
     _kernel_H(kernel_H),
     _kernel_W(kernel_W),

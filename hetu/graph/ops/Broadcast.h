@@ -15,12 +15,12 @@ class BroadcastOpImpl : public OpInterface {
   struct constrcutor_access_key {};
 
  public:
-  BroadcastOpImpl(const OpMeta& op_meta = OpMeta())
+  BroadcastOpImpl(OpMeta op_meta = OpMeta())
   : OpInterface(quote(BroadcastOp)), _mode(0) {
   }
 
   BroadcastOpImpl(const HTShape& shape, const HTShape& add_axes = HTShape(),
-                  const OpMeta& op_meta = OpMeta())
+                  OpMeta op_meta = OpMeta())
   : OpInterface(quote(BroadcastOp)),
     _mode(1),
     _shape(shape),
@@ -94,17 +94,17 @@ class BroadcastOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeBroadcastOp(Tensor input, Tensor output, const OpMeta& op_meta = OpMeta());
+Tensor MakeBroadcastOp(Tensor input, Tensor output, OpMeta op_meta = OpMeta());
 
 Tensor MakeBroadcastOp(Tensor input, const HTShape& shape,
                        const HTShape& add_axes = HTShape(),
-                       const OpMeta& op_meta = OpMeta());
+                       OpMeta op_meta = OpMeta());
 
 class BroadcastGradientOpImpl : public OpInterface {
  public:
   BroadcastGradientOpImpl(const HTShape& axes,
                           const HTKeepDims& keepdims,
-                          const OpMeta& op_meta = OpMeta())
+                          OpMeta op_meta = OpMeta())
   : OpInterface(quote(BroadcastGradientOp)),
     _axes(axes),
     _keepdims(keepdims) {
@@ -156,7 +156,7 @@ class BroadcastGradientOpImpl : public OpInterface {
 
 Tensor MakeBroadcastGradientOp(Tensor input, Tensor ori_input, 
                                Tensor ori_output, const HTAxes& axes,
-                               const OpMeta& op_meta = OpMeta());
+                               OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

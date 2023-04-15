@@ -25,7 +25,7 @@ void BroadcastOpImpl::DoCompute(Operator& op,
 
 TensorList BroadcastOpImpl::DoGradient(Operator& op,
                                        const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeBroadcastGradientOp(grad_outputs.at(0), op->input(0), 
+  auto grad_input = op->requires_grad(0) ? MakeBroadcastGradientOp(grad_outputs.at(0), op->input(0), 
                                           op->output(0), get_add_axes(),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
@@ -69,7 +69,7 @@ BroadcastGradientOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(1)};
 }
 
-Tensor MakeBroadcastOp(Tensor input, Tensor output, const OpMeta& op_meta) {
+Tensor MakeBroadcastOp(Tensor input, Tensor output, OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<BroadcastOpImpl>(),
           {std::move(input), std::move(output)},
@@ -78,7 +78,7 @@ Tensor MakeBroadcastOp(Tensor input, Tensor output, const OpMeta& op_meta) {
 
 Tensor MakeBroadcastOp(Tensor input, const HTShape& shape,
                        const HTShape& add_axes,
-                       const OpMeta& op_meta) {
+                       OpMeta op_meta) {
   if (!add_axes.empty())
     HT_ASSERT(input->ndim() + add_axes.size() == shape.size())
     << "input dims plus add_axes is not equal to output dims."
@@ -92,7 +92,7 @@ Tensor MakeBroadcastOp(Tensor input, const HTShape& shape,
 
 Tensor MakeBroadcastGradientOp(Tensor input, Tensor ori_input, 
                                Tensor ori_output, const HTAxes& axes,
-                               const OpMeta& op_meta) {
+                               OpMeta op_meta) {
   HTShapeList outputlist = {};
   HTShape input_shape = ori_input->shape();
   HTShape output_shape = ori_output->shape();
@@ -140,7 +140,6 @@ Tensor MakeBroadcastGradientOp(Tensor input, Tensor ori_input,
       }
     }
   }
-  HT_LOG_INFO << n_input_shape << " " << add_axes << " " << keep_dims;
   return Graph::MakeOp(
           std::make_shared<BroadcastGradientOpImpl>(add_axes, keep_dims),
           {std::move(input), std::move(ori_input), std::move(ori_output)},

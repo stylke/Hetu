@@ -65,11 +65,11 @@ class NLLLossOpImpl : public OpInterface {
 
 Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
                      ReductionType reduction = kMEAN,
-                     const OpMeta& op_meta = OpMeta());
+                     OpMeta op_meta = OpMeta());
 
 Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
                      const std::string& reduction = "mean",
-                     const OpMeta& op_meta = OpMeta());
+                     OpMeta op_meta = OpMeta());
 
 class NLLLossGradientOpImpl : public OpInterface {
  public:
@@ -113,7 +113,7 @@ class NLLLossGradientOpImpl : public OpInterface {
 
 Tensor MakeNLLLossGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
                              ReductionType reduction = kMEAN,
-                             const OpMeta& op_meta = OpMeta());
+                             OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

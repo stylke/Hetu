@@ -58,7 +58,7 @@ class TriuTrilOpImpl : public OpInterface {
 };
 
 Tensor MakeTriuTrilOp(Tensor input,  bool lower = false, int64_t diagonal = 0,  
-                      const OpMeta& op_meta = OpMeta());
+                      OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -65,13 +65,13 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
   }
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "LayerNormCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
-      [in_arr, ln_scale, ln_bias, mean_arr, var_arr, out_arr, eng, temp_strideA, temp_strideC,
+      [stream, in_arr, ln_scale, ln_bias, mean_arr, var_arr, out_arr, temp_strideA, temp_strideC,
       dimA, strideA, dimC, strideC, eps, last_dims, ndim]() {
+      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
       dnnl::stream engine_stream(eng);
       auto src_md = dnnl::memory::desc(in_arr->shape(), dnnl::memory::data_type::f32, in_arr->stride());
       auto dst_md = dnnl::memory::desc(mean_arr->shape(), dnnl::memory::data_type::f32, mean_arr->stride());
@@ -98,6 +98,7 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
         // Primitive execution: Reduction (Sum).
         reduction_prim.execute(engine_stream, reduction_args);
       }
+      engine_stream.wait();
 
       minus_mean_n_square_kernel1<spec_t>(
         in_arr->data_ptr<spec_t>(), mean_arr->data_ptr<spec_t>(),
@@ -124,10 +125,8 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
 
         // Primitive execution: Reduction (Sum).
         reduction_prim.execute(engine_stream, reduction_args);
-
-        // Wait for the computation to finalize.
-        engine_stream.wait();
       }
+      engine_stream.wait();
 
       layer_norm_kernel<spec_t>(
         in_arr->data_ptr<spec_t>(), mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),  
@@ -201,12 +200,12 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
     return;
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
   HT_DISPATCH_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "LayerNormGradientCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
-      [out_grads, in_arr, ln_scale, grad_scale, grad_bias, grad_arr, mean_arr, var_arr, eng,
+      [stream, out_grads, in_arr, ln_scale, grad_scale, grad_bias, grad_arr, mean_arr, var_arr, 
       reduce_dims, eps, ndim, lastdims, total_elements, size]() {
+      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
       spec_t* ds = NULL;
       DataPtr ds_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
       ds = (spec_t*) ds_ptr.ptr;
@@ -258,6 +257,7 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
         // Primitive execution: Reduction (Sum).
         reduction_prim.execute(engine_stream, reduction_args);
       } 
+      engine_stream.wait();
 
       calculate_gscale<spec_t>(
         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
@@ -328,8 +328,6 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
 
       // Primitive execution: binary with ReLU.
       binary_prim.execute(engine_stream, binary_args);
-
-      // Wait for the computation to finalize.
       engine_stream.wait();
 
       mean_mem = dnnl::memory(mean_md, eng, ds);
@@ -352,6 +350,7 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
         // Primitive execution: Reduction (Sum).
         reduction_prim.execute(engine_stream, reduction_args);
       } 
+      engine_stream.wait();
 
       calculate_grad_kernel<spec_t>(
         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),

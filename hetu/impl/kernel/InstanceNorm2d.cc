@@ -42,11 +42,11 @@ void InstanceNormCpu(const NDArray& in_arr, NDArray& mean_arr, NDArray& var_arr,
   int last_2dim = in_arr->shape(ndim - 1) * in_arr->shape(ndim - 2);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "InstanceNormCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
-      [in_arr, mean_arr, var_arr, out_arr, eng, eps, last_2dim, ndim]() {
+      [stream, in_arr, mean_arr, var_arr, out_arr, eps, last_2dim, ndim]() {
+      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
       dnnl::stream engine_stream(eng); 
       auto src_md = dnnl::memory::desc(in_arr->shape(), dnnl::memory::data_type::f32, in_arr->stride());
       auto dst_md = dnnl::memory::desc(mean_arr->shape(), dnnl::memory::data_type::f32, mean_arr->stride());
@@ -74,6 +74,8 @@ void InstanceNormCpu(const NDArray& in_arr, NDArray& mean_arr, NDArray& var_arr,
         reduction_prim.execute(engine_stream, reduction_args);
       }
 
+      engine_stream.wait();
+
       minus_mean_n_square_kernel1<spec_t>(
         in_arr->data_ptr<spec_t>(), mean_arr->data_ptr<spec_t>(),
         out_arr->data_ptr<spec_t>(), last_2dim, in_arr->numel());
@@ -99,8 +101,8 @@ void InstanceNormCpu(const NDArray& in_arr, NDArray& mean_arr, NDArray& var_arr,
 
         // Primitive execution: Reduction (Sum).
         reduction_prim.execute(engine_stream, reduction_args);
+        engine_stream.wait();
       }
-
       std_normal_transform<spec_t>(
         in_arr->data_ptr<spec_t>(), mean_arr->data_ptr<spec_t>(),
         var_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(), last_2dim,
@@ -141,21 +143,19 @@ void InstanceNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
 
   int ndim = out_grads->ndim();
   HT_ASSERT(ndim == 4);
-  size_t total_elements = 1;
 
   HT_ASSERT(ndim == 4);
 
   int last2dim = out_grads->shape(ndim - 1) * out_grads->shape(ndim - 2);
 
-  size_t size = total_elements;
+  size_t size = out_grads->numel();
   if (size == 0)
     return;
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
   HT_DISPATCH_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "InstanceNormGradientCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
-      [out_grads, in_arr, grad_arr, mean_arr, var_arr, eng, eps, ndim, last2dim, size]() {
+      [stream, out_grads, in_arr, grad_arr, mean_arr, var_arr, eps, ndim, last2dim, size]() {
       spec_t* dscale = NULL;
       DataPtr dscale_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
       dscale = (spec_t*) dscale_ptr.ptr;
@@ -167,6 +167,7 @@ void InstanceNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       spec_t* dy_mul_x = NULL;
       DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), in_arr->numel() * sizeof(spec_t));
       dy_mul_x = (spec_t*) dy_mul_x_ptr.ptr;
+      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
       dnnl::stream engine_stream(eng); 
       auto src_md = dnnl::memory::desc(in_arr->shape(), dnnl::memory::data_type::f32, in_arr->stride());
       auto dst_md = dnnl::memory::desc(mean_arr->shape(), dnnl::memory::data_type::f32, mean_arr->stride());
@@ -193,6 +194,7 @@ void InstanceNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
         // Primitive execution: Reduction (Sum).
         reduction_prim.execute(engine_stream, reduction_args);
       } 
+      engine_stream.wait();
       // Create src memory objects.
       auto src_A_mem = dnnl::memory(src_md, eng, out_grads->data_ptr<spec_t>());
       auto src_B_mem = dnnl::memory(src_md, eng, in_arr->data_ptr<spec_t>());
@@ -212,6 +214,7 @@ void InstanceNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
 
       // Primitive execution: binary with ReLU.
       binary_prim.execute(engine_stream, binary_args);
+      engine_stream.wait();
 
       dst_mem = dnnl::memory(dst_md, eng, dscale);
       
@@ -234,6 +237,7 @@ void InstanceNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
         // Primitive execution: Reduction (Sum).
         reduction_prim.execute(engine_stream, reduction_args);
       } 
+      engine_stream.wait();
       calculate_grad_kernel<spec_t>(
         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),

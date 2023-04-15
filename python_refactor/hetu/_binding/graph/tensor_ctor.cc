@@ -12,7 +12,7 @@ namespace hetu {
 namespace graph {
 
 #define _PY_TENSOR_CTOR_COMMON_ARGS                                            \
-  "DataType dtype=None, bool trainable=false, " OP_META_ARGS
+  "DataType dtype=None, bool requires_grad=false, " OP_META_ARGS
 
 inline PyObject* _from_shape_ctor_helper(ParsedPyArgs& parsed_args, 
                                          Initializer&& init, 
@@ -21,7 +21,7 @@ inline PyObject* _from_shape_ctor_helper(ParsedPyArgs& parsed_args,
   HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyTensor";
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   new(&self->tensor) Tensor();
-  self->tensor = MakeVariableOp(
+  self->tensor = MakeParameterOp(
     std::move(init), parsed_args.get_int64_list(0),
     parsed_args.get_dtype_or_peek(arg_offset + 1).value_or(kFloat32), 
     parsed_args.get_bool_or_default(arg_offset + 2), 
@@ -36,7 +36,7 @@ inline PyObject* _like_tensor_ctor_helper(ParsedPyArgs& parsed_args,
   HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyTensor";
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   new(&self->tensor) Tensor();
-  self->tensor = MakeVariableOp(
+  self->tensor = MakeParameterOp(
     std::move(init), parsed_args.get_tensor(0)->shape(),
     parsed_args.get_dtype_or_peek(arg_offset + 1).value_or(kFloat32),
     parsed_args.get_bool_or_default(arg_offset + 2),
@@ -70,21 +70,21 @@ PyObject* TensorCopyCtor(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
       parsed_args.get_py_obj(0), 
       parsed_args.get_dtype_or_peek(1), 
       nullopt);
-    self->tensor = MakeVariableOp(data, false, kUndeterminedDataType,
+    self->tensor = MakeParameterOp(data, false, kUndeterminedDataType,
                                   parsed_args.get_bool_or_default(2),
                                   parse_op_meta(parsed_args, 3));
   } else if (parsed_args.signature_index() == 1) {
     new (&self->tensor) Tensor();
     NDArray data = NDArrayCopyFromNDArrayCtor(
       parsed_args.get_ndarray(0), parsed_args.get_dtype_or_peek(1), nullopt);
-    self->tensor = MakeVariableOp(data, false, kUndeterminedDataType,
+    self->tensor = MakeParameterOp(data, false, kUndeterminedDataType,
                                   parsed_args.get_bool_or_default(2),
                                   parse_op_meta(parsed_args, 3));
   } else if (parsed_args.signature_index() == 2) {
     new (&self->tensor) Tensor();
     NDArray data = NDArrayCopyFromSequenceCtor(
       parsed_args.get_py_obj(0), parsed_args.get_dtype_or_peek(1), nullopt);
-    self->tensor = MakeVariableOp(data, false, kUndeterminedDataType,
+    self->tensor = MakeParameterOp(data, false, kUndeterminedDataType,
                                   parsed_args.get_bool_or_default(2),
                                   parse_op_meta(parsed_args, 3));
   } else {
@@ -328,12 +328,19 @@ REGISTER_TENSOR_CLASS_METHOD(
 PyObject* PyTensor_rand(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN  
   static PyArgParser parser({
-    "rand(HTShape size, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
+    "rand(HTShape size, " _PY_TENSOR_CTOR_COMMON_ARGS ")",
+    "rand(HTShape size, double lb, double ub, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
   });
   auto parsed_args = parser.parse(args, kwargs);
+  HT_LOG_INFO << parsed_args.signature_index();
   if (parsed_args.signature_index() == 0) {
     return _from_shape_ctor_helper(parsed_args, UniformInitializer());
-  } else {
+  }
+  else if (parsed_args.signature_index() == 1) {
+    return _from_shape_ctor_helper(parsed_args, UniformInitializer(parsed_args.get_float64_or_default(1),
+                                                                   parsed_args.get_float64_or_default(2)), 2);
+  } 
+  else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
   }
@@ -349,11 +356,16 @@ REGISTER_TENSOR_CLASS_METHOD(
 PyObject* PyTensor_rand_like(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN  
   static PyArgParser parser({
-    "rand_like(Tensor tensor, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
+    "rand_like(Tensor tensor, " _PY_TENSOR_CTOR_COMMON_ARGS ")",
+    "rand_like(Tensor tensor, double lb, double ub, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     return _like_tensor_ctor_helper(parsed_args, UniformInitializer());
+  }
+  else if (parsed_args.signature_index() == 1) {
+    return _like_tensor_ctor_helper(parsed_args, UniformInitializer(parsed_args.get_float64_or_default(1),
+                                                                    parsed_args.get_float64_or_default(2)), 2);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
@@ -374,11 +386,15 @@ REGISTER_TENSOR_CLASS_METHOD(
 PyObject* PyTensor_randn(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN  
   static PyArgParser parser({
-    "randn(HTShape size, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
+    "randn(HTShape size, " _PY_TENSOR_CTOR_COMMON_ARGS ")",
+    "randn(HTShape size, double mean, double stddev, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     return _from_shape_ctor_helper(parsed_args, NormalInitializer());
+  } else if (parsed_args.signature_index() == 1) {
+    return _from_shape_ctor_helper(parsed_args, NormalInitializer(parsed_args.get_float64_or_default(1),
+                                                                  parsed_args.get_float64_or_default(2)), 2);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
@@ -395,11 +411,15 @@ REGISTER_TENSOR_CLASS_METHOD(
 PyObject* PyTensor_randn_like(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN  
   static PyArgParser parser({
-    "randn_like(Tensor tensor, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
+    "randn_like(Tensor tensor, " _PY_TENSOR_CTOR_COMMON_ARGS ")",
+    "randn_like(Tensor tensor, double mean, double stddev, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     return _like_tensor_ctor_helper(parsed_args, NormalInitializer());
+  } else if (parsed_args.signature_index() == 1) {
+    return _like_tensor_ctor_helper(parsed_args, NormalInitializer(parsed_args.get_float64_or_default(1),
+                                                                   parsed_args.get_float64_or_default(2)), 2);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
@@ -420,11 +440,17 @@ REGISTER_TENSOR_CLASS_METHOD(
 PyObject* PyTensor_trunc_randn(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN  
   static PyArgParser parser({
-    "trunc_randn(HTShape size, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
+    "trunc_randn(HTShape size, " _PY_TENSOR_CTOR_COMMON_ARGS ")",
+    "trunc_randn(HTShape size, double mean, double stddev, double lb, double ub, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     return _from_shape_ctor_helper(parsed_args, TruncatedNormalInitializer());
+  } else if (parsed_args.signature_index() == 1) {
+    return _from_shape_ctor_helper(parsed_args, TruncatedNormalInitializer(parsed_args.get_float64_or_default(1),
+                                                                           parsed_args.get_float64_or_default(2),
+                                                                           parsed_args.get_float64_or_default(3),
+                                                                           parsed_args.get_float64_or_default(4)), 4);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
@@ -441,11 +467,17 @@ REGISTER_TENSOR_CLASS_METHOD(
 PyObject* PyTensor_trunc_randn_like(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN  
   static PyArgParser parser({
-    "trunc_randn_like(Tensor tensor, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
+    "trunc_randn_like(Tensor tensor, " _PY_TENSOR_CTOR_COMMON_ARGS ")",
+    "trunc_randn_like(Tensor tensor, double mean, double stddev, double lb, double ub, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     return _like_tensor_ctor_helper(parsed_args, TruncatedNormalInitializer());
+  } else if (parsed_args.signature_index() == 1) {
+    return _like_tensor_ctor_helper(parsed_args, TruncatedNormalInitializer(parsed_args.get_float64_or_default(1),
+                                                                           parsed_args.get_float64_or_default(2),
+                                                                           parsed_args.get_float64_or_default(3),
+                                                                           parsed_args.get_float64_or_default(4)), 4);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();

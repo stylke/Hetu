@@ -58,6 +58,7 @@ void BatchNormCpu(const NDArray& input_X, const NDArray& bn_scale,
 
         dnnl::stream engine_stream(eng);
         bnorm_prim.execute(engine_stream, bnorm_args);
+        engine_stream.wait();
       },
       "BatchNorm");
       //cpu_stream.Sync();
@@ -137,6 +138,7 @@ void BatchNormGradientCpu(const NDArray& gradient_Y, const NDArray& input_X,
 
         dnnl::stream engine_stream(eng);
         bnorm_prim.execute(engine_stream, bnorm_args);
+        engine_stream.wait();
       },
          "BatchNormGradient");
       //cpu_stream.Sync();

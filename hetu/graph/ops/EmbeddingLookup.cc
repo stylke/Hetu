@@ -15,7 +15,7 @@ void EmbeddingLookupOpImpl::DoCompute(Operator& op,
 
 TensorList EmbeddingLookupOpImpl::DoGradient(Operator& op,
                                              const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeEmbeddingLookupGradientOp(grad_outputs.at(0), op->input(1), op->output(0), op->input(0),
+  auto grad_input = op->requires_grad(0) ? MakeEmbeddingLookupGradientOp(grad_outputs.at(0), op->input(1), op->output(0), op->input(0),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
   return {grad_input, Tensor()};
@@ -46,7 +46,7 @@ EmbeddingLookupGradientOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(3)};
 }
 
-Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, const OpMeta& op_meta) {
+Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<EmbeddingLookupOpImpl>(),
           {std::move(input), std::move(id)},
@@ -54,7 +54,7 @@ Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, const OpMeta& op_meta) {
 }
 
 Tensor MakeEmbeddingLookupGradientOp(Tensor grad_output, Tensor id, Tensor ori_input, Tensor input,
-                                     const OpMeta& op_meta) {
+                                     OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<EmbeddingLookupGradientOpImpl>(),
           {std::move(grad_output), std::move(id), std::move(ori_input), std::move(input)},

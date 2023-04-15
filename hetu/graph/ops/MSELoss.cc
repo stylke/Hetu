@@ -26,7 +26,7 @@ void MSEOpImpl::DoCompute(Operator& op,
 }
 
 TensorList MSEOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeMSELossGradientOp(
+  auto grad_input = op->requires_grad(0) ? MakeMSELossGradientOp(
                                           op->input(0), op->input(1), grad_outputs.at(0), reduction(),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
@@ -70,7 +70,7 @@ HTShapeList MSEGradOpImpl::DoInferShape(Operator& op,
 
 Tensor MakeMSELossOp(Tensor preds, Tensor labels,
                      ReductionType reduction,
-                     const OpMeta& op_meta) {
+                     OpMeta op_meta) {
   return Graph::MakeOp(
            std::make_shared<MSELossOpImpl>(reduction),
            {std::move(preds), std::move(labels)},
@@ -79,7 +79,7 @@ Tensor MakeMSELossOp(Tensor preds, Tensor labels,
 
 Tensor MakeMSELossOp(Tensor preds, Tensor labels,
                      const std::string& reduction,
-                     const OpMeta& op_meta) {
+                     OpMeta op_meta) {
   return Graph::MakeOp(
            std::make_shared<MSELossOpImpl>(Str2ReductionType(reduction)),
            {std::move(preds), std::move(labels)},
@@ -88,7 +88,7 @@ Tensor MakeMSELossOp(Tensor preds, Tensor labels,
 
 Tensor MakeMSELossGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
                              ReductionType reduction,
-                             const OpMeta& op_meta) {
+                             OpMeta op_meta) {
   return Graph::MakeOp(
            std::make_shared<MSELossGradientOpImpl>(reduction),
            {std::move(preds), std::move(labels), std::move(grad_output)},

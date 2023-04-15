@@ -36,7 +36,7 @@ TensorList ConcatenateOpImpl::DoGradient(Operator& op,
   auto g_op_meta = op->grad_op_meta();
   for (int i = 0; i < num; ++i) {
     HT_ASSERT(op->input(i)->shape(axis) >= 0);
-    auto grad_input = op->require_grad(i) ? MakeConcatenateGradientOp(
+    auto grad_input = op->requires_grad(i) ? MakeConcatenateGradientOp(
                                             op->input(i), op->output(0), grad_outputs.at(0), 
                                             axis, outdim, g_op_meta.set_name(op->grad_name(i)))
                                           : Tensor();
@@ -88,7 +88,7 @@ ConcatenateGradientOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeConcatenateOp(const TensorList& inputs, size_t axis,
-                         const OpMeta& op_meta) {
+                         OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<ConcatenateOpImpl>(axis),
           std::move(inputs),
@@ -96,7 +96,7 @@ Tensor MakeConcatenateOp(const TensorList& inputs, size_t axis,
 }
 
 Tensor MakeConcatenateGradientOp(Tensor input, Tensor output, Tensor grad_output, size_t axis, size_t offset,
-                                 const OpMeta& op_meta) {
+                                 OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<ConcatenateGradientOpImpl>(axis, offset),
           {std::move(input), std::move(output), std::move(grad_output)},

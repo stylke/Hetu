@@ -52,7 +52,7 @@ protected:
   }
 };
 
-Tensor MakeLeakyReluOp(Tensor input, double alpha, const OpMeta& op_meta = OpMeta());
+Tensor MakeLeakyReluOp(Tensor input, double alpha, OpMeta op_meta = OpMeta());
 
 class LeakyReluGradientOpImpl : public OpInterface {
  private:
@@ -61,7 +61,7 @@ class LeakyReluGradientOpImpl : public OpInterface {
 
  public:
   LeakyReluGradientOpImpl(double alpha,
-                          const OpMeta& op_meta = OpMeta())
+                          OpMeta op_meta = OpMeta())
   : OpInterface(quote(LeakyReluGradientOp)),
     _alpha(alpha) {
   }
@@ -95,7 +95,7 @@ protected:
 };
 
 Tensor MakeLeakyReluGradientOp(Tensor input, Tensor grad_output, double alpha,
-                               const OpMeta& op_meta = OpMeta());
+                               OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

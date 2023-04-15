@@ -55,7 +55,7 @@ class ArrayReshapeOpImpl : public OpInterface {
 };
 
 Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
-                          const OpMeta& op_meta = OpMeta());
+                          OpMeta op_meta = OpMeta());
 
 class ArrayReshapeGradientOpImpl : public OpInterface {
 
@@ -83,7 +83,7 @@ class ArrayReshapeGradientOpImpl : public OpInterface {
 };
 
 Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input,
-                                  const OpMeta& op_meta = OpMeta());
+                                  OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

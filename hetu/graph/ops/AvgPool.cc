@@ -14,7 +14,7 @@ void AvgPoolOpImpl::DoCompute(Operator& op,
 
 TensorList AvgPoolOpImpl::DoGradient(Operator& op,
                                      const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeAvgPoolGradientOp(op->output(0), grad_outputs.at(0), op->input(0),
+  return {op->requires_grad(0) ? MakeAvgPoolGradientOp(op->output(0), grad_outputs.at(0), op->input(0),
                                 get_kernel_H(), get_kernel_W(), get_padding(),
                                 get_stride(), op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};

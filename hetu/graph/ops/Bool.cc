@@ -23,12 +23,12 @@ HTShapeList BoolOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-Tensor MakeBoolOp(Tensor input, const OpMeta& op_meta) {
+Tensor MakeBoolOp(Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<BoolOpImpl>(),
           {std::move(input)},
           std::move(op_meta))->output(0);  
 }
 
-} // namespace autograd
+} // namespace graph
 } // namespace hetu

@@ -52,7 +52,7 @@ class SoftmaxOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeSoftmaxOp(Tensor input, int64_t dim, const OpMeta& op_meta = OpMeta());
+Tensor MakeSoftmaxOp(Tensor input, int64_t dim, OpMeta op_meta = OpMeta());
 
 class SoftmaxGradientOpImpl : public OpInterface {
  private:
@@ -61,7 +61,8 @@ class SoftmaxGradientOpImpl : public OpInterface {
 
  public:
   SoftmaxGradientOpImpl(int64_t dim)
-  : OpInterface(quote(SoftmaxGradientOp)) {
+  : OpInterface(quote(SoftmaxGradientOp)),
+  _dim(dim) {
   }
 
   int64_t get_dim() const {
@@ -92,7 +93,7 @@ class SoftmaxGradientOpImpl : public OpInterface {
 };
 
 Tensor MakeSoftmaxGradientOp(Tensor input, Tensor grad_output,
-                             int64_t dim, const OpMeta& op_meta = OpMeta());
+                             int64_t dim, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

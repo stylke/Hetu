@@ -12,7 +12,7 @@ void TanhOpImpl::DoCompute(Operator& op,
 }
 
 TensorList TanhOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeTanhGradientOp(op->output(0), grad_outputs.at(0),
+  return {op->requires_grad(0) ? MakeTanhGradientOp(op->output(0), grad_outputs.at(0),
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -38,7 +38,7 @@ HTShapeList TanhGradientOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-Tensor MakeTanhOp(Tensor input, const OpMeta& op_meta) {
+Tensor MakeTanhOp(Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<TanhOpImpl>(),
     {std::move(input)},
@@ -46,7 +46,7 @@ Tensor MakeTanhOp(Tensor input, const OpMeta& op_meta) {
 }
 
 Tensor MakeTanhGradientOp(Tensor input, Tensor grad_output,
-                          const OpMeta& op_meta) {
+                          OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<TanhGradientOpImpl>(),
     {std::move(input), std::move(grad_output)},

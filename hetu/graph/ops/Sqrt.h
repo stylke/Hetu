@@ -37,7 +37,7 @@ class SqrtOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeSqrtOp(Tensor input, const OpMeta& op_meta = OpMeta());
+Tensor MakeSqrtOp(Tensor input, OpMeta op_meta = OpMeta());
 
 class ReciprocalSqrtOpImpl : public OpInterface {
 
@@ -63,7 +63,7 @@ class ReciprocalSqrtOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeReciprocalSqrtOp(Tensor grad_output, const OpMeta& op_meta = OpMeta());
+Tensor MakeReciprocalSqrtOp(Tensor grad_output, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -46,11 +46,11 @@ protected:
   }
 };
 
-Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, const OpMeta& op_meta = OpMeta());
+Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, OpMeta op_meta = OpMeta());
 
 class EmbeddingLookupGradientOpImpl : public OpInterface {
  public:
-  EmbeddingLookupGradientOpImpl(const OpMeta& op_meta = OpMeta())
+  EmbeddingLookupGradientOpImpl(OpMeta op_meta = OpMeta())
   : OpInterface(quote(EmbeddingLookupGradientOp)) {
   }
 
@@ -75,7 +75,7 @@ protected:
 };
 
 Tensor MakeEmbeddingLookupGradientOp(Tensor grad_output, Tensor id, Tensor ori_input, Tensor input,
-                                     const OpMeta& op_meta = OpMeta());
+                                     OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -15,7 +15,7 @@ void TriuTrilOpImpl::DoCompute(Operator& op,
 }
 
 TensorList TriuTrilOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeTriuTrilOp(grad_outputs.at(0), lower(), diagonal(),
+  return {op->requires_grad(0) ? MakeTriuTrilOp(grad_outputs.at(0), lower(), diagonal(),
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
 }
@@ -27,7 +27,7 @@ HTShapeList TriuTrilOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeTriuTrilOp(Tensor input, bool lower, int64_t diagonal,  
-                      const OpMeta& op_meta) {
+                      OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<TriuTrilOpImpl>(lower, diagonal),
     {std::move(input)},

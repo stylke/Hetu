@@ -61,6 +61,7 @@ void BatchMatMulCpu(const NDArray& a, bool trans_a, const NDArray& b,
 
       dnnl::stream engine_stream(eng);
       Matmul.execute(engine_stream, bmm_args);
+      engine_stream.wait();
     },
     "BatchMatmul");
     //cpu_stream.Sync();

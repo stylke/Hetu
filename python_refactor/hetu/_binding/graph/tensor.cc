@@ -37,7 +37,7 @@ inline PyObject* PyTensor_pynew(PyTypeObject* type, PyObject* args,
 PyObject* PyTensor_make_subclass(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "_make_subclass(PyObject* cls, Tensor data, bool trainable=false)"
+    "_make_subclass(PyObject* cls, Tensor data, bool requires_grad=false)"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
@@ -175,8 +175,8 @@ PyObject* PyTensor_is_parameter(PyTensor* self) {
 
 PyObject* PyTensor_requires_grad(PyTensor* self) {
   HT_PY_FUNC_BEGIN
-  // TODO: rename ``require_grad'' to ``requires_grad''
-  Py_RETURN_BOOLEAN_COND(self->tensor->require_grad());
+  // TODO: rename ``requires_grad'' to ``requires_grad''
+  Py_RETURN_BOOLEAN_COND(self->tensor->requires_grad());
   HT_PY_FUNC_END
 }
 
@@ -205,14 +205,15 @@ PyObject* PyTensor_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   
   static PyArgParser parser({
-    "from_numpy(numpy.array data)"
+    "from_numpy(numpy.array data, bool requires_grad=false, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
 
   if (parsed_args.signature_index() == 0) {
     auto* array_obj = parsed_args.get_numpy_array(0);
+    bool requires_grad = parsed_args.get_bool_or_default(1);
     new(&self->tensor) Tensor();
-    self->tensor = MakeVariableOp(NDArrayFromNumpy(array_obj), false);
+    self->tensor = MakeParameterOp(NDArrayFromNumpy(array_obj), false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 2));
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);

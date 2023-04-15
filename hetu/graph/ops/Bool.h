@@ -39,8 +39,8 @@ protected:
   }
 };
 
-Tensor MakeBoolOp(Tensor input, const OpMeta& op_meta = OpMeta());
+Tensor MakeBoolOp(Tensor input, OpMeta op_meta = OpMeta());
 
 
-} // namespace autograd
+} // namespace graph
 } // namespace hetu

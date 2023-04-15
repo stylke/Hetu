@@ -40,7 +40,7 @@ class SinOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeSinOp(Tensor input, const OpMeta& op_meta = OpMeta());
+Tensor MakeSinOp(Tensor input, OpMeta op_meta = OpMeta());
 
 class CosOpImpl : public OpInterface {
 
@@ -66,7 +66,7 @@ class CosOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeCosOp(Tensor input, const OpMeta& op_meta = OpMeta());
+Tensor MakeCosOp(Tensor input, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

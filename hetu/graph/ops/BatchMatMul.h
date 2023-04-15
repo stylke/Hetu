@@ -15,7 +15,7 @@ class BatchMatMulOpImpl : public OpInterface {
 
  public:
   BatchMatMulOpImpl(bool trans_a = false, bool trans_b = false,
-                    const OpMeta& op_meta = OpMeta())
+                    OpMeta op_meta = OpMeta())
   : OpInterface(quote(BatchMatMulOp)),
     _trans_a(trans_a),
     _trans_b(trans_b) {
@@ -82,7 +82,7 @@ protected:
 };
 
 Tensor MakeBatchMatMulOp(Tensor a, Tensor b, bool trans_a = false, bool trans_b = false,
-                         const OpMeta& op_meta = OpMeta());
+                         OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

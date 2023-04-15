@@ -45,21 +45,7 @@ struct EinsumParameters {
   friend bool operator==(const EinsumParameters& l, const EinsumParameters& r);
 };
 
-bool operator==(const EinsumParameters& l, const EinsumParameters& r) {
-    return (l._msg == r._msg
-            && l._input_msgs == r._input_msgs
-            && l._output_msg == r._output_msg
-            && l.input_dims == r.input_dims
-            && l.output_dims == r.output_dims
-            && l.num_labels == r.num_labels
-            && l.output_labels_idx == r.output_labels_idx
-            && l.undefined_labels == r.undefined_labels
-            && l.output_size == r.output_size
-            && l.num_output_labels == r.num_output_labels
-            && l.elli_len == r.elli_len
-            && l.input_elli_len == r.input_elli_len
-            && l.elli_pos == r.elli_pos);
-  }
+bool operator==(const EinsumParameters& l, const EinsumParameters& r);
 
 class EinsumOpImpl : public OpInterface {
  public:
@@ -165,7 +151,7 @@ EinsumParameters EinsumParseMsg(const TensorList& inputs,
                                 std::string cmd);
 
 Tensor MakeEinsumOp(const std::string& msg, TensorList inputs,
-                    const OpMeta& op_meta = OpMeta());
+                    OpMeta op_meta = OpMeta());
 
 class EinsumGradientOpImpl : public OpInterface {
 
@@ -219,7 +205,7 @@ EinsumParameters EinsumGradientParseMsg(const TensorList& inputs,
 
 Tensor MakeEinsumGradientOp(const std::string& msg, TensorList inputs,
                             Tensor ori_output, Tensor ori_input,
-                            const OpMeta& op_meta = OpMeta());
+                            OpMeta op_meta = OpMeta());
 
-} // namespace autograd
+} // namespace graph
 } // namespace hetu

@@ -16,7 +16,7 @@ void SliceOpImpl::DoCompute(Operator& op,
 }
 
 TensorList SliceOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->require_grad(0) ? MakeSliceGradientOp(grad_outputs.at(0), op->output(0), op->input(0), get_begin_pos(),
+  return {op->requires_grad(0) ? MakeSliceGradientOp(grad_outputs.at(0), op->output(0), op->input(0), get_begin_pos(),
                                 get_output_shape(),
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
@@ -44,7 +44,7 @@ HTShapeList SliceGradientOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeSliceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
-                   const OpMeta& op_meta) {
+                   OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SliceOpImpl>(begin_pos, output_shape),
     {std::move(input)},
@@ -53,7 +53,7 @@ Tensor MakeSliceOp(Tensor input, const HTShape& begin_pos, const HTShape& output
 
 Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
                            const HTShape& begin_pos, const HTShape& output_shape,
-                           const OpMeta& op_meta) {
+                           OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SliceGradientOpImpl>(begin_pos, output_shape),
     {std::move(grad_output), std::move(ori_output), std::move(ori_input)},

@@ -13,7 +13,7 @@ class LinearOpImpl : public OpInterface {
 
  public:
   LinearOpImpl(bool trans_a = false, bool trans_b = true,
-              const OpMeta& op_meta = OpMeta())
+              OpMeta op_meta = OpMeta())
   : OpInterface(quote(LinearOp)),
     _trans_a(trans_a),
     _trans_b(trans_b) {
@@ -77,7 +77,7 @@ class LinearOpImpl : public OpInterface {
 };
 
 Tensor MakeLinearOp(Tensor a, Tensor b, Tensor bias, bool trans_a = false,
-                    bool trans_b = true, const OpMeta& op_meta = OpMeta());
+                    bool trans_b = true, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

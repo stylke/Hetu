@@ -17,7 +17,7 @@ class ConcatenateOpImpl : public OpInterface {
   struct constrcutor_access_key {};
 
  public:
-  ConcatenateOpImpl(size_t axis = 0, const OpMeta& op_meta = OpMeta())
+  ConcatenateOpImpl(size_t axis = 0, OpMeta op_meta = OpMeta())
   : OpInterface(quote(ConcatenateOp)), _axis(axis) {
   }
 
@@ -101,12 +101,12 @@ class ConcatenateOpImpl : public OpInterface {
 };
 
 Tensor MakeConcatenateOp(const TensorList& inputs, size_t axis = 0,
-                         const OpMeta& op_meta = OpMeta());
+                         OpMeta op_meta = OpMeta());
 
 class ConcatenateGradientOpImpl : public OpInterface {
  public:
   ConcatenateGradientOpImpl(size_t axis, size_t offset,
-                            const OpMeta& op_meta = OpMeta())
+                            OpMeta op_meta = OpMeta())
   : OpInterface(quote(ConcatenateGradientOp)),
     _axis(axis), _offset(offset) {
   }
@@ -154,7 +154,7 @@ class ConcatenateGradientOpImpl : public OpInterface {
 };
 
 Tensor MakeConcatenateGradientOp(Tensor input, Tensor output, Tensor grad_output, size_t axis, size_t offset,
-                                 const OpMeta& op_meta = OpMeta());
+                                 OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

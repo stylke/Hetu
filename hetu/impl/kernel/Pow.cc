@@ -48,6 +48,7 @@ void PowCpu(const NDArray& input, double exponent, NDArray& output,
 
         dnnl::stream engine_stream(eng);
         Pow.execute(engine_stream, pow_args);
+        engine_stream.wait();
       },"Pow");
       //cpu_stream.Sync();
     });

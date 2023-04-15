@@ -58,11 +58,11 @@ class MSELossOpImpl : public OpInterface {
 
 Tensor MakeMSELossOp(Tensor preds, Tensor labels,
                      ReductionType reduction = kMEAN,
-                     const OpMeta& op_meta = OpMeta());
+                     OpMeta op_meta = OpMeta());
 
 Tensor MakeMSELossOp(Tensor preds, Tensor labels,
                      const std::string& reduction = "mean",
-                     const OpMeta& op_meta = OpMeta());
+                     OpMeta op_meta = OpMeta());
 
 class MSELossGradientOpImpl : public OpInterface {
  public:
@@ -103,7 +103,7 @@ class MSELossGradientOpImpl : public OpInterface {
 
 Tensor MakeMSELossGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
                              ReductionType reduction = kMEAN,
-                             const OpMeta& op_meta = OpMeta());
+                             OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

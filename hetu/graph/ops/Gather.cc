@@ -15,7 +15,7 @@ void GatherOpImpl::DoCompute(Operator& op,
 
 TensorList GatherOpImpl::DoGradient(Operator& op,
                                     const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeGatherGradientOp(grad_outputs.at(0), get_dim(), op->input(1), op->input(0),
+  auto grad_input = op->requires_grad(0) ? MakeGatherGradientOp(grad_outputs.at(0), get_dim(), op->input(1), op->input(0),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
   return {grad_input, Tensor()};
@@ -50,7 +50,7 @@ GatherGradientOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(2)};
 }
 
-Tensor MakeGatherOp(Tensor input, int64_t dim, Tensor id, const OpMeta& op_meta) {
+Tensor MakeGatherOp(Tensor input, int64_t dim, Tensor id, OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<GatherOpImpl>(dim),
           {std::move(input), std::move(id)},
@@ -58,7 +58,7 @@ Tensor MakeGatherOp(Tensor input, int64_t dim, Tensor id, const OpMeta& op_meta)
 }
 
 Tensor MakeGatherGradientOp(Tensor grad_output, int64_t dim, Tensor id, Tensor input,
-                            const OpMeta& op_meta) {
+                            OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<GatherGradientOpImpl>(dim),
           {std::move(grad_output), std::move(id), std::move(input)},

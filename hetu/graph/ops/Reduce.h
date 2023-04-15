@@ -16,7 +16,7 @@ protected:
   ReduceOpImpl(OpType&& op_type, ReductionType reduction = kMEAN, 
                const HTAxes& axes = {},
                const HTKeepDims& keepdims = {false},
-               const OpMeta& op_meta = OpMeta())
+               OpMeta op_meta = OpMeta())
   : OpInterface(std::move(op_type)),
     _axes(axes),
     _keepdims(keepdims),
@@ -30,7 +30,7 @@ protected:
  public:
   ReduceOpImpl(ReductionType reduction, const HTAxes& axes = {},
                const HTKeepDims& keepdims = {false},
-               const OpMeta& op_meta = OpMeta())
+               OpMeta op_meta = OpMeta())
   : ReduceOpImpl(quote(ReduceOp), reduction, axes, keepdims, op_meta) {}
 
   const HTAxes& get_axes() const {
@@ -113,27 +113,27 @@ protected:
 
 Tensor MakeReduceOp(Tensor input, ReductionType reduction, const HTAxes& axes = {},
                     const HTKeepDims& keepdims = {false},
-                    const OpMeta& op_meta = OpMeta());
+                    OpMeta op_meta = OpMeta());
 
 Tensor MakeReduceOp(Tensor input, const std::string& mode, const HTAxes& axes = {},
                     const HTKeepDims& keepdims = {false},
-                    const OpMeta& op_meta = OpMeta());
+                    OpMeta op_meta = OpMeta());
 
 Tensor MakeReduceMeanOp(Tensor input, const HTAxes& axes,
                         const HTKeepDims& keepdims,
-                        const OpMeta& op_meta);
+                        OpMeta op_meta);
 
 Tensor MakeReduceSumOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
-                       const OpMeta& op_meta);
+                       OpMeta op_meta);
 
 Tensor MakeReduceMaxOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
-                       const OpMeta& op_meta);
+                       OpMeta op_meta);
 
 Tensor MakeReduceMinOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
-                       const OpMeta& op_meta);
+                       OpMeta op_meta);
 
 class ReduceGradientOpImpl : public OpInterface {
  public:
@@ -142,7 +142,7 @@ class ReduceGradientOpImpl : public OpInterface {
                        const HTAxes add_axes = HTAxes(),
                        const HTKeepDims& keepdims = HTKeepDims(),
                        const double value = 0,
-                       const OpMeta& op_meta = OpMeta())
+                       OpMeta op_meta = OpMeta())
   : OpInterface(quote(ReduceGradientOp)),
     _shape(shape),
     _axes(add_axes),
@@ -235,7 +235,7 @@ class ReduceGradientOpImpl : public OpInterface {
 
 Tensor MakeReduceGradientOp(Tensor input, Tensor ori_output, Tensor ori_input, const HTShape& shape,
                             ReductionType reduction, const HTAxes add_axes = HTAxes(), const HTKeepDims& keepdims = HTKeepDims(),
-                            const OpMeta& op_meta = OpMeta());
+                            OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

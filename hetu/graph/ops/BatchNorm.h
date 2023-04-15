@@ -16,7 +16,7 @@ class BatchNormOpImpl : public OpInterface {
 
  public:
   BatchNormOpImpl(double momentum = 0.1, double eps = 1e-5,
-                  const OpMeta& op_meta = OpMeta())
+                  OpMeta op_meta = OpMeta())
   : OpInterface(quote(BatchNormOp)),
     _momentum(momentum),
     _eps(eps) {
@@ -71,13 +71,13 @@ protected:
 TensorList MakeBatchNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias,
                            Tensor running_mean, Tensor running_var,
                            double momentum = 0.1, double eps = 1e-5,
-                           const OpMeta& op_meta = OpMeta());
+                           OpMeta op_meta = OpMeta());
 
 class BatchNormGradientOpImpl : public OpInterface {
 
  public:
   BatchNormGradientOpImpl(double eps,
-                          const OpMeta& op_meta = OpMeta())
+                          OpMeta op_meta = OpMeta())
   : OpInterface(quote(BatchNormGradientOp)),
     _eps(eps) {
   }
@@ -112,7 +112,7 @@ protected:
 
 TensorList MakeBatchNormGradientOp(Tensor output_grad, Tensor input, Tensor bn_scale,
                                    Tensor save_mean, Tensor save_var, double eps,
-                                   const OpMeta& op_meta = OpMeta());
+                                   OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -1154,8 +1154,11 @@ NDArray NDArray::full_(NDArray& data, double fill_value,
 NDArray NDArray::copy(const NDArray& input, StreamIndex stream_id,
                       NDArray& output) {
   NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
-  Stream stream(input->device(), stream_id);
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+  Device out_device = input->device();
+  if (out->device().type() == kCUDA)
+    out_device = out->device();
+  Stream stream(out_device, stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(out_device.type(), __FUNCTION__,
                                   hetu::impl::DataTransfer, input, out, stream);
   return out;
 }

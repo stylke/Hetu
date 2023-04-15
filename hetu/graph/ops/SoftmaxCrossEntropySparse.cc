@@ -28,7 +28,7 @@ void SCESOpImpl::DoCompute(Operator& op,
 }
 
 TensorList SCESOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  auto grad_input = op->require_grad(0) ? MakeSoftmaxCrossEntropySparseGradientOp(
+  auto grad_input = op->requires_grad(0) ? MakeSoftmaxCrossEntropySparseGradientOp(
                                           op->input(0), op->input(1), grad_outputs.at(0), ignored_index(), reduction(),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
@@ -82,7 +82,7 @@ HTShapeList SCESGradOpImpl::DoInferShape(Operator& op,
 
 Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_t ignored_index, 
                                        ReductionType reduction,
-                                       const OpMeta& op_meta) {
+                                       OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SoftmaxCrossEntropySparseOpImpl>(ignored_index, reduction),
     {std::move(preds), std::move(labels)},
@@ -91,7 +91,7 @@ Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_
 
 Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_t ignored_index, 
                                        const std::string& reduction,
-                                       const OpMeta& op_meta) {
+                                       OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SoftmaxCrossEntropySparseOpImpl>(ignored_index, Str2ReductionType(reduction)),
     {std::move(preds), std::move(labels)},
@@ -101,7 +101,7 @@ Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_
 Tensor MakeSoftmaxCrossEntropySparseGradientOp(Tensor preds, Tensor labels, Tensor grad_output,
                                                const int64_t ignored_index, 
                                                ReductionType reduction,
-                                               const OpMeta& op_meta) {
+                                               OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SoftmaxCrossEntropySparseGradientOpImpl>(ignored_index, reduction),
     {std::move(preds), std::move(labels), std::move(grad_output)},

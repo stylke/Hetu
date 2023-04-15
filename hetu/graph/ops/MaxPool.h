@@ -14,7 +14,7 @@ class MaxPoolOpImpl : public OpInterface {
  public:
   MaxPoolOpImpl(size_t kernel_H, size_t kernel_W, 
                 size_t padding, size_t stride,
-                const OpMeta& op_meta = OpMeta())
+                OpMeta op_meta = OpMeta())
   : OpInterface(quote(MaxPoolOp)),
     _kernel_H(kernel_H),
     _kernel_W(kernel_W),
@@ -100,7 +100,7 @@ class MaxPoolGradientOpImpl : public OpInterface {
  public:
   MaxPoolGradientOpImpl(size_t kernel_H,
                         size_t kernel_W, size_t padding, size_t stride,
-                        const OpMeta& op_meta = OpMeta())
+                        OpMeta op_meta = OpMeta())
   : OpInterface(quote(MaxPoolGradientOp)),
     _kernel_H(kernel_H),
     _kernel_W(kernel_W),

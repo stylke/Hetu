@@ -25,12 +25,12 @@ HTShapeList ArangeOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeArangeOp(double start, double end, double step,
-                    const OpMeta& op_meta) {
+                    OpMeta op_meta) {
   return Graph::MakeOp(
            std::make_shared<ArangeOpImpl>(start, end, step),
            {},
            std::move(op_meta))->output(0);
 }
 
-} // namespace autograd
+} // namespace graph
 } // namespace hetu

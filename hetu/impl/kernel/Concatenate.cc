@@ -83,6 +83,7 @@ void ConcatenateCpu(const NDArrayList& inputs, NDArray& output, size_t axis,
       [concat_prim, concat_args, eng]() {
         dnnl::stream engine_stream(eng);
         concat_prim.execute(engine_stream, concat_args);
+        engine_stream.wait();
       },
       "Concatenate");
       //cpu_stream.Sync();

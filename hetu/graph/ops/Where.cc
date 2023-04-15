@@ -18,10 +18,10 @@ void WhereOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList
 TensorList WhereOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
   auto zero_grad = MakeZerosLikeOp(op->input(1), g_op_meta);
-  auto grad_inputA = op->require_grad(1) ? MakeWhereOp(op->input(0), grad_outputs.at(0), zero_grad,
+  auto grad_inputA = op->requires_grad(1) ? MakeWhereOp(op->input(0), grad_outputs.at(0), zero_grad,
                                            g_op_meta.set_name(op->grad_name(1)))
                                          : Tensor();
-  auto grad_inputB = op->require_grad(2) ? MakeWhereOp(op->input(0), zero_grad, grad_outputs.at(0),
+  auto grad_inputB = op->requires_grad(2) ? MakeWhereOp(op->input(0), zero_grad, grad_outputs.at(0),
                                            g_op_meta.set_name(op->grad_name(2)))
                                          : Tensor();
   return {Tensor(), grad_inputA, grad_inputB};
@@ -38,7 +38,7 @@ HTShapeList WhereOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeWhereOp(Tensor cond, Tensor inputA, Tensor inputB,
-                   const OpMeta& op_meta) {
+                   OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<WhereOpImpl>(),
     {std::move(cond), std::move(inputA), std::move(inputB)},

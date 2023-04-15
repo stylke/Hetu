@@ -33,19 +33,21 @@ NDArrayList VariableOpImpl::DoAllocOutputs(Operator& op,
 
 Tensor MakeVariableOp(const Initializer& init, HTShape shape, DataType dtype,
                       bool requires_grad, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<VariableOpImpl>(init, std::move(shape),
-                                                        dtype, requires_grad),
-                       TensorList(), std::move(op_meta))
-    ->output(0);
+  auto out = Graph::MakeOp(std::make_shared<VariableOpImpl>(
+                           init, std::move(shape), dtype, requires_grad),
+                           TensorList(), std::move(op_meta))->output(0);
+  out->set_requires_grad(requires_grad);
+  return out;
 }
 
 Tensor MakeVariableOp(NDArray provided_data, bool copy_provided_data,
                       DataType dtype, bool requires_grad, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<VariableOpImpl>(
-                         std::move(provided_data), copy_provided_data, dtype,
-                         requires_grad),
-                       TensorList(), std::move(op_meta))
-    ->output(0);
+  auto out = Graph::MakeOp(std::make_shared<VariableOpImpl>(
+                           std::move(provided_data), copy_provided_data, dtype,
+                           requires_grad),
+                           TensorList(), std::move(op_meta))->output(0);
+  out->set_requires_grad(requires_grad);
+  return out;
 }
 
 Tensor MakeParameterOp(const Initializer& init, HTShape shape, DataType dtype,
@@ -53,7 +55,7 @@ Tensor MakeParameterOp(const Initializer& init, HTShape shape, DataType dtype,
   auto out = Graph::MakeOp(std::make_shared<ParameterOpImpl>(init, std::move(shape),
                            dtype, requires_grad), TensorList(), std::move(op_meta))
                            ->output(0);
-  out->set_require_grad(requires_grad);
+  out->set_requires_grad(requires_grad);
   return out;
 }
 
@@ -63,7 +65,7 @@ Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data,
                          std::move(provided_data), copy_provided_data, dtype,
                          requires_grad),
                          TensorList(), std::move(op_meta))->output(0);
-  out->set_require_grad(requires_grad);
+  out->set_requires_grad(requires_grad);
   return out;
 }
 

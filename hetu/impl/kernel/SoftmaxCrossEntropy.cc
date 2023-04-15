@@ -59,6 +59,7 @@ void SoftmaxCrossEntropyCpu(const NDArray& input, const NDArray& label,
 
         // Primitive execution.
         softmax_prim.execute(engine_stream, softmax_args);
+        engine_stream.wait();
 
 
         softmax_cross_entropy_cpu<spec_t>(
@@ -90,6 +91,7 @@ void SoftmaxCrossEntropyCpu(const NDArray& input, const NDArray& label,
 
           // Primitive execution: Reduction (Sum).
           reduction_prim.execute(engine_stream, reduction_args);
+          engine_stream.wait();
           FreeToMemoryPool(temp_data_ptr);
         }
         },"SoftmaxCrossEntropy");
@@ -151,6 +153,7 @@ void SoftmaxCrossEntropyGradientCpu(const NDArray& input_y,
 
         // Primitive execution.
         softmax_prim.execute(engine_stream, softmax_args);
+        engine_stream.wait();
 
         softmax_cross_entropy_gradient_cpu<spec_t>(
             (const spec_t*) temp_data, label->data_ptr<spec_t>(),
