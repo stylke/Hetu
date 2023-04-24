@@ -133,6 +133,15 @@ HTShapeList BroadcastOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return outputlist;
 }
 
+void BroadcastOpDef::DeduceStates() {
+  DistributedStates ds_output = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_output.is_valid())
+    << "BroadcastOpDef: distributed states for output tensor must be valid!";
+  HT_ASSERT(ds_output.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";    
+  _outputs[0]->set_distributed_states(ds_output);
+}
+
 void BroadcastGradientOpDef::DoCompute(const NDArrayList& inputs,
                                        NDArrayList& outputs,
                                        RuntimeContext& ctx) {

@@ -19,9 +19,10 @@ HTShapeList ScalarLikeOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }
 
-void ScalarLikeOpDef::ForwardDeduceStates() {
-  Tensor& input = _inputs[0];
-  DistributedStates ds_input = input->get_distributed_states();
+void ScalarLikeOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "ScalarLikeOpDef: distributed states for input must be valid!";  
   int32_t device_num = ds_input.get_device_num();
   std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1}); // partial -> duplicate
   std::unordered_map<int32_t, int32_t> res_states = ds_input.combine_states(src2dst);

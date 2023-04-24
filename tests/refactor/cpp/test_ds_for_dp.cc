@@ -29,8 +29,8 @@ void TestDARDistributedTensor(DataType dtype = kFloat32) {
   int n = 2;
   int dim = 4; 
 
-  DistributedStates ds0(4, {{-2, 1}, {-1, 4}}, {-1});
-  DistributedStates ds1(4, {{-2, 1}, {-1, 1}, {0, 4}}, {0});
+  DistributedStates ds0(4, {{-1, 4}}, {-1});
+  DistributedStates ds1(4, {{0, 4}}, {0});
 
   auto tensor1 = PlaceholderOp(dtype, {n, dim}, OpMeta().set_device_group(all_device_group).set_name("tensor1"))->output(0);
   tensor1->set_distributed_states(ds1); // tensor1: ds1: [(2,4), (2,4), (2,4), (2,4)]

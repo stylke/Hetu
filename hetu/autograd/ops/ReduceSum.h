@@ -51,7 +51,10 @@ class ReduceSumOpDef : public OperatorDef {
       output_shape.emplace_back(1);
     AddOutput(
       NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   const HTShape& get_axes() const {
     return _axes;

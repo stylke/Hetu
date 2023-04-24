@@ -63,7 +63,7 @@ HTShapeList MatMulOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {{a.at(trans_a() ? 1 : 0), b.at(trans_b() ? 0 : 1)}};
 }
 
-void MatMulOpDef::ForwardDeduceStates() {
+void MatMulOpDef::DeduceStates() {
   Tensor& a = _inputs[0];
   Tensor& b = _inputs[1];
   DistributedStates ds_a = a->get_distributed_states();
@@ -71,7 +71,7 @@ void MatMulOpDef::ForwardDeduceStates() {
   int32_t device_num = ds_a.get_device_num();
 
   HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num())
-            << "cannot convert src distributed states to unpaired dst distributed states!";  
+            << "cannot convert src distributed states to unpaired dst distributed states!";
   std::vector<std::unordered_map<int32_t, int32_t>> l2res_case({
     {{-1, 1}, {0, 0}, {1, -2}}, // no trans
     {{-1, 1}, {1, 0}, {0, -2}}  // trans A
@@ -133,40 +133,5 @@ void MatMulOpDef::ForwardDeduceStates() {
   c->set_distributed_states({device_num, res_states, res_order});
 }
 
-DistributedStates MatMulOpDef::BackwardDeduceStates(int32_t index) {
-  DistributedStates ds_grad;
-  Tensor& c = _outputs[0];
-  DistributedStates ds_c = c->get_distributed_states();
-  HT_ASSERT(ds_c.is_valid()) << "MatMul: distributed states for output tensor is not valid!";
-
-  if (index < 2) {
-    std::vector<std::unordered_map<int32_t, int32_t>> res2gradl_case({
-      {{-2, 1}, {0, 0}, {1, -2}, {-1, -1}}, // no trans
-      {{-2, 0}, {0, 1}, {1, -2}, {-1, -1}}  // trans A
-    });
-    auto& res2gradl_map = res2gradl_case[trans_a()];
-    std::vector<std::unordered_map<int32_t, int32_t>> res2gradr_case({
-      {{-2, 0}, {0, -2}, {1, 1}, {-1, -1}}, // no trans
-      {{-2, 1}, {0, -2}, {1, 0}, {-1, -1}}  // trans B
-    });
-    auto& res2gradr_map = res2gradr_case[trans_b()];
-    std::unordered_map<int32_t, int32_t> grad_map = index == 0 ? res2gradl_map : res2gradr_map;
-    std::unordered_map<int32_t, int32_t> grad_states;
-    std::vector<int32_t> keys({-2, -1, 0, 1});
-    for (auto key : keys) {
-      grad_states[grad_map[key]] = ds_c.get_dim(key);
-    }
-    std::vector<int32_t> grad_order;
-    for (auto x : ds_c.get_order()) {
-      grad_order.push_back(grad_map[x]);
-    }
-    ds_grad.set_distributed_states({ds_c.get_device_num(), grad_states, grad_order});
-  } else {
-    // for bias in linear_op ?
-    HT_ASSERT(index == 2) << "index must be equal to 2!";
-    ;
-  }
-  return ds_grad;
-}
 } // namespace autograd
 } // namespace hetu

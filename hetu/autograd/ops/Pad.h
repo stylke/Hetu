@@ -34,7 +34,10 @@ class PadOpDef : public OperatorDef {
       }
     }
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   size_t get_mode() const {
     return _mode;
@@ -93,7 +96,10 @@ class PadGradientOpDef : public OperatorDef {
       }
     }
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   size_t get_mode() const {
     return _mode;

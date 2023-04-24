@@ -32,6 +32,21 @@ HTShapeList SCEOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
+void SCEOpDef::DeduceStates() {
+  DistributedStates ds_preds = _inputs[0]->get_distributed_states();
+  DistributedStates ds_labels = _inputs[1]->get_distributed_states();
+  int ndim = _inputs[0]->ndim();
+  HT_ASSERT(ds_preds.is_valid() && ds_labels.is_valid())
+    << "SoftmaxCrossEntropyOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_preds.get_dim(-2) == 1 && ds_labels.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_preds.check_equal(ds_labels))
+    << "Distributed states among preds and labels should be equal!";
+  HT_ASSERT(ds_preds.check_max_dim(ndim - 1)) // cannot split in last dimension
+    << "Input tensor can only support split in dimension < " << ndim - 1;
+  _outputs[0]->set_distributed_states(ds_preds);
+}
+
 void SCEGradOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) {
   if (placement().is_cuda()) {
@@ -45,6 +60,22 @@ HTShapeList SCEGradOpDef::DoInferShape(const HTShapeList& input_shapes) {
   HT_ASSERT_GE(input_shapes.at(0).size(), 2)
     << "Invalid shape for " << type() << ": " << input_shapes.at(0);
   return {input_shapes.at(0)};
+}
+
+void SCEGradOpDef::DeduceStates() {
+  DistributedStates ds_preds = _inputs[0]->get_distributed_states();
+  DistributedStates ds_labels = _inputs[1]->get_distributed_states();
+  DistributedStates ds_grad_output = _inputs[2]->get_distributed_states();
+  int ndim = _inputs[0]->ndim();
+  HT_ASSERT(ds_preds.is_valid() && ds_labels.is_valid() && ds_grad_output.is_valid())
+    << "SoftmaxCrossEntropyOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_preds.get_dim(-2) == 1 && ds_labels.get_dim(-2) == 1 && ds_grad_output.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_preds.check_equal(ds_labels) && ds_labels.check_equal(ds_grad_output))
+    << "Distributed states among preds and labels and grad_output should be equal!";
+  HT_ASSERT(ds_preds.check_max_dim(ndim - 1)) // cannot split in last dimension
+    << "Input tensor can only support split in dimension < " << ndim - 1;
+  _outputs[0]->set_distributed_states(ds_preds);
 }
 
 } // namespace autograd

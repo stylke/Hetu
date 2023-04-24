@@ -59,7 +59,7 @@ void NDArrayMeta::flatten(int64_t start_dim, int64_t end_dim) {
   start_dim = ParseAxis(start_dim, num_dim);
   end_dim = ParseAxis(end_dim, num_dim);
   int64_t flat_size = 1;
-  for (int64_t i = start_dim; i < end_dim; ++i) {
+  for (int64_t i = start_dim; i < end_dim + 1; ++i) {
     flat_size *= shape[i];
   }
   shape.erase(shape.begin() + start_dim, shape.begin() + end_dim + 1);

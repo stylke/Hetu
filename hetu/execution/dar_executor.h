@@ -96,7 +96,6 @@ class DARExecutor {
 
  protected:
   bool PlaceDevices(const OpList& topo_order);
-  void DeduceDistributedStates(const OpList& topo_order);
   void SubstituteCommOp(const OpList& local_topo_order);
   void CrossSend(std::unordered_map<int32_t, int32_t> split_cur_state, 
                  std::unordered_map<int32_t, int32_t> split_target_state,
@@ -106,9 +105,6 @@ class DARExecutor {
   Tensor CrossReceive(int32_t depth, int32_t& device_index, CommOp& op, 
                       TensorList& recv_datas, std::vector<int32_t>& srcs,
                       Tensor& self_send_data, int32_t& used_device_index);
-  void GenerateSendRecvTopo(CommOp& comm_op, std::vector<P2PSendOp>& send_ops, std::vector<P2PRecvOp>& recv_ops,
-                            std::unordered_map<int32_t, std::unordered_map<int32_t, std::vector<int32_t>>>& send_recv_list);
-
   std::shared_ptr<DARSubExecutor>
   GetOrCreateSubExecutor(const TensorList& fetches);
 

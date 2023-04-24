@@ -314,20 +314,32 @@ bool OperatorDef::DoPlaceToLocalDevice(const Device& placement,
   return true;
 }
 
-void OperatorDef::ForwardDeduceStates() {
+void OperatorDef::DeduceStates() {
   // default: distributed states of output tensor directly copy from input tensor
-  // TODO: check input states is valid & check distributed states of all input tensor are the same.
+  // check input states is valid & check distributed states of all input tensor are the same.
   HT_LOG_DEBUG << name() << ": default copy states from inputs";
-  for (auto& output : _outputs) {
-    for (auto& input : _inputs) {
-      HT_ASSERT(input->get_distributed_states().is_valid()) << "input states must be valid: " << name();
-      output->set_distributed_states(input->get_distributed_states());
+  DistributedStates default_ds;
+  for (auto& input : _inputs) {
+    auto input_ds = input->get_distributed_states(); 
+    HT_ASSERT(input_ds.is_valid()) << name() << ": input states must be valid!";
+    HT_ASSERT(input_ds.get_dim(-2) == 1) << name() << ": input shouldn't be partial!";      
+    if (!default_ds.is_valid()) {
+      default_ds.set_distributed_states(input_ds);
+    } else {
+      HT_ASSERT(default_ds.check_equal(input_ds))
+        << name() << ": in default DeduceStates: distributed states of all input tensor must be same!"
+        << ", " << default_ds.ds_info() << " vs " << input_ds.ds_info();
     }
+  }
+  for (auto& output : _outputs) {
+    output->set_distributed_states(default_ds);
   }
 }
 
 void OperatorDef::BlockOrSync(Tensor& dep) {
   if (!dep.is_defined())
+    return;
+  if (is_placeholder_op(dep->producer()))
     return;
   auto& dep_op = dep->producer();
   if (dep_op->placement() != _placement) {
@@ -356,7 +368,7 @@ void OperatorDef::ReplaceInput(size_t index, Tensor new_input) {
   new_input->AddConsumer(get_self());
 }
 
-void OperatorDef::AddInDeps(TensorList& in_deps) {
+void OperatorDef::AddInDeps(const TensorList& in_deps) {
   if (in_deps.empty()) {
     return;
   }

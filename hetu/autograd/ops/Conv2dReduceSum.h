@@ -21,7 +21,10 @@ class Conv2dReduceSumOpDef : public OperatorDef {
     if (input->has_shape() && input->shape().size() >= 2)
       shape = {input->shape(1)};
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    // DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,

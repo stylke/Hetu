@@ -70,6 +70,9 @@ class DistributedStates {
   std::vector<int32_t> combine_order(std::pair<std::vector<int32_t>, int32_t>& src2dst);
   bool equal_states_and_order(std::unordered_map<int32_t, int32_t>& states1, std::vector<int32_t>& order1,
                               std::unordered_map<int32_t, int32_t>& states2, std::vector<int32_t>& order2);
+  bool check_equal(DistributedStates& dst_distributed_states);
+  bool check_max_dim(int32_t max_dim);
+  bool check_pure_duplicate();    
   bool check_combine(DistributedStates& dst_distributed_states, std::pair<std::vector<int32_t>, int32_t>& src2dst);
 
   std::unordered_map<int32_t, int32_t> reduce_states(int dim);
@@ -85,21 +88,7 @@ class DistributedStates {
   int32_t get_dim(int32_t index);
   std::vector<int32_t> get_loop_sizes();
   std::unordered_map<int32_t, int32_t> map_device_to_state_index(int32_t device_index); // for single device
-  
-  inline std::string print_states() {
-    std::string s = "states = {";
-    for (int d = -2; d <= 1; d++) {
-      if (_states.find(d) != _states.end()) {
-        s += std::to_string(d);
-        s += ": ";
-        s += std::to_string(_states[d]);
-        s += ", ";
-      }
-    }
-    s = s.substr(0, s.size()-2);
-    s += "}";
-    return s;
-  }
+  std::string ds_info();
 
  protected:
   // 同时赋值states和order, 保证其一致性
@@ -114,7 +103,7 @@ class DistributedStates {
   DeviceGroup _placement_group; // 在和Tensor binding的时候必须设置, 否则可以为空
   int32_t _device_num; // 如果_placement_group为空, 则_device_num必须设置
   Device _placement;
-
+  bool _is_distributed; // if false, do not deduce states 
 };
 
 } // namespace autograd

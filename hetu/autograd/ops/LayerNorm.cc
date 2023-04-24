@@ -48,6 +48,26 @@ HTShapeList LayerNormOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }
 
+void LayerNormOpDef::DeduceStates() {
+  HTShape local_shape = _inputs[0]->shape();
+  int max_dim = local_shape.size() - 1;
+  auto ds_input = _inputs[0]->get_distributed_states();
+  auto ds_scale = _inputs[1]->get_distributed_states();
+  auto ds_bias = _inputs[2]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid() && ds_scale.is_valid() && ds_bias.is_valid()
+            && ds_input.get_device_num() == ds_scale.get_device_num()
+            && ds_scale.get_device_num() == ds_bias.get_device_num()) 
+    << "LayerNormOpDef: input states must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1 && ds_scale.get_dim(-2) == 1 
+            && ds_bias.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(max_dim))
+    << "LayerNormOp only support split dimension < " << max_dim;
+  HT_ASSERT(ds_scale.check_pure_duplicate() && ds_bias.check_pure_duplicate())
+    << "Scale and bias should be duplicate!";
+  _outputs[0]->set_distributed_states(ds_input);
+}
+
 void LayerNormGradientOpDef::DoCompute(const NDArrayList& inputs,
                                        NDArrayList& outputs,
                                        RuntimeContext& ctx) {

@@ -18,6 +18,7 @@ class BroadcastOpDef : public OperatorDef {
                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(BroadcastOp), {input, output}, op_meta), _mode(0) {
     AddOutput(output->meta());
+    // DeduceStates();
   }
 
   BroadcastOpDef(const constrcutor_access_key&, Tensor input,
@@ -29,6 +30,8 @@ class BroadcastOpDef : public OperatorDef {
     _add_axes(add_axes) {
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
   }
+
+  void DeduceStates() override;
 
   const HTShape& get_shape() const {
     return _shape;

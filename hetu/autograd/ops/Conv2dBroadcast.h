@@ -17,8 +17,11 @@ class Conv2dBroadcastOpDef : public OperatorDef {
   Conv2dBroadcastOpDef(const constrcutor_access_key&, Tensor input,
                        Tensor output, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(Conv2dBroadcastOp), {input, output}, op_meta) {
-    AddOutput(input->meta());
+    AddOutput(output->meta()); // output->meta() ?
+    // DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,

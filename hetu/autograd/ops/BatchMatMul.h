@@ -49,7 +49,10 @@ class BatchMatMulOpDef : public OperatorDef {
     }
     HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   inline bool trans_a() const {
     return _trans_a;

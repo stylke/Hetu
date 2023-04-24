@@ -58,7 +58,10 @@ class ReduceOpDef : public OperatorDef {
     }
     AddOutput(
       NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   const HTShape& get_axes() const {
     return _axes;
@@ -155,7 +158,10 @@ class ReduceGradientOpDef : public OperatorDef {
     _shape(shape),
     _add_axes(add_axes) {
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   Operator grad_input;
 

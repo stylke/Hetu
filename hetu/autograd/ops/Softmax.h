@@ -20,7 +20,10 @@ class SoftmaxOpDef : public OperatorDef {
                const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SoftmaxOp), {input}, op_meta) {
     AddOutput(input->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -48,7 +51,10 @@ class SoftmaxGradientOpDef : public OperatorDef {
                        Tensor grad_output, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SoftmaxGradientOp), {input, grad_output}, op_meta) {
     AddOutput(grad_output->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,

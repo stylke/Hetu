@@ -48,7 +48,10 @@ class AddElewiseOpDef : public OperatorDef {
     HTShape shape = Broadcast(_inputs[0]->shape(), _inputs[1]->shape());
     HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -76,6 +79,7 @@ class AddByConstOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(AddByConstOp), {input}, op_meta), _value(value) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
   inline double const_value() const {
@@ -116,7 +120,10 @@ class SubElewiseOpDef : public OperatorDef {
     HTShape shape = Broadcast(_inputs[0]->shape(), _inputs[1]->shape());
     HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -144,6 +151,7 @@ class SubByConstOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SubByConstOp), {input}, op_meta), _value(value) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
   inline double const_value() const {
@@ -178,6 +186,7 @@ class SubFromConstOpDef : public OperatorDef {
                     const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SubFromConstOp), {input}, op_meta), _value(value) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
   inline double const_value() const {
@@ -212,6 +221,7 @@ class NegateOpDef : public OperatorDef {
               const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(NegateOp), {input}, op_meta) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
  protected:
@@ -242,7 +252,10 @@ class MulElewiseOpDef : public OperatorDef {
     HTShape shape = Broadcast(_inputs[0]->shape(), _inputs[1]->shape());
     HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -270,6 +283,7 @@ class MulByConstOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(MulByConstOp), {input}, op_meta), _value(value) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
   inline double const_value() const {
@@ -310,7 +324,10 @@ class DivElewiseOpDef : public OperatorDef {
     HTShape shape = Broadcast(_inputs[0]->shape(), _inputs[1]->shape());
     HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -338,6 +355,7 @@ class DivByConstOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DivByConstOp), {input}, op_meta), _value(value) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
   inline double const_value() const {
@@ -372,6 +390,7 @@ class DivFromConstOpDef : public OperatorDef {
                     const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DivFromConstOp), {input}, op_meta), _value(value) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
   inline double const_value() const {
@@ -406,6 +425,7 @@ class ReciprocalOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReciprocalOp), {input}, op_meta) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
  protected:

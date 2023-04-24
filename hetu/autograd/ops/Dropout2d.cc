@@ -28,6 +28,17 @@ HTShapeList Dropout2dOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }
 
+void Dropout2dOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "Dropout2dOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1) 
+    << "Tensor input shouldn't be partial";
+  HT_ASSERT(ds_input.check_max_dim(2))
+    << "droupout2d only support split dimensions N&C in [N, C, H, W] now!";
+  _outputs[0]->set_distributed_states(ds_input);  
+}
+
 NDArrayList
 Dropout2dGradientWithRecomputationOpDef::DoCompute(const NDArrayList& inputs,
                                                    RuntimeContext& ctx) {
@@ -45,5 +56,15 @@ HTShapeList Dropout2dGradientWithRecomputationOpDef::DoInferShape(
   return {input_shapes.at(0)};
 }
 
+void Dropout2dGradientWithRecomputationOpDef::DeduceStates() {
+  DistributedStates ds_grad_output = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_grad_output.is_valid()) 
+    << "Dropout2dGradientWithRecomputationOpDef: distributed states for grad_output must be valid!";
+  HT_ASSERT(ds_grad_output.get_dim(-2) == 1) 
+    << "Tensor input shouldn't be partial";
+  HT_ASSERT(ds_grad_output.check_max_dim(2))
+    << "Dropout2dGradientWithRecomputation only support split dimensions N&C in [N, C, H, W] now!";
+  _outputs[0]->set_distributed_states(ds_grad_output);    
+}
 } // namespace autograd
 } // namespace hetu

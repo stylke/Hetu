@@ -106,6 +106,83 @@ HTShapeList ReduceOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return outputlist;
 }
 
+void ReduceOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "ReduceOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Tensor input shouldn't be partial!";
+  HTShape axes = get_axes();
+  HTKeepDims keepdims = get_keepdims();  
+  int32_t partial = ds_input.get_dim(-2);
+  // device_num
+  int32_t device_num = ds_input.get_device_num();
+  // states
+  std::unordered_map<int32_t, int32_t> states = ds_input.get_states();
+  for (auto d : axes) {
+    int32_t state_d = ds_input.get_dim(d); 
+    if (state_d > 1) {
+      partial *= state_d;
+      states.erase(d);
+    }
+  }
+  states[-2] = partial;
+  std::vector<int32_t> sorted_keys;
+  for (auto& pair : states) {
+    if (pair.first >= 0) {
+      sorted_keys.push_back(pair.first);
+    }
+  }
+  std::sort(sorted_keys.begin(), sorted_keys.end());
+  for (auto d : sorted_keys) {
+    int32_t reduce_dimensions = 0;
+    for (int i = 0; i < axes.size(); i++) {
+      if (axes[i] < d && !keepdims[i]) {
+        reduce_dimensions++;
+      }
+    }
+    int32_t new_d = d - reduce_dimensions;
+    if (new_d != d) {
+      states[new_d] = states[d];
+      states.erase(d);
+    }
+  }
+  // order
+  std::vector<int32_t> order = ds_input.get_order();
+  int32_t dup_occur = 0;
+  bool prev_dup = false;
+  std::vector<int64_t> partial_candidate = axes;
+  partial_candidate.push_back(-2);
+  for (int i = order.size() - 1; i >= 0; i--) {
+    if (std::find(partial_candidate.begin(), partial_candidate.end(), order[i]) != partial_candidate.end()) {
+      if (!prev_dup) {
+        dup_occur++;
+      }
+      prev_dup = true;
+      if (order[i] != -2) {
+        if (std::find(order.begin(), order.end(), -2) == order.end()) {
+          order[i] = -2;
+        } else {
+          order.erase(order.begin() + i);
+        }
+      }
+    } else {
+      prev_dup = false;
+    }
+  }
+  HT_ASSERT(dup_occur <= 1) << "Duplicate dimension and reduce dimensions must be consecutive!";
+  for (int i = 0;i < order.size(); i++) {
+    int32_t reduce_dimensions = 0;
+    for (int j = 0; j < axes.size(); j++) {
+      if (axes[j] < order[i] && !keepdims[j]) {
+        reduce_dimensions++;
+      }
+    }
+    order[i] -= reduce_dimensions;
+  }
+  _outputs[0]->set_distributed_states({device_num, states, order});
+}
+
 void ReduceGradientOpDef::DoCompute(const NDArrayList& inputs,
                                     NDArrayList& outputs, RuntimeContext& ctx) {
   if (mode() == "mean") {
@@ -200,6 +277,21 @@ HTShapeList ReduceGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   }
   outputlist = {output_shape};
   return outputlist;
+}
+
+void ReduceGradientOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  DistributedStates ds_ori_input = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid() && ds_ori_input.is_valid()
+            && ds_input.get_device_num() == ds_ori_input.get_device_num())
+    << "ReduceGradientOpDef: distributed states for inputs tensor must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1 && ds_ori_input.get_dim(-2) == 1)
+    << "Inputs tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_equal(ds_ori_input))
+    << "Distributed states among input and ori_input should be equal!";
+  HT_ASSERT(ds_input.check_max_dim(1)) // same as broadcast shape
+    << "Only support data parallel!";
+  _outputs[0]->set_distributed_states(ds_input);
 }
 
 } // namespace autograd

@@ -20,7 +20,10 @@ class MatDotOpDef : public OperatorDef {
   : OperatorDef(quote(MatDotOp), {a, b}, op_meta) {
     HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
     AddOutput(a->meta());
+    // DeduceStates();
   }
+
+  void DeduceStates() override;
 
   int64_t get_axes() const {
     return _axes;

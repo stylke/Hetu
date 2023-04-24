@@ -18,6 +18,7 @@ class SigmoidOpDef : public OperatorDef {
                const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SigmoidOp), {input}, op_meta) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
  protected:

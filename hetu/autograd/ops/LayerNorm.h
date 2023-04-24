@@ -28,7 +28,10 @@ class LayerNormOpDef : public OperatorDef {
   : OperatorDef(quote(LayerNormOp), {input, ln_scale, ln_bias}, op_meta),
     _eps(eps) {
     AddOutput(input->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   double get_momentum() const {
     return _momentum;

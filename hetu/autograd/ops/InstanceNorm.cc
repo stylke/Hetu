@@ -35,6 +35,15 @@ HTShapeList InstanceNormOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }
 
+void InstanceNormOpDef::DeduceStates() {
+  auto ds_input = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) << "InstanceNormOpDef: input states must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1) << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(2))
+    << "InstanceNormOp only support split dimensions N&C in [N, C, H, W]!";  
+  _outputs[0]->set_distributed_states(ds_input);
+}
+
 void InstanceNormGradientOpDef::DoCompute(const NDArrayList& inputs,
                                           NDArrayList& outputs,
                                           RuntimeContext& ctx) {
@@ -49,6 +58,21 @@ HTShapeList
 InstanceNormGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(0)};
+}
+
+void InstanceNormGradientOpDef::DeduceStates() {
+  DistributedStates ds_output_grad = _inputs[0]->get_distributed_states();
+  DistributedStates ds_input = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_output_grad.is_valid() && ds_input.is_valid() && 
+            ds_output_grad.get_device_num() == ds_input.get_device_num())
+    << "InstanceNormGradientOpDef: distributed states for input tensor must be valid!";
+  HT_ASSERT(ds_output_grad.get_dim(-2) == 1 && ds_input.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_output_grad.check_equal(ds_input))
+    << "Distributed states for tensor output_grad and tensor input must be equal!";
+  HT_ASSERT(ds_input.check_max_dim(2))
+    << "InstanceNormOp only support split dimensions N&C in [N, C, H, W]!";      
+  _outputs[0]->set_distributed_states(ds_input);
 }
 
 } // namespace autograd

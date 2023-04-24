@@ -8,7 +8,10 @@ uint64_t CommOpDef::get_comm_type() {
   // TODO: 后面看要不要把单纯的get拆出一个函数来
   auto src_ds = _inputs[0]->get_distributed_states();
   auto dst_ds = _dst_distributed_states;
-  if (src_ds.check_allreduce(dst_ds)) {
+  if (src_ds.check_pure_duplicate()) {
+    _comm_type = COMM_SPLIT_OP;
+    HT_LOG_DEBUG << "COMM_SPLIT_OP";
+  } else if (src_ds.check_allreduce(dst_ds)) {
     _comm_type = ALL_REDUCE_OP;
     HT_LOG_DEBUG << "ALL_REDUCE_OP";
   } else if (src_ds.check_allgather(dst_ds)) {
@@ -23,29 +26,6 @@ uint64_t CommOpDef::get_comm_type() {
   }
   return _comm_type;
 }  
-
-// 和具体device相关的需求都放到CommOp上实现, DistributedStates仅提供切分状态相关的函数
-// DeviceGroup CommOpDef::get_allreduce_devices() {
-//   HT_ASSERT(_comm_type == ALL_REDUCE_OP) << "The comm_op " << name() << " must be allreduce op!";
-//   HT_ASSERT(!_placement_group.empty()) << "Placement Group should be assigned before get allreduce devices!";
-//   int32_t local_device_index = _placement_group.get_index(_placement);
-//   int32_t interval = 1;
-//   auto src_ds = _inputs[0]->get_distributed_states();
-//   auto order = src_ds.get_order();
-//   auto states = src_ds.get_states();
-//   auto partial = states[-2];
-//   auto partial_dim = std::find(order.begin(), order.end(), -2);
-//   for (auto cur_order = partial_dim + 1; cur_order != order.end(); cur_order++) {
-//     interval *= states[*cur_order];
-//   }
-//   int32_t macro_interval = interval * partial;
-//   int32_t start = local_device_index - local_device_index % macro_interval + local_device_index % interval;
-//   std::vector<Device> comm_group;
-//   for (auto index = start; index < start + interval * partial; index += interval) {
-//     comm_group.push_back(_placement_group.get(index));
-//   }
-//   return DeviceGroup(comm_group);
-// }
 
 // devices by dim for collective communication
 DeviceGroup CommOpDef::get_devices_by_dim(int32_t dim) {
@@ -121,7 +101,7 @@ TensorList CommOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_input};
 }
 
-void CommOpDef::ForwardDeduceStates() {
+void CommOpDef::DeduceStates() {
   Tensor& input = _inputs[0];
   DistributedStates ds_input = input->get_distributed_states();
   DistributedStates ds_dst = get_dst_distributed_states();
@@ -132,27 +112,6 @@ void CommOpDef::ForwardDeduceStates() {
            << "cannot convert src distributed states to unpaired dst distributed states!";
   Tensor& output = _outputs[0];
   output->set_distributed_states(ds_dst);
-}
-
-DistributedStates CommOpDef::BackwardDeduceStates(int32_t index) {
-  HT_ASSERT(index == 0) << "grad index in CommOp must be equal to 0!";
-  Tensor& input = _inputs[0];
-  auto ds_input = input->get_distributed_states();
-  Tensor& output = _outputs[0];
-  auto ds_output = output->get_distributed_states();
-  HT_ASSERT(ds_input.is_valid() && ds_output.is_valid())
-           << "distributed states for input and output tensor must be valid!";
-  HT_ASSERT(ds_input.get_device_num() == ds_output.get_device_num())
-           << "distributed states for input and output tensor must be matched!";
-  DistributedStates ds_input_grad(ds_input);
-  if (ds_input_grad.get_dim(-2) > 1) { // partial->duplicate
-    std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
-    auto new_states = ds_input_grad.combine_states(src2dst);
-    auto new_order = ds_input_grad.combine_order(src2dst);
-    auto device_num = ds_input_grad.get_device_num();
-    ds_input_grad.set_distributed_states({device_num, new_states, new_order});
-  }
-  return ds_input_grad;
 }
 
 void P2PSendOpDef::BindRecvOp(const P2PRecvOp& recv_op) {
@@ -314,8 +273,8 @@ NDArrayList BatchedISendIRecvOpDef::DoCompute(const NDArrayList& inputs,
   }
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), 
                                   hetu::impl::BatchedISendIRecv,
-                                  inputs, _dst_devices, 
-                                  outputs, _src_devices, stream());
+                                  inputs, _dst_devices, outputs, 
+                                  _src_devices, _comm_devices, stream());
   return outputs;                                
 }
 

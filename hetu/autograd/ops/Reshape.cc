@@ -51,6 +51,17 @@ HTShapeList ArrayReshapeOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
+void ArrayReshapeOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "ArrayReshapeOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_pure_duplicate())
+    << "Input tensor cannot be splited in any dimension!";
+  _outputs[0]->set_distributed_states(ds_input);    
+}
+
 void ArrayReshapeGradientOpDef::DoCompute(const NDArrayList& inputs,
                                           NDArrayList& outputs,
                                           RuntimeContext& ctx) {
@@ -63,6 +74,17 @@ HTShapeList
 ArrayReshapeGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {get_input_node()->get_input_shape()};
+}
+
+void ArrayReshapeGradientOpDef::DeduceStates() {
+  DistributedStates ds_grad_output = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_grad_output.is_valid()) 
+    << "ArrayReshapeGradientOpDef: distributed states for grad_output must be valid!";
+  HT_ASSERT(ds_grad_output.get_dim(-2) == 1)
+    << "Tensor grad_output shouldn't be partial!";
+  HT_ASSERT(ds_grad_output.check_pure_duplicate())
+    << "Tensor grad_output cannot be splited in any dimension!";
+  _outputs[0]->set_distributed_states(ds_grad_output);    
 }
 
 } // namespace autograd

@@ -55,7 +55,12 @@ class ConcatenateOpDef : public OperatorDef {
     HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
     AddOutput(
       NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(out_shape));
+    if (op_meta.is_deduce_states) {
+      DeduceStates();
+    }
   }
+
+  void DeduceStates() override;
 
   size_t get_axis() const {
     return _axis;
@@ -94,7 +99,10 @@ class ConcatenateGradientOpDef : public OperatorDef {
   : OperatorDef(quote(ConcatenateGradientOp), {input, grad_output}, op_meta),
     _axis(axis) {
     AddOutput(input->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   size_t get_axis() const {
     return _axis;

@@ -97,5 +97,16 @@ HTShapeList BroadcastShapeOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
+void BroadcastShapeOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid())
+    << "BroadcastShapeOpDef: distributed states for output tensor must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";    
+  HT_ASSERT(ds_input.check_max_dim(1))
+    << "Only support data parallel!";
+  _outputs[0]->set_distributed_states(ds_input);
+}
+
 } // namespace autograd
 } // namespace hetu

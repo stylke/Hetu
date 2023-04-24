@@ -35,7 +35,10 @@ class SplitGradientOpDef : public OperatorDef {
       HT_ASSERT(indices[i] >= 0 && indices[i] < splits[i]);
     }
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_axes() const {
     return _axes;
@@ -147,6 +150,15 @@ class SplitOpDef : public OperatorDef {
     }
     AddOutput(
       NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    if (op_meta.is_deduce_states) {      
+      DeduceStates();
+    }
+  }
+
+  void DeduceStates() override;
+  
+  uint64_t op_indicator() const noexcept {
+    return SPLIT_OP;
   }
 
   HTShape get_axes() const {

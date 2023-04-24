@@ -53,6 +53,20 @@ HTShapeList SplitOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
+void SplitOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid())
+    << "SplitOpDef: distributed states for input tensor must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Tensor input shouldn't be partial!";
+  HTShape axes = get_axes();    
+  for (int i = 0; i < axes.size(); i++) {
+    HT_ASSERT(ds_input.get_dim(axes[i]) == 1)
+      << "Dimension in axes shouldn't be split: " << axes[i];
+  }
+  _outputs[0]->set_distributed_states(ds_input);    
+}
+
 void SplitGradientOpDef::DoCompute(const NDArrayList& inputs,
                                    NDArrayList& outputs, RuntimeContext& ctx) {
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
@@ -78,6 +92,21 @@ HTShapeList SplitGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   }
   set_ori_output_shape(ori_shape);
   return {output_shape};
+}
+
+void SplitGradientOpDef::DeduceStates() {
+  DistributedStates ds_grad_output = _inputs[0]->get_distributed_states();  
+  DistributedStates ds_ori_input = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_grad_output.is_valid() && ds_ori_input.is_valid()
+            && ds_grad_output.get_device_num() == ds_ori_input.get_device_num())
+    << "SliceGradientOpDef: distributed states for inputs tensor must be valid!";
+  HT_ASSERT(ds_grad_output.get_dim(-2) == 1 && ds_ori_input.get_dim(-2) == 1)
+    << "Tensor inputs shouldn't be partial!";
+  HT_ASSERT(ds_grad_output.check_equal(ds_ori_input))
+    << "Distributed states among grad_output and ori_input should be equal!";
+  HT_ASSERT(ds_grad_output.check_pure_duplicate())
+    << "Tensor grad_output and ori_input shouldn't be splited!";
+  _outputs[0]->set_distributed_states(ds_grad_output);  
 }
 
 } // namespace autograd

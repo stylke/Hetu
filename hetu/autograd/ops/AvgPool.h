@@ -35,7 +35,10 @@ class AvgPoolOpDef : public OperatorDef {
       shape = {N, C, p_H, p_W};
     }
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   size_t get_kernel_H() const {
     return _kernel_H;
@@ -96,7 +99,10 @@ class AvgPoolGradientOpDef : public OperatorDef {
     _padding(padding),
     _stride(stride) {
     AddOutput(input->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   size_t get_kernel_H() const {
     return _kernel_H;

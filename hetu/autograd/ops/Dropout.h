@@ -26,6 +26,8 @@ class DropoutOpDef : public OperatorDef {
     _recompute(recompute || inplace),
     _inplace(inplace) {
     AddOutput(input->meta());
+    // TODO: keep random seed same when input tensor is duplicate
+    DeduceStates();
   }
 
   double keep_prob() const {
@@ -74,6 +76,7 @@ class DropoutGradientOpDef : public OperatorDef {
   : OperatorDef(quote(DropoutGradientOp), {grad_output, output}, op_meta),
     _keep_prob(keep_prob) {
     AddOutput(grad_output->meta());
+    DeduceStates();
   }
 
   double keep_prob() const {
@@ -112,6 +115,7 @@ class DropoutGradientWithRecomputationOpDef : public OperatorDef {
                 op_meta),
     _forward_op(forward_op) {
     AddOutput(grad_output->meta());
+    DeduceStates();
   }
 
   double keep_prob() const {

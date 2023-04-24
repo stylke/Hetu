@@ -19,6 +19,9 @@ class SumOpDef : public OperatorDef {
   : OperatorDef(quote(SumOp), inputs, op_meta) {
     HT_ASSERT(_inputs.size() > 0) << "No inputs are provided";
     AddOutput(_inputs[0]->meta());
+    if (op_meta.is_deduce_states) {  
+      DeduceStates();
+    }
   }
 
  protected:

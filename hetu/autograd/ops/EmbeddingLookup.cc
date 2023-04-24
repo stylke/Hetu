@@ -28,6 +28,19 @@ EmbeddingLookupOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
+void EmbeddingLookupOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  DistributedStates ds_id = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid() && ds_id.is_valid() && 
+            ds_input.get_device_num() == ds_id.get_device_num()) 
+    << "EmbeddingLookupOpDef: distributed states for input and id must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1 && ds_id.get_dim(-2) == 1) 
+    << "Tensor input and id shouldn't be partial";
+  HT_ASSERT(ds_input.check_pure_duplicate())
+    << "Tensor input(embedding table) cannot be splited!";
+  _outputs[0]->set_distributed_states(ds_id);
+}
+
 void EmbeddingLookupGradientOpDef::DoCompute(const NDArrayList& inputs,
                                              NDArrayList& outputs,
                                              RuntimeContext& ctx) {
@@ -46,6 +59,21 @@ EmbeddingLookupGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   }
   return {get_embed_shape()};
 }
+
+void EmbeddingLookupGradientOpDef::DeduceStates() {
+  DistributedStates ds_grad_output = _inputs[0]->get_distributed_states();
+  DistributedStates ds_id = _inputs[1]->get_distributed_states();
+  DistributedStates ds_ori_output = _inputs[1]->get_distributed_states();
+  int32_t device_num = ds_grad_output.get_device_num();
+  HT_ASSERT(ds_grad_output.is_valid() && ds_id.is_valid() && ds_ori_output.is_valid()) 
+    << "EmbeddingLookupGradientOpDef: distributed states for grad_output and id and ori_output must be valid!";
+  HT_ASSERT(ds_grad_output.get_dim(-2) == 1 && ds_id.get_dim(-2) == 1 && ds_ori_output.get_dim(-2) == 1) 
+    << "Tensor grad_output and id and ori_output shouldn't be partial";
+  HT_ASSERT(ds_grad_output.check_equal(ds_id) && ds_id.check_equal(ds_ori_output))
+    << "Distributed states for tensor grad_output and id and ori_output must be equal!";
+  
+  _outputs[0]->set_distributed_states({device_num, {{-2, device_num}, {-1, 1}}, {-2}}); // pure partial
+} 
 
 } // namespace autograd
 } // namespace hetu

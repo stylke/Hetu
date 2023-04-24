@@ -19,10 +19,6 @@ class P2PRecvOp;
 class CommOpDef;
 class CommOp;
 
-// tensor1 = op1(xxx)
-// tensor2 = comm_op(tensor1, distributed_state) // distributed_state是给定的op2 input所需的切分状态
-// tensor3 = op2(tensor2) 
-
 class CommOpDef : public OperatorDef {
  private:
   friend class CommOp;
@@ -48,7 +44,7 @@ class CommOpDef : public OperatorDef {
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
 
     // inputs.ds -> outputs.ds
-    ForwardDeduceStates();
+    DeduceStates();
   }
 
   uint64_t op_indicator() const noexcept {
@@ -63,8 +59,7 @@ class CommOpDef : public OperatorDef {
   DeviceGroup get_devices_by_dim(int32_t dim);
   // DeviceGroup get_allreduce_devices();
 
-  void ForwardDeduceStates();
-  DistributedStates BackwardDeduceStates(int32_t index);  
+  void DeduceStates() override;
   
  protected:
   bool DoMapToParallelDevices(const DeviceGroup& placement_group) override; 
@@ -184,14 +179,6 @@ class P2PSendOpDef : public OperatorDef {
     return _dst_device_index != -1;
   }  
 
-  OpList& send_recv_topo() {
-    return _send_recv_topo;
-  }
-
-  void set_send_recv_topo(OpList& send_recv_topo) {
-    _send_recv_topo = send_recv_topo;
-  }  
-
   uint64_t op_indicator() const noexcept {
     return PEER_TO_PEER_SEND_OP;
   }
@@ -205,7 +192,6 @@ class P2PSendOpDef : public OperatorDef {
   NDArrayList DoCompute(const NDArrayList& inputs,
                         RuntimeContext& ctx) override;
 
-  OpList _send_recv_topo{};
   DeviceGroup _dst_group;
   int _dst_device_index{-1}; // for distributed tensor p2p
   int _index_in_group{-1}; // for pipeline p2p
@@ -274,14 +260,6 @@ class P2PRecvOpDef : public OperatorDef {
     return _src_device_index != -1;
   }
 
-  OpList& send_recv_topo() {
-    return _send_recv_topo;
-  }
-
-  void set_send_recv_topo(OpList& send_recv_topo) {
-    _send_recv_topo = send_recv_topo;
-  }
-
   uint64_t op_indicator() const noexcept {
     return PEER_TO_PEER_RECV_OP;
   }
@@ -296,7 +274,6 @@ class P2PRecvOpDef : public OperatorDef {
                         RuntimeContext& ctx) override;
 
   OpList _linked_ops{};
-  OpList _send_recv_topo{};
   DeviceGroup _src_group;
   int _src_device_index{-1}; // for distributed tensor p2p
   int _index_in_group{-1}; // for pipeline p2p
@@ -319,10 +296,12 @@ class BatchedISendIRecvOpDef : public OperatorDef {
   struct constrcutor_access_key {};
   
  public:
-  BatchedISendIRecvOpDef(const constrcutor_access_key&, TensorList& inputs, std::vector<Device>& dst_devices,
-                         HTShapeList& outputs_shape, std::vector<Device>& src_devices, DataType dtype,
-                         const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(BatchedISendIRecvOp), inputs, op_meta), _src_devices(src_devices), _dst_devices(dst_devices) {
+  BatchedISendIRecvOpDef(const constrcutor_access_key&, TensorList& inputs, 
+                         std::vector<Device>& dst_devices, HTShapeList& outputs_shape, 
+                         std::vector<Device>& src_devices, std::vector<Device>& comm_devices,
+                         DataType dtype, const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(BatchedISendIRecvOp), inputs, op_meta), _src_devices(src_devices), 
+                _dst_devices(dst_devices), _comm_devices(comm_devices) {
     HT_ASSERT((inputs.size() == dst_devices.size()) && (outputs_shape.size() == src_devices.size())) 
       << "Send/Recv data must be matched with dst/src Devices!";
     print_mesg();
@@ -364,16 +343,18 @@ class BatchedISendIRecvOpDef : public OperatorDef {
 
   std::vector<Device> _dst_devices;
   std::vector<Device> _src_devices;
+  std::vector<Device> _comm_devices;
 };
 
 class BatchedISendIRecvOp final : public OpWrapper<BatchedISendIRecvOpDef> {
  public:
   BatchedISendIRecvOp(TensorList& inputs, std::vector<Device>& dst_devices,
                       HTShapeList& outputs_shape, std::vector<Device>& src_devices, 
-                      DataType dtype, const OpMeta& op_meta = OpMeta())
+                      std::vector<Device>& comm_devices, DataType dtype, 
+                      const OpMeta& op_meta = OpMeta())
   : OpWrapper<BatchedISendIRecvOpDef>(
     make_ptr<BatchedISendIRecvOpDef>(BatchedISendIRecvOpDef::constrcutor_access_key(), 
-    inputs, dst_devices, outputs_shape, src_devices, dtype, op_meta)) {}                      
+    inputs, dst_devices, outputs_shape, src_devices, comm_devices, dtype, op_meta)) {}                      
 };
 
 class AllGatherOpDef : public OperatorDef {

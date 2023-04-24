@@ -29,7 +29,10 @@ class SliceGradientOpDef : public OperatorDef {
     }
     AddOutput(
       NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_begin_pos() const {
     return _begin_pos;
@@ -96,7 +99,10 @@ class SliceOpDef : public OperatorDef {
     }
     AddOutput(
       NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_begin_pos() const {
     return _begin_pos;

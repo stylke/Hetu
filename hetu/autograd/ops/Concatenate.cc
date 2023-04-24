@@ -61,6 +61,16 @@ HTShapeList ConcatenateOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {out_shape};
 }
 
+void ConcatenateOpDef::DeduceStates() {
+  for (auto input : _inputs) {
+    DistributedStates ds_input = input->get_distributed_states();
+    HT_ASSERT(ds_input.get_dim(get_axis()) == 1)
+      << "Concat was not allowed in splited dimension: " << get_axis();
+  }
+  // 直接调用默认的states copy函数做检查和赋值
+  OperatorDef::DeduceStates();
+}
+
 void ConcatenateGradientOpDef::DoCompute(const NDArrayList& inputs,
                                          NDArrayList& outputs,
                                          RuntimeContext& ctx) {
@@ -73,6 +83,20 @@ HTShapeList
 ConcatenateGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(0)};
+}
+
+void ConcatenateGradientOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  DistributedStates ds_grad_output = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid() && ds_grad_output.is_valid()) 
+    << "ConcatenateGradientOpDef: distributed states for input and grad_output must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1 && ds_grad_output.get_dim(-2) == 1) 
+    << "Tensor input and grad_output shouldn't be partial";
+  HT_ASSERT(ds_input.check_equal(ds_grad_output)) 
+    << "Distributed states for tensor input and tensor gard_output must be equal!";
+  HT_ASSERT(ds_input.get_dim(get_axis()) == 1)
+    << "Concat was not allowed in splited dimension: " << get_axis();
+  _outputs[0]->set_distributed_states(ds_input);
 }
 
 } // namespace autograd

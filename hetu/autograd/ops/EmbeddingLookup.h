@@ -19,10 +19,13 @@ class EmbeddingLookupGradientOpDef : public OperatorDef {
   EmbeddingLookupGradientOpDef(const constrcutor_access_key&,
                                Tensor grad_output, Tensor id, Tensor ori_input,
                                const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(EmbeddingLookupGradientOp), {grad_output, id, ori_input},
+  : OperatorDef(quote(EmbeddingLookupGradientOp), {grad_output, id, ori_input}, // ori_output ?
                 op_meta) {
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_embed_shape() {
     return _embed_shape;
@@ -67,7 +70,10 @@ class EmbeddingLookupOpDef : public OperatorDef {
       shape.emplace_back(input->shape(1));
     }
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_grad_embed() const {
     return _grad_embed_shape;

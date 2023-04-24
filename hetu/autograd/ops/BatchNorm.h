@@ -29,7 +29,10 @@ class BatchNormOpDef : public OperatorDef {
     _momentum(momentum),
     _eps(eps) {
     AddOutput(input->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   double get_momentum() const {
     return _momentum;
@@ -85,7 +88,10 @@ class BatchNormGradientOpDef : public OperatorDef {
     _forward_node(forward_node),
     _eps(eps) {
     AddOutput(output_grad->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   BatchNormOp get_forward_node() const {
     return _forward_node;
@@ -135,7 +141,10 @@ class BatchNormGradientofDataOpDef : public OperatorDef {
   : OperatorDef(quote(BatchNormGradientofDataOp), {bn_gradient, input},
                 op_meta) {
     AddOutput(bn_gradient->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -168,7 +177,10 @@ class BatchNormGradientofScaleOpDef : public OperatorDef {
   : OperatorDef(quote(BatchNormGradientofScaleOp), {bn_gradient, input},
                 op_meta) {
     AddOutput(bn_gradient->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -201,7 +213,10 @@ class BatchNormGradientofBiasOpDef : public OperatorDef {
   : OperatorDef(quote(BatchNormGradientofBiasOp), {bn_gradient, input},
                 op_meta) {
     AddOutput(bn_gradient->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override; // 有待确认?
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,

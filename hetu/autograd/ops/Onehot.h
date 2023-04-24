@@ -23,6 +23,7 @@ class OnehotOpDef : public OperatorDef {
       shape.emplace_back(num_classes);
     }
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
 
   size_t num_classes() const {

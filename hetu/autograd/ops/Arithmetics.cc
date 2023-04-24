@@ -18,6 +18,52 @@ HTShapeList AddElewiseOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
+void AddElewiseOpDef::DeduceStates() {
+  DistributedStates ds_a = _inputs[0]->get_distributed_states();
+  DistributedStates ds_b = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
+    << "AddElewiseOpDef: distributed states for input a and input b must be valid!";
+  // allow sum/sub input tensor states to be partial
+  // HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
+  //   << "Tensor a & b shouldn't be partial";
+  // local shape
+  HTShape shape_a = _inputs[0]->shape();
+  HTShape shape_b = _inputs[1]->shape();
+  HT_LOG_INFO << _inputs[0] << ": shape = " << shape_a << "; " << _inputs[1] << ": shape = " << shape_b;
+
+  int size_a = shape_a.size();
+  int size_b = shape_b.size();
+  int min_size = std::min(size_a, size_b);
+  // global shape
+  for (int i = 0; i < size_a; i++) {
+    shape_a[i] *= ds_a.get_dim(i);
+  }
+  for (int i = 0; i < size_b; i++) {
+    shape_b[i] *= ds_b.get_dim(i);
+  }
+  for (int i = 0; i < min_size; i++) {
+    int dim_a = size_a - 1 - i;
+    int dim_b = size_b - 1 - i;
+    if (shape_a[dim_a] == shape_b[dim_b]) {
+      HT_ASSERT(ds_a.get_dim(dim_a) == ds_b.get_dim(dim_b))
+        << "Split states in " << dim_a << " for tensor a should be equal to split states in " << dim_b << " for tensor b!";
+    } else if (shape_a[dim_a] == 1) {
+      HT_ASSERT(ds_b.get_dim(dim_b) == 1)
+        << "Dimension " << dim_b << " of tensor b shouldn't be splited!";
+    } else if (shape_b[dim_b] == 1) {
+      HT_ASSERT(ds_a.get_dim(dim_a) == 1) 
+        << "Dimension " << dim_a << " of tensor a shouldn't be splited!";      
+    } else {
+      HT_LOG_ERROR << "This case shouldn't be happened!"; 
+    }
+  }
+  if (size_a >= size_b) {
+    _outputs[0]->set_distributed_states(ds_a);
+  } else {
+    _outputs[0]->set_distributed_states(ds_b);
+  }
+}
+
 void AddByConstOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                                 RuntimeContext& ctx) {
   NDArray::add(inputs.at(0), const_value(), stream_index(), outputs.at(0));
@@ -46,6 +92,49 @@ HTShapeList SubElewiseOpDef::DoInferShape(const HTShapeList& input_shapes) {
   HTShape output_shape =
     NDArrayMeta::Broadcast(input_shapes.at(0), input_shapes.at(1));
   return {output_shape};
+}
+
+void SubElewiseOpDef::DeduceStates() {
+  DistributedStates ds_a = _inputs[0]->get_distributed_states();
+  DistributedStates ds_b = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
+    << "SubElewiseOpDef: distributed states for input a and input b must be valid!";
+  // HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
+  //   << "Tensor a & b shouldn't be partial";  
+  // local shape
+  HTShape shape_a = _inputs[0]->shape();
+  HTShape shape_b = _inputs[1]->shape();
+  int size_a = shape_a.size();
+  int size_b = shape_b.size();
+  int min_size = std::min(size_a, size_b);
+  // global shape
+  for (int i = 0; i < size_a; i++) {
+    shape_a[i] *= ds_a.get_dim(i);
+  }
+  for (int i = 0; i < size_b; i++) {
+    shape_b[i] *= ds_b.get_dim(i);
+  }
+  for (int i = 0; i < min_size; i++) {
+    int dim_a = size_a - 1 - i;
+    int dim_b = size_b - 1 - i;
+    if (shape_a[dim_a] == shape_b[dim_b]) {
+      HT_ASSERT(ds_a.get_dim(dim_a) == ds_b.get_dim(dim_b))
+        << "Split states in " << dim_a << " for tensor a should be equal to split states in " << dim_b << " for tensor b!";
+    } else if (shape_a[dim_a] == 1) {
+      HT_ASSERT(ds_b.get_dim(dim_b) == 1)
+        << "Dimension " << dim_b << " of tensor b shouldn't be splited!";
+    } else if (shape_b[dim_b] == 1) {
+      HT_ASSERT(ds_a.get_dim(dim_a) == 1) 
+        << "Dimension " << dim_a << " of tensor a shouldn't be splited!";      
+    } else {
+      HT_LOG_ERROR << "This case shouldn't be happened!"; 
+    }
+  }
+  if (size_a >= size_b) {
+    _outputs[0]->set_distributed_states(ds_a);
+  } else {
+    _outputs[0]->set_distributed_states(ds_b);
+  }
 }
 
 void SubByConstOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -111,6 +200,49 @@ HTShapeList MulElewiseOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
+void MulElewiseOpDef::DeduceStates() {
+  DistributedStates ds_a = _inputs[0]->get_distributed_states();
+  DistributedStates ds_b = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
+    << "MulElewiseOpDef: distributed states for input a and input b must be valid!";
+  HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
+    << "Tensor a & b shouldn't be partial";  
+  // local shape
+  HTShape shape_a = _inputs[0]->shape();
+  HTShape shape_b = _inputs[1]->shape();
+  int size_a = shape_a.size();
+  int size_b = shape_b.size();
+  int min_size = std::min(size_a, size_b);
+  // global shape
+  for (int i = 0; i < size_a; i++) {
+    shape_a[i] *= ds_a.get_dim(i);
+  }
+  for (int i = 0; i < size_b; i++) {
+    shape_b[i] *= ds_b.get_dim(i);
+  }
+  for (int i = 0; i < min_size; i++) {
+    int dim_a = size_a - 1 - i;
+    int dim_b = size_b - 1 - i;
+    if (shape_a[dim_a] == shape_b[dim_b]) {
+      HT_ASSERT(ds_a.get_dim(dim_a) == ds_b.get_dim(dim_b))
+        << "Split states in " << dim_a << " for tensor a should be equal to split states in " << dim_b << " for tensor b!";
+    } else if (shape_a[dim_a] == 1) {
+      HT_ASSERT(ds_b.get_dim(dim_b) == 1)
+        << "Dimension " << dim_b << " of tensor b shouldn't be splited!";
+    } else if (shape_b[dim_b] == 1) {
+      HT_ASSERT(ds_a.get_dim(dim_a) == 1) 
+        << "Dimension " << dim_a << " of tensor a shouldn't be splited!";      
+    } else {
+      HT_LOG_ERROR << "This case shouldn't be happened!"; 
+    }
+  }
+  if (size_a >= size_b) {
+    _outputs[0]->set_distributed_states(ds_a);
+  } else {
+    _outputs[0]->set_distributed_states(ds_b);
+  }
+}
+
 void MulByConstOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                                 RuntimeContext& ctx) {
   NDArray::mul(inputs.at(0), const_value(), stream_index(), outputs.at(0));
@@ -153,6 +285,49 @@ HTShapeList DivElewiseOpDef::DoInferShape(const HTShapeList& input_shapes) {
   HTShape output_shape =
     NDArrayMeta::Broadcast(input_shapes.at(0), input_shapes.at(1));
   return {output_shape};
+}
+
+void DivElewiseOpDef::DeduceStates() {
+  DistributedStates ds_a = _inputs[0]->get_distributed_states();
+  DistributedStates ds_b = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
+    << "DivElewiseOpDef: distributed states for input a and input b must be valid!";
+  HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
+    << "Tensor a & b shouldn't be partial";   
+  // local shape
+  HTShape shape_a = _inputs[0]->shape();
+  HTShape shape_b = _inputs[1]->shape();
+  int size_a = shape_a.size();
+  int size_b = shape_b.size();
+  int min_size = std::min(size_a, size_b);
+  // global shape
+  for (int i = 0; i < size_a; i++) {
+    shape_a[i] *= ds_a.get_dim(i);
+  }
+  for (int i = 0; i < size_b; i++) {
+    shape_b[i] *= ds_b.get_dim(i);
+  }
+  for (int i = 0; i < min_size; i++) {
+    int dim_a = size_a - 1 - i;
+    int dim_b = size_b - 1 - i;
+    if (shape_a[dim_a] == shape_b[dim_b]) {
+      HT_ASSERT(ds_a.get_dim(dim_a) == ds_b.get_dim(dim_b))
+        << "Split states in " << dim_a << " for tensor a should be equal to split states in " << dim_b << " for tensor b!";
+    } else if (shape_a[dim_a] == 1) {
+      HT_ASSERT(ds_b.get_dim(dim_b) == 1)
+        << "Dimension " << dim_b << " of tensor b shouldn't be splited!";
+    } else if (shape_b[dim_b] == 1) {
+      HT_ASSERT(ds_a.get_dim(dim_a) == 1) 
+        << "Dimension " << dim_a << " of tensor a shouldn't be splited!";      
+    } else {
+      HT_LOG_ERROR << "This case shouldn't be happened!"; 
+    }
+  }
+  if (size_a >= size_b) {
+    _outputs[0]->set_distributed_states(ds_a);
+  } else {
+    _outputs[0]->set_distributed_states(ds_b);
+  }
 }
 
 void DivByConstOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,

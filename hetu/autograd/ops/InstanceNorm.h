@@ -20,7 +20,10 @@ class InstanceNormOpDef : public OperatorDef {
                     double eps = 1e-7, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(InstanceNormOp), {input}, op_meta), _eps(eps) {
     AddOutput(input->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   double get_momentum() const {
     return _momentum;
@@ -77,7 +80,10 @@ class InstanceNormGradientOpDef : public OperatorDef {
   : OperatorDef(quote(InstanceNormGradientOp), {output_grad, input}, op_meta),
     _forward_node(forward_node) {
     AddOutput(output_grad->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   InstanceNormOp get_forward_node() const {
     return _forward_node;

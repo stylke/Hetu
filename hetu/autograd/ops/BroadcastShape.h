@@ -22,7 +22,10 @@ class BroadcastShapeOpDef : public OperatorDef {
     _shape(shape),
     _add_axes(add_axes) {
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    // DeduceStates();
   }
+
+  void DeduceStates() override;
 
   const HTShape& get_shape() const {
     return _shape;

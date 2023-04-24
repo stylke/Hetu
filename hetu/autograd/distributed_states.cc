@@ -65,7 +65,6 @@ void DistributedStates::set_order(const std::vector<int32_t>& order) {
   if (order.size() == 0) {
     // get default order
     std::vector<int32_t> keys; 
-    keys.reserve(_states.size());
     for (auto kv : _states) {
       if (kv.second > 1) { // partial/duplicate必须大于1才能分到order
         keys.push_back(kv.first);
@@ -80,7 +79,13 @@ void DistributedStates::set_order(const std::vector<int32_t>& order) {
                   << "order is not matched with states!";
       }
     }
-    _order = order;
+    std::vector<int32_t> res_order;
+    for (auto o : order) {
+      if (_states[o] > 1) {
+        res_order.push_back(o);
+      }
+    }
+    _order = res_order;
   }
 }
 
@@ -149,9 +154,10 @@ std::vector<int32_t> DistributedStates::combine_order(std::pair<std::vector<int3
     if (it != order.end()) {
       auto ind = std::distance(order.begin(), it);
       inds.push_back(ind);
-    } else {
-      HT_LOG_DEBUG << "dimension " << dim << " is not in order !";
-    }
+    } 
+    // else {
+    //   HT_LOG_DEBUG << "dimension " << dim << " is not in order !";
+    // }
   };
   for (auto s : src) {
     collect_safe_index(s);
@@ -186,6 +192,38 @@ std::vector<int32_t> DistributedStates::combine_order(std::pair<std::vector<int3
 bool DistributedStates::equal_states_and_order(std::unordered_map<int32_t, int32_t>& states1, std::vector<int32_t>& order1,
                                                std::unordered_map<int32_t, int32_t>& states2, std::vector<int32_t>& order2) {
   return (states1 == states2) && (order1 == order2);                              
+}
+
+bool DistributedStates::check_equal(DistributedStates& dst_distributed_states) {
+  auto dst_device_num = dst_distributed_states.get_device_num();
+  auto dst_states = dst_distributed_states.get_states();
+  auto dst_order = dst_distributed_states.get_order();
+  return (_device_num == dst_device_num) && equal_states_and_order(_states, _order, dst_states, dst_order);
+}
+
+bool DistributedStates::check_max_dim(int32_t max_dim) {
+  if (_device_num == 1 && _order.size() == 0) {
+    return true;
+  }
+  for (auto s : _states) {
+    if (s.first >= max_dim) {
+      return false;
+    }
+  }
+  for (auto o : _order) {
+    if (o >= max_dim) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool DistributedStates::check_pure_duplicate() {
+  if (_device_num == get_dim(-1)) {
+    return true;
+  } else {
+    return false;
+  }
 }
 
 bool DistributedStates::check_combine(DistributedStates& dst_distributed_states,
@@ -281,5 +319,29 @@ std::unordered_map<int32_t, int32_t> DistributedStates::map_device_to_state_inde
   return state_index;
 }
 
+std::string DistributedStates::ds_info() {
+  std::string d_str = "device num = " + std::to_string(_device_num);
+  std::string o_str = "order = [";
+  std::vector<int32_t> order(_order);
+  for (auto o = order.begin(); o != order.end(); o++) {
+    o_str += std::to_string(*o);
+    if (o + 1 != order.end()) {
+      o_str += ", ";
+    } else {
+      o_str += "]";
+    }
+  }
+  std::sort(order.begin(), order.end());
+  std::string s_str = "states = {";
+  for (auto d = order.begin(); d != order.end(); d++) {
+    s_str += std::to_string(*d) + ": " + std::to_string(_states[*d]);
+    if (d + 1 != order.end()) {
+      s_str += ", ";
+    } else {
+      s_str += "}";
+    }
+  }
+  return d_str + ", " + o_str + ", " + s_str;    
+}
 }
 }

@@ -27,7 +27,10 @@ class SoftmaxCrossEntropyOpDef : public OperatorDef {
       output_shape.emplace_back(-1);
     AddOutput(
       NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
@@ -59,7 +62,10 @@ class SoftmaxCrossEntropyGradientOpDef : public OperatorDef {
   : OperatorDef(quote(SoftmaxCrossEntropyGradientOp),
                 {preds, labels, grad_output}, op_meta) {
     AddOutput(preds->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,

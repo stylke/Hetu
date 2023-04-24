@@ -29,7 +29,10 @@ class ConcatOpDef : public OperatorDef {
     }
     HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   size_t get_axis() const {
     return _axis;
@@ -67,7 +70,10 @@ class ConcatGradientOpDef : public OperatorDef {
     _axis(axis),
     _id(id) {
     AddOutput(input->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   size_t get_axis() const {
     return _axis;

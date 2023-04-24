@@ -2,9 +2,6 @@
 
 #include "hetu/autograd/operator.h"
 
-#include "hetu/impl/communication/comm_group.h"
-using namespace hetu::impl::comm;
-
 namespace hetu {
 namespace autograd {
 
@@ -23,13 +20,11 @@ class BinaryCrossEntropyOpDef : public OperatorDef {
                           Tensor labels, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(BinaryCrossEntropyOp), {preds, labels}, op_meta) {
     AddOutput(preds->meta());
-    ForwardDeduceStates();
-    // test: 这里假设每个op的output只有一个, 简单测试输出的ds, 如果op的output不只一个, 则只输出第0个的情况
-    auto ds = _outputs[0]->get_distributed_states();
-    auto local_device = GetLocalDevice();
-    HT_LOG_DEBUG << local_device << ": " << name() << " definition, output[0] states: " << ds.print_states() << ", shape: " << _outputs[0]->shape();     
+    DeduceStates();
   }
 
+  void DeduceStates() override;
+  
  protected:
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -60,6 +55,7 @@ class BinaryCrossEntropyGradientOpDef : public OperatorDef {
   : OperatorDef(quote(BinaryCrossEntropyGradientOp),
                 {preds, labels, grad_output}, op_meta) {
     AddOutput(preds->meta());
+    DeduceStates();
   }
 
  protected:

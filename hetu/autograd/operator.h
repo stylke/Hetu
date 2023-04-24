@@ -64,17 +64,7 @@ class OperatorDef : public shared_ptr_target {
 
   bool PlaceToLocalDevice(const Device& placement, StreamIndex stream_id);
 
-  virtual void ForwardDeduceStates();
-  DistributedStates BackwardDeduceStates(int32_t index);
-
-  // 必须由各op根据自己的规则重载实现 
-  virtual bool DoDeduceDistributedStates() {
-    for (auto& output : _outputs) {
-      if (!output->get_distributed_states().is_valid()) {
-        return false;
-      }
-    }
-  }  
+  virtual void DeduceStates();
 
   inline void Sync() {
     _stop->Sync();
@@ -221,7 +211,7 @@ class OperatorDef : public shared_ptr_target {
   }
   
   void ReplaceInput(size_t index, Tensor new_input); // 暂时先挪到public来
-  void AddInDeps(TensorList& in_deps);
+  void AddInDeps(const TensorList& in_deps);
 
  protected:
   // Walkaround methods to get the corresponding wrapper
@@ -385,8 +375,10 @@ static const uint64_t BROADCAST_OP = 1ul << 11;
 static const uint64_t REDUCE_OP = 1ul << 12;
 static const uint64_t P2P_OP = 1ul << 13;
 static const uint64_t BATCHED_ISEND_IRECV_OP = 1ul << 14;
+static const uint64_t COMM_SPLIT_OP = 1ul << 19;
 static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t UNKNOWN_OP = 1ul << 21;
+static const uint64_t SPLIT_OP = 1ul << 61;
 static const uint64_t OPTIMIZER_UPDATE_OP = 1ul << 62;
 static const uint64_t GROUP_OP = 1ul << 63;
 
@@ -421,9 +413,15 @@ inline bool is_all_to_all_op(const Operator& op) {
 inline bool is_all_reduce_op(const Operator& op) {
   return (op->op_indicator() & ALL_REDUCE_OP) != 0;
 }
+inline bool is_batched_isend_irecv_op(const Operator& op) {
+  return (op->op_indicator() & BATCHED_ISEND_IRECV_OP) != 0;
+}
 inline bool is_communucation_op(const Operator& op) {
   return is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op) ||
     is_all_to_all_op(op) || is_all_reduce_op(op);
+}
+inline bool is_split_op(const Operator& op) {
+  return (op->op_indicator() & SPLIT_OP) != 0;
 }
 inline bool is_optimizer_update_op(const Operator& op) {
   return (op->op_indicator() & OPTIMIZER_UPDATE_OP) != 0;

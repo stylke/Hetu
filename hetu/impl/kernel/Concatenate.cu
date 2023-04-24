@@ -42,7 +42,7 @@ void ConcatenateCuda(const NDArray& input, NDArray& output, size_t axis,
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
-  size_t size = output->numel();
+  size_t size = input->numel();
   int now_ndim = output->ndim();
   HT_ASSERT(input->ndim() == now_ndim);
   int num_concats = 1;

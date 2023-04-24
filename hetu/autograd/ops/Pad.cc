@@ -31,6 +31,20 @@ HTShapeList PadOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {Infer};
 }
 
+void PadOpDef::DeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  size_t input_shape_len = _inputs[0]->shape().size();
+  size_t padding_len = get_paddings().size();
+  size_t max_split_dimension = input_shape_len - padding_len / 2;
+  HT_ASSERT(ds_input.is_valid()) 
+    << "PadOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(max_split_dimension))
+    << "PadOp only support split dimension < " << max_split_dimension;
+  _outputs[0]->set_distributed_states(ds_input);  
+}
+
 void PadGradientOpDef::DoCompute(const NDArrayList& inputs,
                                  NDArrayList& outputs, RuntimeContext& ctx) {
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
@@ -50,6 +64,20 @@ HTShapeList PadGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
     }
   }
   return {Infer};
+}
+
+void PadGradientOpDef::DeduceStates() {
+  DistributedStates ds_grad_output = _inputs[0]->get_distributed_states();
+  size_t grad_output_shape_len = _inputs[0]->shape().size();
+  size_t padding_len = get_paddings().size();
+  size_t max_split_dimension = grad_output_shape_len - padding_len / 2;
+  HT_ASSERT(ds_grad_output.is_valid()) 
+    << "PadGradientOpDef: distributed states for grad_output must be valid!";
+  HT_ASSERT(ds_grad_output.get_dim(-2) == 1)
+    << "Tensor grad_output shouldn't be partial!";
+  HT_ASSERT(ds_grad_output.check_max_dim(max_split_dimension))
+    << "PadGradientOp only support split dimension < " << max_split_dimension;
+  _outputs[0]->set_distributed_states(ds_grad_output);    
 }
 
 } // namespace autograd

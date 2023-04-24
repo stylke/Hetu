@@ -37,7 +37,10 @@ class TransposeOpDef : public OperatorDef {
     }
     AddOutput(
       NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(res_shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_perms() const {
     return _perms;

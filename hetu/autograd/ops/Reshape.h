@@ -23,7 +23,10 @@ class ArrayReshapeOpDef : public OperatorDef {
     _output_shape(output_shape) {
     AddOutput(
       NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
+    DeduceStates(); // TODO: local shape vs global shape?
   }
+
+  void DeduceStates() override;
 
   HTShape get_output_shape() const {
     return _output_shape;
@@ -73,7 +76,10 @@ class ArrayReshapeGradientOpDef : public OperatorDef {
     AddOutput(NDArrayMeta()
                 .set_dtype(_inputs[0]->dtype())
                 .set_shape(input_node->get_input_shape()));
+    DeduceStates();              
   }
+
+  void DeduceStates() override;
 
   ArrayReshapeOp get_input_node() const {
     return _input_node;

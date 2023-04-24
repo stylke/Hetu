@@ -3,14 +3,8 @@
 #include "hetu/execution/dbr_executor.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/autograd/optim/Optimizer.h"
-#include "hetu/autograd/ops/Variable.h"
-#include "hetu/autograd/ops/MatMul.h"
-#include "hetu/autograd/ops/BinaryCrossEntropy.h"
-#include "hetu/autograd/ops/Sigmoid.h"
-#include "hetu/autograd/ops/Relu.h"
-#include "hetu/autograd/ops/Sum.h"
-#include "hetu/autograd/ops/Communicate.h"
 #include "hetu/autograd/distributed_states.h"
+#include "hetu/autograd/ops/op_headers.h"
 #include <cmath>
 
 using namespace hetu;

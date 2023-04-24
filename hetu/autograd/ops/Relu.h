@@ -20,6 +20,7 @@ class ReluOpDef : public OperatorDef {
             const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReluOp), {input}, op_meta) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
  protected:
@@ -48,6 +49,7 @@ class ReluGradientOpDef : public OperatorDef {
                     Tensor grad_output, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReluGradientOp), {input, grad_output}, op_meta) {
     AddOutput(input->meta());
+    DeduceStates();
   }
 
  protected:

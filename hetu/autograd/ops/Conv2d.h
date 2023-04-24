@@ -39,7 +39,10 @@ class Conv2dOpDef : public OperatorDef {
       shape = {N, f_O, out_H, out_W};
     }
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_padding() const {
     return _padding;
@@ -87,8 +90,11 @@ class Conv2dGradientofFilterOpDef : public OperatorDef {
                 op_meta),
     _padding(padding),
     _stride(stride) {
-    AddOutput(input->meta());
+    AddOutput(filter->meta()); // grad_filter shape == filter shape ?
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_padding() const {
     return _padding;
@@ -138,7 +144,10 @@ class Conv2dGradientofDataOpDef : public OperatorDef {
     _padding(padding),
     _stride(stride) {
     AddOutput(input->meta());
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_padding() const {
     return _padding;
@@ -195,7 +204,10 @@ class Conv2dAddBiasOpDef : public OperatorDef {
     int64_t out_W = (W + 2 * padding - f_W) / stride + 1;
     HTShape shape = {N, f_O, out_H, out_W};
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+    DeduceStates();
   }
+
+  void DeduceStates() override;
 
   HTShape get_padding() const {
     return _padding;
