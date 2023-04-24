@@ -213,8 +213,16 @@ DECLARE_KERNEL_CPU_AND_CUDA(BatchedISendIRecv, const NDArrayList&,
 DECLARE_KERNEL_CPU_AND_CUDA(AllGather, const NDArray&, NDArray&,
                             const DeviceGroup&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ReduceScatter, const NDArray&, NDArray&,
-                            const DeviceGroup&, const Stream&);                                        
-
+                            const DeviceGroup&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(BroadcastComm, const NDArray&, NDArray&, int,
+                            const DeviceGroup&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(ReduceComm, const NDArray&, NDArray&, int,
+                            const DeviceGroup&, const Stream&);                                                                                            
+DECLARE_KERNEL_CPU_AND_CUDA(Gather, const NDArray&, NDArray&, int,
+                            const DeviceGroup&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(Scatter, const NDArray&, NDArray&, int,
+                            const DeviceGroup&, const Stream&);
+                            
 /******************************************************
  * Dispatching kernels for operations
  ******************************************************/

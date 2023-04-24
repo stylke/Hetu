@@ -452,5 +452,358 @@ class ReduceScatterOp final : public OpWrapper<ReduceScatterOpDef> {
   : OpWrapper<ReduceScatterOpDef>(make_ptr<ReduceScatterOpDef>(
       ReduceScatterOpDef::constructor_access_key(), input, comm_group, op_meta)) {}              
 };
+
+/* BroadcastCommOp */
+class BroadcastCommOpDef : public OperatorDef {
+ private:
+  friend class BroadcastCommOp;
+  struct constrcutor_access_key {};
+
+ public:
+  BroadcastCommOpDef(const constrcutor_access_key&, Tensor input, int broadcaster,
+                 const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(BroadcastCommOpDef), {input}, op_meta),
+    _broadcaster(broadcaster) {
+    if (!device_group().empty()) {
+      // TODO: check whether it satisfies to form a DP group
+      HT_ASSERT(device_group().num_devices() >= 2)
+        << "BroadcastComm requires two or more devices. Got " << device_group();
+    }
+    AddOutput(input->meta());
+  }
+
+  uint64_t op_indicator() const noexcept {
+    return BROADCAST_OP;
+  }
+
+  int broadcaster() const {
+    return _broadcaster;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  TensorList DoGradient(const TensorList& grad_outputs) override;
+
+  int _broadcaster;
+};
+
+class BroadcastCommOp final : public OpWrapper<BroadcastCommOpDef> {
+ public:
+  BroadcastCommOp(Tensor input, int broadcaster, const OpMeta& op_meta = OpMeta())
+  : OpWrapper<BroadcastCommOpDef>(make_ptr<BroadcastCommOpDef>(
+     BroadcastCommOpDef::constrcutor_access_key(), input, broadcaster, op_meta)) {}
+};
+
+/* BroadcastCommGradientOp */
+class BroadcastCommGradientOpDef : public OperatorDef {
+ private:
+  friend class BroadcastCommGradientOp;
+  struct constrcutor_access_key {};
+
+ public:
+  BroadcastCommGradientOpDef(const constrcutor_access_key&, Tensor input, int broadcaster,
+                 const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(BroadcastCommGradientOpDef), {input}, op_meta),
+    _broadcaster(broadcaster) {
+    if (!device_group().empty()) {
+      // TODO: check whether it satisfies to form a DP group
+      HT_ASSERT(device_group().num_devices() >= 2)
+        << "BroadcastComm requires two or more devices. Got " << device_group();
+    }
+    AddOutput(input->meta());
+  }
+
+  int broadcaster() const {
+    return _broadcaster;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  int _broadcaster;
+};
+
+class BroadcastCommGradientOp final : public OpWrapper<BroadcastCommGradientOpDef> {
+ public:
+  BroadcastCommGradientOp(Tensor input, int broadcaster, const OpMeta& op_meta = OpMeta())
+  : OpWrapper<BroadcastCommGradientOpDef>(make_ptr<BroadcastCommGradientOpDef>(
+     BroadcastCommGradientOpDef::constrcutor_access_key(), input, broadcaster, op_meta)) {}
+};
+
+/* ReduceCommOp */
+class ReduceCommOpDef : public OperatorDef {
+ private:
+  friend class ReduceCommOp;
+  struct constrcutor_access_key {};
+
+ public:
+  ReduceCommOpDef(const constrcutor_access_key&, Tensor input, int reducer,
+                 const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(ReduceCommOpDef), {input}, op_meta),
+    _reducer(reducer) {
+    if (!device_group().empty()) {
+      // TODO: check whether it satisfies to form a DP group
+      HT_ASSERT(device_group().num_devices() >= 2)
+        << "ReduceComm requires two or more devices. Got " << device_group();
+    }
+    AddOutput(input->meta());
+  }
+
+  uint64_t op_indicator() const noexcept {
+    return REDUCE_OP;
+  }
+
+  int reducer() const {
+    return _reducer;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  TensorList DoGradient(const TensorList& grad_outputs) override;  
+
+  int _reducer;
+};
+
+class ReduceCommOp final : public OpWrapper<ReduceCommOpDef> {
+ public:
+  ReduceCommOp(Tensor input, int reducer, const OpMeta& op_meta = OpMeta())
+  : OpWrapper<ReduceCommOpDef>(make_ptr<ReduceCommOpDef>(
+      ReduceCommOpDef::constrcutor_access_key(), input, reducer, op_meta)) {}
+};
+
+/* ReduceCommGradientOp */
+class ReduceCommGradientOpDef : public OperatorDef {
+ private:
+  friend class ReduceCommGradientOp;
+  struct constrcutor_access_key {};
+
+ public:
+  ReduceCommGradientOpDef(const constrcutor_access_key&, Tensor input, int reducer,
+                 const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(ReduceCommGradientOpDef), {input}, op_meta),
+    _reducer(reducer) {
+    if (!device_group().empty()) {
+      // TODO: check whether it satisfies to form a DP group
+      HT_ASSERT(device_group().num_devices() >= 2)
+        << "ReduceComm requires two or more devices. Got " << device_group();
+    }
+    AddOutput(input->meta());
+  }
+
+  int reducer() const {
+    return _reducer;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  int _reducer;
+};
+
+class ReduceCommGradientOp final : public OpWrapper<ReduceCommGradientOpDef> {
+ public:
+  ReduceCommGradientOp(Tensor input, int reducer, const OpMeta& op_meta = OpMeta())
+  : OpWrapper<ReduceCommGradientOpDef>(make_ptr<ReduceCommGradientOpDef>(
+      ReduceCommGradientOpDef::constrcutor_access_key(), input, reducer, op_meta)) {}
+};
+
+/* GatherOp */
+class GatherOpDef : public OperatorDef {
+ private:
+  friend class GatherOp;
+  struct constrcutor_access_key {};
+
+ public:
+   GatherOpDef(const constrcutor_access_key&, Tensor input, int gatherer,
+                 const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(GatherOpDef), {input}, op_meta),
+    _gatherer(gatherer) {
+    if (!device_group().empty()) {
+      // TODO: check whether it satisfies to form a DP group
+      HT_ASSERT(device_group().num_devices() >= 2)
+        << " Gather requires two or more devices. Got " << device_group();
+    }
+    AddOutput(input->meta());
+  }
+
+  uint64_t op_indicator() const noexcept {
+    return GATHER_OP;
+  }
+
+  int gatherer() const {
+    return _gatherer;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  TensorList DoGradient(const TensorList& grad_outputs) override;  
+
+  int _gatherer;
+};
+
+class GatherOp final : public OpWrapper<GatherOpDef> {
+ public:
+   GatherOp(Tensor input, int gatherer, const OpMeta& op_meta = OpMeta())
+  : OpWrapper<GatherOpDef>(make_ptr<GatherOpDef>(
+       GatherOpDef::constrcutor_access_key(), input, gatherer, op_meta)) {}
+};
+
+/* GatherGradientOp */
+class GatherGradientOpDef : public OperatorDef {
+ private:
+  friend class GatherGradientOp;
+  struct constrcutor_access_key {};
+
+ public:
+   GatherGradientOpDef(const constrcutor_access_key&, Tensor input, int gatherer,
+                 const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(GatherGradientOpDef), {input}, op_meta),
+    _gatherer(gatherer) {
+    if (!device_group().empty()) {
+      // TODO: check whether it satisfies to form a DP group
+      HT_ASSERT(device_group().num_devices() >= 2)
+        << " Gather requires two or more devices. Got " << device_group();
+    }
+    AddOutput(input->meta());
+  }
+
+  int gatherer() const {
+    return _gatherer;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  int _gatherer;
+};
+
+class GatherGradientOp final : public OpWrapper<GatherGradientOpDef> {
+ public:
+   GatherGradientOp(Tensor input, int gatherer, const OpMeta& op_meta = OpMeta())
+  : OpWrapper<GatherGradientOpDef>(make_ptr<GatherGradientOpDef>(
+       GatherGradientOpDef::constrcutor_access_key(), input, gatherer, op_meta)) {}
+};
+
+/* ScatterOp */
+class ScatterOpDef : public OperatorDef {
+ private:
+  friend class ScatterOp;
+  struct constrcutor_access_key {};
+
+ public:
+   ScatterOpDef(const constrcutor_access_key&, Tensor input, int scatterer,
+                 const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(ScatterOpDef), {input}, op_meta),
+    _scatterer(scatterer) {
+    if (!device_group().empty()) {
+      // TODO: check whether it satisfies to form a DP group
+      HT_ASSERT(device_group().num_devices() >= 2)
+        << " Scatter requires two or more devices. Got " << device_group();
+    }
+    AddOutput(input->meta());
+  }
+
+  uint64_t op_indicator() const noexcept {
+    return SCATTER_OP;
+  }
+
+  int scatterer() const {
+    return _scatterer;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  TensorList DoGradient(const TensorList& grad_outputs) override;
+
+  int _scatterer;
+};
+
+class ScatterOp final : public OpWrapper<ScatterOpDef> {
+ public:
+   ScatterOp(Tensor input, int scatterer, const OpMeta& op_meta = OpMeta())
+  : OpWrapper<ScatterOpDef>(make_ptr<ScatterOpDef>(
+       ScatterOpDef::constrcutor_access_key(), input, scatterer, op_meta)) {}
+};
+
+/* ScatterGradientOp */
+class ScatterGradientOpDef : public OperatorDef {
+ private:
+  friend class ScatterGradientOp;
+  struct constrcutor_access_key {};
+
+ public:
+   ScatterGradientOpDef(const constrcutor_access_key&, Tensor input, int scatterer,
+                 const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(ScatterGradientOpDef), {input}, op_meta),
+    _scatterer(scatterer) {
+    if (!device_group().empty()) {
+      // TODO: check whether it satisfies to form a DP group
+      HT_ASSERT(device_group().num_devices() >= 2)
+        << " Scatter requires two or more devices. Got " << device_group();
+    }
+    AddOutput(input->meta());
+  }
+
+  int scatterer() const {
+    return _scatterer;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(const DeviceGroup& placement_group) override;
+
+  NDArrayList DoCompute(const NDArrayList& inputs,
+                        RuntimeContext& ctx) override;
+
+  HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  int _scatterer;
+};
+
+class ScatterGradientOp final : public OpWrapper<ScatterGradientOpDef> {
+ public:
+   ScatterGradientOp(Tensor input, int scatterer, const OpMeta& op_meta = OpMeta())
+  : OpWrapper<ScatterGradientOpDef>(make_ptr<ScatterGradientOpDef>(
+       ScatterGradientOpDef::constrcutor_access_key(), input, scatterer, op_meta)) {}
+};
+
 } // namespace autograd
 } // namespace hetu
