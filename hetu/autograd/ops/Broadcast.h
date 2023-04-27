@@ -71,7 +71,7 @@ class BroadcastOpDef : public OperatorDef {
  protected:
   void DoInferMeta() override;
 
-  void DoDeduceStates() override;
+  // void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
