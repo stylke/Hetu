@@ -12,10 +12,19 @@ void ArrayReshapeOpDef::DoCompute(const NDArrayList& inputs,
 }
 
 TensorList ArrayReshapeOpDef::DoGradient(const TensorList& grad_outputs) {
-  auto& self = reinterpret_cast<ArrayReshapeOp&>(get_self());
-  return {ArrayReshapeGradientOp(grad_outputs.at(0), self,
-                                 grad_op_meta().set_name(grad_name()))
-            ->output(0)};
+  // auto& self = reinterpret_cast<ArrayReshapeOp&>(get_self());
+  if (grad_outputs.at(0).is_defined() && grad_outputs.at(0)->is_tensor())
+    return {ArrayReshapeGradientOp(grad_outputs.at(0), _inputs[0],
+                                  grad_op_meta().set_name(grad_name()))
+              ->output(0)};
+  else 
+    return { Tensor() };
+}
+
+void ArrayReshapeOpDef::DoInferMeta() {
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(_output_shape).set_device(_inputs[0]->device()));
+  if (_inputs[0]->has_shape())
+    set_input_shape(_inputs[0]->shape());
 }
 
 HTShapeList ArrayReshapeOpDef::DoInferShape(const HTShapeList& input_shapes) {
@@ -40,6 +49,7 @@ HTShapeList ArrayReshapeOpDef::DoInferShape(const HTShapeList& input_shapes) {
     }
     output_size *= output_shape[i];
   }
+  // HT_LOG_INFO << input_shape << " " << output_shape;
   if (idx == -1) {
     HT_ASSERT(input_size == output_size) << "Invalid output size.";
   } else {
@@ -51,7 +61,7 @@ HTShapeList ArrayReshapeOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
-void ArrayReshapeOpDef::DeduceStates() {
+void ArrayReshapeOpDef::DoDeduceStates() {
   DistributedStates ds_input = _inputs[0]->get_distributed_states();
   HT_ASSERT(ds_input.is_valid()) 
     << "ArrayReshapeOpDef: distributed states for input must be valid!";
@@ -70,21 +80,18 @@ void ArrayReshapeGradientOpDef::DoCompute(const NDArrayList& inputs,
                                   outputs.at(0), stream());
 }
 
+void ArrayReshapeGradientOpDef::DoInferMeta() {
+  AddOutput(_inputs[1]->meta());
+}
+
 HTShapeList
 ArrayReshapeGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
-  return {get_input_node()->get_input_shape()};
+  return {input_shapes.at(1)};
 }
 
-void ArrayReshapeGradientOpDef::DeduceStates() {
-  DistributedStates ds_grad_output = _inputs[0]->get_distributed_states();
-  HT_ASSERT(ds_grad_output.is_valid()) 
-    << "ArrayReshapeGradientOpDef: distributed states for grad_output must be valid!";
-  HT_ASSERT(ds_grad_output.get_dim(-2) == 1)
-    << "Tensor grad_output shouldn't be partial!";
-  HT_ASSERT(ds_grad_output.check_pure_duplicate())
-    << "Tensor grad_output cannot be splited in any dimension!";
-  _outputs[0]->set_distributed_states(ds_grad_output);    
+void ArrayReshapeGradientOpDef::DoDeduceStates() {
+  _outputs[0]->set_distributed_states(_inputs[1]->get_distributed_states());    
 }
 
 } // namespace autograd

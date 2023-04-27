@@ -12,10 +12,20 @@ void SliceOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
 }
 
 TensorList SliceOpDef::DoGradient(const TensorList& grad_outputs) {
-  return {SliceGradientOp(grad_outputs.at(0), _outputs[0], get_begin_pos(),
+  return {SliceGradientOp(grad_outputs.at(0), _outputs[0], _inputs[0], get_begin_pos(),
                           get_ori_output_shape(),
                           grad_op_meta().set_name(grad_name()))
             ->output(0)};
+}
+
+void SliceOpDef::DoInferMeta() {
+  HT_ASSERT(_begin_pos.size() == _output_shape.size());
+  int len = _begin_pos.size();
+  for (int i = 0; i < len; ++i) {
+    HT_ASSERT(_begin_pos[i] >= 0);
+  }
+  AddOutput(
+    NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(_output_shape).set_device(_inputs[0]->device()));
 }
 
 HTShapeList SliceOpDef::DoInferShape(const HTShapeList& input_shapes) {
@@ -26,20 +36,23 @@ HTShapeList SliceOpDef::DoInferShape(const HTShapeList& input_shapes) {
   HTShape ori_output_shape = get_ori_output_shape();
   HTShape output_shape = get_output_shape();
   HTShape begin_pos = get_begin_pos();
+//   HT_LOG_INFO << output_shape << ori_output_shape << ori_shape;
   for (int i = 0; i < ndim; ++i) {
     if (ori_output_shape[i] == -1) {
       output_shape[i] = ori_shape[i] - begin_pos[i];
     }
     HT_ASSERT(output_shape[i] > 0);
-    HT_ASSERT(begin_pos[i] + output_shape[i] <= ori_shape[i]);
+    HT_ASSERT(begin_pos[i] + output_shape[i] <= ori_shape[i])
+    << "begin_pos" << begin_pos[i] << " ,output_shape" << output_shape[i]
+    << " ,ori_shape" << ori_shape[i];
   }
-  set_ori_output_shape(ori_shape);
+//   set_ori_output_shape(ori_shape);
   set_output_shape(output_shape);
-  set_grad_output_shape(ori_shape);
+  // set_grad_output_shape(ori_shape);
   return {output_shape};
 }
 
-void SliceOpDef::DeduceStates() {
+void SliceOpDef::DoDeduceStates() {
   DistributedStates ds_input = _inputs[0]->get_distributed_states();
   HT_ASSERT(ds_input.is_valid()) 
     << "SliceOpDef: distributed states for input must be valid!";
@@ -67,12 +80,18 @@ void SliceGradientOpDef::DoCompute(const NDArrayList& inputs,
     outputs.at(0), get_begin_pos().data(), stream());
 }
 
+void SliceGradientOpDef::DoInferMeta() {
+  int len = get_begin_pos().size();
+  for (int i = 0; i < len; ++i) {
+    HT_ASSERT(_begin_pos[i] >= 0);
+  }
+  AddOutput(
+    NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(_output_shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList SliceGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
-  SliceOp& input_ptr = reinterpret_cast<SliceOp&>(_inputs[1]->producer());
-  if (input_ptr) {
-    set_output_shape(input_ptr->get_grad_output_shape());
-  }
+  set_output_shape(input_shapes.at(2));
   HTShape output_shape = get_output_shape();
   HTShape begin_pos = get_begin_pos();
   HT_ASSERT(output_shape.size() > 0);
@@ -86,18 +105,8 @@ HTShapeList SliceGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
-void SliceGradientOpDef::DeduceStates() {
-  DistributedStates ds_grad_output = _inputs[0]->get_distributed_states();  
-  DistributedStates ds_ori_input = _inputs[1]->get_distributed_states();
-  HT_ASSERT(ds_grad_output.is_valid() && ds_ori_input.is_valid()
-            && ds_grad_output.get_device_num() == ds_ori_input.get_device_num())
-    << "SliceGradientOpDef: distributed states for inputs tensor must be valid!";
-  HT_ASSERT(ds_grad_output.get_dim(-2) == 1 && ds_ori_input.get_dim(-2) == 1)
-    << "Tensor inputs shouldn't be partial!";
-  HT_ASSERT(ds_grad_output.check_equal(ds_ori_input))
-    << "Distributed states among grad_output and ori_input should be equal!";
-
-  _outputs[0]->set_distributed_states(ds_grad_output);  
+void SliceGradientOpDef::DoDeduceStates() {
+  _outputs[0]->set_distributed_states(_inputs[2]->get_distributed_states());  
 }
 
 } // namespace autograd

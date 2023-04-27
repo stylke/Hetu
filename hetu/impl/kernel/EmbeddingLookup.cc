@@ -2,18 +2,19 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-void embedding_lookup_cpu(const spec_t* input, const spec_t* ids, size_t size,
+void embedding_lookup_cpu(const spec_t* input, const int64_t* ids, size_t size,
                           size_t length, size_t input_row, spec_t* output) {
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
   for (size_t idx = 0; idx < size; ++idx) {
-    int id = ids[idx];
+    int64_t id = ids[idx];
     spec_t* output_ptr = output + length * idx;
     if (id < 0 || id >= (int) input_row) {
       for (size_t i = 0; i < length; i++)
@@ -37,18 +38,17 @@ void array_zero_set_cpu(spec_t* input, size_t size) {
 }
 
 template <typename spec_t>
-void embedding_lookup_gradient_cpu(const spec_t* output_grad, const spec_t* ids,
+void embedding_lookup_gradient_cpu(const spec_t* output_grad, const int64_t* ids,
                                    size_t size, size_t length,
                                    spec_t* input_grad) {
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
-  for (size_t idx = 0; idx < size; ++idx) {
-    int id = ids[idx];
-    const spec_t* output_grad_ptr = output_grad + length * idx;
-    spec_t* input_grad_ptr = input_grad + length * id;
-    for (size_t i = 0; i < length; i++)
-      *(input_grad_ptr + i) += *(output_grad_ptr + i);
+  for (size_t idx = 0; idx < size / length; ++idx) {
+    int id = int(ids[idx]);
+    for (size_t i = 0; i < length; i++) {
+      input_grad[length * id + i] +=  output_grad[length * idx + i];
+    }
   }
 }
 
@@ -59,6 +59,8 @@ void EmbeddingLookupCpu(const NDArray& input, const NDArray& id,
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT(input->ndim() == 2)
     << "input_dim is invalid.Expect 2,but get " << input->ndim();
+  
+  CPUStream cpu_stream(stream);
 
   for (size_t i = 0; i < output->ndim(); i++) {
     if (i + 1 < output->ndim()) {
@@ -74,8 +76,13 @@ void EmbeddingLookupCpu(const NDArray& input, const NDArray& id,
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "EmbbedingLookupCpu", [&]() {
-      embedding_lookup_cpu(input->data_ptr<spec_t>(), id->data_ptr<spec_t>(),
+      auto _future = cpu_stream.EnqueueTask(
+      [input, id, output, size, length, input_row]() {
+      embedding_lookup_cpu(input->data_ptr<spec_t>(), id->data_ptr<int64_t>(),
                            size, length, input_row, output->data_ptr<spec_t>());
+      },
+      "EmbbedingLookup");
+      //cpu_stream.Sync();
     });
 }
 
@@ -86,6 +93,8 @@ void EmbeddingLookupGradientCpu(const NDArray& output_grad, const NDArray& id,
   HT_ASSERT_SAME_DEVICE(output_grad, input_grad);
   HT_ASSERT(input_grad->ndim() == 2)
     << "input_dim is invalid.Expect 2,but get " << input_grad->ndim();
+
+  CPUStream cpu_stream(stream);
 
   for (size_t i = 0; i < output_grad->ndim(); i++) {
     if (i < output_grad->ndim() - 1) {
@@ -99,13 +108,16 @@ void EmbeddingLookupGradientCpu(const NDArray& output_grad, const NDArray& id,
   if (size == 0 || length == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-    input_grad->dtype(), spec_t, "ArrayZeroSet",
-    [&]() { array_zero_set_cpu(input_grad->data_ptr<spec_t>(), size); });
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_grad->dtype(), spec_t, "EmbeddingLookupGradientCuda", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input_grad, output_grad, id, size, length]() {
+      array_zero_set_cpu(input_grad->data_ptr<spec_t>(), size);
       embedding_lookup_gradient_cpu(output_grad->data_ptr<spec_t>(),
-                                    id->data_ptr<spec_t>(), size, length,
+                                    id->data_ptr<int64_t>(), output_grad->numel(), length,
                                     input_grad->data_ptr<spec_t>());
+      },
+      "EmbbedingLookupGradient");
+      //cpu_stream.Sync();
     });
 }
 

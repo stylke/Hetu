@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -58,13 +59,17 @@ void pad_gradient_cpu(const spec_t* output_grad, spec_t* input_grad, size_t N,
 }
 
 void PadCpu(const NDArray& input, NDArray& output, const HTShape& paddings,
-            const Stream& stream, size_t mode = 0, double constant_values = 0) {
+            const Stream& stream, std::string mode = "constant", double constant_values = 0) {
   HT_ASSERT(input->is_cpu()) << "Input is not on a host device.";
   HT_ASSERT(output->is_cpu()) << "Output is not on a host device.";
   HT_ASSERT(input->device() == output->device())
     << "Input and output are not on the same host device. "
     << "Devices: (input) " << input->device() << " vs. (output) "
     << output->device();
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t pad_len = paddings.size();
   size_t len = pad_len;
   size_t endpoint[8];
@@ -83,27 +88,35 @@ void PadCpu(const NDArray& input, NDArray& output, const HTShape& paddings,
     }
   }
   // size_t size = output->numel();
-  if (mode == 0) {
+  if (mode == "constant") {
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       input->dtype(), spec_t, "PadCpu", [&]() {
+        auto _future = cpu_stream.EnqueueTask(
+        [input, output, endpoint, constant_values]() {
         pad_cpu<spec_t>(input->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
                         endpoint[0], endpoint[1], output->shape(0), endpoint[2],
                         endpoint[3], output->shape(1), endpoint[4], endpoint[5],
                         output->shape(2), endpoint[6], endpoint[7],
                         output->shape(3), constant_values);
+        },"Pad");
+        //cpu_stream.Sync();
       });
   }
 }
 
 void PadGradientCpu(const NDArray& output_grad, NDArray& input_grad,
                     const HTShape& paddings, const Stream& stream,
-                    size_t mode = 0) {
+                    std::string mode = "constant") {
   HT_ASSERT(output_grad->is_cpu()) << "Output_grad is not on a host device.";
   HT_ASSERT(input_grad->is_cpu()) << "Input_grad is not on a host device.";
   HT_ASSERT(input_grad->device() == output_grad->device())
     << "input and output grads are not on the same host device. "
     << "Devices: (input_grad) " << input_grad->device() << " vs. (output_grad) "
     << output_grad->device();
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t pad_len = paddings.size();
   size_t len = pad_len;
   size_t begin_p[4];
@@ -125,13 +138,18 @@ void PadGradientCpu(const NDArray& output_grad, NDArray& input_grad,
     }
   }
   // size_t size = input_grad->numel();
-  if (mode == 0) {
+  if (mode == "constant") {
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       input_grad->dtype(), spec_t, "PadGradientCpu", [&]() {
+        auto _future = cpu_stream.EnqueueTask(
+        [input_grad, output_grad, N, C, H, W,
+          begin_p, out_N, out_C, out_H, out_W]() {
         pad_gradient_cpu<spec_t>(output_grad->data_ptr<spec_t>(),
                                  input_grad->data_ptr<spec_t>(), N, C, H, W,
                                  begin_p[0], begin_p[1], begin_p[2], begin_p[3],
                                  out_N, out_C, out_H, out_W);
+        },"PadGradient");
+        //cpu_stream.Sync();
       });
   }
 }

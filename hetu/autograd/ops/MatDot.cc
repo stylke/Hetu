@@ -25,11 +25,16 @@ TensorList MatDotOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_inputA, grad_inputB};
 }
 
+void MatDotOpDef::DoInferMeta() {
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList MatDotOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }
 
-void MatDotOpDef::DeduceStates() {
+void MatDotOpDef::DoDeduceStates() {
   DistributedStates ds_a = _inputs[0]->get_distributed_states();
   DistributedStates ds_b = _inputs[1]->get_distributed_states();
   HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && 

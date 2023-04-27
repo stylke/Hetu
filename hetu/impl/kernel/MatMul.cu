@@ -32,6 +32,9 @@ void MatMulCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
                         a->data_ptr<spec_t>(), trans_a ? n : k, &beta,
                         output->data_ptr<spec_t>(), m);
   });
+    //   HT_LOG_INFO << "_____________up____________\n" << a << 
+    // "\n" << b << "\n" << output
+    // << "\n__________down_____________";
 }
 
 } // namespace impl

@@ -44,7 +44,6 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dCuda", [&]() {
-      const spec_t* input_data = (const spec_t*) input_x->data_ptr<spec_t>();
 
       // input
       cudnnTensorDescriptor_t input_desc;
@@ -53,7 +52,6 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
                                             datatype, input_N, input_C, input_H,
                                             input_W));
 
-      const spec_t* filter_data = (const spec_t*) input_f->data_ptr<spec_t>();
 
       // filter
       cudnnFilterDescriptor_t filter_desc;
@@ -67,13 +65,12 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
       CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
       CUDNN_CALL(cudnnSetConvolution2dDescriptor(
         conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT));
+        CUDNN_CROSS_CORRELATION, datatype));
       // output
       cudnnTensorDescriptor_t out_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&out_desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(
         out_desc, CUDNN_TENSOR_NCHW, datatype, out_N, out_C, out_H, out_W));
-      spec_t* output_data = (spec_t*) output->data_ptr<spec_t>();
       // algorithm
       cudnnConvolutionFwdAlgo_t algo;
       size_t workspace_size;
@@ -99,7 +96,6 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
           break;
         }
       }
-    // algo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
 
 #else
         CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(
@@ -116,10 +112,10 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
 
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
-      CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_data,
-                                         filter_desc, filter_data, conv_desc,
+      CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_x->data_ptr<spec_t>(),
+                                         filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
                                          algo, work_data, workspace_size, &beta,
-                                         out_desc, output_data));
+                                         out_desc, output->data_ptr<spec_t>()));
       FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(out_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
@@ -168,7 +164,6 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dGradientofFilterCuda", [&]() {
       // input
-      const spec_t* input_data = (const spec_t*) input_x->data_ptr<spec_t>();
       cudnnTensorDescriptor_t input_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(input_desc, CUDNN_TENSOR_NCHW,
@@ -176,7 +171,6 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
                                             input_W));
 
       // dy
-      const spec_t* dy_data = (const spec_t*) gradient_y->data_ptr<spec_t>();
       cudnnTensorDescriptor_t dy_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&dy_desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(dy_desc, CUDNN_TENSOR_NCHW,
@@ -190,7 +184,6 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
         CUDNN_CROSS_CORRELATION, datatype));
 
       // dw
-      spec_t* df_data = (spec_t*) gradient_f->data_ptr<spec_t>();
       cudnnFilterDescriptor_t df_desc;
       CUDNN_CALL(cudnnCreateFilterDescriptor(&df_desc));
       CUDNN_CALL(cudnnSetFilter4dDescriptor(
@@ -235,8 +228,8 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
       CUDNN_CALL(cudnnConvolutionBackwardFilter(
-        handle, &alpha, input_desc, input_data, dy_desc, dy_data, conv_desc,
-        algo, work_data, workspace_size, &beta, df_desc, df_data));
+        handle, &alpha, input_desc, input_x->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
+        conv_desc, algo, work_data, workspace_size, &beta, df_desc, gradient_f->data_ptr<spec_t>()));
       FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(dy_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
@@ -282,14 +275,12 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_f->dtype(), spec_t, "Conv2dGradientofDataCuda", [&]() {
       // filter
-      const spec_t* filter_data = (const spec_t*) input_f->data_ptr<spec_t>();
       cudnnFilterDescriptor_t filter_desc;
       CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc));
       CUDNN_CALL(cudnnSetFilter4dDescriptor(filter_desc, datatype,
                                             CUDNN_TENSOR_NCHW, filter_N,
                                             filter_C, filter_H, filter_W));
       // dy
-      const spec_t* dy_data = (const spec_t*) gradient_y->data_ptr<spec_t>();
       cudnnTensorDescriptor_t dy_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&dy_desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(dy_desc, CUDNN_TENSOR_NCHW,
@@ -301,7 +292,6 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
         conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
         CUDNN_CROSS_CORRELATION, datatype));
       // dx
-      spec_t* dx_data = (spec_t*) gradient_x->data_ptr<spec_t>();
       cudnnTensorDescriptor_t dx_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&dx_desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(dx_desc, CUDNN_TENSOR_NCHW,
@@ -348,8 +338,8 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
       CUDNN_CALL(cudnnConvolutionBackwardData(
-        handle, &alpha, filter_desc, filter_data, dy_desc, dy_data, conv_desc,
-        algo, work_data, workspace_size, &beta, dx_desc, dx_data));
+        handle, &alpha, filter_desc, input_f->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
+        conv_desc, algo, work_data, workspace_size, &beta, dx_desc, gradient_x->data_ptr<spec_t>()));
 
       FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(dy_desc));
@@ -416,15 +406,12 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dAddBiasCuda", [&]() {
-      const spec_t* input_data = (const spec_t*) input_x->data_ptr<spec_t>();
       // input
       cudnnTensorDescriptor_t input_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(input_desc, CUDNN_TENSOR_NCHW,
                                             datatype, input_N, input_C, input_H,
                                             input_W));
-
-      const spec_t* filter_data = (const spec_t*) input_f->data_ptr<spec_t>();
       // filter
       cudnnFilterDescriptor_t filter_desc;
       CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc));
@@ -444,7 +431,6 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
       CUDNN_CALL(cudnnCreateTensorDescriptor(&out_desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(
         out_desc, CUDNN_TENSOR_NCHW, datatype, out_N, out_C, out_H, out_W));
-      spec_t* output_data = (spec_t*) output->data_ptr<spec_t>();
       // algorithm
       cudnnConvolutionFwdAlgo_t algo;
       size_t workspace_size;
@@ -484,10 +470,10 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
 
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
-      CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_data,
-                                         filter_desc, filter_data, conv_desc,
+      CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_x->data_ptr<spec_t>(),
+                                         filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
                                          algo, work_data, workspace_size, &beta,
-                                         out_desc, output_data));
+                                         out_desc, output->data_ptr<spec_t>()));
       FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(out_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));

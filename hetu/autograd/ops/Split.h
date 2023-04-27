@@ -17,28 +17,19 @@ class SplitGradientOpDef : public OperatorDef {
 
  public:
   SplitGradientOpDef(const constrcutor_access_key&, Tensor grad_output,
-                     Tensor ori_input, const HTAxes& axes,
+                     Tensor ori_output, Tensor ori_input, const HTAxes& axes,
                      const HTShape& indices, const HTShape& splits,
                      const HTShape& begin_pos, const HTShape& output_shape,
                      const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(SplitGradientOp), {grad_output, ori_input}, op_meta),
+  : OperatorDef(quote(SplitGradientOp), {grad_output, ori_output, ori_input}, op_meta),
     _axes(axes),
     _indices(indices),
     _splits(splits),
     _begin_pos(begin_pos),
     _output_shape(output_shape) {
-    HT_ASSERT(axes.size() == splits.size());
-    int len = axes.size();
-    for (int i = 0; i < len; ++i) {
-      HT_ASSERT(axes[i] >= 0);
-      HT_ASSERT(splits[i] >= 0);
-      HT_ASSERT(indices[i] >= 0 && indices[i] < splits[i]);
-    }
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()));
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
-
-  void DeduceStates() override;
 
   HTShape get_axes() const {
     return _axes;
@@ -77,6 +68,10 @@ class SplitGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -98,12 +93,12 @@ class SplitGradientOpDef : public OperatorDef {
 class SplitGradientOp final : public OpWrapper<SplitGradientOpDef> {
  public:
   SplitGradientOp() : OpWrapper<SplitGradientOpDef>() {}
-  SplitGradientOp(Tensor grad_output, Tensor ori_input, const HTAxes& axes,
+  SplitGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input, const HTAxes& axes,
                   const HTShape& indices, const HTShape& splits,
                   const HTShape& begin_pos, const HTShape& output_shape,
                   const OpMeta& op_meta = OpMeta())
   : OpWrapper<SplitGradientOpDef>(make_ptr<SplitGradientOpDef>(
-      SplitGradientOpDef::constrcutor_access_key(), grad_output, ori_input,
+      SplitGradientOpDef::constrcutor_access_key(), grad_output, ori_output, ori_input,
       axes, indices, splits, begin_pos, output_shape, op_meta)) {}
 };
 
@@ -120,45 +115,10 @@ class SplitOpDef : public OperatorDef {
     _axes(axes),
     _indices(indices),
     _splits(splits) {
-    HT_ASSERT(axes.size() == splits.size());
-    int len = axes.size();
-    for (int i = 0; i < len; ++i) {
-      HT_ASSERT(axes[i] >= 0);
-      HT_ASSERT(splits[i] >= 0);
-      HT_ASSERT(indices[i] >= 0 && indices[i] < splits[i]);
+    DoInferMeta();
+    if (op_meta.is_deduce_states) {
+      DoDeduceStates();
     }
-
-    HTShape ori_shape = input->shape();
-    int ndim = ori_shape.size();
-    HTShape begin_pos(ndim);
-    HTShape output_shape(ndim);
-    for (int i = 0; i < ndim; ++i) {
-      begin_pos[i] = 0;
-      output_shape[i] = ori_shape[i];
-    }
-    for (int i = 0; i < len; ++i) {
-      int64_t axe = axes[i];
-      int64_t ind = indices[i];
-      int64_t spl = splits[i];
-      int64_t part_size = ori_shape[axe] / spl;
-      begin_pos[axe] = ind * part_size;
-      if (ind != spl - 1) {
-        output_shape[axe] = part_size;
-      } else {
-        output_shape[axe] = ori_shape[axe] - begin_pos[axe];
-      }
-    }
-    AddOutput(
-      NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
-    if (op_meta.is_deduce_states) {      
-      DeduceStates();
-    }
-  }
-
-  void DeduceStates() override;
-  
-  uint64_t op_indicator() const noexcept {
-    return SPLIT_OP;
   }
 
   HTShape get_axes() const {
@@ -216,6 +176,10 @@ class SplitOpDef : public OperatorDef {
   Operator grad;
 
  protected:
+  void DoInferMeta() override;
+
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/ndarray_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -19,16 +20,21 @@ void DataTransferCpu(const NDArray& from, NDArray& to, const Stream& stream) {
       << " types are sharing the same storage, which is not allowed.";
     return;
   }
-  if (from->dtype() == to->dtype()) {
-    memcpy(to_ptr, from_ptr, numel * DataType2Size(from->dtype()));
-  } else {
-    HT_DISPATCH_PAIRED_SIGNED_INTEGER_AND_FLOATING_TYPES(
-      from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCpu", [&]() {
-        auto* typed_from_ptr = reinterpret_cast<spec_a_t*>(from_ptr);
-        auto* typed_to_ptr = reinterpret_cast<spec_b_t*>(to_ptr);
-        std::copy(typed_from_ptr, typed_from_ptr + numel, typed_to_ptr);
-      });
-  }
+  CPUStream cpu_stream(stream);
+  auto _future = cpu_stream.EnqueueTask(
+  [from, to, to_ptr, from_ptr, numel]() {
+    if (from->dtype() == to->dtype()) {
+      memcpy(to_ptr, from_ptr, numel * DataType2Size(from->dtype()));
+    } else {
+      HT_DISPATCH_PAIRED_SIGNED_INTEGER_AND_FLOATING_TYPES(
+        from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCpu", [&]() {
+          auto* typed_from_ptr = reinterpret_cast<spec_a_t*>(from_ptr);
+          auto* typed_to_ptr = reinterpret_cast<spec_b_t*>(to_ptr);
+          std::copy(typed_from_ptr, typed_from_ptr + numel, typed_to_ptr);
+        });
+    }
+  },
+  "DataTransfer");
 }
 
 } // namespace impl

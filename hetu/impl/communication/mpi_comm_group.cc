@@ -25,10 +25,13 @@ inline MPI_Op to_MPI_Op(ReductionType red_type) {
     case kPROD: return MPI_PROD;
     case kMAX: return MPI_MAX;
     case kMIN: return MPI_MIN;
+    case kNONE:
+      HT_NOT_IMPLEMENTED << "Reduction type cannot be none";
+      __builtin_unreachable();
     default:
       HT_NOT_IMPLEMENTED << "Reduction type " << red_type
                          << " is not supported for MPI.";
-      return MPI_SUM; // shoud not reach here
+      __builtin_unreachable();
   }
 }
 
@@ -44,7 +47,7 @@ inline MPI_Datatype to_MPI_Datatype(DataType dtype) {
     default:
       HT_NOT_IMPLEMENTED << "Data type " << dtype
                          << " is not supported for MPI.";
-      return MPI_FLOAT; // shoud not reach here
+      __builtin_unreachable();
   }
 }
 

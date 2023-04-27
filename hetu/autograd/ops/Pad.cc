@@ -17,6 +17,21 @@ TensorList PadOpDef::DoGradient(const TensorList& grad_outputs) {
             ->output(0)};
 }
 
+void PadOpDef::DoInferMeta() {
+  HTShape shape;
+  if (_inputs[0]->has_shape()) {
+    shape = _inputs[0]->shape();
+    size_t len = _paddings.size();
+    for (size_t i = 0; i < 4; ++i) {
+      if (i >= (4 - len / 2)) {
+        shape[i] = shape[i] + _paddings[(i - (4 - len / 2)) * 2] +
+          _paddings[(i - (4 - len / 2)) * 2 + 1];
+      }
+    }
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList PadOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   HTShape Infer = input_shapes.at(0);
@@ -31,7 +46,7 @@ HTShapeList PadOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {Infer};
 }
 
-void PadOpDef::DeduceStates() {
+void PadOpDef::DoDeduceStates() {
   DistributedStates ds_input = _inputs[0]->get_distributed_states();
   size_t input_shape_len = _inputs[0]->shape().size();
   size_t padding_len = get_paddings().size();
@@ -52,6 +67,18 @@ void PadGradientOpDef::DoCompute(const NDArrayList& inputs,
     outputs.at(0), get_paddings(), stream(), get_mode());
 }
 
+void PadGradientOpDef::DoInferMeta() {
+  HTShape shape = _inputs[0]->shape();
+  size_t len = _paddings.size();
+  for (size_t i = 0; i < 4; ++i) {
+    if (i >= (4 - len / 2)) {
+      shape[i] = shape[i] - _paddings[(i - (4 - len / 2)) * 2] -
+        _paddings[(i - (4 - len / 2)) * 2 + 1];
+    }
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
+}
+
 HTShapeList PadGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   HTShape Infer = input_shapes.at(0);
@@ -64,20 +91,6 @@ HTShapeList PadGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
     }
   }
   return {Infer};
-}
-
-void PadGradientOpDef::DeduceStates() {
-  DistributedStates ds_grad_output = _inputs[0]->get_distributed_states();
-  size_t grad_output_shape_len = _inputs[0]->shape().size();
-  size_t padding_len = get_paddings().size();
-  size_t max_split_dimension = grad_output_shape_len - padding_len / 2;
-  HT_ASSERT(ds_grad_output.is_valid()) 
-    << "PadGradientOpDef: distributed states for grad_output must be valid!";
-  HT_ASSERT(ds_grad_output.get_dim(-2) == 1)
-    << "Tensor grad_output shouldn't be partial!";
-  HT_ASSERT(ds_grad_output.check_max_dim(max_split_dimension))
-    << "PadGradientOp only support split dimension < " << max_split_dimension;
-  _outputs[0]->set_distributed_states(ds_grad_output);    
 }
 
 } // namespace autograd

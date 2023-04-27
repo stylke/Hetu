@@ -7,11 +7,13 @@
 #include "hetu/_binding/core/device.h"
 #include "hetu/_binding/core/stream.h"
 #include "hetu/_binding/core/ndarray.h"
-#include "hetu/_binding/autograd/tensor.h"
+#include "hetu/_binding/graph/operator.h"
+#include "hetu/_binding/graph/tensor.h"
+#include "hetu/_binding/graph/graph.h"
 
 namespace hetu {
 
-using namespace hetu::autograd;
+using namespace hetu::graph;
 
 enum class ArgType : uint8_t {
   /* Python primitives */
@@ -21,6 +23,7 @@ enum class ArgType : uint8_t {
   STRING, 
   
   /* Python sequences of primitives */
+  BOOL_LIST,
   INT64_LIST, 
   FLOAT64_LIST, 
   STRING_LIST, 
@@ -40,7 +43,10 @@ enum class ArgType : uint8_t {
   ND_ARRAY, 
   ND_ARRAY_LIST, 
   TENSOR, 
-  TENSOR_LIST
+  TENSOR_LIST,
+  OPERATOR,
+  OPERATOR_LIST,
+  FEED_DICT
 };
 
 std::string ArgType2Str(ArgType);
@@ -86,6 +92,7 @@ class FnArg {
   std::string _default_string;
   std::vector<int64_t> _default_int64_list;
   std::vector<double> _default_float64_list;
+  std::vector<bool> _default_bool_list;
 };
 
 class FnSignature {
@@ -204,6 +211,14 @@ class ParsedPyArgs {
     return has(i) ? get_string(i) : default_value;
   }
 
+  inline std::vector<bool> get_bool_list(size_t i) const {
+    return BoolList_FromPyBoolList(_args[i]);
+  }
+
+  inline std::vector<bool> get_bool_list_or_default(size_t i) const {
+    return has(i) ? get_bool_list(i) : signature_arg(i)._default_bool_list;
+  }
+
   inline std::vector<int64_t> get_int64_list(size_t i) const {
     return Int64List_FromPyIntList(_args[i]);
   }
@@ -264,7 +279,7 @@ class ParsedPyArgs {
   }
 
   inline optional<Device> get_device_or_peek(size_t i) const {
-    return has(i) ? optional<Device>(get_device(i)) : get_device_ctx().peek();
+    return has(i) ? optional<Device>(get_device(i)) : get_eager_device_ctx().peek();
   }
 
   inline DeviceGroup get_device_group(size_t i) const {
@@ -325,6 +340,30 @@ class ParsedPyArgs {
     return has(i) ? TensorList_FromPyObject(_args[i]) : TensorList();
   }
 
+  inline Operator get_operator(size_t i) const {
+    return Operator_FromPyObject(_args[i]);
+  }
+
+  inline Operator get_operator_optional(size_t i) const {
+    return has(i) ? get_operator(i) : Operator();
+  }
+
+  inline OpList get_operator_list(size_t i) const {
+    return OperatorList_FromPyObject(_args[i]);
+  }
+
+  inline OpList get_operator_list_or_empty(size_t i) const {
+    return has(i) ? OperatorList_FromPyObject(_args[i]) : OpList();
+  }
+
+  inline FeedDict get_feed_dict(size_t i) const {
+    return FeedDict_FromPyObject(_args[i]);
+  }
+
+  inline FeedDict get_feed_dict_or_empty(size_t i) const {
+    return has(i) ? get_feed_dict(i) : FeedDict();
+  }
+
  private:
   const FnSignature& _signature;
   std::vector<PyObject*> _args;
@@ -358,16 +397,11 @@ class PyArgParser {
   "OpName name=None"
 
 inline OpMeta parse_op_meta(const ParsedPyArgs& parsed_args, size_t offset) {
-  OpMeta ret;
-  auto stream_index_opt = parsed_args.get_stream_index_or_peek(offset);
-  if (stream_index_opt != nullopt)
-    ret.set_stream_index(*stream_index_opt);
-  auto device_group_opt = parsed_args.get_device_group_or_peek(offset + 1);
-  if (device_group_opt != nullopt)
-    ret.set_device_group(*device_group_opt);
-  ret
-    .set_extra_deps(parsed_args.get_tensor_list_or_empty(offset + 2))
-    .set_name(parsed_args.get_string_or_else(offset + 3, OpName()));
+  OpMeta ret = CurrentOpMetaCtx();
+  if (parsed_args.has(offset + 2))
+    ret.set_extra_deps(parsed_args.get_tensor_list(offset + 2));
+  if (parsed_args.has(offset + 3))
+    ret.set_name(parsed_args.get_string(offset + 3));
   return ret;
 }
 

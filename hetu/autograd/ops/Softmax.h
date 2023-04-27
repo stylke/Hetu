@@ -16,29 +16,38 @@ class SoftmaxOpDef : public OperatorDef {
   struct constrcutor_access_key {};
 
  public:
-  SoftmaxOpDef(const constrcutor_access_key&, Tensor input,
+  SoftmaxOpDef(const constrcutor_access_key&, Tensor input, int64_t dim,
                const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(SoftmaxOp), {input}, op_meta) {
-    AddOutput(input->meta());
-    DeduceStates();
+  : OperatorDef(quote(SoftmaxOp), {input}, op_meta),
+  _dim(dim) {
+    DoInferMeta();
+    DoDeduceStates();
   }
 
-  void DeduceStates() override;
+  int64_t get_dim() {
+    return _dim;
+  }
 
  protected:
+  void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
   TensorList DoGradient(const TensorList& grad_outputs) override;
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  int64_t _dim;
 };
 
 class SoftmaxOp final : public OpWrapper<SoftmaxOpDef> {
  public:
-  SoftmaxOp(Tensor input, const OpMeta& op_meta = OpMeta())
+  SoftmaxOp(Tensor input, int64_t dim, const OpMeta& op_meta = OpMeta())
   : OpWrapper<SoftmaxOpDef>(make_ptr<SoftmaxOpDef>(
-      SoftmaxOpDef::constrcutor_access_key(), input, op_meta)) {}
+      SoftmaxOpDef::constrcutor_access_key(), input, dim, op_meta)) {}
 };
 
 class SoftmaxGradientOpDef : public OperatorDef {
@@ -48,27 +57,36 @@ class SoftmaxGradientOpDef : public OperatorDef {
 
  public:
   SoftmaxGradientOpDef(const constrcutor_access_key&, Tensor input,
-                       Tensor grad_output, const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(SoftmaxGradientOp), {input, grad_output}, op_meta) {
-    AddOutput(grad_output->meta());
-    DeduceStates();
+                       Tensor grad_output, int64_t dim, const OpMeta& op_meta = OpMeta())
+  : OperatorDef(quote(SoftmaxGradientOp), {input, grad_output}, op_meta),
+  _dim(dim) {
+    DoInferMeta();
+    DoDeduceStates();
   }
 
-  void DeduceStates() override;
+  int64_t get_dim() {
+    return _dim;
+  }
 
  protected:
+  void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
+
+  int64_t _dim;
 };
 
 class SoftmaxGradientOp final : public OpWrapper<SoftmaxGradientOpDef> {
  public:
-  SoftmaxGradientOp(Tensor input, Tensor grad_output,
+  SoftmaxGradientOp(Tensor input, Tensor grad_output, int64_t dim,
                     const OpMeta& op_meta = OpMeta())
   : OpWrapper<SoftmaxGradientOpDef>(make_ptr<SoftmaxGradientOpDef>(
-      SoftmaxGradientOpDef::constrcutor_access_key(), input, grad_output,
+      SoftmaxGradientOpDef::constrcutor_access_key(), input, grad_output, dim,
       op_meta)) {}
 };
 

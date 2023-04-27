@@ -20,25 +20,19 @@ class ConcatOpDef : public OperatorDef {
   ConcatOpDef(const constrcutor_access_key&, Tensor inputA, Tensor inputB,
               size_t axis, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ConcatOp), {inputA, inputB}, op_meta), _axis(axis) {
-    HTShape shape;
-    if (inputA->has_shape() && inputB->has_shape()) {
-      shape = inputA->shape();
-      if (shape[get_axis()] > 0) {
-        shape[get_axis()] += inputB->shape(get_axis());
-      }
-    }
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
-
-  void DeduceStates() override;
 
   size_t get_axis() const {
     return _axis;
   }
 
  protected:
+  void DoInferMeta() override;
+
+  void DoDeduceStates() override;  
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -69,11 +63,9 @@ class ConcatGradientOpDef : public OperatorDef {
   : OperatorDef(quote(ConcatGradientOp), {input, grad_output}, op_meta),
     _axis(axis),
     _id(id) {
-    AddOutput(input->meta());
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
-
-  void DeduceStates() override;
 
   size_t get_axis() const {
     return _axis;
@@ -84,6 +76,10 @@ class ConcatGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

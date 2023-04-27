@@ -11,7 +11,7 @@ __global__ void relu_kernel(const spec_t* input, size_t size, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  output[idx] = (input[idx] < 0) ? 0 : input[idx];
+  output[idx] = (double(input[idx]) < 0) ? 0 : input[idx];
 }
 
 template <typename spec_t>
@@ -21,7 +21,7 @@ __global__ void relu_gradient_kernel(const spec_t* input,
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  output[idx] = (input[idx] < 0) ? 0 : output_grad[idx];
+  output[idx] = (double(input[idx]) < 0) ? 0 : output_grad[idx];
 }
 
 void ReluCuda(const NDArray& input, NDArray& output, const Stream& stream) {
@@ -42,6 +42,8 @@ void ReluCuda(const NDArray& input, NDArray& output, const Stream& stream) {
       relu_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
     });
+        // CudaStreamSynchronize(cuda_stream);
+    //   HT_LOG_INFO << output->data_ptr<void>();
 }
 
 void ReluGradientCuda(const NDArray& input, const NDArray& output_grad,

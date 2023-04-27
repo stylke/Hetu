@@ -17,11 +17,13 @@ class WhereOpDef : public OperatorDef {
   WhereOpDef(const constrcutor_access_key&, Tensor cond, Tensor inputA,
              Tensor inputB, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(WhereOp), {cond, inputA, inputB}, op_meta) {
-    AddOutput(cond->meta());
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

@@ -128,9 +128,17 @@ HTShape NDArrayMeta::Reduce(const HTShape& shape, const HTAxes& axes,
   if (keepdims) {
     for (auto axis : parsed_axes)
       reduced_shape[axis] = 1;
+  } else if (parsed_axes.size() == num_dim) {
+    return {1};
   } else {
+    HTShape reduced_shape_pre = reduced_shape;
     for (auto axis : parsed_axes)
-      reduced_shape.erase(reduced_shape.begin() + axis);
+      reduced_shape_pre[axis] = 0;
+    reduced_shape = {};
+    for (int i = 0; i < num_dim; i++) {
+      if (reduced_shape_pre[i] != 0)
+        reduced_shape.emplace_back(reduced_shape_pre[i]);
+    }
   }
   return reduced_shape;
 }
@@ -188,7 +196,7 @@ int64_t NDArrayMeta::ParseAxis(int64_t axis, int64_t num_dim) {
 HTAxes NDArrayMeta::ParseAxes(const HTAxes axes, int64_t num_dim) {
   HTAxes ret;
   if (axes.size() == 0) {
-    ret.reserve(num_dim);
+    ret.resize(num_dim);
     std::iota(ret.begin(), ret.end(), 0);
   } else {
     ret.reserve(axes.size());

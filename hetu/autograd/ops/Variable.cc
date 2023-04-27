@@ -12,7 +12,10 @@ bool VariableOpDef::DoPlaceToLocalDevice(const Device& placement,
     _data = NDArray::to(_data, placement, dtype, kBlockingStream);
   }
   if (_init != nullptr) {
-    _init->Init(_data, 0, kBlockingStream);
+    if (!_inited) {
+        _init->Init(_data, 0, kBlockingStream);
+        _inited = 1;
+    }
   }
   return OperatorDef::DoPlaceToLocalDevice(placement, stream_id);
 }
@@ -30,8 +33,10 @@ PlaceholderBaseOpDef::DoInferShape(const HTShapeList& input_shapes) {
 
 void VariableOpDef::reset_initializer(const Initializer& init) {
   _init.reset(init.copy());
+  _inited = 0;
   if (!_placement.is_undetermined()) {
     _init->Init(_data, 0, kBlockingStream);
+    _inited = 1;
   }
 }
 

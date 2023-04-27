@@ -7,7 +7,7 @@ namespace autograd {
 
 void MatMulOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                             RuntimeContext& ctx) {
-  HT_DISPATCH_KERNEL_CUDA_ONLY(placement().type(), type(), hetu::impl::MatMul,
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(), hetu::impl::MatMul,
                                inputs.at(0), trans_a(), inputs.at(1), trans_b(),
                                outputs.at(0), stream());
 }
@@ -51,6 +51,33 @@ TensorList MatMulOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_a, grad_b};
 }
 
+void MatMulOpDef::DoInferMeta() {
+  auto a = _inputs[0];
+  auto b = _inputs[1];
+  if (a->has_shape() && b->has_shape()) {
+    HT_ASSERT(a->ndim() == 2 && b->ndim() == 2)
+      << "Failed to construct the \"" << type() << "\" operation "
+      << "(with name \"" << name() << "\"): "
+      << "Dimensions must be 2. "
+      << "Got " << a->ndim() << ", " << b->ndim() << ".";
+    int64_t dim_a = a->shape(trans_a() ? 0 : 1);
+    int64_t dim_b = b->shape(trans_b() ? 1 : 0);
+    HT_ASSERT(dim_a == -1 || dim_b == -1 || dim_a == dim_b)
+      << "Failed to construct the \"" << type() << "\" operation "
+      << "(with name \"" << name() << "\"): "
+      << "Dimensions must be compatible. "
+      << "Got " << dim_a << " vs. " << dim_b << ". "
+      << "Input shapes: " << a->shape() << " vs. " << b->shape() << ".";
+  }
+  HTShape shape = {-1, -1};
+  if (a->has_shape())
+    shape[0] = a->shape(trans_a() ? 1 : 0);
+  if (b->has_shape())
+    shape[1] = b->shape(trans_b() ? 0 : 1);
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList MatMulOpDef::DoInferShape(const HTShapeList& input_shapes) {
   const HTShape& a = input_shapes.at(0);
   const HTShape& b = input_shapes.at(1);
@@ -63,7 +90,7 @@ HTShapeList MatMulOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {{a.at(trans_a() ? 1 : 0), b.at(trans_b() ? 0 : 1)}};
 }
 
-void MatMulOpDef::DeduceStates() {
+void MatMulOpDef::DoDeduceStates() {
   Tensor& a = _inputs[0];
   Tensor& b = _inputs[1];
   DistributedStates ds_a = a->get_distributed_states();

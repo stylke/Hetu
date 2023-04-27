@@ -12,9 +12,6 @@ void BatchMatMulCuda(const NDArray& a, bool trans_a, const NDArray& b,
   HT_ASSERT_CUDA_DEVICE(a);
   HT_ASSERT_SAME_DEVICE(a, b);
   HT_ASSERT_SAME_DEVICE(a, output);
-  HT_ASSERT_NDIM(a, 2);
-  HT_ASSERT_NDIM(b, 2);
-  HT_ASSERT_NDIM(output, 2);
   HT_ASSERT_SAME_DTYPE(a, b);
   HT_ASSERT_SAME_DTYPE(a, output);
 

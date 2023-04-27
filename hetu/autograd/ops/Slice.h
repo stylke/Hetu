@@ -17,22 +17,15 @@ class SliceGradientOpDef : public OperatorDef {
 
  public:
   SliceGradientOpDef(const constrcutor_access_key&, Tensor grad_output,
-                     Tensor ori_input, const HTShape& begin_pos,
+                     Tensor ori_output, Tensor ori_input, const HTShape& begin_pos,
                      const HTShape& output_shape,
                      const OpMeta& op_meta = OpMeta())
-  : OperatorDef(quote(SliceGradientOp), {grad_output, ori_input}, op_meta),
+  : OperatorDef(quote(SliceGradientOp), {grad_output, ori_output, ori_input}, op_meta),
     _begin_pos(begin_pos),
     _output_shape(output_shape) {
-    int len = begin_pos.size();
-    for (int i = 0; i < len; ++i) {
-      HT_ASSERT(begin_pos[i] >= 0);
-    }
-    AddOutput(
-      NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
-
-  void DeduceStates() override;
 
   HTShape get_begin_pos() const {
     return _begin_pos;
@@ -55,6 +48,10 @@ class SliceGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -70,11 +67,11 @@ class SliceGradientOpDef : public OperatorDef {
 class SliceGradientOp final : public OpWrapper<SliceGradientOpDef> {
  public:
   SliceGradientOp() : OpWrapper<SliceGradientOpDef>() {}
-  SliceGradientOp(Tensor grad_output, Tensor ori_input,
+  SliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
                   const HTShape& begin_pos, const HTShape& output_shape,
                   const OpMeta& op_meta = OpMeta())
   : OpWrapper<SliceGradientOpDef>(make_ptr<SliceGradientOpDef>(
-      SliceGradientOpDef::constrcutor_access_key(), grad_output, ori_input,
+      SliceGradientOpDef::constrcutor_access_key(), grad_output, ori_output, ori_input,
       begin_pos, output_shape, op_meta)) {}
 };
 
@@ -88,21 +85,12 @@ class SliceOpDef : public OperatorDef {
              const HTShape& begin_pos, const HTShape& output_shape,
              const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SliceOp), {input}, op_meta),
-    grad(),
     _begin_pos(begin_pos),
     _output_shape(output_shape),
     _ori_output_shape(output_shape) {
-    HT_ASSERT(begin_pos.size() == output_shape.size());
-    int len = begin_pos.size();
-    for (int i = 0; i < len; ++i) {
-      HT_ASSERT(begin_pos[i] >= 0);
-    }
-    AddOutput(
-      NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
-
-  void DeduceStates() override;
 
   HTShape get_begin_pos() const {
     return _begin_pos;
@@ -132,9 +120,11 @@ class SliceOpDef : public OperatorDef {
     _grad_output_shape = output_shape;
   }
 
-  Operator grad;
-
  protected:
+  void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

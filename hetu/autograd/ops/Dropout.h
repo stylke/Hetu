@@ -25,9 +25,8 @@ class DropoutOpDef : public OperatorDef {
     _keep_prob(keep_prob),
     _recompute(recompute || inplace),
     _inplace(inplace) {
-    AddOutput(input->meta());
-    // TODO: keep random seed same when input tensor is duplicate
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
   double keep_prob() const {
@@ -43,6 +42,8 @@ class DropoutOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   NDArrayList DoCompute(const NDArrayList& inputs,
                         RuntimeContext& ctx) override;
 
@@ -75,8 +76,8 @@ class DropoutGradientOpDef : public OperatorDef {
                        const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DropoutGradientOp), {grad_output, output}, op_meta),
     _keep_prob(keep_prob) {
-    AddOutput(grad_output->meta());
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
   double keep_prob() const {
@@ -84,6 +85,8 @@ class DropoutGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   NDArrayList DoCompute(const NDArrayList& inputs,
                         RuntimeContext& ctx) override;
 
@@ -109,41 +112,43 @@ class DropoutGradientWithRecomputationOpDef : public OperatorDef {
  public:
   DropoutGradientWithRecomputationOpDef(const constrcutor_access_key&,
                                         Tensor grad_output,
-                                        DropoutOp forward_op,
+                                        OpId forward_op,
+                                        double keep_prob,
                                         const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DropoutGradientWithRecomputationOp), {grad_output},
                 op_meta),
-    _forward_op(forward_op) {
-    AddOutput(grad_output->meta());
-    DeduceStates();
+    _forward_op(forward_op),
+    _keep_prob(keep_prob) {
+    DoInferMeta();
+    DoDeduceStates();
   }
 
   double keep_prob() const {
-    return _forward_op->keep_prob();
-  }
-
-  bool inplace() const override {
-    return _forward_op->inplace();
+    return _keep_prob;
   }
 
  protected:
+  void DoInferMeta() override;
+
   NDArrayList DoCompute(const NDArrayList& inputs,
                         RuntimeContext& ctx) override;
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  DropoutOp _forward_op;
+  OpId _forward_op;
+
+  double _keep_prob;
 };
 
 class DropoutGradientWithRecomputationOp final
 : public OpWrapper<DropoutGradientWithRecomputationOpDef> {
  public:
-  DropoutGradientWithRecomputationOp(Tensor grad_output, DropoutOp forward_op,
+  DropoutGradientWithRecomputationOp(Tensor grad_output, OpId forward_op, double keep_prob,
                                      const OpMeta& op_meta = OpMeta())
   : OpWrapper<DropoutGradientWithRecomputationOpDef>(
       make_ptr<DropoutGradientWithRecomputationOpDef>(
         DropoutGradientWithRecomputationOpDef::constrcutor_access_key(),
-        grad_output, forward_op, op_meta)) {}
+        grad_output, forward_op, keep_prob, op_meta)) {}
 };
 
 } // namespace autograd

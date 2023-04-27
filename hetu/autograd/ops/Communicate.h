@@ -44,7 +44,7 @@ class CommOpDef : public OperatorDef {
     AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
 
     // inputs.ds -> outputs.ds
-    DeduceStates();
+    DoDeduceStates();
   }
 
   uint64_t op_indicator() const noexcept {
@@ -59,7 +59,7 @@ class CommOpDef : public OperatorDef {
   DeviceGroup get_devices_by_dim(int32_t dim);
   // DeviceGroup get_allreduce_devices();
 
-  void DeduceStates() override;
+  void DoDeduceStates() override;
   
  protected:
   bool DoMapToParallelDevices(const DeviceGroup& placement_group) override; 

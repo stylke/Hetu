@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -29,6 +30,10 @@ void Conv2dReduceSumCpu(const NDArray& input, NDArray& output,
   HT_ASSERT_SAME_DEVICE(input, output);
 
   HT_ASSERT(input->shape(1) == output->shape(0));
+
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  
   size_t batch_size = input->shape(0);
   size_t input_size = input->shape(2) * input->shape(3);
   size_t output_size = output->shape(0);
@@ -36,9 +41,14 @@ void Conv2dReduceSumCpu(const NDArray& input, NDArray& output,
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "Conv2dReduceCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, input_size, output_size, batch_size]() {
       conv2d_reduce_cpu<spec_t>(input->data_ptr<spec_t>(),
                                 output->data_ptr<spec_t>(), input_size,
                                 output_size, batch_size);
+      },
+      "Conv2dReduce");
+      //cpu_stream.Sync(); 
     });
 }
 

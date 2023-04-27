@@ -3,6 +3,7 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/ndarray_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -58,6 +59,8 @@ void SGDUpdateCpu(const NDArray& grad, NDArray& param, NDArray& velocity,
   HT_ASSERT_CPU_DEVICE(grad);
   HT_ASSERT_CPU_DEVICE(param);
   HT_ASSERT_EXCHANGABLE(grad, param);
+  CPUStream cpu_stream(stream);
+
   if (momentum != 0) {
     HT_ASSERT_CPU_DEVICE(velocity);
     HT_ASSERT_EXCHANGABLE(velocity, param);
@@ -66,18 +69,21 @@ void SGDUpdateCpu(const NDArray& grad, NDArray& param, NDArray& velocity,
   if (size == 0)
     return;
   HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "SGDUpdateCpu", [&]() {
-    if (momentum == 0) {
-      sgd_update_cpu<spec_t>(grad->data_ptr<spec_t>(),
-                             param->data_ptr<spec_t>(), lr, size);
-    } else if (!nesterov) {
-      momentum_update_cpu<spec_t>(
-        grad->data_ptr<spec_t>(), param->data_ptr<spec_t>(),
-        velocity->data_ptr<spec_t>(), lr, momentum, size);
-    } else {
-      nesterov_momentum_update_cpu<spec_t>(
-        grad->data_ptr<spec_t>(), param->data_ptr<spec_t>(),
-        velocity->data_ptr<spec_t>(), lr, momentum, size);
-    }
+    auto _future = cpu_stream.EnqueueTask(
+    [momentum, grad, param, velocity, lr, nesterov, size]() {
+      if (momentum == 0) {
+        sgd_update_cpu<spec_t>(grad->data_ptr<spec_t>(),
+                              param->data_ptr<spec_t>(), lr, size);
+      } else if (!nesterov) {
+        momentum_update_cpu<spec_t>(
+          grad->data_ptr<spec_t>(), param->data_ptr<spec_t>(),
+          velocity->data_ptr<spec_t>(), lr, momentum, size);
+      } else {
+        nesterov_momentum_update_cpu<spec_t>(
+          grad->data_ptr<spec_t>(), param->data_ptr<spec_t>(),
+          velocity->data_ptr<spec_t>(), lr, momentum, size);
+      }
+    },"Reciprocal");
   });
 }
 

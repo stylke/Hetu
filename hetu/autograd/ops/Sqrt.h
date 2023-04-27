@@ -19,11 +19,13 @@ class SqrtOpDef : public OperatorDef {
   SqrtOpDef(const constrcutor_access_key&, Tensor input,
             const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SqrtOp), {input}, op_meta) {
-    AddOutput(input->meta());
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -48,11 +50,13 @@ class ReciprocalSqrtOpDef : public OperatorDef {
   ReciprocalSqrtOpDef(const constrcutor_access_key&, Tensor grad_output,
                       const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReciprocalSqrtOp), {grad_output}, op_meta) {
-    AddOutput(grad_output->meta());
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

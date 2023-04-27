@@ -3,6 +3,7 @@
 #include "hetu/impl/random/CPURandomState.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <random>
 
 namespace hetu {
@@ -42,15 +43,21 @@ void init_truncated_normal_cpu(spec_t* arr, size_t size, spec_t mean,
 void NormalInitsCpu(NDArray& data, double mean, double stddev, uint64_t seed,
                     const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(data);
+  CPUStream cpu_stream(stream);
+
   size_t size = data->numel();
   if (size == 0)
     return;
   if (seed == 0)
     seed = GenNextRandomSeed();
   HT_DISPATCH_FLOATING_TYPES(data->dtype(), spec_t, "NormalInitsCpu", [&]() {
-    init_normal_cpu<spec_t>(data->data_ptr<spec_t>(), size,
-                            static_cast<spec_t>(mean),
-                            static_cast<spec_t>(stddev), seed);
+      auto _future = cpu_stream.EnqueueTask(
+      [data, size, mean, stddev, seed]() {
+      init_normal_cpu<spec_t>(data->data_ptr<spec_t>(), size,
+                              static_cast<spec_t>(mean),
+                              static_cast<spec_t>(stddev), seed);
+      },"NormalInits");
+      //cpu_stream.Sync();
   });
 }
 
@@ -59,15 +66,21 @@ void UniformInitsCpu(NDArray& data, double lb, double ub, uint64_t seed,
   HT_ASSERT_CPU_DEVICE(data);
   HT_ASSERT(lb < ub) << "Invalid range for uniform random init: "
                      << "[" << lb << ", " << ub << ").";
+  CPUStream cpu_stream(stream);
+
   size_t size = data->numel();
   if (size == 0)
     return;
   if (seed == 0)
     seed = GenNextRandomSeed();
   HT_DISPATCH_FLOATING_TYPES(data->dtype(), spec_t, "UniformInitCpu", [&]() {
-    init_uniform_cpu<spec_t>(data->data_ptr<spec_t>(), size,
-                             static_cast<spec_t>(lb), static_cast<spec_t>(ub),
-                             seed);
+    auto _future = cpu_stream.EnqueueTask(
+      [data, size, lb, ub, seed]() {
+      init_uniform_cpu<spec_t>(data->data_ptr<spec_t>(), size,
+                               static_cast<spec_t>(lb), static_cast<spec_t>(ub),
+                               seed);
+      },"UniformInit");
+      //cpu_stream.Sync();
   });
 }
 
@@ -75,6 +88,8 @@ void TruncatedNormalInitsCpu(NDArray& data, double mean, double stddev,
                              double lb, double ub, uint64_t seed,
                              const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(data);
+  CPUStream cpu_stream(stream);
+
   size_t size = data->numel();
   if (size == 0)
     return;
@@ -82,10 +97,14 @@ void TruncatedNormalInitsCpu(NDArray& data, double mean, double stddev,
     seed = GenNextRandomSeed();
   HT_DISPATCH_FLOATING_TYPES(
     data->dtype(), spec_t, "TruncatedNormalInitsCpu", [&]() {
+    auto _future = cpu_stream.EnqueueTask(
+      [data, size, mean, stddev, lb, ub, seed]() {
       init_truncated_normal_cpu<spec_t>(
         data->data_ptr<spec_t>(), size, static_cast<spec_t>(mean),
         static_cast<spec_t>(stddev), static_cast<spec_t>(lb),
         static_cast<spec_t>(ub), seed);
+      },"TruncatedNormalInits");
+      //cpu_stream.Sync();
     });
 }
 

@@ -314,7 +314,7 @@ bool OperatorDef::DoPlaceToLocalDevice(const Device& placement,
   return true;
 }
 
-void OperatorDef::DeduceStates() {
+void OperatorDef::DoDeduceStates() {
   // default: distributed states of output tensor directly copy from input tensor
   // check input states is valid & check distributed states of all input tensor are the same.
   HT_LOG_DEBUG << name() << ": default copy states from inputs";
@@ -327,7 +327,7 @@ void OperatorDef::DeduceStates() {
       default_ds.set_distributed_states(input_ds);
     } else {
       HT_ASSERT(default_ds.check_equal(input_ds))
-        << name() << ": in default DeduceStates: distributed states of all input tensor must be same!"
+        << name() << ": in default DoDeduceStates: distributed states of all input tensor must be same!"
         << ", " << default_ds.ds_info() << " vs " << input_ds.ds_info();
     }
   }

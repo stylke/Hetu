@@ -43,6 +43,8 @@ void BroadcastCuda(const NDArray& input, NDArray& output,
         input->data_ptr<spec_t>(), input_size, size,
         output->data_ptr<spec_t>());
     });
+  // CudaStreamSynchronize(cuda_stream);
+  // HT_LOG_INFO << input << "\n" << output;
 }
 
 void BroadcastGradientCuda(const NDArray& input, NDArray& output,

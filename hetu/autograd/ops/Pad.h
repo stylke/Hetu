@@ -17,29 +17,16 @@ class PadOpDef : public OperatorDef {
 
  public:
   PadOpDef(const constrcutor_access_key&, Tensor input, const HTShape& paddings,
-           size_t mode, double constant, const OpMeta& op_meta = OpMeta())
+           const std::string& mode, double constant, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(PadOp), {input}, op_meta),
     _mode(mode),
     _paddings(paddings),
     _constant(constant) {
-    HTShape shape;
-    if (input->has_shape()) {
-      shape = input->shape();
-      size_t len = paddings.size();
-      for (size_t i = 0; i < 4; ++i) {
-        if (i >= (4 - len / 2)) {
-          shape[i] = shape[i] + paddings[(i - (4 - len / 2)) * 2] +
-            paddings[(i - (4 - len / 2)) * 2 + 1];
-        }
-      }
-    }
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
-  void DeduceStates() override;
-
-  size_t get_mode() const {
+  const std::string& get_mode() const {
     return _mode;
   }
 
@@ -52,6 +39,10 @@ class PadOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -59,7 +50,7 @@ class PadOpDef : public OperatorDef {
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  size_t _mode;
+  std::string _mode;
 
   HTShape _paddings;
 
@@ -68,7 +59,7 @@ class PadOpDef : public OperatorDef {
 
 class PadOp final : public OpWrapper<PadOpDef> {
  public:
-  PadOp(Tensor input, const HTShape& paddings, size_t mode, double constant,
+  PadOp(Tensor input, const HTShape& paddings, std::string mode, double constant,
         const OpMeta& op_meta = OpMeta())
   : OpWrapper<PadOpDef>(make_ptr<PadOpDef>(PadOpDef::constrcutor_access_key(),
                                            input, paddings, mode, constant,
@@ -82,26 +73,16 @@ class PadGradientOpDef : public OperatorDef {
 
  public:
   PadGradientOpDef(const constrcutor_access_key&, Tensor grad_output,
-                   const HTShape& paddings, size_t mode,
+                   const HTShape& paddings, const std::string& mode,
                    const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(PadGradientOp), {grad_output}, op_meta),
     _mode(mode),
     _paddings(paddings) {
-    HTShape shape = grad_output->shape();
-    size_t len = paddings.size();
-    for (size_t i = 0; i < 4; ++i) {
-      if (i >= (4 - len / 2)) {
-        shape[i] = shape[i] - paddings[(i - (4 - len / 2)) * 2] -
-          paddings[(i - (4 - len / 2)) * 2 + 1];
-      }
-    }
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
-  void DeduceStates() override;
-
-  size_t get_mode() const {
+  const std::string& get_mode() const {
     return _mode;
   }
 
@@ -110,19 +91,21 @@ class PadGradientOpDef : public OperatorDef {
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
   HTShapeList DoInferShape(const HTShapeList& input_shapes) override;
 
-  size_t _mode;
+  std::string _mode;
 
   HTShape _paddings;
 };
 
 class PadGradientOp final : public OpWrapper<PadGradientOpDef> {
  public:
-  PadGradientOp(Tensor grad_output, const HTShape& paddings, size_t mode,
+  PadGradientOp(Tensor grad_output, const HTShape& paddings, std::string mode,
                 const OpMeta& op_meta = OpMeta())
   : OpWrapper<PadGradientOpDef>(
       make_ptr<PadGradientOpDef>(PadGradientOpDef::constrcutor_access_key(),

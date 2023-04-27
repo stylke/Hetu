@@ -19,11 +19,13 @@ class ReluOpDef : public OperatorDef {
   ReluOpDef(const constrcutor_access_key&, Tensor input,
             const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReluOp), {input}, op_meta) {
-    AddOutput(input->meta());
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -48,11 +50,13 @@ class ReluGradientOpDef : public OperatorDef {
   ReluGradientOpDef(const constrcutor_access_key&, Tensor input,
                     Tensor grad_output, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReluGradientOp), {input, grad_output}, op_meta) {
-    AddOutput(input->meta());
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

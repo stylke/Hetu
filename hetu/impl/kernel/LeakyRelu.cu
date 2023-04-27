@@ -13,7 +13,7 @@ __global__ void leaky_relu_kernel(const spec_t* input, spec_t alpha,
   if (idx >= size)
     return;
   output[idx] = input[idx];
-  if (input[idx] < 0)
+  if (double(input[idx]) < 0)
     output[idx] *= alpha;
 }
 
@@ -26,7 +26,7 @@ __global__ void leaky_relu_gradient_kernel(const spec_t* input,
   if (idx >= size)
     return;
   output[idx] = output_grad[idx];
-  if (input[idx] < 0)
+  if (double(input[idx]) < 0)
     output[idx] *= alpha_reciprocal;
 }
 
@@ -72,7 +72,7 @@ void LeakyReluGradientCuda(const NDArray& input, const NDArray& output_grad,
     input->dtype(), spec_t, "LeakyReluGradientCuda", [&]() {
       leaky_relu_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(),
-        static_cast<spec_t>(1.0 / alpha), size, input_grad->data_ptr<spec_t>());
+        static_cast<spec_t>(alpha), size, input_grad->data_ptr<spec_t>());
     });
 }
 

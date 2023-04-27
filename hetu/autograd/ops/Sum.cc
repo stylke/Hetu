@@ -27,19 +27,11 @@ TensorList SumOpDef::DoGradient(const TensorList& grad_outputs) {
 
 HTShapeList SumOpDef::DoInferShape(const HTShapeList& input_shapes) {
   int len = input_shapes.size();
-  size_t max_size = 0;
-  int max_idx = 0;
-  for (int idx = 0; idx < len; ++idx) {
-    size_t tmp = 1;
-    for (size_t i = 0; i < input_shapes.at(idx).size(); ++i) {
-      tmp *= input_shapes.at(idx)[i];
-    }
-    if (tmp > max_size) {
-      max_idx = idx;
-      max_size = tmp;
-    }
+  HTShape output_shape = input_shapes[0];
+  for (int i = 1; i < len; ++i) {
+    output_shape = Broadcast(output_shape, input_shapes[i]);
   }
-  return {input_shapes.at(max_idx)};
+  return {output_shape};
 }
 
 } // namespace autograd

@@ -35,7 +35,7 @@ void TestDARDataParallelMLP(DataType dtype = kFloat32,
       act = ReluOp(act)->output(0);
   }
   auto prob = SigmoidOp(act)->output(0);
-  auto loss = BinaryCrossEntropyOp(prob, y)->output(0);
+  auto loss = BinaryCrossEntropyOp(prob, y, "mean")->output(0);
   SGDOptimizer optimizer(0.1, 0.0);
   auto train_op = optimizer.Minimize(loss);
 
@@ -95,7 +95,7 @@ void TestDBRDataParallelMLP(DataType dtype = kFloat32,
     }
     auto prob = SigmoidOp(act)->output(0);
     if (training) {
-      auto loss = BinaryCrossEntropyOp(prob, y)->output(0);
+      auto loss = BinaryCrossEntropyOp(prob, y, "mean")->output(0);
       optimizer.ZeroGrad();
       loss->Backward();
       optimizer.Step();

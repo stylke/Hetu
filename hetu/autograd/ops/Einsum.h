@@ -27,9 +27,10 @@ class EinsumOpDef : public OperatorDef {
     _msg(msg),
     input_dims(),
     output_dims() {
-    ParseMsg();
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()));
+    // ParseMsg();
+    // HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+    // AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()));
+    DoInferMeta();
   }
 
   inline std::string fetch_msg() const {
@@ -46,6 +47,8 @@ class EinsumOpDef : public OperatorDef {
 
  protected:
   void ParseMsg();
+
+  void DoInferMeta() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -104,8 +107,9 @@ class EinsumGradientOpDef : public OperatorDef {
     _msg(msg),
     input_dims(),
     output_dims() {
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()));
+    // HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+    // AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()));
+    DoInferMeta();
   }
 
   inline std::string fetch_msg() const {
@@ -117,7 +121,9 @@ class EinsumGradientOpDef : public OperatorDef {
   Tensor pred_in;
 
  protected:
-  void ParseMsg();
+  void ParseMsg(const HTShapeList& input_shapes);
+
+  void DoInferMeta() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

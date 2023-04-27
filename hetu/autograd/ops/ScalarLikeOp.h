@@ -18,8 +18,8 @@ class ScalarLikeOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(std::move(op_type), {input}, op_meta),
     _scalar_value(scalar_value) {
-    AddOutput(input->meta());
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
  public:
@@ -31,9 +31,11 @@ class ScalarLikeOpDef : public OperatorDef {
     return _scalar_value;
   }
 
-  void DeduceStates() override;
-
  protected:
+  void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

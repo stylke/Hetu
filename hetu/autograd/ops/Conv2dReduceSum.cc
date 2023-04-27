@@ -25,7 +25,7 @@ Conv2dReduceSumOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {{input_shapes.at(0)[1]}};
 }
 
-void Conv2dReduceSumOpDef::DeduceStates() {
+void Conv2dReduceSumOpDef::DoDeduceStates() {
   DistributedStates ds_input = _inputs[0]->get_distributed_states();
   HT_ASSERT(ds_input.is_valid()) 
     << "Conv2dReduceSumOpDef: distributed states for input must be valid!";

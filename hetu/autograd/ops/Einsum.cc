@@ -20,7 +20,7 @@ NDArray sumproduct_pair(NDArray& left_, NDArray& right_, HTShape sum_dims_,
   HT_ASSERT(dim <= (int64_t) dim_bitset_size)
     << "only tensors with up to " << dim_bitset_size << " dims are supported";
   std::bitset<dim_bitset_size> sum_dims;
-  for (int i = 0; i < sum_dims_.size(); ++i) {
+  for (size_t i = 0; i < sum_dims_.size(); ++i) {
     size_t d = sum_dims_[i];
     HT_ASSERT(!sum_dims[d])
       << "dim " << d << " appears multiple times in the list of dims";
@@ -132,9 +132,9 @@ NDArray sumproduct_pair(NDArray& left_, NDArray& right_, HTShape sum_dims_,
 
   right = NDArray::reshape(right, rs);
 
-  NDArray result = NDArray::batchmatmul(left, right, false, false);
+  NDArray result = NDArray::bmm(left, right, false, false);
   HTShape os(out_size.size());
-  for (int i = 0; i < out_size.size(); ++i) {
+  for (size_t i = 0; i < out_size.size(); ++i) {
     os[i] = out_size[i];
   }
 
@@ -251,7 +251,7 @@ void EinsumOpDef::ParseMsg() {
     num_ellipsis = 0;
     i = 0;
     OpDim tmp_dim = {};
-    int label_idx = 0;
+    // int label_idx = 0;
     while (i < output_len) {
       switch (tmp_output[i]) {
         case '.':
@@ -336,7 +336,6 @@ void EinsumOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
     OpDim input_labels;
     HTShape input_shape;
     NDArray input_tensor = NDArray::copy(inputs.at(i));
-    ;
     input_labels = input_dims[i];
     input_shape = inputs.at(i)->shape();
 
@@ -387,7 +386,7 @@ void EinsumOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
 
   for (int dim = 0; dim < num_output_labels; dim++) {
     int output_dim_size = permuted_inputs[0]->shape(dim);
-    for (int i = 1; i < num_inputs(); ++i) {
+    for (size_t i = 1; i < num_inputs(); ++i) {
       int input_dim_size = permuted_inputs[i]->shape(dim);
       HT_ASSERT(output_dim_size == input_dim_size || output_dim_size == 1 ||
                 input_dim_size == 1)
@@ -424,9 +423,7 @@ void EinsumOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
   // cudaEventRecord(stop, 0);
   // cudaEventSynchronize(stop);
   // cudaEventElapsedTime(&elapsed, start, stop);
-  // std::cout << "_____________________________part3 elapsed:" << elapsed
-  // <<std::endl;
-  for (int i = 1; i < num_inputs(); ++i) {
+  for (size_t i = 1; i < num_inputs(); ++i) {
     NDArray permuted_input = NDArray::copy(permuted_inputs[i]);
     HTShape sum_dims;
     // Sum out or squeeze dimensions that are size 1 for all later operands
@@ -445,10 +442,8 @@ void EinsumOpDef::DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
     }
     // Multiply tensors and sum out dimensions in sum_dims
     if (sum_dims.empty()) {
-      std::cout << "PT1" << std::endl;
       output_tensor = NDArray::mul(output_tensor, permuted_input);
     } else if (sum_dims.size() == output_tensor->ndim()) {
-      std::cout << "PT2" << std::endl;
       NDArray flatten_input = NDArray::flatten(permuted_input, 0, -1);
       NDArray flatten_output = NDArray::flatten(output_tensor, 0, -1);
       output_tensor =
@@ -495,6 +490,12 @@ TensorList EinsumOpDef::DoGradient(const TensorList& grad_outputs) {
     grad_inputs.emplace_back(grad_input);
   }
   return grad_inputs;
+}
+
+void EinsumOpDef::DoInferMeta() {
+  ParseMsg();
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_device(_inputs[0]->device()));
 }
 
 HTShapeList EinsumOpDef::DoInferShape(const HTShapeList& input_shapes) {
@@ -553,7 +554,7 @@ HTShapeList EinsumOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
-void EinsumGradientOpDef::ParseMsg() {
+void EinsumGradientOpDef::ParseMsg(const HTShapeList& input_shapes) {
   input_dims = {};
   output_dims = {};
   _input_msgs = {};
@@ -621,8 +622,7 @@ void EinsumGradientOpDef::ParseMsg() {
     if (_inputs[i]->has_shape())
       input_shape = _inputs[i]->shape();
     else {
-      EinsumOp& input_ptr = reinterpret_cast<EinsumOp&>(pred->producer());
-      input_shape = input_ptr->get_grad_shape();
+      input_shape = input_shapes.at(i);
     }
     OpDim input_dim = input_dims.at(i);
     int ndims = input_shape.size();
@@ -647,7 +647,8 @@ void EinsumGradientOpDef::ParseMsg() {
         << "num of dims is not equal to num of labels.";
     } else {
       HT_ASSERT(nlabels == ndims)
-        << "num of dims is not equal to num of labels.";
+        << "num of dims is not equal to num of labels."
+        << nlabels << "vs" << ndims << " of input" << i;
     }
   }
 
@@ -678,7 +679,7 @@ void EinsumGradientOpDef::ParseMsg() {
     i = 0;
     OpDim tmp_dim = {};
     undefined_labels = {};
-    int label_idx = 0;
+    // int label_idx = 0;
     while (i < output_len) {
       switch (tmp_output[i]) {
         case '.':
@@ -691,7 +692,7 @@ void EinsumGradientOpDef::ParseMsg() {
           elli_pos = output_idx;
           output_idx += elli_len;
           if (output_ellis > elli_len) {
-            for (int idx = 0; idx < output_ellis - elli_len; ++idx) {
+            for (int64_t idx = 0; idx < output_ellis - elli_len; ++idx) {
               std::string label = "UNDEFINED" + std::to_string(idx);
               undefined_labels.emplace(label, 0);
               output_labels_idx.emplace(label, output_idx++);
@@ -803,7 +804,7 @@ void EinsumGradientOpDef::DoCompute(const NDArrayList& inputs,
 
   for (int dim = 0; dim < num_output_labels; dim++) {
     int output_dim_size = permuted_inputs[0]->shape(dim);
-    for (int i = 1; i < num_inputs(); ++i) {
+    for (size_t i = 1; i < num_inputs(); ++i) {
       int input_dim_size = permuted_inputs[i]->shape(dim);
       HT_ASSERT(output_dim_size == input_dim_size || output_dim_size == 1 ||
                 input_dim_size == 1)
@@ -837,7 +838,7 @@ void EinsumGradientOpDef::DoCompute(const NDArrayList& inputs,
     }
   }
 
-  for (int i = 1; i < num_inputs(); ++i) {
+  for (size_t i = 1; i < num_inputs(); ++i) {
     NDArray permuted_input = permuted_inputs[i];
     HTShape sum_dims;
 
@@ -888,13 +889,21 @@ void EinsumGradientOpDef::DoCompute(const NDArrayList& inputs,
       output_idx += 1;
     }
   }
+  
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::Reshape, output_tensor,
                                   outputs.at(0), stream());
 }
 
+void EinsumGradientOpDef::DoInferMeta() {
+  HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype())
+                         .set_device(_inputs[0]->device())
+                         .set_shape(pred_in->shape()));
+}
+
 HTShapeList EinsumGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
-  ParseMsg();
+  ParseMsg(input_shapes);
   return {pred_in->shape()};
 }
 

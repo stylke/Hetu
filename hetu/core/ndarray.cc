@@ -116,17 +116,8 @@ NDArray NDArray::sub(const NDArray& x, const NDArray& y, StreamIndex stream_id,
     ? output
     : NDArray::empty(output_shape, x->device(), x->dtype());
   Stream stream(x->device(), stream_id);
-  // TODO: support element-wise subtraction kernel
-  NDArray opposite_y;
-  if (x->shape() == y->shape())
-    opposite_y = out;
-  else
-    opposite_y = NDArray::empty_like(y);
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(y->device().type(), __FUNCTION__,
-                                  hetu::impl::Opposite, y, opposite_y, stream);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
-                                  hetu::impl::AddElewise, x, opposite_y, out,
-                                  stream);
+                                  hetu::impl::SubElewise, x, y, out, stream);
   return out;
 }
 
@@ -137,8 +128,12 @@ NDArray NDArray::sub(const NDArray& input, double scalar, StreamIndex stream_id,
 
 NDArray NDArray::sub(double scalar, const NDArray& input, StreamIndex stream_id,
                      NDArray& output) {
-  auto out = NDArray::neg(input, stream_id, output);
-  return NDArray::add(out, scalar, stream_id, out);
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::SubConst, input, scalar, out,
+                                  stream);
+  return out;
 }
 
 NDArray NDArray::neg(const NDArray& input, StreamIndex stream_id,
@@ -197,8 +192,12 @@ NDArray NDArray::div(const NDArray& input, double scalar, StreamIndex stream_id,
 
 NDArray NDArray::div(double scalar, const NDArray& input, StreamIndex stream_id,
                      NDArray& output) {
-  auto out = NDArray::reciprocal(input, stream_id, output);
-  return NDArray::mul(out, scalar, stream_id, out);
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::DivConst, input, scalar, out,
+                                  stream);
+  return out;
 }
 
 NDArray NDArray::pow(const NDArray& input, double exponent,
@@ -301,17 +300,17 @@ NDArray NDArray::round(const NDArray& input, StreamIndex stream_id,
   return out;
 }
 
-NDArray NDArray::_reduce(const NDArray& input, ReductionType red_type,
-                         const HTAxes& axes, bool keepdims,
-                         StreamIndex stream_id, NDArray& output) {
+NDArray NDArray::reduce(const NDArray& input, ReductionType red_type,
+                        const HTAxes& axes, bool keepdims,
+                        StreamIndex stream_id, NDArray& output) {
   auto output_shape = NDArrayMeta::Reduce(input->shape(), axes, keepdims);
   NDArray out = output.is_defined()
     ? output
     : NDArray::empty(output_shape, input->device(), input->dtype());
   Stream stream(input->device(), stream_id);
-  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
-                               hetu::impl::Reduce, input, out, axes, red_type,
-                               stream);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Reduce, input, out, axes, red_type,
+                                  stream);
   return out;
 }
 
@@ -324,20 +323,20 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
     << " (transpose = " << trans_left << ") vs. " << y->shape()
     << " (transpose = " << trans_right << "). ";
   NDArray out = output.is_defined()
-    ? out
+    ? output
     : NDArray::empty(
         {x->shape(trans_left ? 1 : 0), y->shape(trans_right ? 0 : 1)},
         x->device(), x->dtype());
   Stream stream(x->device(), stream_id);
-  HT_DISPATCH_KERNEL_CUDA_ONLY(x->device().type(), __FUNCTION__,
-                               hetu::impl::MatMul, x, trans_left, y,
-                               trans_right, out, stream);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
+                                  hetu::impl::MatMul, x, trans_left, y,
+                                  trans_right, out, stream);
   return out;
 }
 
-NDArray NDArray::batchmatmul(const NDArray& x, const NDArray& y,
-                             bool trans_left, bool trans_right,
-                             StreamIndex stream_id, NDArray& output) {
+NDArray NDArray::bmm(const NDArray& x, const NDArray& y,
+                     bool trans_left, bool trans_right,
+                     StreamIndex stream_id, NDArray& output) {
   const HTShape& a = x->shape();
   const HTShape& b = y->shape();
   int ndims = a.size() - 2;
@@ -354,12 +353,13 @@ NDArray NDArray::batchmatmul(const NDArray& x, const NDArray& y,
   }
   shape.emplace_back(a.at(trans_left ? ndims + 1 : ndims));
   shape.emplace_back(b.at(trans_right ? ndims : ndims + 1));
-  NDArray out =
-    output.is_defined() ? out : NDArray::empty(shape, x->device(), x->dtype());
+  NDArray out = output.is_defined()
+    ? output
+    : NDArray::empty(shape, x->device(), x->dtype());
   Stream stream(x->device(), stream_id);
-  HT_DISPATCH_KERNEL_CUDA_ONLY(x->device().type(), __FUNCTION__,
-                               hetu::impl::BatchMatMul, x, trans_left, y,
-                               trans_right, out, stream);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
+                                  hetu::impl::BatchMatMul, x, trans_left, y,
+                                  trans_right, out, stream);
   return out;
 }
 
@@ -590,8 +590,509 @@ NDArrayList NDArray::split(const NDArray& input, const HTShape& chunks,
   }
 }
 
+//_____________________________________________________________________________________
+
+NDArray NDArray::avgpool(const NDArray& input, const size_t kernel_H,
+                         const size_t kernel_W, const size_t padding,
+                         const size_t stride,
+                         StreamIndex stream_id,
+                         NDArray& output) {  
+  NDArray out;
+  if (output.is_defined())
+    out = output;
+  else {
+    int64_t N = input->shape(0);
+    int64_t C = input->shape(1);
+    int64_t H = input->shape(2);
+    int64_t W = input->shape(3);
+    int64_t p_H = (H + 2 * padding - kernel_H) / stride + 1;
+    int64_t p_W = (W + 2 * padding - kernel_W) / stride + 1;
+    out = NDArray::empty({N, C, p_H, p_W}, input->device(), input->dtype());
+  }
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__, hetu::impl::AvgPool,
+                                  input, kernel_H, kernel_W,
+                                  out, padding, stride,
+                                  stream);
+  return out;
+}
+
+NDArray NDArray::arrayset(NDArray& input, double value,
+                          StreamIndex stream_id) {  
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
+      input->device().type(), __FUNCTION__, hetu::impl::ArraySet, 
+      input, value, stream);  
+  return input;
+}
+
+NDArrayList NDArray::batchnorm(const NDArray& input, const NDArray& bn_scale, const NDArray& bn_bias,
+                               NDArray& running_mean, NDArray& running_var,
+                               double momentum, double eps,
+                               StreamIndex stream_id,
+                               NDArray& output,
+                               NDArray& save_mean,
+                               NDArray& save_var) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  NDArray savemean = save_mean.is_defined() ? save_mean : NDArray::empty({input->shape(1)}, input->device(), input->dtype());
+  NDArray savevar = save_var.is_defined() ? save_var : NDArray::empty({input->shape(1)}, input->device(), input->dtype());
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
+    input->device().type(), __FUNCTION__, hetu::impl::BatchNorm, input,
+    bn_scale, bn_bias, out, momentum, eps,
+    running_mean, running_var, 
+    savemean, savevar, stream);
+  return {out, savemean, savevar};
+}
+
+NDArray NDArray::broadcast(const NDArray& input, const HTShape& shape,
+                           StreamIndex stream_id,
+                           NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty(shape, input->device(), input->dtype());
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Broadcast, input,
+                                  out, stream);
+  return out;
+}
+
+NDArray NDArray::broadcast(const NDArray& input, const HTShape& shape,
+                           const HTAxes& add_axes,
+                           StreamIndex stream_id,
+                           NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty(shape, input->device(), input->dtype());
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::BroadcastShape, input,
+                                  out, add_axes, stream);
+  return out;
+}
+
+NDArray NDArray::conv2d(const NDArray& input, const NDArray& filter, 
+                        const HTShape& padding, const HTShape& stride,
+                        StreamIndex stream_id,
+                        NDArray& output) {
+  NDArray out;
+  if (output.is_defined()) 
+    out = output;
+  else {
+    int64_t N = input->shape(0);
+    int64_t H = input->shape(0);
+    int64_t W = input->shape(0);
+    int64_t f_O = filter->shape(0);
+    int64_t f_H = filter->shape(2);
+    int64_t f_W = filter->shape(3);
+    int64_t out_H = (H + 2 * padding[0] - f_H) / stride[0] + 1;
+    int64_t out_W = (W + 2 * padding[1] - f_W) / stride[1] + 1;
+    out = NDArray::empty({N, f_O, out_H, out_W}, input->device(), input->dtype());
+  }
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__, hetu::impl::Conv2d,
+                                  input, filter, out,
+                                  padding[0], padding[1],
+                                  stride[0], stride[1], stream);
+  return out;
+}
+
+NDArray NDArray::embedding(const NDArray& input, const NDArray& id,
+                           StreamIndex stream_id,
+                           NDArray& output) {
+  NDArray out;
+  if (output.is_defined()) 
+    out = output;
+  else {
+    HTShape output_shape = id->shape();
+    output_shape.emplace_back(input->shape(1));
+    out = NDArray::empty(output_shape, input->device(), input->dtype());
+  }
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::EmbeddingLookup, input,
+                                  id, out, stream);
+  return out;
+}
+
+NDArray NDArray::gather(const NDArray& input, const NDArray& id, int64_t dim,
+                        StreamIndex stream_id,
+                        NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty(id->shape(), input->device(), input->dtype());
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Gather, input,
+                                  id, out, dim, stream);
+  return out;
+}
+
+NDArrayList NDArray::instancenorm(const NDArray& input, double eps,
+                                  StreamIndex stream_id,
+                                  NDArray& output,
+                                  NDArray& save_mean,
+                                  NDArray& save_var) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  HTShape local_shape = input->shape();
+  local_shape[3] = 1;
+  local_shape[2] = 1;
+  NDArray savemean = save_mean.is_defined() ? save_mean : NDArray::empty(local_shape, input->device(), input->dtype());
+  NDArray savevar = save_var.is_defined() ? save_var : NDArray::empty(local_shape, input->device(), input->dtype());
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
+    input->device().type(), __FUNCTION__, hetu::impl::InstanceNorm, input,
+    savemean, savevar, out, eps, stream);
+  return {out, savemean, savevar};  
+}
+
+NDArray NDArray::kldiv(const NDArray& preds, const NDArray& labels,
+                       ReductionType reduction,
+                       StreamIndex stream_id,
+                       NDArray& output) {
+  NDArray out;
+  if (output.is_defined()) 
+    out = output;
+  else {
+    if (reduction != kNONE)
+      out = NDArray::empty({1}, preds->device(), preds->dtype());
+    else 
+      out = NDArray::empty(preds->shape(), preds->device(), preds->dtype());
+  }
+  Stream stream(preds->device(), stream_id);
+  NDArray unreduced =
+    reduction == kNONE ? out : NDArray::empty_like(preds);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(preds->device().type(), __FUNCTION__,
+                                  hetu::impl::KLDivLoss, preds,
+                                  labels, unreduced, stream);
+  if (reduction != kNONE) {
+    NDArray::reduce(unreduced, reduction, HTAxes(), false, stream_id, out);
+  }
+  return out;
+}
+
+NDArrayList NDArray::layernorm(const NDArray& input, const NDArray& bn_scale, const NDArray& bn_bias, 
+                               const HTShape& normalized_shape, double eps,
+                               StreamIndex stream_id,
+                               NDArray& output,
+                               NDArray& save_mean,
+                               NDArray& save_var) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  HTShape local_shape = input->shape();
+  int ndim = local_shape.size();
+  local_shape[ndim - 1] = 1;
+  NDArray savemean = save_mean.is_defined() ? save_mean : NDArray::empty(normalized_shape, input->device(), input->dtype());
+  NDArray savevar = save_var.is_defined() ? save_var : NDArray::empty(normalized_shape, input->device(), input->dtype());
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::LayerNorm, input,
+                                  bn_scale, bn_bias, savemean, savevar, 
+                                  out, normalized_shape.size(), eps, stream);  
+  return {out, savemean, savevar};
+}
+
+NDArray NDArray::leakyrelu(const NDArray& input, double alpha,
+                           StreamIndex stream_id,
+                           NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::LeakyRelu, input,
+                                  alpha, out, stream);
+  return out;
+}
+
+NDArray NDArray::linear(const NDArray& a, const NDArray& b, const NDArray& bias, 
+                        bool trans_a, bool trans_b,
+                        StreamIndex stream_id,
+                        NDArray& output) {
+  HT_ASSERT(a->ndim() == 2 && b->ndim() == 2 &&
+            a->shape(trans_a ? 0 : 1) == b->shape(trans_b ? 1 : 0))
+    << "Invalid shapes for matrix multiplication: " << a->shape()
+    << " (transpose = " << trans_a << ") vs. " << b->shape()
+    << " (transpose = " << trans_b << "). ";
+  NDArray out = output.is_defined()
+    ? output
+    : NDArray::empty(
+        {a->shape(trans_a ? 1 : 0), b->shape(trans_b ? 0 : 1)},
+        a->device(), a->dtype());
+  Stream stream(a->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(a->device().type(), __FUNCTION__, hetu::impl::Linear,
+                                  a, trans_a, b, trans_b,
+                                  bias, out, stream);
+  return out; 
+}
+
+NDArray NDArray::mseloss(const NDArray& preds, const NDArray& labels,
+                         ReductionType reduction,
+                         StreamIndex stream_id,
+                         NDArray& output) {
+  NDArray out;
+  if (output.is_defined()) 
+    out = output;
+  else {
+    if (reduction != kNONE)
+      out = NDArray::empty({1}, preds->device(), preds->dtype());
+    else 
+      out = NDArray::empty(preds->shape(), preds->device(), preds->dtype());
+  }
+  Stream stream(preds->device(), stream_id);
+  NDArray unreduced =
+    reduction == kNONE ? out : NDArray::empty_like(preds);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(preds->device().type(), __FUNCTION__,
+                                  hetu::impl::MSELoss, preds,
+                                  labels, unreduced, stream);
+  if (reduction != kNONE) {
+    NDArray::reduce(unreduced, reduction, HTAxes(), false, stream_id, out);
+  }
+  return out;
+}
+
+NDArray NDArray::nllloss(const NDArray& preds, const NDArray& labels,
+                         ReductionType reduction,
+                         StreamIndex stream_id,
+                         NDArray& output) {
+  NDArray out;
+  if (output.is_defined()) 
+    out = output;
+  else {
+    if (reduction != kNONE)
+      out = NDArray::empty({1}, preds->device(), preds->dtype());
+    else 
+      out = NDArray::empty(labels->shape(), preds->device(), preds->dtype());
+  }
+  Stream stream(preds->device(), stream_id);
+  NDArray unreduced =
+    reduction == kNONE ? out : NDArray::empty(labels->shape(), preds->device(), preds->dtype());
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(preds->device().type(), __FUNCTION__,
+                                  hetu::impl::NLLLoss, preds,
+                                  labels, unreduced, stream);
+  if (reduction != kNONE) {
+    NDArray::reduce(unreduced, reduction, HTAxes(), false, stream_id, out);
+  }
+  return out;
+}
+
+NDArray NDArray::norm(const NDArray& input, int64_t p, int64_t dim, 
+                      bool keepdim,
+                      StreamIndex stream_id,
+                      NDArray& output) {
+  NDArray out;
+  if (output.is_defined())
+    out = output;
+  else {
+    HTShape outshape = input->shape();
+    int64_t axi = dim >= 0 ? dim: dim + outshape.size();
+    if (keepdim) 
+      outshape[axi] = 1;
+    else 
+      outshape.erase(outshape.begin() + axi);
+    out = NDArray::empty(outshape, input->device(), input->dtype());
+  }
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__, hetu::impl::Norm,
+                                  input, out, dim, p, stream);
+  return out;
+}
+
+NDArray NDArray::onehot(const NDArray& input, size_t num_classes,
+                        StreamIndex stream_id,
+                        NDArray& output) {
+  HTShape out_shape = input->shape();
+  out_shape.emplace_back(num_classes);
+  NDArray out = output.is_defined() ? output : NDArray::empty(out_shape, input->device(), input->dtype());
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Onehot, input,
+                                  num_classes, out, stream);
+  return out;
+}
+
+NDArray NDArray::pad(const NDArray& input, const HTShape& paddings, 
+                     std::string mode, double constant,
+                     StreamIndex stream_id,
+                     NDArray& output) {
+  HTShape Infer = input->shape();
+  size_t len = paddings.size();
+  for (size_t i = 0; i < 4; ++i) {
+    if (i >= (4 - len / 2)) {
+      Infer[i] = Infer[i] + paddings[(i - (4 - len / 2)) * 2] +
+        paddings[(i - (4 - len / 2)) * 2 + 1];
+    }
+  }
+  NDArray out = output.is_defined() ? output : NDArray::empty(Infer, input->device(), input->dtype());
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__, hetu::impl::Pad,
+                                  input, out, paddings,
+                                  stream, mode, constant);
+  return out;
+}
+
+NDArray NDArray::repeat(const NDArray& input, HTShape repeats,
+                        StreamIndex stream_id,
+                        NDArray& output) {
+  NDArray out;
+  if (output.is_defined()) 
+    out = output;
+  else {
+    HTShape output_shape = repeats;
+    HT_ASSERT(output_shape.size() >= input->ndim());
+    for (size_t i = 0; i < input->ndim(); ++i) {
+      output_shape[i + output_shape.size() - input->ndim()] *= input->shape(i); 
+    }
+    NDArray::empty(output_shape, input->device(), input->dtype());
+  }
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Repeat, input,
+                                  out, stream);
+  return out;
+}
+
+NDArray NDArray::roll(const NDArray& input, HTShape shifts, HTAxes dims,
+                      StreamIndex stream_id,
+                      NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Roll, input,
+                                  shifts, dims,
+                                  out, stream);
+  return out;
+}
+
+NDArray NDArray::sin(const NDArray& input,
+                     StreamIndex stream_id,
+                     NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Sin, input,
+                                  out, stream);
+  return out;
+}
+
+NDArray NDArray::slice(const NDArray& input, 
+                       const HTShape& begin_pos, const HTShape& output_shape,
+                       StreamIndex stream_id,
+                       NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty(output_shape, input->device(), input->dtype());
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__, hetu::impl::Slice,
+                                  input, out,
+                                  const_cast<HTShape&>(begin_pos).data(), stream);
+  return out;
+}
+
+NDArray NDArray::softmax(const NDArray& input,
+                         int64_t dim,
+                         StreamIndex stream_id,
+                         NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Softmax, input,
+                                  out, dim, stream);
+  return out;
+}
+
+NDArray NDArray::sceloss(const NDArray& preds, const NDArray& labels,
+                         ReductionType reduction,
+                         StreamIndex stream_id,
+                         NDArray& output) {
+  NDArray out;
+  HTShape output_shape = HTShape(preds->shape().begin(), preds->shape().end() - 1);
+  if (output.is_defined()) 
+    out = output;
+  else {
+    if (reduction != kNONE)
+      out = NDArray::empty({1}, preds->device(), preds->dtype());
+    else 
+      out = NDArray::empty(output_shape, preds->device(), preds->dtype());
+  }
+  Stream stream(preds->device(), stream_id);
+  NDArray unreduced =
+    reduction == kNONE ? out : NDArray::empty(output_shape, preds->device(), preds->dtype());
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(preds->device().type(), __FUNCTION__,
+                                  hetu::impl::SoftmaxCrossEntropy, preds,
+                                  labels, unreduced, stream);
+  if (reduction != kNONE) {
+    NDArray::reduce(unreduced, reduction, HTAxes(), false, stream_id, out);
+  }
+  return out;
+}
+
+NDArray NDArray::sceloss(const NDArray& preds, const NDArray& labels, const int64_t ignored_index, 
+                         ReductionType reduction,
+                         StreamIndex stream_id,
+                         NDArray& output) {
+  NDArray out;
+  HTShape output_shape = HTShape(preds->shape().begin(), preds->shape().end() - 1);
+  if (output.is_defined()) 
+    out = output;
+  else {
+    if (reduction != kNONE)
+      out = NDArray::empty({1}, preds->device(), preds->dtype());
+    else 
+      out = NDArray::empty(output_shape, preds->device(), preds->dtype());
+  }
+  Stream stream(preds->device(), stream_id);
+  NDArray unreduced =
+    reduction == kNONE ? out : NDArray::empty(output_shape, preds->device(), preds->dtype());
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(preds->device().type(), __FUNCTION__,
+                                  hetu::impl::SoftmaxCrossEntropySparse, preds,
+                                  labels, unreduced, ignored_index, stream);
+  if (reduction != kNONE) {
+    NDArray::reduce(unreduced, reduction, HTAxes(), false, stream_id, out);
+  }
+  return out;
+}            
+
+NDArray NDArray::triu(const NDArray& input, bool lower, int64_t diagonal, 
+                      StreamIndex stream_id,
+                      NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__, hetu::impl::TriuTril,
+                                  input, output, lower, diagonal, stream);
+  return out;
+}
+
+NDArray NDArray::where(const NDArray& cond, const NDArray& x, const NDArray& y, 
+                       StreamIndex stream_id,
+                       NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(x);
+  Stream stream(x->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__, 
+                                  hetu::impl::Where, cond, x, y, out, stream);
+  return out;
+}
+
+NDArray NDArray::maxpool(const NDArray& input, const size_t kernel_H,
+                         const size_t kernel_W, const size_t padding,
+                         const size_t stride,
+                         StreamIndex stream_id,
+                         NDArray& output) {  
+  NDArray out;
+  if (output.is_defined())
+    out = output;
+  else {
+    int64_t N = input->shape(0);
+    int64_t C = input->shape(1);
+    int64_t H = input->shape(2);
+    int64_t W = input->shape(3);
+    int64_t p_H = (H + 2 * padding - kernel_H) / stride + 1;
+    int64_t p_W = (W + 2 * padding - kernel_W) / stride + 1;
+    out = NDArray::empty({N, C, p_H, p_W}, input->device(), input->dtype());
+  }
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__, hetu::impl::MaxPool,
+                                  input, kernel_H, kernel_W,
+                                  out, padding, stride,
+                                  stream);
+  return out;
+}
+
+//_____________________________________________________________________________________
+
 NDArray NDArray::cat(const NDArrayList& inputs, int axis,
-                     StreamIndex stream_id) {
+                     StreamIndex stream_id,
+                     NDArray& output) {
   auto parsed_axis = NDArrayMeta::ParseAxis(axis, inputs.at(0)->ndim());
   if (parsed_axis == 0) {
     std::vector<HTShape> shapes;
@@ -602,7 +1103,7 @@ NDArray NDArray::cat(const NDArrayList& inputs, int axis,
     // TODO: For axis 0, we can copy the inputs one-by-one,
     // but it would be better to refine the concat kernel
     // to accept multiple inputs.
-    NDArray ret =
+    NDArray ret = output.is_defined() ? output :
       NDArray::empty(cat_shape, inputs.at(0)->device(), inputs.at(0)->dtype());
     HTShape chunks(inputs.size());
     std::transform(inputs.begin(), inputs.end(), chunks.begin(),
@@ -653,8 +1154,11 @@ NDArray NDArray::full_(NDArray& data, double fill_value,
 NDArray NDArray::copy(const NDArray& input, StreamIndex stream_id,
                       NDArray& output) {
   NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
-  Stream stream(input->device(), stream_id);
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+  Device out_device = input->device();
+  if (out->device().type() == kCUDA)
+    out_device = out->device();
+  Stream stream(out_device, stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(out_device.type(), __FUNCTION__,
                                   hetu::impl::DataTransfer, input, out, stream);
   return out;
 }

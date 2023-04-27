@@ -101,7 +101,7 @@ TensorList CommOpDef::DoGradient(const TensorList& grad_outputs) {
   return {grad_input};
 }
 
-void CommOpDef::DeduceStates() {
+void CommOpDef::DoDeduceStates() {
   Tensor& input = _inputs[0];
   DistributedStates ds_input = input->get_distributed_states();
   DistributedStates ds_dst = get_dst_distributed_states();

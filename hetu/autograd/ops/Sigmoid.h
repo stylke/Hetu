@@ -17,11 +17,13 @@ class SigmoidOpDef : public OperatorDef {
   SigmoidOpDef(const constrcutor_access_key&, Tensor input,
                const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SigmoidOp), {input}, op_meta) {
-    AddOutput(input->meta());
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
+  void DoInferMeta() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

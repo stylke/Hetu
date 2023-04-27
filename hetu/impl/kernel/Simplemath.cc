@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
 
 namespace hetu {
@@ -21,13 +22,20 @@ void FloorCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT_EXCHANGABLE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = input->numel();
   if (size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "FloorCpu", [&]() {
-      floor_cpu<spec_t>(input->data_ptr<spec_t>(), size,
-                        output->data_ptr<spec_t>());
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, size]() {
+        floor_cpu<spec_t>(input->data_ptr<spec_t>(), size,
+                          output->data_ptr<spec_t>());
+      }, "Floor");
+      //cpu_stream.Sync();
     });
 }
 
@@ -45,13 +53,20 @@ void CeilCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT_EXCHANGABLE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = input->numel();
   if (size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "CeilCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, size]() {
       ceil_cpu<spec_t>(input->data_ptr<spec_t>(), size,
                        output->data_ptr<spec_t>());
+      }, "Ceil");
+      //cpu_stream.Sync();
     });
 }
 
@@ -69,13 +84,20 @@ void RoundCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT_EXCHANGABLE(input, output);
 
+  CPUStream cpu_stream(stream);
+  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+
   size_t size = input->numel();
   if (size == 0)
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "RoundCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, size]() {
       round_cpu<spec_t>(input->data_ptr<spec_t>(), size,
                         output->data_ptr<spec_t>());
+      }, "Round");
+      //cpu_stream.Sync();
     });
 }
 

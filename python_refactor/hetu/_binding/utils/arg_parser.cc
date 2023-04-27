@@ -16,6 +16,8 @@ std::string ArgType2Str(ArgType type) {
       return "float";
     case ArgType::STRING:
       return "string";
+    case ArgType::BOOL_LIST:
+      return "List[bool]";
     case ArgType::INT64_LIST:
       return "List[int]";
     case ArgType::FLOAT64_LIST:
@@ -42,6 +44,12 @@ std::string ArgType2Str(ArgType type) {
       return "hetu.Tensor";
     case ArgType::TENSOR_LIST:
       return "List[hetu.Tensor]";
+    case ArgType::OPERATOR:
+      return "hetu.Operator";
+    case ArgType::OPERATOR_LIST:
+      return "List[hetu.Operator]";
+    case ArgType::FEED_DICT:
+      return "FeedDict";
     default:
       HT_VALUE_ERROR << "Unknown argument type: " << static_cast<int>(type);
       __builtin_unreachable();
@@ -58,6 +66,10 @@ ArgType Str2ArgType(const std::string& type) {
   if (type == "str" || type == "std::string" || type == "string" ||
       type == "OpName" || type == "TensorName")
     return ArgType::STRING;
+  if (type == "List[bool]" || type == "BoolList" ||
+      type == "std::vector<bool>" || type == "vector<bool>" || 
+      type == "HTKeepDims")
+    return ArgType::BOOL_LIST;
   if (type == "List[int]" || type == "IntList" ||
       type == "std::vector<int64_t>" || type == "vector<int64_t>" || 
       type == "HTShape" || type == "HTStride" || type == "HTAxes")
@@ -95,6 +107,15 @@ ArgType Str2ArgType(const std::string& type) {
       type == "List[hetu.tensor]" || type == "List[tensor]" || 
       type == "TensorList") 
     return ArgType::TENSOR_LIST;
+  if (type == "hetu.Operator" || type == "Operator" || 
+      type == "hetu.operator" || type == "operator")
+      return ArgType::OPERATOR;
+  if (type == "List[hetu.Operator]" || type == "List[Operator]" ||
+      type == "List[hetu.operator]" || type == "List[operator]" || 
+      type == "OperatorList" || type == "OpList") 
+    return ArgType::OPERATOR_LIST;
+  if (type == "FeedDict" || type == "feed_dict")
+    return ArgType::FEED_DICT;
   HT_VALUE_ERROR << "Unknown argument type: " << type;
   __builtin_unreachable();
 }
@@ -174,6 +195,15 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
           _default_repr = '\'' + _default_string + '\'';
         }
         break;
+      case ArgType::BOOL_LIST:
+        if (!_default_as_none) {
+          auto err_msg = parse_bool_list_slow_but_safe(
+            default_str, _default_bool_list);
+          if (!err_msg.empty())
+            HT_VALUE_ERROR << "Cannot parse default List[bool]: " << err_msg;
+          _default_repr = default_str;
+        }
+        break;
       case ArgType::INT64_LIST:
         if (!_default_as_none) {
           auto err_msg = parse_int64_list_slow_but_safe(
@@ -200,9 +230,12 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
       case ArgType::DEVICE_GROUP:
       case ArgType::STREAM:
       case ArgType::ND_ARRAY:
-      case ArgType::TENSOR:
       case ArgType::ND_ARRAY_LIST:
+      case ArgType::TENSOR:
       case ArgType::TENSOR_LIST:
+      case ArgType::OPERATOR:
+      case ArgType::OPERATOR_LIST:
+      case ArgType::FEED_DICT:
         if (!_default_as_none) {
           HT_VALUE_ERROR << "Default " << _arg_type << " can only be None";
         }
@@ -224,6 +257,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyFloat(obj);
     case ArgType::STRING:
       return CheckPyString(obj);
+    case ArgType::BOOL_LIST:
+      return CheckPyBoolList(obj);
     case ArgType::INT64_LIST:
       return CheckPyIntList(obj);
     case ArgType::FLOAT64_LIST:
@@ -250,6 +285,12 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyTensor(obj);
     case ArgType::TENSOR_LIST:
       return CheckPyTensorList(obj);
+    case ArgType::OPERATOR:
+      return CheckPyOperator(obj);
+    case ArgType::OPERATOR_LIST:
+      return CheckPyOperatorList(obj);
+    case ArgType::FEED_DICT:
+      return CheckPyFeedDict(obj);
     default:
       HT_VALUE_ERROR << "Unknown argument type: " 
         << static_cast<int>(_arg_type);

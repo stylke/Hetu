@@ -21,38 +21,9 @@ class BatchMatMulOpDef : public OperatorDef {
   : OperatorDef(quote(BatchMatMulOp), {a, b}, op_meta),
     _trans_a(trans_a),
     _trans_b(trans_b) {
-    if (a->has_shape() && b->has_shape()) {
-      HT_ASSERT(a->ndim() >= 2 && b->ndim() >= 2)
-        << "Failed to construct the \"" << type() << "\" operation "
-        << "(with name \"" << name() << "\"): "
-        << "Dimensions must be more than 2. "
-        << "Got " << a->ndim() << ", " << b->ndim() << ".";
-      int64_t ndims = a->ndim();
-      int64_t dim_a = a->shape(trans_a ? ndims - 2 : ndims - 1);
-      int64_t dim_b = b->shape(trans_b ? ndims - 1 : ndims - 2);
-      HT_ASSERT(dim_a == -1 || dim_b == -1 || dim_a == dim_b)
-        << "Failed to construct the \"" << type() << "\" operation "
-        << "(with name \"" << name() << "\"): "
-        << "Dimensions must be compatible. "
-        << "Got " << dim_a << " vs. " << dim_b << ". "
-        << "Input shapes: " << a->shape() << " vs. " << b->shape() << ".";
-    }
-    HTShape shape = {};
-    if (a->has_shape() && b->has_shape()) {
-      int ndims = a->ndim();
-      for (int i = 0; i < ndims - 2; ++i) {
-        HT_ASSERT(a->shape(i) == b->shape(i));
-        shape.emplace_back(a->shape(i));
-      }
-      shape.emplace_back(a->shape(trans_a ? ndims - 1 : ndims - 2));
-      shape.emplace_back(b->shape(trans_b ? ndims - 2 : ndims - 1));
-    }
-    HT_ASSERT_TENSORS_SAME_DTYPE(_inputs);
-    AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape));
-    DeduceStates();
+    DoInferMeta();
+    DoDeduceStates();
   }
-
-  void DeduceStates() override;
 
   inline bool trans_a() const {
     return _trans_a;
@@ -62,7 +33,11 @@ class BatchMatMulOpDef : public OperatorDef {
     return _trans_b;
   }
 
- protected:
+ protected:  
+  void DoInferMeta() override;
+
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

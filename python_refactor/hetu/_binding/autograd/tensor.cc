@@ -28,6 +28,19 @@ PyObject* PyTensor_New(const Tensor& tensor, bool return_none_if_undefined) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensorList_New(const TensorList& tensors,
+                           bool return_none_if_undefined) {
+  HT_PY_FUNC_BEGIN
+  PyObject* ret = PyList_New(tensors.size());
+  HT_RUNTIME_ERROR_IF(!ret) << "Failed to alloc list";
+  for (size_t i = 0; i < tensors.size(); i++) {
+    auto* tensor_obj = PyTensor_New(tensors[i], return_none_if_undefined);
+    PyList_SET_ITEM(ret, i, tensor_obj);
+  }
+  return ret;
+  HT_PY_FUNC_END
+}
+
 inline PyObject* PyTensor_pynew(PyTypeObject* type, PyObject* args, 
                                 PyObject* kwargs) {
   return TensorCopyCtor(type, args, kwargs);
@@ -247,6 +260,49 @@ PyObject* PyTensor_backward(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_trainable_variables(PyTensor* self, PyObject* args,
+                                       PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "trainable_variables(Tensor tensor, bool connect_p2p=true, bool skip_computed=false)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    auto topo = TopoSort(
+      parsed_args.get_tensor(0), 
+      parsed_args.get_bool_or_default(1), 
+      parsed_args.get_bool_or_default(2));
+    TensorList trainable_vars;
+    trainable_vars.reserve(topo.size());
+    for (auto& op : topo)
+      if (is_trainable_op(op))
+        trainable_vars.push_back(op->output(0));
+    return PyTensorList_New(trainable_vars);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_gradients(PyObject*, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "gradients(Tensor y, List[Tensor] xs, Tensor grad_y=None)", 
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    return PyTensorList_New(Gradients(
+      parsed_args.get_tensor(0), 
+      parsed_args.get_tensor_list(1), 
+      parsed_args.get_tensor_optional(2)));
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   auto* unsafe_self = PyTensor_Type->tp_alloc(PyTensor_Type, 0);
@@ -366,6 +422,8 @@ std::vector<PyMethodDef> InitTensorPyClassMethodDefs() {
   std::vector<PyMethodDef> ret = {{nullptr}};
   AddPyMethodDefs(ret, {
     {"from_numpy", (PyCFunction) PyTensor_from_numpy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"trainable_variables", (PyCFunction) PyTensor_trainable_variables, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"gradients", (PyCFunction) PyTensor_gradients, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {nullptr}
   });
   AddPyMethodDefs(ret, hetu::autograd::get_registered_tensor_class_methods());

@@ -11,7 +11,6 @@ void AvgPoolCuda(const NDArray& input, const size_t kernel_H,
                  const size_t kernel_W, NDArray& output, const size_t padding,
                  const size_t stride, const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(input);
-  HT_ASSERT_CUDA_DEVICE(output);
   HT_ASSERT_SAME_DEVICE(input, output);
 
   CUDAStream cuda_stream(stream);
@@ -36,15 +35,12 @@ void AvgPoolCuda(const NDArray& input, const size_t kernel_H,
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "AvgPoolCuda", [&]() {
-      const spec_t* input_data = (const spec_t*) input->data_ptr<spec_t>();
-      spec_t* output_data = (spec_t*) output->data_ptr<spec_t>();
       // pooling descriptor
       cudnnPoolingDescriptor_t avgpool_desc;
       CUDNN_CALL(cudnnCreatePoolingDescriptor(&avgpool_desc));
       CUDNN_CALL(cudnnSetPooling2dDescriptor(
-        avgpool_desc, CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
-        CUDNN_PROPAGATE_NAN, kernel_H, kernel_W, padding, padding, stride,
-        stride));
+        avgpool_desc, CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING, CUDNN_PROPAGATE_NAN,
+        kernel_H, kernel_W, padding, padding, stride, stride));
 
       // input descriptor
       cudnnTensorDescriptor_t input_desc;
@@ -64,8 +60,8 @@ void AvgPoolCuda(const NDArray& input, const size_t kernel_H,
       spec_t beta = 0.0;
 
       CUDNN_CALL(cudnnPoolingForward(handle, avgpool_desc, &alpha, input_desc,
-                                     input_data, &beta, output_desc,
-                                     output_data));
+                                     input->data_ptr<spec_t>(), &beta, output_desc,
+                                     output->data_ptr<spec_t>()));
 
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
@@ -79,14 +75,12 @@ void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
                          const size_t padding, const size_t stride,
                          const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(output_Y);
-  HT_ASSERT_CUDA_DEVICE(gradient_Y);
-  HT_ASSERT_CUDA_DEVICE(input_X);
-  HT_ASSERT_CUDA_DEVICE(gradient_X);
   HT_ASSERT_SAME_DEVICE(output_Y, gradient_Y);
   HT_ASSERT_SAME_DEVICE(output_Y, input_X);
   HT_ASSERT_SAME_DEVICE(output_Y, gradient_X);
 
   CUDAStream cuda_stream(stream);
+  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
   // input
@@ -103,24 +97,16 @@ void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
     datatype = CUDNN_DATA_FLOAT;
   } else if (output_Y->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
-  } else {
-    HT_VALUE_ERROR << "Invalid Datatype.";
   }
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     output_Y->dtype(), spec_t, "AvgPoolGradientCuda", [&]() {
-      const spec_t* input_data = (const spec_t*) input_X->data_ptr<spec_t>();
-      spec_t* gradient_x_data = (spec_t*) gradient_X->data_ptr<spec_t>();
-      const spec_t* output_data = (const spec_t*) output_Y->data_ptr<spec_t>();
-      const spec_t* gradient_Y_data =
-        (const spec_t*) gradient_Y->data_ptr<spec_t>();
       // pooling descriptor
       cudnnPoolingDescriptor_t avgpool_desc;
       CUDNN_CALL(cudnnCreatePoolingDescriptor(&avgpool_desc));
       CUDNN_CALL(cudnnSetPooling2dDescriptor(
-        avgpool_desc, CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
-        CUDNN_PROPAGATE_NAN, kernel_H, kernel_W, padding, padding, stride,
-        stride));
+        avgpool_desc, CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING, CUDNN_PROPAGATE_NAN,
+        kernel_H, kernel_W, padding, padding, stride, stride));
 
       // input descriptor
       cudnnTensorDescriptor_t input_desc;
@@ -140,9 +126,9 @@ void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
       spec_t beta = 0.0;
 
       CUDNN_CALL(cudnnPoolingBackward(handle, avgpool_desc, &alpha, output_desc,
-                                      output_data, output_desc, gradient_Y_data,
-                                      input_desc, input_data, &beta, input_desc,
-                                      gradient_x_data));
+                                      output_Y->data_ptr<spec_t>(), output_desc, gradient_Y->data_ptr<spec_t>(),
+                                      input_desc, input_X->data_ptr<spec_t>(), &beta, input_desc,
+                                      gradient_X->data_ptr<spec_t>()));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
       CUDNN_CALL(cudnnDestroyPoolingDescriptor(avgpool_desc));

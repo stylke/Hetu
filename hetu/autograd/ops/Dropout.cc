@@ -25,15 +25,18 @@ NDArrayList DropoutOpDef::DoCompute(const NDArrayList& inputs,
 
 TensorList DropoutOpDef::DoGradient(const TensorList& grad_outputs) {
   if (recompute()) {
-    auto& self = reinterpret_cast<DropoutOp&>(get_self());
     return {DropoutGradientWithRecomputationOp(
-              grad_outputs.at(0), self, grad_op_meta().set_name(grad_name()))
+              grad_outputs.at(0), id(), keep_prob(), grad_op_meta().set_name(grad_name()))
               ->output(0)};
   } else {
     return {DropoutGradientOp(grad_outputs.at(0), output(0), keep_prob(),
                               grad_op_meta().set_name(grad_name()))
               ->output(0)};
   }
+}
+
+void DropoutOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
 }
 
 HTShapeList DropoutOpDef::DoInferShape(const HTShapeList& input_shapes) {
@@ -49,6 +52,10 @@ NDArrayList DropoutGradientOpDef::DoCompute(const NDArrayList& inputs,
   return outputs;
 }
 
+void DropoutGradientOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList
 DropoutGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
@@ -59,11 +66,15 @@ NDArrayList
 DropoutGradientWithRecomputationOpDef::DoCompute(const NDArrayList& inputs,
                                                  RuntimeContext& ctx) {
   NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(inputs, ctx);
-  uint64_t seed = ctx.get_op_ctx(_forward_op->id()).get_uint64("seed");
+  uint64_t seed = ctx.get_op_ctx(_forward_op).get_uint64("seed");
   HT_DISPATCH_KERNEL_CUDA_ONLY(
     placement().type(), type(), hetu::impl::DropoutGradientWithRecomputation,
     inputs.at(0), 1 - keep_prob(), seed, outputs[0], stream());
   return outputs;
+}
+
+void DropoutGradientWithRecomputationOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
 }
 
 HTShapeList DropoutGradientWithRecomputationOpDef::DoInferShape(

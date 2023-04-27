@@ -2,26 +2,25 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/cuda_math.h"
 
 namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-__global__ void embedding_lookup_kernel(const spec_t* input, const spec_t* ids,
+__global__ void embedding_lookup_kernel(const spec_t* input, const int64_t* ids,
                                         size_t size, size_t length,
                                         size_t input_row, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  int id = ids[idx];
-  spec_t* output_ptr = output + length * idx;
+  int64_t id = ids[idx];
   if (id < 0 || id >= input_row) {
     for (int i = 0; i < length; i++)
-      output_ptr[i] = 0;
+      output[length * idx + i] = 0;
   } else {
-    const spec_t* input_ptr = input + length * id;
     for (int i = 0; i < length; i++)
-      output_ptr[i] = input_ptr[i];
+      output[length * idx + i] = input[length * id + i];
   }
 }
 
@@ -34,18 +33,17 @@ __global__ void array_zero_set_kernel(spec_t* input, size_t size) {
 }
 
 template <typename spec_t>
-__global__ void embedding_lookup_gradient_kernel(const float* output_grad,
-                                                 const float* ids, size_t size,
+__global__ void embedding_lookup_gradient_kernel(const spec_t* output_grad,
+                                                 const int64_t* ids, size_t size,
                                                  size_t length,
-                                                 float* input_grad) {
+                                                 spec_t* input_grad) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
+  if (idx >= size / length)
     return;
-  int id = ids[idx];
-  const float* output_grad_ptr = output_grad + length * idx;
-  float* input_grad_ptr = input_grad + length * id;
-  for (int i = 0; i < length; i++)
-    atomicAdd(input_grad_ptr + i, *(output_grad_ptr + i));
+  int id = int(ids[idx]);
+  for (int i = 0; i < length; i++) {
+    hetu::cuda::AtomicAdd((input_grad + length * id + i), (output_grad[length * idx + i]));
+  }
 }
 
 void EmbeddingLookupCuda(const NDArray& input, const NDArray& id,
@@ -76,9 +74,10 @@ void EmbeddingLookupCuda(const NDArray& input, const NDArray& id,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "EmbbedingLookupCuda", [&]() {
       embedding_lookup_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), id->data_ptr<spec_t>(), size, length,
+        input->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size, length,
         input_row, output->data_ptr<spec_t>());
     });
+    CudaStreamSynchronize(cuda_stream);
 }
 
 void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
@@ -105,17 +104,20 @@ void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+  HT_DISPATCH_FLOATING_TYPES(
     input_grad->dtype(), spec_t, "ArrayZeroSet", [&]() {
       array_zero_set_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input_grad->data_ptr<spec_t>(), size);
     });
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+  size_t size2 = output_grad->numel();
+  threads.x = MIN(size2, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
+  blocks.x = DIVUP(size2, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
+  HT_DISPATCH_FLOATING_TYPES(
     input_grad->dtype(), spec_t, "EmbeddingLookupGradientCuda", [&]() {
-      embedding_lookup_gradient_kernel<float>
+      embedding_lookup_gradient_kernel<spec_t>
         <<<blocks, threads, 0, cuda_stream>>>(
-          output_grad->data_ptr<float>(), id->data_ptr<float>(), size, length,
-          input_grad->data_ptr<float>());
+          output_grad->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size2, length,
+          input_grad->data_ptr<spec_t>());
     });
 }
 

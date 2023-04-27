@@ -10,8 +10,9 @@ from hetu import optim as optim
 
 import builtins # bool is resovled as hetu.bool
 
-class _Context(object):
-    def __init__(self, devices=None, stream_index=None, extra_deps=None):
+class _OpContext(object):
+    def __init__(self, eager_device=None, devices=None, stream_index=None, extra_deps=None):
+        self.eager_device = eager_device
         self.devices = devices
         self.stream_index = stream_index
         self.extra_deps = extra_deps
@@ -32,20 +33,50 @@ class _Context(object):
             self.extra_deps = [group(extra_deps)]
 
     def __enter__(self):
-        _hetu_core._internal_contxt.push_op_ctx(
+        _hetu_core._internal_context.push_op_ctx(
+            eager_device=self.eager_device,
             device_group=self.devices, 
             stream_index=self.stream_index, 
             extra_deps=self.extra_deps)
         return self
     
     def __exit__(self, e_type, e_value, e_trace):
-        _hetu_core._internal_contxt.pop_op_ctx(
+        _hetu_core._internal_context.pop_op_ctx(
+            pop_eager_device=(self.eager_device is not None),
             pop_device_group=(self.devices is not None), 
             pop_stream_index=(self.stream_index is not None), 
             pop_extra_deps=(self.extra_deps is not None))
 
-def context(devices=None, stream_index=None, extra_deps=None):
-    return _Context(devices=devices, stream_index=stream_index, extra_deps=extra_deps)
+def context(eager_device=None, devices=None, stream_index=None, extra_deps=None):
+    return _OpContext(eager_device=eager_device, devices=devices, stream_index=stream_index, extra_deps=extra_deps)
 
 def control_dependencies(control_inputs):
-    return _Context(extra_deps=control_inputs)
+    return _OpContext(extra_deps=control_inputs)
+
+class _GraphContext(object):
+    def __init__(self, g):
+        if isinstance(g, Graph):
+            self.graph = g
+        elif isinstance(g, builtins.str):
+            if g == "eager":
+                self.graph = _hetu_core._internal_context.get_default_eager_graph()
+            elif g == "define_and_run":
+                self.graph = _hetu_core._internal_context.get_default_define_and_run_graph()
+            elif g == "define_by_run":
+                self.graph = _hetu_core._internal_context.get_default_define_by_run_graph()
+            else:
+                self.graph = _hetu_core._internal_context.get_graph(g)
+        elif isinstance(g, builtins.int):
+            self.graph = _hetu_core._internal_context.get_graph(g)
+        else:
+            raise ValueError(f"Cannot parse type '{type(g).__name__}' as hetu.Graph")
+
+    def __enter__(self):
+        _hetu_core._internal_context.push_graph_ctx(self.graph.id)
+        return self
+    
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_graph_ctx()
+
+def graph(g):
+    return _GraphContext(g)

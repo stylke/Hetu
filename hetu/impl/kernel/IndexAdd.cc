@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -33,6 +34,8 @@ void IndexAddCpu(const NDArray& input, const NDArray& id, NDArray& output,
   HT_ASSERT(id->ndim() == 1)
     << "invalid index shape.Expect dim=1, but get" << id->ndim();
 
+  CPUStream cpu_stream(stream);
+
   size_t before_stride = 1;
   size_t after_stride = 1;
   size_t cur_stride = input->shape(dim);
@@ -50,9 +53,13 @@ void IndexAddCpu(const NDArray& input, const NDArray& id, NDArray& output,
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "IndexAddCpu", [&]() {
+      auto _future = cpu_stream.EnqueueTask(
+      [input, id, output, size, before_stride, after_stride, cur_stride]() {
       index_add_cpu<spec_t>(input->data_ptr<spec_t>(), id->data_ptr<spec_t>(),
                             size, before_stride, after_stride, cur_stride,
                             output->data_ptr<spec_t>());
+      },"IndexAdd");
+      //cpu_stream.Sync();
     });
 }
 

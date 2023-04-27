@@ -10,14 +10,14 @@ cpp_indent = " " * 2
 op_file_fmt = """\
 // Auto-generated. Do NOT edit!
 
-#include "hetu/_binding/autograd/ops/python_headers.h"
+#include "hetu/_binding/graph/ops/python_headers.h"
 
 namespace hetu {{
-namespace autograd {{
+namespace graph {{
 
 {file_body}
 
-}} // namespace autograd
+}} // namespace graph
 }} // namespace hetu
 """
 
@@ -28,7 +28,6 @@ PyObject* Tensor_class_{py_fn_name}(PyObject*, PyObject* args, PyObject* kwargs)
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({parser_fmts});
   auto parsed_args = parser.parse(args, kwargs);
-  Operator op;
   PyObject* ret = nullptr;
   {pre_processing}
   switch (parsed_args.signature_index()) {{
@@ -81,7 +80,6 @@ REGISTER_TENSOR_METHOD(
 op_signature_handler_case_fmt = """
     case {signature_index}: {{
       {cpp_function}
-      ret = PyObject_FromOperatorOutputs(op);
       break;
     }}
 """
@@ -127,7 +125,7 @@ def gen_ops(input_file, output_dir):
                 arg_getters = parsed_results['arg_getters']
                 
                 # parse op arguments
-                cpp_function = f"op = {cpp_op_name}("
+                cpp_function = f"ret = PyObject_FromOperatorOutputs(Make{cpp_op_name}("
                 # 1. operator-specific arguments
                 if len(arg_getters) == 0:
                     if method_type == 'member':
@@ -144,7 +142,7 @@ def gen_ops(input_file, output_dir):
                 # 2. common arguments for op_meta
                 cpp_function += "\n" + (cpp_indent * 4) + \
                     f"parse_op_meta(parsed_args, {len(arg_getters)})"
-                cpp_function += "\n" + (cpp_indent * 3) + ");"
+                cpp_function += "\n" + (cpp_indent * 3) + "));"
                 
                 op_specific_args = args if method_type == 'class' \
                                         else parsed_results['args_excluding_self']

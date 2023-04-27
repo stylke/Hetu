@@ -16,7 +16,7 @@ DataH2DOpDef::DataH2DOpDef(const constrcutor_access_key&, Tensor input,
     << "The device group must be containing a single CUDA device. "
     << "Got " << device_group().devices() << ".";
   AddOutput(NDArrayMeta().set(input->meta()).set_device(device_group().get(0)));
-  DeduceStates();
+  DoDeduceStates();
 }
 
 bool DataH2DOpDef::DoPlaceToLocalDevice(const Device& placement,
@@ -64,7 +64,7 @@ DataD2HOpDef::DataD2HOpDef(const constrcutor_access_key&, Tensor input,
     << "the device group must be containing a single host device. "
     << "Got " << device_group().devices() << ".";
   AddOutput(NDArrayMeta().set(input->meta()).set_device(device_group().get(0)));
-  DeduceStates();
+  DoDeduceStates();
 }
 
 bool DataD2HOpDef::DoPlaceToLocalDevice(const Device& placement,

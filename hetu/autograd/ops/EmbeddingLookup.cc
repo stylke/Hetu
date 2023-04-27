@@ -1,4 +1,5 @@
 #include "hetu/autograd/ops/EmbeddingLookup.h"
+#include "hetu/autograd/ops/Reshape.h"
 #include "hetu/autograd/ops/kernel_links.h"
 
 namespace hetu {
@@ -14,21 +15,29 @@ void EmbeddingLookupOpDef::DoCompute(const NDArrayList& inputs,
 
 TensorList EmbeddingLookupOpDef::DoGradient(const TensorList& grad_outputs) {
   auto grad_input =
-    EmbeddingLookupGradientOp(grad_outputs.at(0), _inputs[1], _outputs[0],
+    EmbeddingLookupGradientOp(grad_outputs.at(0), _inputs[1], _outputs[0], _inputs[0],
                               grad_op_meta().set_name(grad_name()))
       ->output(0);
   return {grad_input, Tensor()};
 }
 
+void EmbeddingLookupOpDef::DoInferMeta() {
+  HTShape shape;
+  if (_inputs[0]->has_shape() && _inputs[1]->has_shape()) {
+    shape = _inputs[1]->shape();
+    shape.emplace_back(_inputs[0]->shape(1));
+  }
+  AddOutput(NDArrayMeta().set_dtype(_inputs[0]->dtype()).set_shape(shape).set_device(_inputs[0]->device()));
+}
+
 HTShapeList
 EmbeddingLookupOpDef::DoInferShape(const HTShapeList& input_shapes) {
-  set_grad_embed(input_shapes[0]);
   HTShape output_shape = input_shapes[1];
   output_shape.emplace_back(input_shapes[0][1]);
   return {output_shape};
 }
 
-void EmbeddingLookupOpDef::DeduceStates() {
+void EmbeddingLookupOpDef::DoDeduceStates() {
   DistributedStates ds_input = _inputs[0]->get_distributed_states();
   DistributedStates ds_id = _inputs[1]->get_distributed_states();
   HT_ASSERT(ds_input.is_valid() && ds_id.is_valid() && 
@@ -49,18 +58,18 @@ void EmbeddingLookupGradientOpDef::DoCompute(const NDArrayList& inputs,
     inputs.at(0), inputs.at(1), outputs.at(0), stream());
 }
 
+void EmbeddingLookupGradientOpDef::DoInferMeta() {
+  AddOutput(_inputs[3]->meta());
+}
+
 HTShapeList
 EmbeddingLookupGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
-  EmbeddingLookupOp& input_ptr =
-    reinterpret_cast<EmbeddingLookupOp&>(_inputs[2]->producer());
-  if (input_ptr) {
-    set_embed_shape(input_ptr->get_grad_embed());
-  }
+  set_embed_shape(input_shapes.at(3));
   return {get_embed_shape()};
 }
 
-void EmbeddingLookupGradientOpDef::DeduceStates() {
+void EmbeddingLookupGradientOpDef::DoDeduceStates() {
   DistributedStates ds_grad_output = _inputs[0]->get_distributed_states();
   DistributedStates ds_id = _inputs[1]->get_distributed_states();
   DistributedStates ds_ori_output = _inputs[1]->get_distributed_states();

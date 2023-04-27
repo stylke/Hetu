@@ -107,7 +107,7 @@ inline DeviceGroup DeviceGroup_FromPyObject(PyObject* obj) {
  * For contextlib usage
  ******************************************************/
 
-ContextManager<Device>& get_device_ctx();
+ContextManager<Device>& get_eager_device_ctx();
 ContextManager<DeviceGroup>& get_device_group_ctx();
 
 } // namespace hetu

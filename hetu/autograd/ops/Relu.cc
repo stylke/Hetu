@@ -16,6 +16,10 @@ TensorList ReluOpDef::DoGradient(const TensorList& grad_outputs) {
             ->output(0)};
 }
 
+void ReluOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
+}
+
 HTShapeList ReluOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }
@@ -25,6 +29,10 @@ void ReluGradientOpDef::DoCompute(const NDArrayList& inputs,
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::ReluGradient, inputs.at(0),
                                   inputs.at(1), outputs.at(0), stream());
+}
+
+void ReluGradientOpDef::DoInferMeta() {
+  AddOutput(_inputs[0]->meta());
 }
 
 HTShapeList ReluGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {

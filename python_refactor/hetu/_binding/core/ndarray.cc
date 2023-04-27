@@ -1,11 +1,11 @@
 #include "hetu/_binding/core/ndarray.h"
 #include "hetu/_binding/constants.h"
-#include "hetu/_binding/autograd/function_registry.h"
+#include "hetu/_binding/utils/function_registry.h"
 #include "hetu/_binding/utils/pybind_common.h"
 #include "hetu/_binding/utils/except.h"
 #include "hetu/_binding/utils/decl_utils.h"
 #include "hetu/_binding/utils/arg_parser.h"
-#include "hetu/autograd/ops/kernel_links.h"
+#include "hetu/graph/ops/kernel_links.h"
 
 namespace hetu {
 
@@ -184,7 +184,6 @@ PyObject* PyNDArray_to_numpy(PyNDArray* self, PyObject* args,
   HT_PY_FUNC_BEGIN
   HT_VALUE_ERROR_IF(!self->ndarray.is_defined()) 
     << "NDArray is not defined";
-  
   static PyArgParser parser({
     "numpy(bool force=false)"
   });

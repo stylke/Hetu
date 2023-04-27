@@ -64,6 +64,22 @@ inline std::string parse_float64_list_slow_but_safe(const std::string& str,
   return "";
 }
 
+inline std::string parse_bool_list_slow_but_safe(const std::string& str,
+                                                 std::vector<bool>& r) {
+  if (str.length() < 2 || str.front() != '[' || str.back() != ']')
+    return "String \'" + str + "\' is not surrounded by square brackets";
+  std::istringstream iss(str.substr(1, str.length() - 2));
+  std::string token;
+  bool parsed;
+  while (std::getline(iss, token, ',')) {
+    bool ok = parse_bool_slow_but_safe(token, parsed);
+    if (!ok)
+      return "Substring \'" + token + "\' cannot be parsed as a bool";
+    r.push_back(parsed);
+  }
+  return "";
+}
+
 inline std::string parse_string_literal(const std::string& str, std::string& r,
                                         bool quoted = true) {
   size_t begin = 0, end = str.size();
@@ -73,7 +89,7 @@ inline std::string parse_string_literal(const std::string& str, std::string& r,
          !(str.front() == '\'' && str.back() == '\'')))
       return "String \'" + str + "\' is not quoted";
     begin = 1;
-    end = str.size() - 1;
+    end = str.size();
   }
 
   r.reserve(end - begin);

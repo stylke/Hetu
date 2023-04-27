@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
 namespace impl {
@@ -35,6 +36,8 @@ void DiagonalCpu(const NDArray& input, NDArray& output, int dim1, int dim2,
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
+  CPUStream cpu_stream(stream);
+
   size_t size = output->numel();
   if (dim1 > dim2) {
     int tmp = dim1;
@@ -44,10 +47,10 @@ void DiagonalCpu(const NDArray& input, NDArray& output, int dim1, int dim2,
   int strideA = 1;
   int strideB = 1;
   int strideC = 1;
-  for (size_t i = 0; i < dim1; ++i) {
+  for (int i = 0; i < dim1; ++i) {
     strideA *= input->shape(i);
   }
-  for (size_t i = dim1 + 1; i < dim2; ++i) {
+  for (int i = dim1 + 1; i < dim2; ++i) {
     strideB *= input->shape(i);
   }
   for (size_t i = dim2 + 1; i < input->ndim(); ++i) {
@@ -58,10 +61,14 @@ void DiagonalCpu(const NDArray& input, NDArray& output, int dim1, int dim2,
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "DiagonalCpu", [&]() {
-      diagonal_cpu<spec_t>(input->data_ptr<spec_t>(), size, strideA, strideB,
-                           strideC, static_cast<int>(input->shape(dim1)),
-                           static_cast<int>(input->shape(dim2)), dim_len,
-                           offset, output->data_ptr<spec_t>());
+    auto _binary_future = cpu_stream.EnqueueTask(
+      [input, output, size, strideA, strideB,
+        strideC, dim1, dim2, dim_len, offset]() {
+        diagonal_cpu<spec_t>(input->data_ptr<spec_t>(), size, strideA, strideB,
+                             strideC, static_cast<int>(input->shape(dim1)),
+                             static_cast<int>(input->shape(dim2)), dim_len,
+                             offset, output->data_ptr<spec_t>());}, "Diagonal");
+      //cpu_stream.Sync();      
     });
 }
 
@@ -99,6 +106,8 @@ void DiagonalGradientCpu(const NDArray& input, NDArray& output, int dim1,
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
+  CPUStream cpu_stream(stream);
+
   size_t size = output->numel();
   if (dim1 > dim2) {
     int tmp = dim1;
@@ -108,10 +117,10 @@ void DiagonalGradientCpu(const NDArray& input, NDArray& output, int dim1,
   int strideA = 1;
   int strideB = 1;
   int strideC = 1;
-  for (size_t i = 0; i < dim1; ++i) {
+  for (int i = 0; i < dim1; ++i) {
     strideA *= input->shape(i);
   }
-  for (size_t i = dim1 + 1; i < dim2; ++i) {
+  for (int i = dim1 + 1; i < dim2; ++i) {
     strideB *= input->shape(i);
   }
   for (size_t i = dim2; i < input->ndim(); ++i) {
@@ -122,9 +131,13 @@ void DiagonalGradientCpu(const NDArray& input, NDArray& output, int dim1,
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "DiagonalGradientCpu", [&]() {
-      diagonal_gradient_cpu<spec_t>(input->data_ptr<spec_t>(), size, strideA,
+      auto _future = cpu_stream.EnqueueTask(
+      [input, output, size, strideA, strideB, strideC, dim_len]() {
+              diagonal_gradient_cpu<spec_t>(input->data_ptr<spec_t>(), size, strideA,
                                     strideB, strideC, dim_len,
                                     output->data_ptr<spec_t>());
+      }, "DiagonalGradient");
+      //cpu_stream.Sync();            
     });
 }
 

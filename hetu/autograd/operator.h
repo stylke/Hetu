@@ -64,8 +64,6 @@ class OperatorDef : public shared_ptr_target {
 
   bool PlaceToLocalDevice(const Device& placement, StreamIndex stream_id);
 
-  virtual void DeduceStates();
-
   inline void Sync() {
     _stop->Sync();
   }
@@ -256,6 +254,11 @@ class OperatorDef : public shared_ptr_target {
     return {};
   }
 
+  virtual void DoInferMeta() {
+    HT_NOT_IMPLEMENTED << "InferMeta fn of op \"" << type()
+                       << "\" is not defined";
+  }
+
   virtual HTShapeList DoInferShape(const HTShapeList& input_shapes) {
     if (num_outputs() == 0)
       return {};
@@ -263,6 +266,8 @@ class OperatorDef : public shared_ptr_target {
                        << "\" is not defined";
     return {};
   }
+
+  virtual void DoDeduceStates();
 
   virtual NDArrayList DoAllocOutputs(const NDArrayList& inputs,
                                      RuntimeContext& ctx);
