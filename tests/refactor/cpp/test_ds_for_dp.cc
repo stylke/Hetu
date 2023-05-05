@@ -34,8 +34,12 @@ void TestDARDistributedTensor(DataType dtype = kFloat32) {
 
   auto tensor1 = PlaceholderOp(dtype, {n, dim}, OpMeta().set_device_group(all_device_group).set_name("tensor1"))->output(0);
   tensor1->set_distributed_states(ds1); // tensor1: ds1: [(2,4), (2,4), (2,4), (2,4)]
+  // const StreamIndex NDArray::DEFAULT_STREAM = kComputingStream;
+  // auto w = VariableOp({dim*n, dim}, HeUniformInitializer(), dtype, true)->output(0);
+  // auto w_data = (NDArray::rand({dim, dim}, Device(kCPU), kFloat32, 0.0, 1.0, 2023) - 0.5) * (2.0 / std::sqrt(dim));
+  // auto w_data = (NDArray::rand({dim, dim}, Device(kCPU), kFloat32, 0.0, 1.0, 2023) - 0.5);  
+  auto w_data = NDArray::rand({dim, dim}, Device(kCPU), kFloat32, 0.0, 1.0, 2023, kBlockingStream);
 
-  auto w_data = (NDArray::rand({dim, dim}, Device(kCPU), kFloat32, 0.0, 1.0, 2023) - 0.5) * (2.0 / std::sqrt(dim));
   auto w = VariableOp(w_data, true, OpMeta().set_device_group(all_device_group).set_name("w"))->output(0);
   w->set_distributed_states(ds0); // duplicate: w=(4,4)
 
@@ -44,7 +48,7 @@ void TestDARDistributedTensor(DataType dtype = kFloat32) {
 
   auto y = PlaceholderOp(dtype, {n, dim}, OpMeta().set_device_group(all_device_group).set_name("y"))->output(0);  
   y->set_distributed_states(ds1);
-  auto loss = BinaryCrossEntropyOp(result, y)->output(0);
+  auto loss = BinaryCrossEntropyOp(result, y, "mean")->output(0);
 
   SGDOptimizer optimizer(0.1, 0.0);
   auto train_op = optimizer.Minimize(loss);
@@ -55,7 +59,7 @@ void TestDARDistributedTensor(DataType dtype = kFloat32) {
   NDArray labels = NDArray::zeros({n, dim}, local_device, dtype);
 
   SynchronizeAllStreams();
-  
+  // HT_LOG_INFO << local_device << ": w_data = " << w_data;
   FeedDict feed_dict = {{tensor1->id(), data}, {y->id(), labels}};
 
   TensorList weights;
