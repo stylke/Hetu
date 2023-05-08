@@ -121,6 +121,10 @@ class SplitOpDef : public OperatorDef {
     }
   }
 
+  uint64_t op_indicator() const noexcept {
+    return SPLIT_OP;
+  }  
+
   HTShape get_axes() const {
     return _axes;
   }
