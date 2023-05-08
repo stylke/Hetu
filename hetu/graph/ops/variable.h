@@ -115,23 +115,6 @@ class VariableOpImpl : public OpInterface {
   bool _requires_grad;
 };
 
-class ParameterOpImpl : public VariableOpImpl {
- public:
-  ParameterOpImpl(const Initializer& init, HTShape shape,
-                  DataType dtype = kFloat32, bool requires_grad = false)
-  : VariableOpImpl(quote(ParameterOp), init, std::move(shape), dtype,
-                   requires_grad) {}
-
-  ParameterOpImpl(NDArray provided_data, bool copy_provided_data,
-                  DataType dtype, bool requires_grad)
-  : VariableOpImpl(quote(ParameterOp), std::move(provided_data),
-                   copy_provided_data, dtype, requires_grad) {}
-
-  uint64_t op_indicator() const noexcept override {
-    return VARIABLE_OP | PARAMETER_OP;
-  }
-};
-
 Tensor MakeVariableOp(const Initializer& init, HTShape shape,
                       DataType dtype = kFloat32, bool requires_grad = false,
                       OpMeta op_meta = OpMeta());

@@ -6,13 +6,13 @@ namespace hetu {
 
 using StreamIndex = int32_t;
 constexpr int32_t HT_NUM_STREAMS_PER_DEVICE = 1 << 4;
-constexpr StreamIndex kUndeterminedStream = -2;
-constexpr StreamIndex kBlockingStream = -1;
-constexpr StreamIndex kComputingStream = 0;
-constexpr StreamIndex kH2DStream = 1;
-constexpr StreamIndex kD2HStream = 2;
-constexpr StreamIndex kP2PStream = 3;
-constexpr StreamIndex kCollectiveStream = 4;
+constexpr StreamIndex kUndeterminedStream = -1;
+constexpr StreamIndex kBlockingStream = 0;
+constexpr StreamIndex kComputingStream = 1;
+constexpr StreamIndex kH2DStream = 2;
+constexpr StreamIndex kD2HStream = 3;
+constexpr StreamIndex kP2PStream = 4;
+constexpr StreamIndex kCollectiveStream = 5;
 
 class Stream {
  public:

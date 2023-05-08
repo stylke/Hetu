@@ -10,6 +10,48 @@ Operator& ExecutableGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   return MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
 }
 
+void ExecutableGraph::ResetVariableDataInner(const Tensor& tensor,
+                                             const Initializer& init) {
+  if (tensor->placement().is_undetermined()) {
+    _add_on_inits[tensor->id()] = std::unique_ptr<Initializer>(init.copy());
+  } else {
+    init.Init(GetVariableDataInner(tensor));
+  }
+}
+
+NDArray& ExecutableGraph::GetVariableDataInner(const Tensor& tensor) {
+  auto it = _preserved_data.find(tensor->id());
+  HT_RUNTIME_ERROR_IF(it == _preserved_data.end())
+    << "Cannot find data for variable tensor " << tensor;
+  return it->second;
+}
+
+NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
+                                                 const Initializer& init) {
+  // TODO: check meta is valid
+  _preserved_data[tensor->id()] =
+    NDArray::empty(tensor->shape(), tensor->placement(), tensor->dtype());
+  auto it = _add_on_inits.find(tensor->id());
+  if (it != _add_on_inits.end()) {
+    it->second->Init(_preserved_data[tensor->id()]);
+  } else if (!init.vodify()) {
+    init.Init(_preserved_data[tensor->id()]);
+  }
+  return _preserved_data[tensor->id()];
+}
+
+void ExecutableGraph::RegisterVariableDataInner(const Tensor& tensor,
+                                                NDArray data,
+                                                const Initializer& init) {
+  _preserved_data[tensor->id()] = std::move(data);
+  auto it = _add_on_inits.find(tensor->id());
+  if (it != _add_on_inits.end()) {
+    it->second->Init(_preserved_data[tensor->id()]);
+  } else if (!init.vodify()) {
+    init.Init(_preserved_data[tensor->id()]);
+  }
+}
+
 bool ExecutableGraph::MapOpsToParallelDevices(
   const DeviceGroup& placement_group) {
   HT_NOT_IMPLEMENTED;
@@ -82,11 +124,10 @@ NDArrayList ExecutableGraph::Run(const TensorList& fetches,
   // TODO: For each pair of `fetches` and `feed_dict`,
   // deduce the optimal execution plan, and cache it.
   for (auto& fetch : fetches) {
-    Instantiate(fetches, kCUDA);
-    // if (fetch->placement().is_undetermined()) {
-    //   Instantiate(fetches, kCUDA);
-    //   break;
-    // }
+    if (fetch->placement().is_undetermined()) {
+      Instantiate(fetches, kCUDA);
+      break;
+    }
   }
 
   auto is_op_computed = [&](const Operator& op) -> bool {

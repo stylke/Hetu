@@ -27,7 +27,7 @@ class OptimizerUpdateOpInterface : public OpInterface {
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
     // Question: should we check whether the param is trainable?
-    HT_VALUE_ERROR_IF(!is_parameter_op(inputs.front()->producer()))
+    HT_VALUE_ERROR_IF(!inputs.front()->producer()->is_parameter())
       << "The first input " << inputs.front() << " is not a parameter";
     return {inputs.front()->meta()};
   }

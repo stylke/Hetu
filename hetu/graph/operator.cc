@@ -1,5 +1,6 @@
 #include "hetu/graph/headers.h"
 #include "hetu/graph/ops/group.h"
+#include "hetu/graph/ops/variable.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "hetu/impl/stream/CUDAStream.h"
 
@@ -97,6 +98,15 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
                     .set_extra_deps(extra_deps)
                     .set_name(_op_meta.name + "_extra_deps")));
   }
+  // Deduce requires grad
+  bool requires_grad = false;
+  if (is_variable_op(*_body)) {
+    requires_grad = reinterpret_cast<VariableOpImpl&>(*_body).requires_grad();
+  } else {
+    requires_grad =
+      std::any_of(_inputs.begin(), _inputs.end(),
+                  [](const Tensor& tensor) { return tensor->requires_grad(); });
+  }
   // Outputs of this op
   auto output_meta_list = _body->InferMeta(_inputs);
   if (output_meta_list.size() == 1) {
@@ -106,7 +116,7 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
       << " of the \"" << _body->type() << "\" op.";
     _outputs.emplace_back(
       TensorIdentifier{_ids.graph_id, _ids.op_id, 0, graph.next_tensor_id()},
-      _op_meta.name, output_meta);
+      _op_meta.name, requires_grad, output_meta);
   } else if (output_meta_list.size() > 1) {
     _outputs.reserve(output_meta_list.size());
     for (int i = 0; i < static_cast<int>(output_meta_list.size()); i++) {
@@ -117,12 +127,12 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
         << _body->type() << "\" op.";
       _outputs.emplace_back(
         TensorIdentifier{_ids.graph_id, _ids.op_id, i, graph.next_tensor_id()},
-        _op_meta.name + '_' + std::to_string(i), output_meta);
+        _op_meta.name + '_' + std::to_string(i), requires_grad, output_meta);
     }
   } else {
     _extra_out_dep_linkers.emplace_back(
       TensorIdentifier{_ids.graph_id, _ids.op_id, -1, graph.next_tensor_id()},
-      _op_meta.name);
+      _op_meta.name, requires_grad);
   }
 }
 
@@ -160,6 +170,11 @@ void OpDef::BlockOrSyncInput(Tensor& input) {
     // by waiting for the stop event of the dependency.
     input_op->instantiation_ctx().stop->Block(instantiation_ctx().stream());
   }
+}
+
+bool OpDef::is_parameter() const {
+  const auto& graph = Graph::GetGraph(graph_id());
+  return graph._parameter_ops.find(id()) != graph._parameter_ops.end();
 }
 
 Operator::Operator(OpIdentifier ids, std::shared_ptr<OpInterface> body,

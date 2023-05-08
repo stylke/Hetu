@@ -473,6 +473,8 @@ class OpDef : public shared_ptr_target {
     return false;
   }
 
+  bool is_parameter() const;
+
   bool requires_grad(size_t i) const {
     return _inputs[i]->requires_grad();
   }
@@ -675,7 +677,6 @@ std::ostream& operator<<(std::ostream&, const Operator&);
  * Indicators of Operators
  ******************************************************/
 
-static const uint64_t PARAMETER_OP = 1ul;
 static const uint64_t PLACEHOLDER_OP = 1ul << 1;
 static const uint64_t VARIABLE_OP = 1ul << 2;
 static const uint64_t HOST_TO_DEVICE_OP = 1ul << 3;
@@ -701,7 +702,6 @@ static const uint64_t GROUP_OP = 1ul << 63;
     return is_##type##_op(x.get());                                            \
   }
 
-DECLARE_OP_INDICATOR_CHECKER(parameter, PARAMETER_OP)
 DECLARE_OP_INDICATOR_CHECKER(placeholder, PLACEHOLDER_OP)
 DECLARE_OP_INDICATOR_CHECKER(variable, VARIABLE_OP)
 DECLARE_OP_INDICATOR_CHECKER(host_to_device, HOST_TO_DEVICE_OP)

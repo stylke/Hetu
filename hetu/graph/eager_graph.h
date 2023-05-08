@@ -30,6 +30,19 @@ class EagerGraph : public Graph {
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);
 
+  void ResetVariableDataInner(const Tensor& tensor,
+                              const Initializer& init) override;
+
+  NDArray& GetVariableDataInner(const Tensor& tensor) override;
+
+  NDArray& AllocVariableDataInner(
+    const Tensor& tensor,
+    const Initializer& init = VoidifiedInitializer()) override;
+
+  void RegisterVariableDataInner(
+    const Tensor& tensor, NDArray data,
+    const Initializer& init = VoidifiedInitializer()) override;
+
   NDArray GetOrCompute(Tensor& tensor);
   
   void RemoveTensor(const Tensor& tensor);

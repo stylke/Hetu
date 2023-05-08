@@ -35,6 +35,9 @@ class DefineByRunGraph : public Graph {
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);
 
+  void ResetVariableDataInner(const Tensor& tensor,
+                              const Initializer& init) override;
+
   NDArray GetOrCompute(Tensor& tensor);
 
   std::tuple<TensorList, TensorList, FeedDict>
@@ -103,6 +106,7 @@ class DefineByRunGraph : public Graph {
   std::shared_ptr<ExecutableGraph> _exec_graph;
   Op2OpMap _op_to_exec_op_mapping;
   Tensor2TensorMap _tensor_to_exec_tensor_mapping;
+  std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
   std::unordered_map<OpId, size_t> _op_to_num_destructed_outputs;
 };
 
