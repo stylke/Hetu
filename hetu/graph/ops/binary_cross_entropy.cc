@@ -59,14 +59,6 @@ Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
     ->output(0);
 }
 
-Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
-                                std::string reduction, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<BinaryCrossEntropyOpImpl>(Str2ReductionType(reduction)),
-                       {std::move(probs), std::move(labels)},
-                       std::move(op_meta))
-    ->output(0);
-}
-
 Tensor MakeBinaryCrossEntropyGradientOp(Tensor probs, Tensor labels,
                                         Tensor grad_outputs,
                                         ReductionType reduction,

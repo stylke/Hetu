@@ -108,14 +108,27 @@ Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
                                 ReductionType reduction = kMEAN,
                                 OpMeta op_meta = OpMeta());
 
-Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
-                                std::string reduction = "mean",
-                                OpMeta op_meta = OpMeta());
+inline Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
+                                       std::string reduction,
+                                       OpMeta op_meta = OpMeta()) {
+  return MakeBinaryCrossEntropyOp(std::move(probs), std::move(labels),
+                                  Str2ReductionType(reduction),
+                                  std::move(op_meta));
+}
 
 Tensor MakeBinaryCrossEntropyGradientOp(Tensor probs, Tensor labels,
                                         Tensor grad_outputs,
                                         ReductionType reduction = kMEAN,
                                         OpMeta op_meta = OpMeta());
+
+inline Tensor MakeBinaryCrossEntropyGradientOp(Tensor probs, Tensor labels,
+                                               Tensor grad_outputs,
+                                               std::string reduction,
+                                               OpMeta op_meta = OpMeta()) {
+  return MakeBinaryCrossEntropyGradientOp(
+    std::move(probs), std::move(labels), std::move(grad_outputs),
+    Str2ReductionType(reduction), std::move(op_meta));
+}
 
 } // namespace graph
 } // namespace hetu

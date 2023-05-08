@@ -5,6 +5,7 @@
 #include "hetu/graph/common.h"
 #include "hetu/graph/tensor.h"
 #include "hetu/graph/operator.h"
+#include "hetu/graph/init/initializer.h"
 #include <mutex>
 #include <stack>
 
@@ -45,29 +46,6 @@ class Graph {
   Graph& operator=(const Graph&) = delete;
   Graph(Graph&&) = delete;
   Graph& operator=(Graph&&) = delete;
-
-  NDArray& GetOrAllocVariableData(const Tensor& tensor) {
-    auto it = _preserved_data.find(tensor->id());
-    if (it != _preserved_data.end()) {
-      return it->second;
-    } else {
-      auto& op = tensor->producer();
-      HT_RUNTIME_ERROR_IF(!is_parameter_op(op) && !is_variable_op(op))
-        << "Tensor " << tensor->name() << " is not a parameter or variable";
-      HT_RUNTIME_ERROR_IF(op->graph_id() != id())
-        << "Tensor " << tensor->name() << " belongs to graph " << op->graph_id()
-        << " rather than graph " << id();
-      // TODO: check meta is valid
-      auto data =
-        NDArray::empty(tensor->shape(), tensor->placement(), tensor->dtype());
-      _preserved_data.insert({tensor->id(), data});
-      return _preserved_data[tensor->id()];
-    }
-  }
-
-  void RegisterVariableData(const Tensor& tensor, NDArray data) {
-    _preserved_data[tensor->id()] = data;
-  }
 
   virtual NDArrayList Run(const TensorList& fetches,
                           const FeedDict& feed_dict = {}) = 0;
@@ -121,25 +99,12 @@ class Graph {
     Operator op(OpIdentifier{id(), next_op_id()}, std::move(body),
                 std::move(inputs), std::move(op_meta));
     AddOp(op);
-    bool require_flag = false;
-    for (size_t i = 0; i < op->num_inputs(); i++) {
-      if (op->requires_grad(i))
-        require_flag = true;  
-    }
-    for (size_t i = 0; i < op->num_outputs(); i++) {
-      op->output(i)->set_requires_grad(false);
-      // HT_LOG_INFO << op << ", output" << i;
-    }
-    if (require_flag && op->num_outputs() > 0)
-      op->output(0)->set_requires_grad(true);
     return _op_indexing[op->id()];
   }
 
   virtual void AddOp(Operator& op) {
     ++_op_type_cnts[op->type()];
     _op_indexing[op->id()] = op;
-    if (is_parameter_op(op))
-      _parameter_ops.insert(op->id());
     if (op->in_degrees() == 0) {
       _source_ops.insert(op->id());
     } else {
@@ -155,6 +120,15 @@ class Graph {
     _op_out_degrees[op->id()] = 0;
   }
 
+  virtual void MarkOpAsParameter(OpId id) {
+    auto it = _op_indexing.find(id);
+    HT_VALUE_ERROR_IF(it == _op_indexing.end())
+      << "Operator with id " << id << " is not in graph " << name();
+    HT_VALUE_ERROR_IF(!is_variable_op(it->second))
+      << "Cannot mark a non-variable op " << it->second << " as a parameter";
+    _parameter_ops.insert(id);
+  }
+
   virtual void RemoveOp(Operator& op) {
     _parameter_ops.erase(op->id());
     _source_ops.erase(op->id());
@@ -168,6 +142,35 @@ class Graph {
     Operator::for_each_output_tensor(
       op, [&](Tensor& tensor) { _preserved_data.erase(tensor->id()); });
     _op_indexing.erase(op->id());
+  }
+
+  virtual void ResetVariableDataInner(const Tensor& tensor,
+                                      const Initializer& init) {
+    HT_RUNTIME_ERROR << "Cannot reset variable data in graph " << name()
+                     << " with type " << type();
+    __builtin_unreachable();
+  }
+
+  virtual NDArray& GetVariableDataInner(const Tensor& tensor) {
+    HT_RUNTIME_ERROR << "Cannot get variable data from graph " << name()
+                     << " with type " << type();
+    __builtin_unreachable();
+  }
+
+  virtual NDArray&
+  AllocVariableDataInner(const Tensor& tensor,
+                         const Initializer& init = VoidifiedInitializer()) {
+    HT_RUNTIME_ERROR << "Cannot allocate variable data in graph " << name()
+                     << " with type " << type();
+    __builtin_unreachable();
+  }
+
+  virtual void
+  RegisterVariableDataInner(const Tensor& tensor, NDArray data,
+                            const Initializer& init = VoidifiedInitializer()) {
+    HT_RUNTIME_ERROR << "Cannot register variable data for graph " << name()
+                     << " with type " << type();
+    __builtin_unreachable();
   }
 
   virtual NDArray GetOrCompute(Tensor& tensor) {
@@ -239,13 +242,13 @@ class Graph {
 
   static Operator& MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
                           OpMeta op_meta, Graph& graph);
-
+  
   static inline Graph& GetGraph(const Operator& op) {
     return GetGraph(op->graph_id());
   }
 
   static inline Graph& GetGraph(const Tensor& tensor) {
-    return GetGraph(tensor->producer());
+    return GetGraph(tensor->graph_id());
   }
 
   static inline Graph& GetGraph(GraphId graph_id) {
@@ -290,8 +293,29 @@ class Graph {
     Graph::_cur_graph_ctx.pop();
   }
 
-  bool _default_stop_at(const Operator& op) {
-    return false;
+  static void MarkAsParameter(const Operator& op) {
+    Graph::GetGraph(op->graph_id()).MarkOpAsParameter(op->id());
+  }
+  
+  static void MarkAsParameter(const Tensor& tensor) {
+    Graph::GetGraph(tensor->graph_id())
+      .MarkOpAsParameter(tensor->producer_id());
+  }
+
+  static inline OpCRefList GetProducerOpCRefList(const TensorList& tensors) {
+    OpCRefList ret;
+    ret.reserve(tensors.size());
+    for (const auto& tensor : tensors)
+      ret.push_back(std::cref(tensor->producer()));
+    return ret;
+  }
+
+  static inline OpCRefList GetProducerOpCRefList(const TensorRefList& tensors) {
+    OpCRefList ret;
+    ret.reserve(tensors.size());
+    for (const auto& tensor_ref : tensors)
+      ret.push_back(std::cref(tensor_ref.get()->producer()));
+    return ret;
   }
 
   static OpRefList TopoSort(const OpRefList& ops, int32_t num_ops_hint = -1,
@@ -314,6 +338,36 @@ class Graph {
     return Graph::TopoSort(ops, num_ops_hint, stop_at);
   }
 
+  // static TensorRefList DependentVariables(const TensorList& tensors,
+  //                                         int32_t num_ops_hint = -1) {
+  //   auto var_op_refs = TopoSort(tensors, num_ops_hint, [](const Operator& op) {
+  //     return is_variable(op);
+  //   });
+  //   TensorRefList var_refs;
+  //   var_refs.reserve(var_op_refs.size());
+  //   for (auto& var_op_ref : var_op_refs)
+  //     var_refs.push_back(std::ref(var_op_ref->output(0)));
+  //   return var_refs;
+  // }
+
+  // static TensorRefList DependentVariables(const TensorCRefList& tensors,
+  //                                         int32_t num_ops_hint = -1) {
+  //   auto var_op_refs = TopoSort(tensors, num_ops_hint, [](const Operator& op) {
+  //     return is_variable(op);
+  //   });
+  //   TensorRefList var_refs;
+  //   var_refs.reserve(var_op_refs.size());
+  //   for (auto& var_op_ref : var_op_refs)
+  //     var_refs.push_back(std::ref(var_op_ref->output(0)));
+  //   return var_refs;
+  // }
+
+  // static TensorRefList DependentVariables(const Tensor& tensor,
+  //                                         int32_t num_ops_hint = -1) {
+  //   return Graph::DependentVariables(TensorCRefList{std::cref(tensor)},
+  //                                    num_ops_hint);
+  // }
+
   static TensorList Gradients(const TensorList& ys, const TensorList& xs,
                               const TensorList& grad_ys = TensorList(),
                               int32_t num_ops_hint = -1);
@@ -322,6 +376,36 @@ class Graph {
                               const Tensor& grad_y = Tensor(),
                               int32_t num_ops_hint = -1) {
     return Gradients(TensorList{y}, xs, TensorList{grad_y}, num_ops_hint);
+  }
+
+  static void ResetVariableData(const Tensor& tensor, const Initializer& init) {
+    HT_VALUE_ERROR_IF(!tensor->is_variable())
+      << "'ResetVariableData' does not support non-variable tensor: " << tensor;
+    Graph::GetGraph(tensor).ResetVariableDataInner(tensor, init);
+  }
+
+  static NDArray& GetVariableData(const Tensor& tensor) {
+    HT_VALUE_ERROR_IF(!tensor->is_variable())
+      << "'GetVariableData' does not support non-variable tensor: " << tensor;
+    return Graph::GetGraph(tensor).GetVariableDataInner(tensor);
+  }
+
+  static NDArray&
+  AllocVariableData(const Tensor& tensor,
+                    const Initializer& init = VoidifiedInitializer()) {
+    HT_VALUE_ERROR_IF(!tensor->is_variable())
+      << "'AllocVariableData' does not support non-variable tensor: " << tensor;
+    return Graph::GetGraph(tensor).AllocVariableDataInner(tensor, init);
+  }
+
+  static void
+  RegisterVariableData(const Tensor& tensor, NDArray data,
+                       const Initializer& init = VoidifiedInitializer()) {
+    HT_VALUE_ERROR_IF(!tensor->is_variable())
+      << "'RegisterVariableData' does not support non-variable tensor: "
+      << tensor;
+    return Graph::GetGraph(tensor).RegisterVariableDataInner(tensor, data,
+                                                             init);
   }
 
   template <class T, class... Args>

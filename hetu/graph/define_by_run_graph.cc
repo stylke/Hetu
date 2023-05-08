@@ -42,6 +42,18 @@ Operator& DefineByRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   return _op_indexing[op_id];
 }
 
+void DefineByRunGraph::ResetVariableDataInner(const Tensor& tensor,
+                                              const Initializer& init) {
+  auto it = _tensor_to_exec_tensor_mapping.find(tensor->id());
+  if (it == _tensor_to_exec_tensor_mapping.end()) {
+    // The op is not instantiated yet. Mark an add-on initializer.
+    _add_on_inits[tensor->id()] = std::unique_ptr<Initializer>(init.copy());
+  } else {
+    // The op has been instantiated. Let the executable graph handle it.
+    Graph::ResetVariableData(it->second, init);
+  }
+}
+
 Tensor& DefineByRunGraph::DetachEagerTensor(const Tensor& tensor) {
   auto it = _detached_ops.find(tensor->id());
   if (it != _detached_ops.end())
@@ -166,7 +178,7 @@ void DefineByRunGraph::PruneTensor(const Tensor& tensor) {
       }
     });
 
-    if (is_parameter_op(op)) {
+    if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
       removable_op_ids.insert(op->id());
     }
   }
@@ -228,6 +240,11 @@ DefineByRunGraph::GenerateExecutionTargets(const TensorList& fetches,
 
   auto put_exec_output = [&](Tensor& tensor, Tensor& exec_tensor) -> void {
     _tensor_to_exec_tensor_mapping[tensor->id()] = exec_tensor;
+    auto it = _add_on_inits.find(tensor->id());
+    if (it != _add_on_inits.end()) {
+      Graph::ResetVariableData(exec_tensor, *it->second);
+      _add_on_inits.erase(tensor->id());
+    }
   };
 
   auto generate_exec_target = [&](const Tensor& output) -> void {
@@ -262,12 +279,15 @@ DefineByRunGraph::GenerateExecutionTargets(const TensorList& fetches,
       TensorList exec_inputs, exec_in_deps;
       std::tie(exec_inputs, exec_in_deps) =
         Operator::transform_each_input_tensor(op, get_exec_input);
-      _op_to_exec_op_mapping[op->id()] = Graph::MakeOp(
+      auto& exec_op = Graph::MakeOp(
         op->_body, std::move(exec_inputs),
         OpMeta().set(op->op_meta()).set_extra_deps(std::move(exec_in_deps)),
         *_exec_graph);
-      Operator::for_each_output_tensor_pair(
-        op, _op_to_exec_op_mapping[op->id()], put_exec_output);
+      if (_parameter_ops.find(op->id()) != _parameter_ops.end())
+        Graph::MarkAsParameter(exec_op);
+
+      Operator::for_each_output_tensor_pair(op, exec_op, put_exec_output);
+      _op_to_exec_op_mapping[op->id()] = exec_op;
     }
     Operator::for_each_output_tensor(op, generate_exec_target);
   }

@@ -13,6 +13,10 @@ class Initializer {
                     StreamIndex stream_id = NDArray::DEFAULT_STREAM) const = 0;
 
   virtual Initializer* copy() const = 0;
+
+  virtual bool vodify() const {
+    return false;
+  }
 };
 
 class VoidifiedInitializer : public Initializer {
@@ -30,6 +34,36 @@ class VoidifiedInitializer : public Initializer {
   Initializer* copy() const override {
     return new VoidifiedInitializer();
   }
+
+  bool vodify() const override {
+    return true;
+  }
+};
+
+class ProvidedInitializer : public Initializer {
+ public:
+  ProvidedInitializer(NDArray provided_data)
+  : Initializer(), _provided_data(std::move(provided_data)) {}
+
+  void Init(NDArray& data, uint64_t seed = 0,
+            StreamIndex stream_id = NDArray::DEFAULT_STREAM) const override {
+    NDArray::copy(_provided_data, stream_id, data);
+  }
+
+  Initializer* copy() const override {
+    return new ProvidedInitializer(_provided_data);
+  }
+
+  const NDArray& provided_data() const noexcept {
+    return _provided_data;
+  }
+
+  NDArray& provided_data() noexcept {
+    return _provided_data;
+  }
+
+ protected:
+  NDArray _provided_data;
 };
 
 class ConstantInitializer : public Initializer {

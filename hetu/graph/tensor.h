@@ -25,7 +25,7 @@ class TensorDef : public shared_ptr_target {
 
  public:
   TensorDef(const constrcutor_access_key&, TensorIdentifier ids,
-            TensorName name, NDArrayMeta meta);
+            TensorName name, bool requires_grad, NDArrayMeta meta);
 
   ~TensorDef() = default;
 
@@ -169,9 +169,9 @@ class TensorDef : public shared_ptr_target {
   
   const TensorIdentifier _ids;
   const TensorName _name;
+  bool _requires_grad;
   NDArrayMeta _meta;
   OpRefList _consumers;
-  bool _requires_grad;
   bool _inform_graph_on_destruction;
 };
 
@@ -181,7 +181,8 @@ class Tensor : public shared_ptr_wrapper<TensorDef> {
   friend class Graph;
   friend class ExecutableGraph;
 
-  Tensor(TensorIdentifier ids, TensorName name, NDArrayMeta meta = {});
+  Tensor(TensorIdentifier ids, TensorName name, bool requires_grad,
+         NDArrayMeta meta = {});
 
   Tensor() = default;
 

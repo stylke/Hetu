@@ -37,6 +37,37 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   return _op_indexing[op->id()];
 }
 
+void EagerGraph::ResetVariableDataInner(const Tensor& tensor,
+                                        const Initializer& init) {
+  init.Init(GetVariableDataInner(tensor));
+}
+
+NDArray& EagerGraph::GetVariableDataInner(const Tensor& tensor) {
+  auto it = _preserved_data.find(tensor->id());
+  HT_RUNTIME_ERROR_IF(it == _preserved_data.end())
+    << "Cannot find data for variable tensor " << tensor;
+  return it->second;
+}
+
+NDArray& EagerGraph::AllocVariableDataInner(const Tensor& tensor,
+                                            const Initializer& init) {
+  // TODO: check meta is valid
+  _preserved_data[tensor->id()] =
+    NDArray::empty(tensor->shape(), tensor->placement(), tensor->dtype());
+  if (!init.vodify()) {
+    init.Init(_preserved_data[tensor->id()]);
+  }
+  return _preserved_data[tensor->id()];
+}
+
+void EagerGraph::RegisterVariableDataInner(const Tensor& tensor, NDArray data,
+                                           const Initializer& init) {
+  _preserved_data[tensor->id()] = std::move(data);
+  if (!init.vodify()) {
+    init.Init(_preserved_data[tensor->id()]);
+  }
+}
+
 void EagerGraph::RemoveTensor(const Tensor& tensor) {
   auto& producer = _op_indexing[tensor->producer_id()];
   size_t num_outputs = MAX(producer->num_outputs(), 1);

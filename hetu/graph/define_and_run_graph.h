@@ -2,6 +2,7 @@
 
 #include "hetu/graph/graph.h"
 #include "hetu/graph/executable_graph.h"
+#include "hetu/graph/init/initializer.h"
 
 namespace hetu {
 namespace graph {
@@ -12,7 +13,7 @@ class DefineAndRunGraph : public Graph {
   friend class Tensor;
 
   DefineAndRunGraph(GraphName name, size_t init_capacity)
-  : Graph(name, init_capacity), _instantiated(false) {
+  : Graph(name, init_capacity) {
     std::srand(std::time(0));
     _op_to_exec_op_mapping.reserve(init_capacity);
     _tensor_to_exec_tensor_mapping.reserve(init_capacity);
@@ -35,6 +36,9 @@ class DefineAndRunGraph : public Graph {
 
   void Instantiate();
 
+  void ResetVariableDataInner(const Tensor& tensor,
+                              const Initializer& init) override;
+
   void RemoveOp(Operator& op) override {
     _op_to_exec_op_mapping.erase(op->id());
     Operator::for_each_output_tensor(op, [&](Tensor& tensor) {
@@ -52,7 +56,7 @@ class DefineAndRunGraph : public Graph {
   std::shared_ptr<ExecutableGraph> _exec_graph;
   Op2OpMap _op_to_exec_op_mapping;
   Tensor2TensorMap _tensor_to_exec_tensor_mapping;
-  bool _instantiated;
+  std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
 };
 
 } // namespace graph
