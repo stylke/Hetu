@@ -9,6 +9,8 @@
 #include <mutex>
 #include <stack>
 
+#include "hetu/impl/communication/comm_group.h"
+
 namespace hetu {
 namespace graph {
 
@@ -504,10 +506,27 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
     });
   }
 
-  // ensure update ops are executed later
   // TODO: support all in place ops
   visited.clear();
   for (size_t i = 0; i < ret.size(); i++) {
+    // BatchISendIRecvOp must be directly after nearest SplitOp
+    if (is_batched_isend_irecv_op(ret[i])) {
+      Operator& batched_isend_irecv_op = ret[i].get();
+      // input must be split_op
+      if (batched_isend_irecv_op->num_inputs() > 0) {
+        for (size_t j = i - 1; i >= 2 && j >= 1; j--) {
+          if (is_slice_op(ret[j]) && ret[j].get()->output(0)->consumer(0)->id() == batched_isend_irecv_op->id()) {
+            // move batched_isend_irecv_op (ret[i]) after split_op (ret[j])
+            for (size_t k = i; k > j + 1; k--) {
+              ret[k] = ret[k - 1];
+            } 
+            ret[j + 1] = batched_isend_irecv_op;
+            break;
+          }
+        }
+      }
+    }
+    // ensure update ops are executed later
     if (is_optimizer_update_op(ret[i])) {
       if (visited.find(ret[i].get()->id()) != visited.end())
         continue;

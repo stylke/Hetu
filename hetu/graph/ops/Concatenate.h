@@ -75,6 +75,9 @@ class ConcatenateOpImpl : public OpInterface {
     return {output_meta};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 
@@ -130,6 +133,9 @@ class ConcatenateGradientOpImpl : public OpInterface {
     NDArrayMeta output_meta = inputs[0]->meta();
     return {output_meta};
   }
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;

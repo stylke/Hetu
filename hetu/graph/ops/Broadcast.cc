@@ -50,6 +50,12 @@ HTShapeList BroadcastOpImpl::DoInferShape(Operator& op,
   return outputlist;
 }
 
+void BroadcastOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                     const OpMeta& op_meta) const {
+  HT_LOG_INFO << op_meta.name << ": warning: deduce states for broadcast op was not checked! please use carefully!";
+  OpInterface::DoDeduceStates(inputs, outputs, op_meta);
+}
+
 void BroadcastGradientOpImpl::DoCompute(Operator& op,
                                         const NDArrayList& inputs,
                                         NDArrayList& outputs,
@@ -67,6 +73,12 @@ BroadcastGradientOpImpl::DoInferShape(Operator& op,
                                       const HTShapeList& input_shapes,
                                       RuntimeContext& ctx) const {
   return {input_shapes.at(1)};
+}
+
+void BroadcastGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                             const OpMeta& op_meta) const {
+  HT_LOG_INFO << op_meta.name << ": warning: deduce states for broadcast gradient op was not checked! please use carefully!";
+  OpInterface::DoDeduceStates(inputs, outputs, op_meta);
 }
 
 Tensor MakeBroadcastOp(Tensor input, Tensor output, OpMeta op_meta) {

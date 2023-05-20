@@ -18,6 +18,9 @@ class GroupOpImpl final : public OpInterface {
     return {};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const {}  
+
   void DoCompute(Operator&, const NDArrayList&, NDArrayList&,
                  RuntimeContext&) const {}
 };

@@ -18,6 +18,10 @@ class SliceOpImpl : public OpInterface {
     _begin_pos(begin_pos),
     _output_shape(output_shape) {
   }
+  
+  uint64_t op_indicator() const noexcept override {
+    return SLICE_OP;
+  }
 
   HTShape get_begin_pos() const {
     return _begin_pos;
@@ -42,6 +46,9 @@ class SliceOpImpl : public OpInterface {
                                            .set_device(inputs[0]->device());
     return {output_meta};
   };
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
@@ -91,6 +98,9 @@ class SliceGradientOpImpl : public OpInterface {
   DoInferMeta(const TensorList& inputs) const override {
     return {inputs[2]->meta()};
   };
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;

@@ -38,6 +38,9 @@ class MatMulOpImpl final : public OpInterface {
     return {NDArrayMeta().set_dtype(a->dtype()).set_shape(shape)};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+  
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 

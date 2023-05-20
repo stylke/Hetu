@@ -27,6 +27,8 @@ void DefineAndRunGraph::Instantiate() {
     _exec_graph =
       Graph::_make_new_graph<ExecutableGraph>(name() + "_executable");
 
+  Graph::push_graph_ctx(_exec_graph->id());
+
   auto get_exec_input = [&](const Tensor& input) -> Tensor {
     auto it = _tensor_to_exec_tensor_mapping.find(input->id());
     HT_RUNTIME_ERROR_IF(it == _tensor_to_exec_tensor_mapping.end())
@@ -44,6 +46,7 @@ void DefineAndRunGraph::Instantiate() {
   };
 
   OpRefList topo = topo_order();
+  HT_LOG_DEBUG << "topo: " << topo;
   HT_LOG_TRACE << "Instantiating a " << type() << " graph with topo " << topo;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
@@ -63,8 +66,13 @@ void DefineAndRunGraph::Instantiate() {
       Graph::MarkAsParameter(exec_op);
 
     Operator::for_each_output_tensor_pair(op, exec_op, put_exec_output);
+    if (is_placeholder_op(op) || is_variable_op(op)) {
+      exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
+    }
     _op_to_exec_op_mapping[op->id()] = exec_op;
   }
+
+  Graph::pop_graph_ctx();
 }
 
 NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,

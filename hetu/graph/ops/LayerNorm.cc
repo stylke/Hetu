@@ -36,6 +36,33 @@ HTShapeList LayerNormOpImpl::DoInferShape(Operator& op,const HTShapeList& input_
   return {input_shapes.at(0), output_shape, output_shape};
 }
 
+void LayerNormOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                     const OpMeta& op_meta) const {
+  size_t dim = normalized_shape().size();
+  HTShape local_shape = inputs.at(0)->shape();
+  int max_dim = local_shape.size() - dim;
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  const DistributedStates& ds_scale = inputs.at(1)->get_distributed_states();
+  const DistributedStates& ds_bias = inputs.at(2)->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid() && ds_scale.is_valid() && ds_bias.is_valid()
+            && ds_input.get_device_num() == ds_scale.get_device_num()
+            && ds_scale.get_device_num() == ds_bias.get_device_num()) 
+    << "LayerNormOpDef: input states must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1 && ds_scale.get_dim(-2) == 1 
+            && ds_bias.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(max_dim) && 
+            ds_scale.check_max_dim(max_dim) &&
+            ds_bias.check_max_dim(max_dim))
+    << "LayerNormOp only support input, scale and bias split in dimension < " << max_dim;
+  // scale and bias shape should be normalized_shape, so keep duplicate
+  HT_ASSERT(ds_scale.check_pure_duplicate() && ds_bias.check_pure_duplicate())
+    << "Scale and bias should be duplicate!";
+  outputs.at(0)->set_distributed_states(ds_input);
+  outputs.at(1)->set_distributed_states(ds_scale);
+  outputs.at(2)->set_distributed_states(ds_bias);
+}
+
 void LayerNormGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                        NDArrayList& outputs,
                                        RuntimeContext& ctx) const {
@@ -58,6 +85,13 @@ TensorList MakeLayerNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias, HTShap
           std::make_shared<LayerNormOpImpl>(normalized_shape, eps),
           {std::move(input), std::move(bn_scale), std::move(bn_bias)},
           std::move(op_meta))->outputs();   
+}
+
+void LayerNormGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                             const OpMeta& op_meta) const {
+  outputs.at(0)->set_distributed_states(inputs.at(1)->get_distributed_states());
+  outputs.at(1)->set_distributed_states(inputs.at(2)->get_distributed_states());
+  outputs.at(2)->set_distributed_states(inputs.at(2)->get_distributed_states());
 }
 
 TensorList MakeLayerNormGradientOp(Tensor output_grad, Tensor input, Tensor bn_scale,

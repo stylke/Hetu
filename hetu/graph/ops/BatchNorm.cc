@@ -50,6 +50,22 @@ HTShapeList BatchNormOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0), {input_shapes.at(0)[1]}, {input_shapes.at(0)[1]}};
 }
 
+// 注: input tensor shape=[N, C, H, W], 在N, H, W维上做切分均会影响到batch norm的mean和var, 
+// 导致最终结果产生差异(类比于batch和mini-batch做batchnorm的区别)
+void BatchNormOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                     const OpMeta& op_meta) const {
+  const auto& ds_input = inputs.at(0)->get_distributed_states();
+  const auto& ds_scale = inputs.at(1)->get_distributed_states();
+  const auto& ds_bias = inputs.at(2)->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) << op_meta.name << ": input states must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1) << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(2)) // cannot split in H,W dimension
+    << "Input tensor can only support split in dimension N, C!";
+  HT_ASSERT(ds_input.get_dim(1) == ds_scale.get_dim(0) && ds_input.get_dim(1) == ds_bias.get_dim(0))
+    << "Split states for bn_scale and bn_bias should be equal to split states for input dimension C!";  
+  outputs.at(0)->set_distributed_states(ds_input);
+}
+
 void BatchNormGradientOpImpl::DoCompute(Operator& op,
                                         const NDArrayList& inputs,
                                         NDArrayList& outputs,
@@ -67,6 +83,13 @@ BatchNormGradientOpImpl::DoInferShape(Operator& op,
                                       RuntimeContext& ctx) const {
   int64_t channels = input_shapes.at(0)[1];
   return {input_shapes.at(1), {channels}, {channels}};
+}
+
+void BatchNormGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                             const OpMeta& op_meta) const {
+  outputs.at(0)->set_distributed_states(inputs.at(1)->get_distributed_states());
+  outputs.at(1)->set_distributed_states(inputs.at(2)->get_distributed_states());
+  outputs.at(2)->set_distributed_states(inputs.at(2)->get_distributed_states());  
 }
 
 TensorList MakeBatchNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias,

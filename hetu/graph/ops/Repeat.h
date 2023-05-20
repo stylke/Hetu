@@ -39,6 +39,9 @@ class RepeatOpImpl : public OpInterface {
     return {output_meta};
   };
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
@@ -73,6 +76,9 @@ class RepeatGradientOpImpl : public OpInterface {
   DoInferMeta(const TensorList& inputs) const override {
     return {inputs[1]->meta()};
   };
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override; 
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;

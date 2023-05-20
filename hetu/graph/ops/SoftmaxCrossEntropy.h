@@ -41,6 +41,9 @@ class SoftmaxCrossEntropyOpImpl : public OpInterface {
     return {out_meta};
   };
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
@@ -88,6 +91,9 @@ class SoftmaxCrossEntropyGradientOpImpl : public OpInterface {
     return {inputs[0]->meta()};
   };
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+  
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 

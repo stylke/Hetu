@@ -67,6 +67,9 @@ protected:
     return {output_meta};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 
@@ -132,6 +135,9 @@ protected:
     return {output_meta};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+  
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;
 

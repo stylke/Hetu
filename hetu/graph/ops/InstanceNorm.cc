@@ -29,6 +29,16 @@ HTShapeList InstanceNormOpImpl::DoInferShape(Operator&op,
   return {input_shapes.at(0), local_shape, local_shape};
 }
 
+void InstanceNormOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                        const OpMeta& op_meta) const {
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) << "InstanceNormOpDef: input states must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1) << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(2))
+    << "InstanceNormOp only support split dimensions N&C in [N, C, H, W]!";  
+  outputs.at(0)->set_distributed_states(ds_input);
+}
+
 void InstanceNormGradientOpImpl::DoCompute(Operator& op,
                                            const NDArrayList& inputs,
                                            NDArrayList& outputs,
@@ -44,6 +54,11 @@ InstanceNormGradientOpImpl::DoInferShape(Operator& op,
                                          const HTShapeList& input_shapes,
                                          RuntimeContext& ctx) const {
   return {input_shapes.at(0)};
+}
+
+void InstanceNormGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                                const OpMeta& op_meta) const {
+  outputs.at(0)->set_distributed_states(inputs.at(1)->get_distributed_states());
 }
 
 TensorList MakeInstanceNormOp(Tensor input, double eps,

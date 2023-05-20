@@ -34,6 +34,18 @@ HTShapeList Dropout2dOpImpl::DoInferShape(Operator& op, const HTShapeList& input
   return {input_shapes.at(0)};
 }
 
+void Dropout2dOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                     const OpMeta& op_meta) const {
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "Dropout2dOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1) 
+    << "Tensor input shouldn't be partial";
+  HT_ASSERT(ds_input.check_max_dim(2))
+    << "droupout2d only support split dimensions N&C in [N, C, H, W] now!";
+  outputs.at(0)->set_distributed_states(ds_input);  
+}
+
 void Dropout2dGradientWithRecomputationOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                                          NDArrayList& outputs,
                                                          RuntimeContext& runtime_ctx) const {

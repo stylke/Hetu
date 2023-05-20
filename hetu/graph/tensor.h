@@ -3,6 +3,7 @@
 #include "hetu/common/macros.h"
 #include "hetu/core/ndarray.h"
 #include "hetu/graph/common.h"
+#include "hetu/graph/distributed_states.h"
 
 namespace hetu {
 namespace graph {
@@ -145,6 +146,7 @@ class TensorDef : public shared_ptr_target {
 
   void set_placement(const Device& p) {
     _meta.set_device(p);
+    _distributed_states.set_placement(p);
   }
 
   const bool requires_grad() const noexcept {
@@ -156,6 +158,18 @@ class TensorDef : public shared_ptr_target {
   }
 
   NDArray get_or_compute();
+
+  const DistributedStates& get_distributed_states() const {
+    return _distributed_states;
+  }
+
+  void set_distributed_states(const DistributedStates& distributed_states) {
+    _distributed_states.set_distributed_states(distributed_states);
+  }
+
+  void set_placement_group(const DeviceGroup& placement_group) {
+    _distributed_states.set_placement_group(placement_group);
+  }  
 
  protected:
   void AddConsumer(Operator& op);
@@ -173,6 +187,7 @@ class TensorDef : public shared_ptr_target {
   NDArrayMeta _meta;
   OpRefList _consumers;
   bool _inform_graph_on_destruction;
+  DistributedStates _distributed_states;
 };
 
 class Tensor : public shared_ptr_wrapper<TensorDef> {

@@ -30,20 +30,22 @@ NDArrayList VariableOpImpl::DoAllocOutputs(Operator& op,
   return {Graph::GetVariableData(op->output(0))};
 }
 
+// in_degree=0, should set distributed states manually
 Tensor MakeVariableOp(const Initializer& init, HTShape shape, DataType dtype,
                       bool requires_grad, OpMeta op_meta) {
   auto out = Graph::MakeOp(std::make_shared<VariableOpImpl>(
-                           init, std::move(shape), dtype, requires_grad),
-                           TensorList(), std::move(op_meta))->output(0);
+                           init, std::move(shape), dtype, requires_grad), TensorList(), 
+                           std::move(op_meta.set_is_deduce_states(false)))->output(0);
   return out;
 }
 
+// in_degree=0, should set distributed states manually
 Tensor MakeVariableOp(NDArray provided_data, bool copy_provided_data,
                       DataType dtype, bool requires_grad, OpMeta op_meta) {
   auto out = Graph::MakeOp(std::make_shared<VariableOpImpl>(
                            std::move(provided_data), copy_provided_data, dtype,
-                           requires_grad),
-                           TensorList(), std::move(op_meta))->output(0);
+                           requires_grad), TensorList(), 
+                           std::move(op_meta.set_is_deduce_states(false)))->output(0);
   return out;
 }
 

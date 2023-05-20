@@ -32,6 +32,22 @@ void BinaryCrossEntropyOpImpl::DoCompute(Operator& op,
   }
 }
 
+void BinaryCrossEntropyOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                              const OpMeta& op_meta) const {
+  const DistributedStates& ds_preds = inputs.at(0)->get_distributed_states();
+  const DistributedStates& ds_labels = inputs.at(1)->get_distributed_states();
+  HT_ASSERT(ds_preds.is_valid() && ds_labels.is_valid()
+            && ds_preds.get_device_num() == ds_labels.get_device_num())
+    << "BCEOpDef: distributed states for inputs tensor must be valid!";
+  HT_ASSERT(ds_preds.get_dim(-2) == 1 && ds_labels.get_dim(-2) == 1)
+    << "Inputs tensor shouldn't be partial!";
+  HT_ASSERT(ds_preds.check_equal(ds_labels))
+    << "Distributed states among preds and labels should be equal!";
+  // HT_ASSERT(ds_preds.check_max_dim(1))
+  //   << "BCEOp only support data parallel!";
+  outputs.at(0)->set_distributed_states(ds_preds);  
+}
+
 void BinaryCrossEntropyGradientOpImpl::DoCompute(
   Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
   RuntimeContext& runtime_ctx) const {

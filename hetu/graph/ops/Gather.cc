@@ -34,6 +34,19 @@ GatherOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(1)};
 }
 
+void GatherOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                  const OpMeta& op_meta) const {
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  const DistributedStates& ds_id = inputs.at(1)->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid() && ds_id.is_valid()) 
+    << "GatherOpImpl: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1 && ds_id.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_pure_duplicate() && ds_id.check_pure_duplicate())
+    << "Input tensor cannot be splited in any dimension!";
+  outputs.at(0)->set_distributed_states(ds_id);    
+}
+
 void GatherGradientOpImpl::DoCompute(Operator& op,
                                      const NDArrayList& inputs,
                                      NDArrayList& outputs,
@@ -48,6 +61,11 @@ GatherGradientOpImpl::DoInferShape(Operator& op,
                                    const HTShapeList& input_shapes,
                                    RuntimeContext& ctx) const {
   return {input_shapes.at(2)};
+}
+
+void GatherGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                          const OpMeta& op_meta) const {
+  outputs.at(0)->set_distributed_states(inputs.at(2)->get_distributed_states());
 }
 
 Tensor MakeGatherOp(Tensor input, int64_t dim, Tensor id, OpMeta op_meta) {

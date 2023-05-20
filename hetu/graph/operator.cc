@@ -3,14 +3,43 @@
 #include "hetu/graph/ops/variable.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "hetu/impl/stream/CUDAStream.h"
+#include "hetu/impl/communication/comm_group.h"
 
 namespace hetu {
 namespace graph {
 
+void OpInterface::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                 const OpMeta& op_meta) const {
+  // default: distributed states of output tensor directly copy from input tensor
+  // check input states is valid & check distributed states of all input tensor are the same.
+  HT_ASSERT(inputs.size() > 0) << op_meta.name << ": distributed states should be manually set when in_degree=0!";
+  HT_LOG_DEBUG << op_meta.name << ": default copy states from inputs";
+  DistributedStates default_ds;
+  for (auto& input : inputs) {
+    const auto& input_ds = input->get_distributed_states(); 
+    HT_ASSERT(input_ds.is_valid()) << op_meta.name << ": input states must be valid! and " 
+                                    << "input: " << input << ", input_ds: " << input_ds.ds_info();
+    HT_ASSERT(input_ds.get_dim(-2) == 1) << op_meta.name << ": input shouldn't be partial!";      
+    if (!default_ds.is_valid()) {
+      default_ds.set_distributed_states(input_ds);
+    } else {
+      HT_ASSERT(default_ds.check_equal(input_ds))
+        << op_meta.name << ": in Default DoDeduceStates: distributed states of all input tensor must be same!"
+        << ", " << default_ds.ds_info() << " vs " << input_ds.ds_info();
+    }
+  }
+  for (auto& output : outputs) {
+    output->set_distributed_states(default_ds);
+  }
+}
+
 bool OpInterface::DoMapToParallelDevices(Operator& op,
                                          const DeviceGroup& pg) const {
   op->instantiation_ctx().placement_group = pg;
-  // TODO: set output statuses
+  // set output statuses
+  Operator::for_each_output_tensor(
+    op, [&](Tensor& tensor) { tensor->set_placement_group(pg); });
+  // TODO: add P2P communication ops for pipeline parallel
   return true;
 }
 
@@ -133,6 +162,20 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
     _extra_out_dep_linkers.emplace_back(
       TensorIdentifier{_ids.graph_id, _ids.op_id, -1, graph.next_tensor_id()},
       _op_meta.name, requires_grad);
+  }
+  
+  // Deduce states for output tensor
+  if (op_meta.is_deduce_states) {
+    _body->DeduceStates(_inputs, _outputs, _op_meta);
+    // std::ostringstream os;
+    // os << _op_meta.name << ": " << std::endl;
+    // for (auto& in : _inputs) {
+    //   os << in << ": input states: " << in->get_distributed_states().ds_info() << "; input shape: " << in->shape() << std::endl;
+    // }
+    // for (auto& out : _outputs) {
+    //   os << out << ": output states: " << out->get_distributed_states().ds_info() << "; output shape: " << out->shape() << std::endl;
+    // }
+    // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " << os.str();
   }
 }
 

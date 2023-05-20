@@ -51,6 +51,22 @@ HTShapeList SCESOpImpl::DoInferShape(Operator& op,
   }
 }
 
+void SCESOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                               const OpMeta& op_meta) const {
+  const DistributedStates& ds_preds = inputs.at(0)->get_distributed_states();
+  const DistributedStates& ds_labels = inputs.at(1)->get_distributed_states();
+  int ndim = inputs.at(0)->ndim();
+  HT_ASSERT(ds_preds.is_valid() && ds_labels.is_valid())
+    << "SoftmaxCrossEntropySparseOp: distributed states for input must be valid!";
+  HT_ASSERT(ds_preds.get_dim(-2) == 1 && ds_labels.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_preds.check_equal(ds_labels))
+    << "Distributed states among preds and labels should be equal!";
+  HT_ASSERT(ds_preds.check_max_dim(ndim - 1)) // cannot split in last dimension
+    << "Input tensor can only support split in dimension < " << ndim - 1;
+  outputs.at(0)->set_distributed_states(ds_preds);
+}
+
 void SCESGradOpImpl::DoCompute(Operator& op, 
                                const NDArrayList& inputs, NDArrayList& outputs,
                                RuntimeContext& ctx) const {
@@ -78,6 +94,11 @@ HTShapeList SCESGradOpImpl::DoInferShape(Operator& op,
   HT_ASSERT_GE(input_shapes.at(0).size(), 2)
     << "Invalid shape for " << type() << ": " << input_shapes.at(0);
   return {input_shapes.at(0)};
+}
+
+void SCESGradOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                    const OpMeta& op_meta) const {
+  outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
 }
 
 Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_t ignored_index, 

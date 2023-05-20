@@ -6,6 +6,7 @@
 #include "hetu/graph/ops/BatchNorm.h"
 #include "hetu/graph/ops/binary_cross_entropy.h"
 #include "hetu/graph/ops/Broadcast.h"
+#include "hetu/graph/ops/Communication.h"
 #include "hetu/graph/ops/Concat.h"
 #include "hetu/graph/ops/Concatenate.h"
 #include "hetu/graph/ops/Conv2d.h"

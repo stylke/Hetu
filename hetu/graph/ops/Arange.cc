@@ -29,7 +29,7 @@ Tensor MakeArangeOp(double start, double end, double step,
   return Graph::MakeOp(
            std::make_shared<ArangeOpImpl>(start, end, step),
            {},
-           std::move(op_meta))->output(0);
+           std::move(op_meta.set_is_deduce_states(false)))->output(0);
 }
 
 } // namespace graph
