@@ -52,6 +52,7 @@ using TensorIdSet = std::unordered_set<TensorId>;
 using Tensor2TensorMap = std::unordered_map<TensorId, Tensor>;
 using Tensor2TensorListMap = std::unordered_map<TensorId, TensorList>;
 using Tensor2NDArrayMap = std::unordered_map<TensorId, NDArray>;
+using Tensor2IntMap = std::unordered_map<TensorId, int>;
 
 using GradAndVar = std::pair<Tensor, Tensor>;
 using GradAndVarList = std::vector<GradAndVar>;

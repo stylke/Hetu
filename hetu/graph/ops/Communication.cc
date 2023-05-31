@@ -5,18 +5,18 @@
 namespace hetu {
 namespace graph {
 
-// 注: 在OpImpl/OpInterface只提供函数接口, 状态都存在Operator->OpDef里, 因此这里的函数
-// 都要接受op来获取状态并做推导; 值得注意的是由于部分函数接口只有当前CommOpImpl有, 因此外界
-// 在调用类似get_comm_type(op)的时候, 必须要检查op->OpImpl是comm_op类型才行
 uint64_t CommOpImpl::get_comm_type(Operator& op) {
   // input may be inplaced, so comm_type should be updated for each call
-  // if (_comm_type != -1) {
-  //   return _comm_type;
-  // }
   Tensor& input = op->input(0); 
   const auto& src_ds = input->get_distributed_states();
   const auto& dst_ds = _dst_ds;
-  if (src_ds.check_pure_duplicate()) {
+  // 1. pp 2. tp 3. tp+pp 
+  if (src_ds.check_equal(dst_ds)) {
+    _comm_type = P2P_OP; // pp
+    HT_LOG_DEBUG << "P2P_OP";
+  } 
+  // tp (now also included tp+pp case, simplely add p2p op after tp result)
+  else if (src_ds.check_pure_duplicate()) {
     // TODO: check data among comm_devices be duplicate
     _comm_type = COMM_SPLIT_OP;
     HT_LOG_DEBUG << "COMM_SPLIT_OP";
@@ -30,19 +30,23 @@ uint64_t CommOpImpl::get_comm_type(Operator& op) {
     _comm_type = REDUCE_SCATTER_OP;
     HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
   } else {
-    _comm_type = P2P_OP; // other case: 非集合通信, 部分device之间p2p通信
-    HT_LOG_DEBUG << "P2P_OP";
+    _comm_type = BATCHED_ISEND_IRECV_OP;
+    HT_LOG_DEBUG << "BATCHED_ISEND_IRECV_OP";
   }
   return _comm_type;
 }
 
 // devices by dim for collective communication
 DeviceGroup CommOpImpl::get_devices_by_dim(Operator& op, int32_t dim) const {
-  const auto& placement_group = op->placement_group();
-  const auto& placement = op->placement();
   Tensor& input = op->input(0);
+  const auto& placement_group = src_group(op);
+  const auto& placement = op->placement();
   HT_ASSERT(!placement_group.empty()) 
     << "Placement Group should be assigned before get devices by dim " << dim;
+  HT_ASSERT(placement_group.contains(placement))
+    << "Func get_devices_by_dim can only be called by device in src group: " 
+    << placement_group << ", now get device " << placement << " in dst group!";
+
   int32_t local_device_idx = placement_group.get_index(placement);
   const auto& src_ds = input->get_distributed_states();
   const auto& order = src_ds.get_order();
@@ -76,12 +80,55 @@ void CommOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   output->set_distributed_states(ds_dst);  
 }
 
+bool CommOpImpl::DoMapToParallelDevices(Operator& op,
+                                        const DeviceGroup& pg) const {
+  const DeviceGroup& src_group = op->input(0)->placement_group();
+  // set output statuses
+  if (is_inter_group(op)) {
+    std::vector<Device> devices;
+    devices.insert(devices.end(), src_group.devices().begin(), src_group.devices().end());
+    devices.insert(devices.end(), _dst_group.devices().begin(), _dst_group.devices().end());
+    DeviceGroup merge_group(devices);
+    op->instantiation_ctx().placement_group = merge_group;
+    Operator::for_each_output_tensor(
+      op, [&](Tensor& tensor) { tensor->set_placement_group(_dst_group); });
+  } else {
+    op->instantiation_ctx().placement_group = src_group;
+    Operator::for_each_output_tensor(
+      op, [&](Tensor& tensor) { tensor->set_placement_group(src_group); });    
+  }
+  return true;  
+}
+
+bool CommOpImpl::DoInstantiate(Operator& op, const Device& placement,
+                               StreamIndex stream_index) const {
+  auto& inst_ctx = op->instantiation_ctx();
+  inst_ctx.placement = placement;
+  inst_ctx.stream_index = stream_index;
+  if (placement.is_cuda()) {
+    inst_ctx.start = std::make_unique<hetu::impl::CUDAEvent>(placement);
+    inst_ctx.stop = std::make_unique<hetu::impl::CUDAEvent>(placement);
+  } else {
+    inst_ctx.start = std::make_unique<hetu::impl::CPUEvent>();
+    inst_ctx.stop = std::make_unique<hetu::impl::CPUEvent>();
+  }
+  Operator::for_each_output_tensor(op, [&](Tensor& tensor) {
+    if (tensor->placement_group().contains(placement)) {
+      tensor->set_placement(placement);
+    }
+  });
+  return true;
+}
+
 std::vector<NDArrayMeta> 
 CommOpImpl::DoInferMeta(const TensorList& inputs) const {
   const Tensor& input = inputs.at(0);
   const HTShape& input_shape = input->shape();
   const DistributedStates& src_ds = input->get_distributed_states();
   const DistributedStates& dst_ds = get_dst_distributed_states();
+  const DeviceGroup& src_group = input->placement_group();
+  HT_ASSERT(!src_ds.check_equal(dst_ds) || (!_dst_group.empty() && src_group != _dst_group))
+    << "CommOp must communicate intra/inter device group!";
   HTShape shape(input_shape.size());
   for (size_t d = 0; d < input_shape.size(); d++) {
     shape[d] = input_shape[d] * src_ds.get_dim(d) / dst_ds.get_dim(d);
@@ -359,6 +406,11 @@ void ReduceScatterOpImpl::DoCompute(Operator& op,
                                   _comm_group, op->instantiation_ctx().stream());
 }
 
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, DeviceGroup dst_group, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds, dst_group), 
+                      {std::move(input)}, std::move(op_meta))->output(0);
+}
+
 Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds), 
                       {std::move(input)}, std::move(op_meta))->output(0);
@@ -374,7 +426,7 @@ Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group,
 Tensor MakeP2PSendOp(Tensor input, const DeviceGroup& dst_group, 
                      int dst_device_index, OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<P2PSendOpImpl>(dst_group, dst_device_index, op_meta.device_group),
-                      {std::move(input)}, std::move(op_meta))->output(0);
+                      {std::move(input)}, std::move(op_meta))->out_dep_linker();
 }
 
 Tensor MakeP2PRecvOp(const DeviceGroup& src_group, DataType dtype,
@@ -398,13 +450,13 @@ Tensor MakeBatchedISendIRecvOp(TensorList inputs,
 }
 
 Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group, 
-                       const DeviceGroup& device_group, OpMeta op_meta) {
+                       OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<AllGatherOpImpl>(comm_group, op_meta.device_group), 
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
 Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, 
-                           const DeviceGroup& device_group, OpMeta op_meta) {
+                           OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, op_meta.device_group), 
                       {std::move(input)}, std::move(op_meta))->output(0);
 }

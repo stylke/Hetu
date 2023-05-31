@@ -141,7 +141,7 @@ class TensorDef : public shared_ptr_target {
   }
 
   const Device& placement() const noexcept {
-    return device();
+    return _distributed_states.get_placement();
   }
 
   void set_placement(const Device& p) {
@@ -165,6 +165,10 @@ class TensorDef : public shared_ptr_target {
 
   void set_distributed_states(const DistributedStates& distributed_states) {
     _distributed_states.set_distributed_states(distributed_states);
+  }
+
+  const DeviceGroup& placement_group() const {
+    return _distributed_states.get_placement_group();
   }
 
   void set_placement_group(const DeviceGroup& placement_group) {

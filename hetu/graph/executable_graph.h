@@ -25,13 +25,30 @@ class ExecutableGraph : public Graph {
 
   bool Instantiate(const TensorList& fetches, const Device& placement);
 
-  NDArrayList Run(const TensorList& fetches, const FeedDict& feed_dict = {});
+  NDArrayList Run(const TensorList& fetches, 
+                  const FeedDict& feed_dict = {}) {}
+
+  NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
+                  const FeedDict& feed_dict = {}, const int num_micro_batches = 1);
 
   GraphType type() const {
     return GraphType::EXECUTABLE;
   }
 
  protected:
+  std::unordered_map<int, std::vector<std::pair<bool, int>>>
+  GenerateGpipeSchedule(int num_stages, int num_micro_batches, bool is_inference);
+
+  std::unordered_map<int, std::vector<std::pair<bool, int>>>
+  GeneratePipedreamFlushSchedule(int num_stages, int num_micro_batches, bool is_inference);
+
+  void ComputeFunc(const OpRefList& topo, RuntimeContext& runtime_ctx, 
+                  Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
+                  Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
+                  const TensorIdSet& accumulated_tensor, const OpIdSet& accumulated_ops,
+                  const FeedDict& feed_dict, const TensorList& fetches,
+                  const std::unordered_map<TensorId, size_t>& fetch_indices);
+
   void SubstituteCommOp(const OpRefList& topo_order);
 
   void CrossSend(std::unordered_map<int32_t, int32_t> split_cur_state, 
@@ -83,6 +100,7 @@ class ExecutableGraph : public Graph {
   }
 
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
+  std::vector<DeviceGroup> _stages;
 };
 
 } // namespace graph

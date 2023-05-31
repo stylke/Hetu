@@ -75,8 +75,8 @@ void DefineAndRunGraph::Instantiate() {
   Graph::pop_graph_ctx();
 }
 
-NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
-                                   const FeedDict& feed_dict) {
+NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches,
+                                   const FeedDict& feed_dict, const int num_micro_batches) {
   bool has_uninstantiated_ops =
     std::any_of(fetches.begin(), fetches.end(), [&](const Tensor& fetch) {
       return _op_to_exec_op_mapping.find(fetch->producer_id()) ==
@@ -93,7 +93,8 @@ NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
   exec_feed_dict.reserve(feed_dict.size());
   for (const auto& kv : feed_dict)
     exec_feed_dict[_tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;
-  return _exec_graph->Run(exec_fetches, exec_feed_dict);
+  auto& exec_loss = _tensor_to_exec_tensor_mapping[loss->id()];    
+  return _exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches);
 }
 
 } // namespace graph

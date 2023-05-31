@@ -190,8 +190,8 @@ const Operator& OpDef::get_self() const {
 void OpDef::BlockOrSyncAllInputs() {
   for (auto& input : _inputs)
     BlockOrSyncInput(input);
-  for (auto& in_dep : _extra_in_dep_linkers)
-    BlockOrSyncInput(in_dep);
+  // for (auto& in_dep : _extra_in_dep_linkers)
+  //   BlockOrSyncInput(in_dep);
 }
 
 void OpDef::BlockOrSyncInput(Tensor& input) {
@@ -203,7 +203,8 @@ void OpDef::BlockOrSyncInput(Tensor& input) {
   HT_RUNTIME_ERROR_IF(input_placement.is_undetermined() ||
                       (!input_placement.local()))
     << "Input " << input << " is not instantiated or on a remote device. "
-    << "Please use P2P communication op to fetch it";
+    << "Please use P2P communication op to fetch it"
+    << "cur op = " << input->consumers() << ", cur device = " << hetu::impl::comm::GetLocalDevice();
   if (input_placement != current_placement) {
     // We cannot block different devices. Just sync here.
     input_op->instantiation_ctx().stop->Sync();

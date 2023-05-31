@@ -19,14 +19,20 @@ class ScatterOpImpl;
 
 class CommOpImpl final: public OpInterface {
  public:
-  CommOpImpl(DistributedStates dst_ds)
-  : OpInterface(quote(CommOp)), _dst_ds(dst_ds) {}
+  CommOpImpl(DistributedStates dst_ds, DeviceGroup dst_group = DeviceGroup())
+  : OpInterface(quote(CommOp)), _dst_ds(dst_ds), _dst_group(dst_group) {}
 
   uint64_t op_indicator() const noexcept override {
     return COMM_OP;
   }  
 
  protected:
+  bool DoMapToParallelDevices(Operator& op,
+                              const DeviceGroup& pg) const override;
+
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;                              
+
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override;
 
@@ -47,6 +53,26 @@ class CommOpImpl final: public OpInterface {
     return _dst_ds;
   }
 
+  const DeviceGroup& src_group(Operator& op) const {
+    return op->input(0)->placement_group();
+  }
+
+  const DeviceGroup& dst_group(Operator& op) const {
+    if (_dst_group.empty()) {
+      return op->input(0)->placement_group();
+    } else {
+      return _dst_group;
+    }
+  }
+
+  bool is_intra_group(Operator& op) const {
+    return !is_inter_group(op);
+  }
+
+  bool is_inter_group(Operator& op) const {
+    return src_group(op) != dst_group(op);
+  }
+
   uint64_t get_comm_type(Operator& op);
 
   DeviceGroup get_devices_by_dim(Operator& op, int32_t dim) const; 
@@ -54,7 +80,11 @@ class CommOpImpl final: public OpInterface {
  protected:
   uint64_t _comm_type{UNKNOWN_OP};
   DistributedStates _dst_ds;
+  DeviceGroup _dst_group;
 };
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+                  DeviceGroup dst_group, OpMeta op_meta = OpMeta());
 
 Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
                   OpMeta op_meta = OpMeta());
@@ -357,8 +387,7 @@ class AllGatherOpImpl final : public OpInterface {
   DeviceGroup _comm_group;
 };
 
-Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group, 
-                       const DeviceGroup& device_group = DeviceGroup(),
+Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group,
                        OpMeta op_meta = OpMeta());
 
 class ReduceScatterOpImpl final : public OpInterface {
@@ -397,8 +426,7 @@ class ReduceScatterOpImpl final : public OpInterface {
   DeviceGroup _comm_group;
 };
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, 
-                           const DeviceGroup& device_group = DeviceGroup(),
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group,
                            OpMeta op_meta = OpMeta());
 
 }

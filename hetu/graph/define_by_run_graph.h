@@ -25,7 +25,11 @@ class DefineByRunGraph : public Graph {
                    size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
   : DefineByRunGraph(name, init_capacity) {}
 
-  NDArrayList Run(const TensorList& fetches, const FeedDict& feed_dict = {});
+  NDArrayList Run(const TensorList& fetches, 
+                  const FeedDict& feed_dict = {}) {}
+
+  NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
+                  const FeedDict& feed_dict = {}, const int num_micro_batches = 1);
 
   GraphType type() const {
     return GraphType::DEFINE_BY_RUN;
@@ -39,6 +43,9 @@ class DefineByRunGraph : public Graph {
                               const Initializer& init) override;
 
   NDArray GetOrCompute(Tensor& tensor);
+
+  NDArray GetOrCompute(const Tensor& loss, Tensor& tensor, 
+                       const int num_micro_batches = 1) {}
 
   std::tuple<TensorList, TensorList, FeedDict>
   GenerateExecutionTargets(const TensorList& fetches,

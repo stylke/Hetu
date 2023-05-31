@@ -52,6 +52,9 @@ class Graph {
   virtual NDArrayList Run(const TensorList& fetches,
                           const FeedDict& feed_dict = {}) = 0;
 
+  virtual NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
+                          const FeedDict& feed_dict = {}, const int num_micro_batches = 1) {}                          
+
   GraphId id() const noexcept {
     return _id;
   }
@@ -340,6 +343,9 @@ class Graph {
     return Graph::TopoSort(ops, num_ops_hint, stop_at);
   }
 
+  static std::tuple<OpRefList, OpRefList> disentangle_forward_and_backward_ops(
+    const OpRefList& topo, const TensorList& losses);  
+
   // static TensorRefList DependentVariables(const TensorList& tensors,
   //                                         int32_t num_ops_hint = -1) {
   //   auto var_op_refs = TopoSort(tensors, num_ops_hint, [](const Operator& op) {
@@ -552,6 +558,43 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
   }
 
   return ret;
+}
+
+inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_ops(
+  const OpRefList& topo, const TensorList& losses) {
+  // traverse forward nodes (including losses)
+  OpCRefDeque traverse_queue;
+  for (const Tensor& loss : losses)
+    traverse_queue.push_back(loss->producer());
+  std::set<OpId> fw_set;
+  while (!traverse_queue.empty()) {
+    const Operator& op = traverse_queue.front().get();
+    traverse_queue.pop_front();
+    fw_set.insert(op->id());
+    Operator::for_each_input_tensor(op, [&](const Tensor& tensor) {
+      if (fw_set.find(tensor->producer()->id()) == fw_set.end()) {
+        traverse_queue.push_back(tensor->producer());
+      }
+    });
+  }
+
+  // get the forward ops
+  OpRefList fw_ops;
+  fw_ops.reserve(fw_set.size());
+  std::copy_if(topo.begin(), topo.end(), std::back_inserter(fw_ops),
+               [&fw_set](const OpRef& op_ref) {
+                 return fw_set.find(op_ref.get()->id()) != fw_set.end();
+               });
+
+  // get the backward ops
+  OpRefList bw_ops;
+  bw_ops.reserve(topo.size() - fw_ops.size());
+  std::copy_if(topo.begin(), topo.end(), std::back_inserter(bw_ops),
+               [&fw_set](const OpRef& op_ref) {
+                 return fw_set.find(op_ref.get()->id()) == fw_set.end();
+               });
+
+  return {fw_ops, bw_ops};
 }
 
 } // namespace graph

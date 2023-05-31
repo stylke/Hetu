@@ -24,7 +24,10 @@ class DefineAndRunGraph : public Graph {
                     size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
   : DefineAndRunGraph(name, init_capacity) {}
 
-  NDArrayList Run(const TensorList& fetches, const FeedDict& feed_dict = {});
+  NDArrayList Run(const TensorList& fetches, const FeedDict& feed_dict = {}) {}
+
+  NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
+                  const FeedDict& feed_dict = {}, const int num_micro_batches = 1);
 
   GraphType type() const {
     return GraphType::DEFINE_AND_RUN;

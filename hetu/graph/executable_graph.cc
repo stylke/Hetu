@@ -58,12 +58,6 @@ void ExecutableGraph::RegisterVariableDataInner(const Tensor& tensor,
   }
 }
 
-// bool ExecutableGraph::MapOpsToParallelDevices(
-//   const DeviceGroup& placement_group) {
-//   HT_NOT_IMPLEMENTED;
-//   return true;
-// }
-
 bool ExecutableGraph::Instantiate(const TensorList& fetches,
                                   const Device& preferred_device) {
   auto is_op_instantiated = [&](const Operator& op) -> bool {
@@ -71,12 +65,25 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
   };
   OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_instantiated);
   HT_LOG_TRACE << "Instantiating ops: " << topo;
+
+  // global info for all devices
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
     if (!op->placement().is_undetermined())
       continue;
+
+    // remove redundant comm ops
+    if (is_comm_op(op)) {
+      auto& input_op = op->input(0)->producer();
+      // TODO: special case: input_op include pp but op don't 
+      if (is_comm_op(input_op)) {
+        ReplaceInput(op, 0, input_op->input(0));
+        // input changes, update comm_op type
+        reinterpret_cast<CommOpImpl&>(op->body()).get_comm_type(op);
+      }
+    }
     
-    // 1. for global info: op->placement_group + tensor->placement_group
+    // op->placement_group + tensor->placement_group
     if (!op->device_group().empty()) {
       op->MapToParallelDevices(op->device_group());
     } else {
@@ -93,14 +100,115 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         HT_ASSERT(op->num_inputs() > 0)
           << "Currently we cannot infer the devices "
           << "for operators with zero in-degree. : " << op;
-        inferred = op->input(0)->producer()->placement_group();        
+        inferred = op->input(0)->placement_group();
       }
       op->MapToParallelDevices(inferred);
     }
+    // udpate stages
+    DeviceGroup stage_group;
+    if (is_comm_op(op)) {
+      auto& op_impl = reinterpret_cast<CommOpImpl&>(op->body());
+      stage_group = op_impl.src_group(op);
+    } else if (!is_group_op(op)) {
+      stage_group = op->placement_group();
+    }
+    if (!stage_group.empty() && std::find(_stages.begin(), _stages.end(), stage_group) == _stages.end()) {
+      _stages.push_back(stage_group);
+    }
 
-    // 2. for local compute: op->placement + tensor->placement
+    // add p2p comm_op for pipeline parallel
+    const auto& dst_group = op->placement_group();
+    for (size_t i = 0; i < op->num_inputs(); i++) {
+      auto& input = op->input(i);
+      auto& input_op = input->producer();
+      const auto& src_group = input_op->placement_group();
+      if (src_group != dst_group) {
+        // TODO: reuse p2p op & remove useless p2p op
+        Tensor p2p_input;
+        // there is no two linked comm_op, due to the former code to remove redundant comm_op
+        // if comm_op need pp, its placement_group contains both src and dst group
+        if (is_comm_op(input_op)) {
+          auto& input_op_impl = reinterpret_cast<CommOpImpl&>(input_op->body());
+          if (input_op_impl.dst_group(input_op) == dst_group) {
+            continue;
+          } else {
+            const auto& src_group_comm = input_op_impl.src_group(input_op);
+            HT_ASSERT(src_group_comm.num_devices() == dst_group.num_devices())
+              << "DeviceGroup size in different pipeline stage must be same, "
+              << "got " << src_group_comm.num_devices()
+              << " vs. " << dst_group.num_devices();
+
+            bool reused = false;
+            for (auto& consumer_op : input_op->input(0)->consumers()) {
+              if (consumer_op.get()->id() != input_op->id() && is_comm_op(consumer_op)) {
+                auto& consumer_op_impl = reinterpret_cast<CommOpImpl&>(consumer_op.get()->body());
+                const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
+                if (consumer_op_impl.get_dst_distributed_states().check_equal(
+                  input_op_impl.get_dst_distributed_states()) && dst_group_comm == dst_group) {
+                  ReplaceInput(op, i, consumer_op.get()->output(0));
+                  reused = true;
+                  break;
+                }
+              }
+            }
+            if (reused)
+              continue;
+
+            p2p_input = MakeCommOp(input_op->input(0), input_op_impl.get_dst_distributed_states(), dst_group);
+          }
+        } else if (is_comm_op(op)) {
+          auto& op_impl = reinterpret_cast<CommOpImpl&>(op->body());
+          const auto& src_group_comm = op_impl.src_group(op);
+          HT_ASSERT(src_group_comm == src_group)
+            << "CommOp(with pp) " << op->name() << ": src group " << src_group_comm
+            << " must equal to InputOp " << input_op->name() <<": group " << src_group;
+          continue;
+        } else {
+          HT_ASSERT(src_group.num_devices() == dst_group.num_devices())
+            << "DeviceGroup size in different pipeline stage must be same, "
+            << "got " << src_group.num_devices() 
+            << " vs. " << dst_group.num_devices();
+
+          bool reused = false;
+          for (auto& consumer_op : input->consumers()) {
+            if (consumer_op.get()->id() != op->id() && is_comm_op(consumer_op)) {
+              auto& consumer_op_impl = reinterpret_cast<CommOpImpl&>(consumer_op.get()->body());
+              const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
+              if (consumer_op_impl.get_dst_distributed_states().check_equal(
+                  input->get_distributed_states()) && dst_group_comm == dst_group) {
+                ReplaceInput(op, i, consumer_op.get()->output(0));
+                reused = true;
+                break;
+              }
+            }
+          }
+          if (reused)
+            continue;
+
+          p2p_input = MakeCommOp(input, input->get_distributed_states(), dst_group);
+        }
+        auto& p2p_op = p2p_input->producer();
+        // will be splited into intra_comm + p2p_send(src_group) and p2p_recv(dst_group)
+        p2p_op->MapToParallelDevices(input_op->placement_group());
+        ReplaceInput(op, i, p2p_input);
+      }
+    }
+  }
+
+  // get updated topo
+  OpRefList updated_topo = Graph::TopoSort(fetches, num_ops(), is_op_instantiated);
+
+  // HT_LOG_DEBUG << preferred_device << ": updated topo after map placement_group: " << updated_topo; 
+
+  // local info for local_device
+  for (auto& op_ref : updated_topo) {
+    auto& op = op_ref.get();
+    if (!op->placement().is_undetermined())
+      continue;  
+
+    // for local compute: op->placement + tensor->placement
     if (!op->placement_group().contains(preferred_device))
-      continue; // pipeline parallel
+      continue;
     Device placement =
       is_device_to_host_op(op) ? Device(kCPU) : preferred_device;
     StreamIndex stream_id = get_suggested_stream_index(op);
@@ -116,19 +224,10 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     HT_VALUE_ERROR_IF(!ok) << "Failed to instantiate op " << op << " on "
                            << placement;
 
-    // remove duplicate comm ops
-    if (is_comm_op(op)) {
-      auto& input_op = op->input(0)->producer();
-      if (is_comm_op(input_op)) {
-        ReplaceInput(op, 0, input_op->input(0));
-        reinterpret_cast<CommOpImpl&>(op->body()).get_comm_type(op); // input changes, update comm_op type
-      }
-    }
-    
     // add transfer ops
     for (size_t i = 0; i < op->num_inputs(); i++) {
       auto& input = op->input(i);
-      if (input->placement() != placement) {
+      if (input->placement() != placement && !is_comm_op(op)) {
         HT_RUNTIME_ERROR_IF(!input->placement().local())
           << "Please use P2P communication to fetch remote input";
 
@@ -163,164 +262,192 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   for (auto& op_ref : topo_order) {
     auto& op = op_ref.get();
-    if (is_comm_op(op)) {
+    // each device only need to substitute local comm_ops
+    if (is_comm_op(op) && op->placement_group().contains(local_device)) {
       HT_LOG_DEBUG << local_device << "==============> substitute comm_op begin: " << op << "...";
       auto& comm_op = op;
-      auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(op->body());
-      uint64_t comm_type = comm_op_impl.get_comm_type(op);
+      auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(comm_op->body());
+      uint64_t comm_type = comm_op_impl.get_comm_type(comm_op);
+      const auto& src_group = comm_op_impl.src_group(comm_op);
+      const auto& dst_group = comm_op_impl.dst_group(comm_op);
+      Tensor& input = comm_op->input(0);
       Tensor result;
-      if (comm_type == COMM_SPLIT_OP) {
-        auto local_device_index =comm_op->placement_group().get_index(comm_op->placement());
-        const auto& dst_ds = comm_op_impl.get_dst_distributed_states();
-        auto cur_state_index = dst_ds.map_device_to_state_index(local_device_index);
-        const auto& order = dst_ds.get_order();
-        const auto& states = dst_ds.get_states();
-        HTAxes keys; 
-        HTShape indices, splits;
-        for (auto o : order) {
-          if (o >= 0) { 
-            keys.push_back(o);
-            splits.push_back(states.at(o));
-            indices.push_back(cur_state_index[o]);
+
+      if (comm_op_impl.is_intra_group(comm_op) || comm_op_impl.is_inter_group(comm_op) && 
+          src_group.contains(local_device)) {
+        // tp
+        if (comm_type == P2P_OP) {
+          result = comm_op->input(0);
+        } else if (comm_type == COMM_SPLIT_OP) {
+          auto local_device_index = src_group.get_index(local_device);
+          const auto& dst_ds = comm_op_impl.get_dst_distributed_states();
+          auto cur_state_index = dst_ds.map_device_to_state_index(local_device_index);
+          const auto& order = dst_ds.get_order();
+          const auto& states = dst_ds.get_states();
+          HTAxes keys; 
+          HTShape indices, splits;
+          for (auto o : order) {
+            if (o >= 0) { 
+              keys.push_back(o);
+              splits.push_back(states.at(o));
+              indices.push_back(cur_state_index[o]);
+            }
           }
-        }
-        HT_LOG_DEBUG << local_device << ": keys = " << keys << "; indices = " << indices << "; splits = " << splits;
-        Tensor split_output = MakeSplitOp(comm_op->input(0), keys, indices, splits, OpMeta().set_is_deduce_states(false));
-        auto& split_op = split_output->producer();
-        split_op->MapToParallelDevices(comm_op->placement_group());
-        split_op->Instantiate(local_device, kComputingStream);
-        result = split_output;
-      } else if (comm_type == ALL_REDUCE_OP) {
-        DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2); // do allreduce among comm_group
-        Tensor all_reduce_output = MakeAllReduceOp(
-          comm_op->input(0), comm_group, // comm_group is a subset of comm_op's placement_group
-          OpMeta().set_device_group(comm_op->placement_group())
-                  .set_is_deduce_states(false)
-                  .set_name(comm_op->input(0)->name() + "_AllReduce"));
-        auto& all_reduce_op = all_reduce_output->producer();
-        all_reduce_op->MapToParallelDevices(comm_op->placement_group());
-        all_reduce_op->Instantiate(local_device, kCollectiveStream);
-        result = all_reduce_output;
-        HT_LOG_DEBUG << local_device << ": substitute comm_op to all_reduce_op: " << comm_group;        
-      } else if (comm_type == ALL_GATHER_OP) {
-        DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
-        Tensor all_gather_output = MakeAllGatherOp(
-          comm_op->input(0), comm_group, comm_op->device_group(),
-          OpMeta().set_device_group(comm_op->placement_group())
-                  .set_is_deduce_states(false)
-                  .set_name(comm_op->input(0)->name() + "_AllGather"));
-        auto& all_gather_op = all_gather_output->producer();
-        all_gather_op->MapToParallelDevices(comm_op->placement_group());
-        all_gather_op->Instantiate(local_device, kCollectiveStream);
-        result = all_gather_output;
-        HT_LOG_DEBUG << local_device << ": substitute comm_op to all_gather_op: " << comm_group;
-      } else if (comm_type == REDUCE_SCATTER_OP) {
-        DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2);
-        Tensor reduce_scatter_output =  MakeReduceScatterOp(
-          comm_op->input(0), comm_group, comm_op->device_group(),
-          OpMeta().set_device_group(comm_op->placement_group())
-                  .set_is_deduce_states(false)
-                  .set_name(comm_op->input(0)->name() + "_ReduceScatter"));
-        auto& reduce_scatter_op = reduce_scatter_output->producer();
-        reduce_scatter_op->MapToParallelDevices(comm_op->placement_group());
-        reduce_scatter_op->Instantiate(local_device, kCollectiveStream);
-        result = reduce_scatter_output;
-        HT_LOG_DEBUG << local_device << ": substitute comm_op to reduce_scatter_op: " << comm_group;
-      } else if (comm_type == P2P_OP) {
-        // 1. local_device send data to other devices 2. local_device recv data from other devices
-        DataType dtype = comm_op->input(0)->dtype();
-        int32_t local_device_index = comm_op->placement_group().get_index(comm_op->placement());
-        TensorList send_datas_local;
-        std::vector<int32_t> dsts_local;
-        HTShapeList recv_shapes_local;
-        std::vector<int32_t> srcs_local;
-        Tensor self_send_data;
-        std::vector<std::pair<int32_t, int32_t>> send_pairs;
-        for (int32_t used_device_index = 0; used_device_index < comm_op->placement_group().num_devices(); used_device_index++) {     
-          HT_LOG_DEBUG << local_device << ": cross send begin!";
+          HT_LOG_DEBUG << local_device << ": keys = " << keys << "; indices = " << indices << "; splits = " << splits;
+          Tensor split_output = MakeSplitOp(input, keys, indices, splits, OpMeta().set_is_deduce_states(false));
+          auto& split_op = split_output->producer();
+          split_op->MapToParallelDevices(src_group);
+          split_op->Instantiate(local_device, kComputingStream);
+          result = split_output;
+        } else if (comm_type == ALL_REDUCE_OP) {
+          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2); // do allreduce among comm_group
+          Tensor all_reduce_output = MakeAllReduceOp(
+            input, comm_group, // comm_group is a subset of placement_group
+            OpMeta().set_device_group(src_group)
+                    .set_is_deduce_states(false)
+                    .set_name(input->name() + "_AllReduce"));
+          auto& all_reduce_op = all_reduce_output->producer();
+          all_reduce_op->MapToParallelDevices(src_group);
+          all_reduce_op->Instantiate(local_device, kCollectiveStream);
+          result = all_reduce_output;
+          HT_LOG_DEBUG << local_device << ": substitute comm_op to all_reduce_op: " << comm_group;        
+        } else if (comm_type == ALL_GATHER_OP) {
+          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
+          Tensor all_gather_output = MakeAllGatherOp(
+            input, comm_group,
+            OpMeta().set_device_group(src_group)
+                    .set_is_deduce_states(false)
+                    .set_name(input->name() + "_AllGather"));
+          auto& all_gather_op = all_gather_output->producer();
+          all_gather_op->MapToParallelDevices(src_group);
+          all_gather_op->Instantiate(local_device, kCollectiveStream);
+          result = all_gather_output;
+          HT_LOG_DEBUG << local_device << ": substitute comm_op to all_gather_op: " << comm_group;
+        } else if (comm_type == REDUCE_SCATTER_OP) {
+          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2);
+          Tensor reduce_scatter_output =  MakeReduceScatterOp(
+            input, comm_group,
+            OpMeta().set_device_group(src_group)
+                    .set_is_deduce_states(false)
+                    .set_name(input->name() + "_ReduceScatter"));
+          auto& reduce_scatter_op = reduce_scatter_output->producer();
+          reduce_scatter_op->MapToParallelDevices(src_group);
+          reduce_scatter_op->Instantiate(local_device, kCollectiveStream);
+          result = reduce_scatter_output;
+          HT_LOG_DEBUG << local_device << ": substitute comm_op to reduce_scatter_op: " << comm_group;
+        } else if (comm_type == BATCHED_ISEND_IRECV_OP) {
+          // 1. local_device send data to other devices 2. local_device recv data from other devices
+          DataType dtype = input->dtype();
+          int32_t local_device_index = src_group.get_index(local_device);
+          TensorList send_datas_local;
+          std::vector<int32_t> dsts_local;
+          HTShapeList recv_shapes_local;
+          std::vector<int32_t> srcs_local;
+          Tensor self_send_data;
+          std::vector<std::pair<int32_t, int32_t>> send_pairs;
+          for (int32_t used_device_index = 0; used_device_index < src_group.num_devices(); used_device_index++) {     
+            HT_LOG_DEBUG << local_device << ": cross send begin!";
+            int32_t device_index = 0;
+            TensorList send_datas;
+            std::vector<int32_t> dsts;
+            // execute cross_send for all devices to get the complete recv_shapes
+            CrossSend({}, {}, 0, false, device_index, comm_op, send_datas, dsts, used_device_index);
+            HT_ASSERT(device_index == src_group.num_devices()) << "cross send error!";
+            HT_LOG_DEBUG << local_device << ": cross send end!";
+            // for batch send/recv
+            for (int i = 0; i < dsts.size(); i++) {
+              send_pairs.push_back({used_device_index, dsts[i]}); // for comm_set
+              // local_device send to other devices
+              if (used_device_index == local_device_index && dsts[i] != local_device_index) {
+                send_datas_local.push_back(send_datas[i]);
+                dsts_local.push_back(dsts[i]);
+              } 
+              // local device recv from other devices
+              if (used_device_index != local_device_index && dsts[i] == local_device_index) {
+                recv_shapes_local.push_back(send_datas[i]->shape());
+                srcs_local.push_back(used_device_index);              
+              }
+              // special case: local device send to self
+              if (used_device_index == local_device_index && dsts[i] == local_device_index) {
+                self_send_data = send_datas[i];
+              }
+            }
+          }
+
+          // get comm_devices for batch isend/irecv, union set
+          std::set<int32_t> comm_set;
+          comm_set.insert(local_device_index);
+          comm_set.insert(dsts_local.begin(), dsts_local.end());
+          comm_set.insert(srcs_local.begin(), srcs_local.end());
+          bool keep_search = true;
+          while (keep_search) {
+            keep_search = false;
+            for (auto& pair : send_pairs) {
+              bool find_first = (comm_set.find(pair.first) != comm_set.end());
+              bool find_second = (comm_set.find(pair.second) != comm_set.end());
+              if (find_first && !find_second) {
+                comm_set.insert(pair.second);
+                keep_search = true;
+              } else if (!find_first && find_second) {
+                comm_set.insert(pair.first);
+                keep_search = true;
+              }
+            }
+          }
+          std::vector<Device> comm_devices(comm_set.size());
+          std::vector<Device> dst_devices(dsts_local.size());
+          std::vector<Device> src_devices(srcs_local.size());
+          std::transform(dsts_local.begin(), dsts_local.end(), dst_devices.begin(), [&](int32_t index) { return src_group.get(index); });
+          std::transform(srcs_local.begin(), srcs_local.end(), src_devices.begin(), [&](int32_t index) { return src_group.get(index); });        
+          std::transform(comm_set.begin(), comm_set.end(), comm_devices.begin(), [&](int32_t index) { return src_group.get(index); });
+          // when needn't recv, MakeBatchedISendIRecvOp return out_dep_linker
+          Tensor batched_isend_irecv_output = MakeBatchedISendIRecvOp(send_datas_local, dst_devices, recv_shapes_local, src_devices, comm_devices, dtype, 
+            OpMeta().set_is_deduce_states(false).set_name("BatchedISendIRecvOp_for_" + comm_op->name()));
+          auto& batched_isend_irecv_op = batched_isend_irecv_output->producer();
+          batched_isend_irecv_op->MapToParallelDevices(src_group);
+          batched_isend_irecv_op->Instantiate(local_device, kCollectiveStream);
+          TensorList recv_datas_local = batched_isend_irecv_op->outputs();
+
+          HT_LOG_DEBUG << local_device << ": cross receive begin!";
           int32_t device_index = 0;
-          TensorList send_datas;
-          std::vector<int32_t> dsts;
-          // execute cross_send for all devices to get the complete recv_shapes
-          CrossSend({}, {}, 0, false, device_index, comm_op, send_datas, dsts, used_device_index);
-          HT_ASSERT(device_index == comm_op->placement_group().num_devices()) << "cross send error!";
-          HT_LOG_DEBUG << local_device << ": cross send end!";
-          // for batch send/recv
-          for (int i = 0; i < dsts.size(); i++) {
-            send_pairs.push_back({used_device_index, dsts[i]}); // for comm_set
-            // local_device send to other devices
-            if (used_device_index == local_device_index && dsts[i] != local_device_index) {
-              send_datas_local.push_back(send_datas[i]);
-              dsts_local.push_back(dsts[i]);
-            } 
-            // local device recv from other devices
-            if (used_device_index != local_device_index && dsts[i] == local_device_index) {
-              recv_shapes_local.push_back(send_datas[i]->shape());
-              srcs_local.push_back(used_device_index);              
-            }
-            // special case: local device send to self
-            if (used_device_index == local_device_index && dsts[i] == local_device_index) {
-              self_send_data = send_datas[i];
-            }
-          }
-        }
+          // already get the recv_datas by batch_send_recv, so just need local device to execute cross_receive
+          result = CrossReceive(0, device_index, comm_op, recv_datas_local, srcs_local, self_send_data, local_device_index);
+          HT_ASSERT(device_index == src_group.num_devices()) << "cross receive error!";
+          HT_LOG_DEBUG << local_device << ": cross receive end!";
 
-        // get comm_devices for batch isend/irecv, union set
-        std::set<int32_t> comm_set;
-        comm_set.insert(local_device_index);
-        comm_set.insert(dsts_local.begin(), dsts_local.end());
-        comm_set.insert(srcs_local.begin(), srcs_local.end());
-        bool keep_search = true;
-        while (keep_search) {
-          keep_search = false;
-          for (auto& pair : send_pairs) {
-            bool find_first = (comm_set.find(pair.first) != comm_set.end());
-            bool find_second = (comm_set.find(pair.second) != comm_set.end());
-            if (find_first && !find_second) {
-              comm_set.insert(pair.second);
-              keep_search = true;
-            } else if (!find_first && find_second) {
-              comm_set.insert(pair.first);
-              keep_search = true;
-            }
+          // add dummy link for topo sort
+          if (dst_devices.size() == 0) { // connect comm_op->input producer with batchISendIRecvOp when needn't send
+            AddInDeps(batched_isend_irecv_op, {input});
           }
+          if (src_devices.size() == 0) { // connect batchISendIRecvOp with comm_op->ouput consumers when needn't recv
+            AddInDeps(result->producer(), {batched_isend_irecv_op->out_dep_linker()});
+          }          
         }
-        std::vector<Device> comm_devices(comm_set.size());
-        std::vector<Device> dst_devices(dsts_local.size());
-        std::vector<Device> src_devices(srcs_local.size());
-        std::transform(dsts_local.begin(), dsts_local.end(), dst_devices.begin(), [&](int32_t index) { return comm_op->placement_group().get(index); });
-        std::transform(srcs_local.begin(), srcs_local.end(), src_devices.begin(), [&](int32_t index) { return comm_op->placement_group().get(index); });        
-        std::transform(comm_set.begin(), comm_set.end(), comm_devices.begin(), [&](int32_t index) { return comm_op->placement_group().get(index); });
-        // HT_LOG_DEBUG << local_device << ": MakeBatchedISendIRecvOp for " << comm_op->name() 
-        //                              << ": send_datas_local=" << send_datas_local
-        //                              << ", dst_devices=" << DeviceGroup(dst_devices)
-        //                              << ", recv_shapes=" << recv_shapes_local
-        //                              << ", src_devices=" << DeviceGroup(src_devices) 
-        //                              << ", comm_devices=" << DeviceGroup(comm_devices);
-        // TODO: when needn't recv, MakeBatchedISendIRecvOp cannot return null output tensor, how to get the MakeBatchedISendIRecvOp???                                       
-        Tensor batched_isend_irecv_output = MakeBatchedISendIRecvOp(send_datas_local, dst_devices, recv_shapes_local, src_devices, comm_devices, dtype, 
-          OpMeta().set_is_deduce_states(false).set_name("BatchedISendIRecvOp_for_" + comm_op->name()));
-        auto& batched_isend_irecv_op = batched_isend_irecv_output->producer();
-        batched_isend_irecv_op->MapToParallelDevices(comm_op->placement_group());
-        batched_isend_irecv_op->Instantiate(local_device, kCollectiveStream);
-        if (dst_devices.size() == 0) { // connect comm_op->input producer with batchISendIRecvOp when needn't send
-          AddInDeps(batched_isend_irecv_op, {comm_op->input(0)});
-          HT_LOG_DEBUG << local_device << ": BatchISendIRecv needn't send, so connect "
-                       << batched_isend_irecv_op << "with comm_op's input " << comm_op->input(0);
-        }
-        if (src_devices.size() == 0) { // connect batchISendIRecvOp with comm_op->ouput consumers when needn't recv
+        // add p2p send after tp
+        if (comm_op_impl.is_inter_group(comm_op)) {
+          HT_LOG_DEBUG << local_device << ": send to stage " << dst_group;
+          Tensor send_out_dep_linker = MakeP2PSendOp(result, dst_group, 
+            src_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
+          auto& send_op = send_out_dep_linker->producer();
+          send_op->MapToParallelDevices(src_group);
+          send_op->Instantiate(local_device, kP2PStream);
+          // add dummy link for topo sort
           for (int i = 0; i < comm_op->output(0)->num_consumers(); i++) {
-            AddInDeps(comm_op->output(0)->consumer(i), {batched_isend_irecv_op->out_dep_linker()});
+            AddInDeps(comm_op->output(0)->consumer(i), {send_out_dep_linker});
           }
         }
-        TensorList recv_datas_local = batched_isend_irecv_op->outputs();
-
-        HT_LOG_DEBUG << local_device << ": cross receive begin!";
-        int32_t device_index = 0;
-        // already get the recv_datas by batch_send_recv, so just need local device to execute cross_receive
-        result = CrossReceive(0, device_index, comm_op, recv_datas_local, srcs_local, self_send_data, local_device_index);
-        HT_ASSERT(device_index == comm_op->placement_group().num_devices()) << "cross receive error!";
-        HT_LOG_DEBUG << local_device << ": cross receive end!";    
+      } else {
+        // p2p recv
+        HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group;
+        Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
+        Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->shape(),
+          dst_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
+        auto& recv_op = recv_output->producer();
+        recv_op->MapToParallelDevices(dst_group);
+        recv_op->Instantiate(local_device, kP2PStream);
+        // add dummy link for topo sort
+        AddInDeps(recv_op, {input});
+        result = recv_output;
       }
       result->set_distributed_states(comm_op_impl.get_dst_distributed_states()); // assign distributed states for result tensor
 
@@ -333,7 +460,6 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           }
         }
       }
-      // comm_op->output(0) = result;
       HT_LOG_DEBUG << local_device << "==============> substitute comm_op end: " << op << "...";
     }
   }
@@ -345,6 +471,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
   HT_ASSERT(is_comm_op(comm_op)) << comm_op->name() << " must be comm_op!";
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(comm_op->body());
+  const auto& src_group = comm_op_impl.src_group(comm_op);
   const auto& prev_distributed_states = comm_op->input(0)->get_distributed_states();
   auto prev_partial = prev_distributed_states.get_dim(-2);
   auto prev_duplicate = prev_distributed_states.get_dim(-1);
@@ -353,10 +480,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
 
   const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states();
   auto target_duplicate = target_distributed_states.get_dim(-1);
-  HT_ASSERT(comm_op->placement() == local_device) 
-          << "Corss Receive: comm_op's placement " << comm_op->placement() 
-          << " != " << "local device " << local_device;
-  auto local_device_index = comm_op->placement_group().get_index(comm_op->placement());
+  auto local_device_index = src_group.get_index(local_device);
   auto cur_state_index = target_distributed_states.map_device_to_state_index(used_device_index); // 指定的device需要的是tensor的哪一部分数据
 
   auto get_state_index = [&](int32_t dim) -> int32_t {
@@ -398,7 +522,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
       auto sum_output = MakeSumOp(part_result_list, OpMeta().set_is_deduce_states(false));
       auto& sum_op = sum_output->producer();
       if (used_device_index == local_device_index) {
-        sum_op->MapToParallelDevices(comm_op->placement_group());
+        sum_op->MapToParallelDevices(src_group);
         sum_op->Instantiate(local_device, kComputingStream);
       }
       result = sum_output;    
@@ -435,7 +559,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
           auto concatenate_output = MakeConcatenateOp(part_result_list, cur_dim, OpMeta().set_is_deduce_states(false));
           auto& concatenate_op = concatenate_output->producer();
           if (used_device_index == local_device_index) {
-            concatenate_op->MapToParallelDevices(comm_op->placement_group());
+            concatenate_op->MapToParallelDevices(src_group);
             concatenate_op->Instantiate(local_device, kComputingStream);
           }
           result = concatenate_output;
@@ -463,15 +587,13 @@ void ExecutableGraph::CrossSend(std::unordered_map<int32_t, int32_t> split_cur_s
   // basic info
   HT_ASSERT(is_comm_op(comm_op)) << comm_op->name() << " must be comm_op!";
   auto& local_device = hetu::impl::comm::GetLocalDevice();
-  auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(comm_op->body());  
+  auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(comm_op->body());
+  const auto& src_group = comm_op_impl.src_group(comm_op);
   const auto& prev_distributed_states = comm_op->input(0)->get_distributed_states();
   auto prev_partial = prev_distributed_states.get_dim(-2);
   auto prev_duplicate = prev_distributed_states.get_dim(-1);
-  HT_ASSERT(comm_op->placement() == local_device) 
-          << "Corss Send: comm_op's placement " << comm_op->placement() 
-          << " != " << "local device " << local_device;
-  auto local_device_index =comm_op->placement_group().get_index(comm_op->placement());  
-  auto cur_state_index = prev_distributed_states.map_device_to_state_index(used_device_index); // 根据指定的device index和order确定该device拥有的是tensor的哪部分数据
+  auto local_device_index = src_group.get_index(local_device);  
+  auto cur_state_index = prev_distributed_states.map_device_to_state_index(used_device_index);
 
   const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states();
   auto target_duplicate = target_distributed_states.get_dim(-1);
@@ -498,7 +620,7 @@ void ExecutableGraph::CrossSend(std::unordered_map<int32_t, int32_t> split_cur_s
   // cross send part
   if (prev_partial == 1 && prev_duplicate > target_duplicate && get_state_index(-1) % (prev_duplicate / target_duplicate) != 0) {    
     HT_LOG_DEBUG << local_device << ": device " << used_device_index << " don't need to send to other devices!";
-    device_index += comm_op->placement_group().num_devices();
+    device_index += src_group.num_devices();
     return;
   }  
   if (depth == target_order.size()) {
@@ -515,7 +637,7 @@ void ExecutableGraph::CrossSend(std::unordered_map<int32_t, int32_t> split_cur_s
       auto split_output = MakeSplitOp(comm_op->input(0), keys, indices, splits, OpMeta().set_is_deduce_states(false));
       auto& split_op = split_output->producer();
       if (used_device_index == local_device_index) { // 其他device上生成的用于替换comm_op不需要map placement_group和placement
-        split_op->MapToParallelDevices(comm_op->placement_group());
+        split_op->MapToParallelDevices(src_group);
         split_op->Instantiate(local_device, kComputingStream);
       }
       send_part = split_output;
@@ -584,8 +706,148 @@ void ExecutableGraph::CrossSend(std::unordered_map<int32_t, int32_t> split_cur_s
   }
 }
 
-NDArrayList ExecutableGraph::Run(const TensorList& fetches,
-                                 const FeedDict& feed_dict) {                        
+// schedule: {stage_id: [<is_forward, micro_batch_id>, <is_forward,
+// micro_batch_id>, ...], ...}
+std::unordered_map<int, std::vector<std::pair<bool, int>>>
+ExecutableGraph::GenerateGpipeSchedule(
+  int num_stages, int num_micro_batches, bool is_inference) {
+  std::unordered_map<int, std::vector<std::pair<bool, int>>> schedule;
+  // inference time: for only forward
+  if (is_inference) {
+    for (int stage_id = 0; stage_id < num_stages; stage_id++) {
+      std::vector<std::pair<bool, int>> tasks;
+      tasks.reserve(num_micro_batches);
+      for (int step_id = 0; step_id < num_micro_batches; step_id++) {
+        tasks.push_back({true, step_id});
+      }
+      schedule[stage_id] = tasks;
+    }
+    return schedule;
+  }
+  // traininig time: for forward and backward
+  for (int stage_id = 0; stage_id < num_stages; stage_id++) {
+    std::vector<std::pair<bool, int>> tasks;
+    tasks.reserve(2 * num_micro_batches);
+    for (int step_id = 0; step_id < num_micro_batches; step_id++) {
+      tasks.push_back({true, step_id});
+    }
+    for (int step_id = 0; step_id < num_micro_batches; step_id++) {
+      tasks.push_back({false, step_id});
+    }
+    schedule[stage_id] = tasks;
+  }
+  return schedule;
+}
+
+// schedule: {stage_id: [<is_forward, micro_batch_id>, <is_forward,
+// micro_batch_id>, ...], ...}
+std::unordered_map<int, std::vector<std::pair<bool, int>>>
+ExecutableGraph::GeneratePipedreamFlushSchedule(
+  int num_stages, int num_micro_batches, bool is_inference) {
+  HT_ASSERT(num_micro_batches >= num_stages)
+    << "num_micro_batches must bigger than num_stages in pipedream-flush!";
+  std::unordered_map<int, std::vector<std::pair<bool, int>>> schedule;
+  // inference time: for only forward
+  if (is_inference) {
+    for (int stage_id = 0; stage_id < num_stages; stage_id++) {
+      std::vector<std::pair<bool, int>> tasks;
+      tasks.reserve(num_micro_batches);
+      for (int step_id = 0; step_id < num_micro_batches; step_id++) {
+        tasks.push_back({true, step_id});
+      }
+      schedule[stage_id] = tasks;
+    }
+    return schedule;
+  }
+  // traininig time: for forward and backward
+  for (int stage_id = 0; stage_id < num_stages; stage_id++) {
+    std::vector<std::pair<bool, int>> tasks;
+    tasks.reserve(2 * num_micro_batches);
+    int num_warmup_microbatches = num_stages - stage_id - 1;
+    int num_microbatches_remaining =
+      num_micro_batches - num_warmup_microbatches;
+    // 1. warmup
+    for (int step_id = 0; step_id < num_warmup_microbatches; step_id++) {
+      tasks.push_back({true, step_id});
+    }
+    // 2. 1F1B
+    for (int step_id = 0; step_id < num_microbatches_remaining; step_id++) {
+      tasks.push_back({true, num_warmup_microbatches + step_id});
+      tasks.push_back({false, step_id});
+    }
+    // 3. cooldown
+    for (int step_id = 0; step_id < num_warmup_microbatches; step_id++) {
+      tasks.push_back({false, num_microbatches_remaining + step_id});
+    }
+    schedule[stage_id] = tasks;
+  }
+  return schedule;
+}
+
+void ExecutableGraph::ComputeFunc(const OpRefList& topo, RuntimeContext& runtime_ctx, 
+                                  Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
+                                  Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
+                                  const TensorIdSet& accumulated_tensor, const OpIdSet& accumulated_ops,
+                                  const FeedDict& feed_dict, const TensorList& fetches,
+                                  const std::unordered_map<TensorId, size_t>& fetch_indices) {
+  for (auto& op_ref : topo) {
+    auto& op = op_ref.get();
+    bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
+      return feed_dict.find(tensor->id()) != feed_dict.end();
+    });
+    if (computed)
+      continue;
+    
+    if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
+      continue;
+    }
+
+    NDArrayList input_vals;
+    input_vals.reserve(op->num_inputs());
+    for (const auto& input : op->inputs()) {
+      auto it = tensor2data.find(input->id());
+      HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
+        << "Failed to execute the \"" << op->type() << "\" operation "
+        << "(with name \"" << op->name() << "\"): "
+        << "Cannot find input " << input;
+      auto& data = it->second;
+      if (data->device() != input->placement() ||
+          data->dtype() != input->dtype()) {
+        tensor2data[input->id()] =
+          NDArray::to(data, input->placement(), input->dtype(),
+                      kBlockingStream);
+      }
+      input_vals.push_back(tensor2data[input->id()]);
+      if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end()) {
+        tensor2data.erase(input->id());
+      }
+    }
+    NDArrayList output_vals = op->Compute(input_vals, runtime_ctx);
+    op->Sync();
+    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() 
+      << ": exec op " << op->name() 
+      // << ", input_vals = " << input_vals
+      << ", output_vals = " << output_vals;
+    for (size_t i = 0; i < op->num_outputs(); i++) {
+      const auto& output = op->output(i);
+      if (accumulated_tensor.find(output->id()) != accumulated_tensor.end()) {
+        if (grad_accumulation.find(output->id()) == grad_accumulation.end()) {
+          grad_accumulation[output->id()] = output_vals[i];
+        } else {
+          grad_accumulation[output->id()] = NDArray::add(grad_accumulation[output->id()], output_vals[i]);
+        }
+        if (grad_accumulation_finished) {
+          tensor2data[output->id()] = grad_accumulation[output->id()];
+        }
+      } else if (tensor2degrees[output->id()] > 0 || fetch_indices.find(output->id()) != fetch_indices.end()) {
+        tensor2data[output->id()] = output_vals[i];
+      }
+    }
+  }
+}
+
+NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
+                                 const FeedDict& feed_dict, const int num_micro_batches) {                        
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";                              
   // TODO: For each pair of `fetches` and `feed_dict`,
@@ -617,72 +879,192 @@ NDArrayList ExecutableGraph::Run(const TensorList& fetches,
   OpRefList updated_topo = Graph::TopoSort(fetches, -1, is_op_computed);
   HT_LOG_DEBUG << local_device << ": updated global topo after substitute comm_op: " << updated_topo;
 
-  OpRefList local_topo;
-  std::copy_if(updated_topo.begin(), updated_topo.end(), std::back_inserter(local_topo), 
-  [&](OpRef& op_ref) { return op_ref.get()->placement_group().contains(local_device); });  
-  HT_LOG_DEBUG << local_device << ": local topo after substitute comm_op: " << local_topo;
+  // split into fw_topo and bw_topo
+  OpRefList fw_topo, bw_topo;
+  std::tie(fw_topo, bw_topo) = disentangle_forward_and_backward_ops(updated_topo, {loss});
 
-  // compute
-  RuntimeContext runtime_ctx(local_topo.size());
-  Tensor2NDArrayMap tensor2data;
-  tensor2data.reserve(local_topo.size());
-  tensor2data.insert(feed_dict.begin(), feed_dict.end());
-  NDArrayList results(fetches.size());
+  // get local_fw_topo and local_bw_topo
+  // ops to substitute comm_op is in the same placement_group, but in the different placement
+  OpRefList local_fw_topo, local_bw_topo, local_topo;
+  std::copy_if(fw_topo.begin(), fw_topo.end(), std::back_inserter(local_fw_topo),
+  [&](OpRef& op_ref) { return op_ref.get()->placement() == local_device; });
+  std::copy_if(bw_topo.begin(), bw_topo.end(), std::back_inserter(local_bw_topo),
+  [&](OpRef& op_ref) { return op_ref.get()->placement() == local_device; });
+  local_topo.reserve(local_fw_topo.size() + local_bw_topo.size());
+  local_topo.insert(local_topo.end(), local_fw_topo.begin(), local_fw_topo.end());
+  local_topo.insert(local_topo.end(), local_bw_topo.begin(), local_bw_topo.end());
+  HT_LOG_DEBUG << local_device << ": local fw topo: " << local_fw_topo << "\nlocal bw topo: " << local_bw_topo;
+
+  HT_LOG_DEBUG << local_device << ": 1. pipeline init[begin]";
+  // pipeline compute
+  // runtimectx for m micro batches
+  std::vector<RuntimeContext> runtime_ctx_list(num_micro_batches, 
+    RuntimeContext(local_topo.size()));
+  // tensor data for m micro batches
+  std::vector<Tensor2NDArrayMap> tensor2data_list(num_micro_batches);
+  // tensor degrees for m micro batches, if degree=0 && not in fetches, free memory for this tensor
+  std::vector<Tensor2IntMap> tensor2degrees_list(num_micro_batches);
+  // flush update once for m micro batches
+  Tensor2NDArrayMap grad_accumulation;
+  
   std::unordered_map<TensorId, size_t> fetch_indices;
   for (size_t i = 0; i < fetches.size(); i++)
     fetch_indices[fetches.at(i)->id()] = i;
+    
+  // get feed in dict & split into m micro batches
+  for (const auto& kv : feed_dict) {
+    if (!kv.second.is_defined()) continue; // only feed placeholder_op in local device group
+    auto micro_batches = NDArray::split(kv.second, num_micro_batches);
+    for (int i = 0; i < num_micro_batches; i++) {
+      tensor2data_list[i][kv.first] = NDArray::squeeze(micro_batches[i], 0);
+    }
+  }
+
+  // get consume times for each tensor
+  Tensor2IntMap tensor2degrees;
+  for (auto& op_ref : local_topo) {
+    for (auto& input : op_ref.get()->inputs()) {
+      tensor2degrees[input->id()]++;
+    }
+  }
+  for (int i = 0; i < num_micro_batches; i++) {
+    tensor2degrees_list[i] = tensor2degrees;
+  }
+
+  // some special ops shouldn't be updated before grad accumulation finished
+  TensorIdSet accumulated_tensor;
+  OpRefDeque accumulated_ops_deque;
+  for (auto& op_ref : local_bw_topo) {
+    auto& op = op_ref.get();
+    // 1. compute_op -(local_grad)-> update_op (local_group)
+    // 2. compute_op -(local_grad)-> allreduce -> update_op (local_group)
+    // 3. compute_op -(grad_in_group2)-> p2p_send (group1)  p2p_recv -> update_op (group2)
+    // 4. compute_op -(grad_in_group2)-> allreduce -> p2p_send (goup1)  p2p_recv -> update_op (group2)
+    if (is_optimizer_update_op(op)) {
+      Tensor& grad = op->input(1);
+      Operator& grad_op = grad->producer();
+      if (is_all_reduce_op(grad_op)) {
+        accumulated_tensor.insert(grad_op->input(0)->id());
+        accumulated_ops_deque.push_back(std::ref(grad_op));
+      } else if (is_peer_to_peer_recv_op(grad_op)) {
+        accumulated_ops_deque.push_back(std::ref(grad_op));
+      } else {
+        accumulated_tensor.insert(grad->id());
+        accumulated_ops_deque.push_back(op_ref);
+      }
+    } else if (is_peer_to_peer_send_op(op)) {
+      for (auto& consumer_op : op->out_dep_linker()->consumers()) {
+        if (is_optimizer_update_op(consumer_op)) {
+          Tensor& grad = op->input(0);
+          Operator& grad_op = grad->producer();
+          if (is_all_reduce_op(grad_op)) {
+            accumulated_tensor.insert(grad_op->input(0)->id());
+            accumulated_ops_deque.push_back(std::ref(grad_op));
+          } else {
+            accumulated_tensor.insert(grad->id());
+            accumulated_ops_deque.push_back(op_ref);
+          }
+          break;
+        }
+      }
+    }
+  }
+  OpIdSet accumulated_ops;
+  while (!accumulated_ops_deque.empty()) {
+    auto& op_ref = accumulated_ops_deque.front();
+    accumulated_ops_deque.pop_front();
+    accumulated_ops.insert(op_ref.get()->id());
+    Operator::for_each_output_tensor(op_ref.get(), [&](const Tensor& output) {
+      for (auto& consumer_op : output->consumers()) {
+        if (consumer_op.get()->placement() == local_device) {
+          accumulated_ops_deque.push_back(consumer_op);
+        }
+      }
+    });
+  }
+  HT_LOG_DEBUG << local_device << ": 1. pipeline init[end]";
+
+  HT_LOG_DEBUG << local_device << ": 2. compute[begin]";
+  int num_stages = _stages.size();
+  bool is_inference = (bw_topo.size() == 0);
+  HT_LOG_DEBUG << local_device << ": num_stages = " << num_stages 
+    << ", num_micro_batches = " << num_micro_batches << ", is_inference = " 
+    << is_inference;
+  // get task schedule table for pipedream-flush
+  auto schedule = GeneratePipedreamFlushSchedule(
+    num_stages, num_micro_batches, is_inference);
+  // // get task schedule table for gpipe    
+  // auto schedule = generate_gpipe_schedule(num_stages, num_micro_batches);
+  // get tasks for current stage
+  int stage_id = local_device.index() / _stages.at(0).num_devices();
+  // int stage_id = -1;
+  // for (int i = 0; i < _stages.size(); i++) {
+  //   if (_stages[i].contains(local_device)) {
+  //     stage_id = i;
+  //   }
+  // }
+  // HT_LOG_DEBUG << local_device << ": stages = " << _stages << "; stage id = " << stage_id;
+  auto& tasks = schedule[stage_id];
+  HT_LOG_DEBUG << local_device << ": stage id = " << stage_id;
+  for (std::size_t i = 0; i < tasks.size(); i++) {
+    auto& task = tasks[i];
+    bool is_forward = task.first;
+    int micro_batch_id = task.second;
+    auto& tensor2data = tensor2data_list[micro_batch_id];
+    auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
+    auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
+    if (is_forward) {
+      ComputeFunc(local_fw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
+                  false, accumulated_tensor, accumulated_ops, feed_dict, fetches, fetch_indices);
+    } else {
+      bool grad_accumulation_finished = (i == tasks.size() - 1);
+      ComputeFunc(local_bw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
+                  grad_accumulation_finished, accumulated_tensor, accumulated_ops, feed_dict, 
+                  fetches, fetch_indices);
+    }
+    if (is_forward) {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward]";
+    } else {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward]";
+    }
+  }
+  HT_LOG_DEBUG << local_device << ": 2. compute[end]";
+
+  HT_LOG_DEBUG << local_device << ": 3. get results[begin]";
+  NDArrayList results(fetches.size(), NDArray());
   std::unordered_set<OpId> to_sync_op_ids;
   to_sync_op_ids.reserve(fetches.size());
-
   for (auto& op_ref : local_topo) {
     auto& op = op_ref.get();
-    // Question: Is it possible that some outputs are fed in
-    // while the rest are not?
-    bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
-      return feed_dict.find(tensor->id()) != feed_dict.end();
-    });
-    if (computed)
-      continue;
-
-    HT_LOG_DEBUG << local_device << ": " << op->name() << " comupte begin...";
-
-    NDArrayList inputs;
-    inputs.reserve(op->num_inputs());
-    for (size_t i = 0; i < op->num_inputs(); i++) {
-      // TODO: Support async transfer. And this could be checked for once.
-      auto& data = tensor2data[op->input(i)->id()];
-      if (data->device() != op->input(i)->placement() ||
-          data->dtype() != op->input(i)->dtype()) {
-        tensor2data[op->input(i)->id()] =
-          NDArray::to(data, op->input(i)->placement(), op->input(i)->dtype(),
-                      kBlockingStream);
-      }
-      inputs.push_back(tensor2data[op->input(i)->id()]);
-    }
-    auto outputs = op->Compute(inputs, runtime_ctx);
-    
-    // op->Sync();
-    // HT_LOG_DEBUG << local_device << ": " << op->name() << " comupte end..." 
-    //   << "\ninputs = " << inputs 
-    //   << "\noutputs = " << outputs;  
-
-    for (size_t i = 0; i < outputs.size(); i++) {
-      tensor2data.insert({op->output(i)->id(), outputs[i]});
-    }
-    
     Operator::for_each_output_tensor(op, [&](const Tensor& output) {
       auto it = fetch_indices.find(output->id());
       if (it != fetch_indices.end()) {
-        if (output->output_id() >= 0)
-          results[it->second] = outputs[output->output_id()];
+        if (output->output_id() >= 0) {
+          if (is_variable_op(op) || accumulated_ops.find(op) != accumulated_ops.end() 
+            || accumulated_tensor.find(output->id()) != accumulated_tensor.end()) {
+            results[it->second] = tensor2data_list[num_micro_batches - 1][output->id()];
+          } else if (is_placeholder_op(op)) {
+            auto feed_it = feed_dict.find(output->id());
+            if (feed_it != feed_dict.end()) {
+              results[it->second] = feed_it->second;
+            }
+          } else {
+            NDArrayList result;
+            result.reserve(num_micro_batches);
+            for (auto& tensor2data : tensor2data_list) {
+              result.push_back(tensor2data[output->id()]);
+            }
+            results[it->second] = NDArray::cat(result);
+          }
+        }
         to_sync_op_ids.insert(op->id());
       }
     });
-    // TODO: remove inputs that are no longer used
   }
   for (auto op_id : to_sync_op_ids) {
     _op_indexing[op_id]->Sync();
   }
+  HT_LOG_DEBUG << local_device << ": 3. get results[end]";
   return results;
 }
 
