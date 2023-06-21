@@ -2,6 +2,7 @@
 
 #include "hetu/common/macros.h"
 #include "hetu/core/device.h"
+#include <mutex>
 #include <memory>
 
 namespace hetu {
@@ -21,6 +22,9 @@ class MemoryPool {
   virtual void FreeDataSpace(DataPtr ptr) = 0;
 
   virtual Device device() = 0;
+
+protected:
+  std::mutex _mtx;  
 };
 
 void RegisterMemoryPool(std::shared_ptr<MemoryPool> memory_pool);

@@ -17,8 +17,10 @@ bool DataH2DOpImpl::DoInstantiate(Operator& op, const Device& placement,
   auto& inst_ctx = op->instantiation_ctx();
   inst_ctx.placement = placement;
   inst_ctx.stream_index = stream_id;
-  inst_ctx.start = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
-  inst_ctx.stop = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
+  for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) {
+    inst_ctx.start[i] = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
+    inst_ctx.stop[i] = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
+  }
   op->output(0)->set_placement(placement);
   return true;
 }
@@ -48,8 +50,10 @@ bool DataD2HOpImpl::DoInstantiate(Operator& op, const Device& placement,
   auto& inst_ctx = op->instantiation_ctx();
   inst_ctx.placement = placement;
   inst_ctx.stream_index = stream_id;
-  inst_ctx.start = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
-  inst_ctx.stop = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
+  for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) {
+    inst_ctx.start[i] = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
+    inst_ctx.stop[i] = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
+  }
   op->output(0)->set_placement(placement);
   return true;
 }

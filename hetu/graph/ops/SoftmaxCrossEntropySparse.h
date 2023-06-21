@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Loss.h"
 
 namespace hetu {
 namespace graph {
@@ -11,21 +12,12 @@ class SoftmaxCrossEntropySparseOp;
 class SoftmaxCrossEntropySparseGradientOpImpl;
 class SoftmaxCrossEntropySparseGradientOp;
 
-class SoftmaxCrossEntropySparseOpImpl : public OpInterface {
+class SoftmaxCrossEntropySparseOpImpl : public LossOpImpl {
  public:
   SoftmaxCrossEntropySparseOpImpl(const int64_t ignored_index = -1, 
                           ReductionType reduction = kMEAN)
-  : OpInterface(quote(SoftmaxCrossEntropySparseOp)),
-    _ignored_index(ignored_index),
-    _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-    << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-    << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
+  : LossOpImpl(quote(SoftmaxCrossEntropySparseOp), reduction),
+    _ignored_index(ignored_index) {}
 
   int64_t ignored_index() const {
     return _ignored_index;
@@ -59,8 +51,6 @@ class SoftmaxCrossEntropySparseOpImpl : public OpInterface {
 
   int64_t _ignored_index;
 
-  ReductionType _reduction;
-
  public:
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
@@ -80,22 +70,16 @@ Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_
                                        const std::string& reduction = "mean",
                                        OpMeta op_meta = OpMeta());
 
-class SoftmaxCrossEntropySparseGradientOpImpl : public OpInterface {
+class SoftmaxCrossEntropySparseGradientOpImpl : public LossGradientOpImpl {
 
  public:
   SoftmaxCrossEntropySparseGradientOpImpl(const int64_t ignored_index = -1, 
                                           ReductionType reduction = kMEAN)
-  : OpInterface(quote(SoftmaxCrossEntropySparseGradientOp)),
-    _ignored_index(ignored_index),
-    _reduction(reduction) {
-  }
+  : LossGradientOpImpl(quote(SoftmaxCrossEntropySparseGradientOp), reduction),
+    _ignored_index(ignored_index) {}
 
   ino64_t ignored_index() const {
     return _ignored_index;
-  }
-
-  ReductionType reduction() const {
-    return _reduction;
   }
 
  protected:
@@ -116,8 +100,6 @@ class SoftmaxCrossEntropySparseGradientOpImpl : public OpInterface {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
   int64_t _ignored_index; 
-
-  ReductionType _reduction;
 
  public:
   bool operator==(const OpInterface& rhs) const override {

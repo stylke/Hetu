@@ -106,11 +106,15 @@ bool CommOpImpl::DoInstantiate(Operator& op, const Device& placement,
   inst_ctx.placement = placement;
   inst_ctx.stream_index = stream_index;
   if (placement.is_cuda()) {
-    inst_ctx.start = std::make_unique<hetu::impl::CUDAEvent>(placement);
-    inst_ctx.stop = std::make_unique<hetu::impl::CUDAEvent>(placement);
+    for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) { 
+      inst_ctx.start[i] = std::make_unique<hetu::impl::CUDAEvent>(placement);
+      inst_ctx.stop[i] = std::make_unique<hetu::impl::CUDAEvent>(placement);
+    }
   } else {
-    inst_ctx.start = std::make_unique<hetu::impl::CPUEvent>();
-    inst_ctx.stop = std::make_unique<hetu::impl::CPUEvent>();
+    for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) {     
+      inst_ctx.start[i] = std::make_unique<hetu::impl::CPUEvent>();
+      inst_ctx.stop[i] = std::make_unique<hetu::impl::CPUEvent>();
+    }
   }
   Operator::for_each_output_tensor(op, [&](Tensor& tensor) {
     if (tensor->placement_group().contains(placement)) {
@@ -223,28 +227,21 @@ HTShapeList P2PSendOpImpl::DoInferShape(Operator& op,
   return {};
 }
 
-NDArrayList P2PSendOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
-                                     RuntimeContext& runtime_ctx) const {
+void P2PSendOpImpl::DoCompute(Operator& op, 
+                              const NDArrayList& inputs,
+                              NDArrayList& outputs,
+                              RuntimeContext& runtime_ctx) const {
   NDArray input = inputs.at(0);
   HT_ASSERT(input->dtype() == op->input(0)->dtype())
     << "Data type mismatched for P2P communication: " << input->dtype()
     << " vs. " << op->input(0)->dtype();
   size_t dst_device_index = _dst_device_index == -1 ? 
          op->placement_group().get_index(op->placement()) : _dst_device_index;
-  // TODO: sending the shape in compute fn is just a walkaround,
-  // we shall determine the shape for recv op in executor
-  NDArray send_shape = NDArray::empty({HT_MAX_NDIM + 1}, Device(kCPU), kInt64);
-  auto* ptr = send_shape->data_ptr<int64_t>();
-  ptr[0] = static_cast<int64_t>(input->ndim());
-  std::copy(input->shape().begin(), input->shape().end(), ptr + 1);
-  hetu::impl::P2PSendCpu(send_shape, _dst_group.get(dst_device_index),
-                         Stream(Device(kCPU), kBlockingStream));
 
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), 
                                   type(), hetu::impl::P2PSend, input,
                                   _dst_group.get(dst_device_index), 
-                                  op->instantiation_ctx().stream());
-  return NDArrayList();                                    
+                                  op->instantiation_ctx().stream());                                 
 }
 
 bool P2PRecvOpImpl::DoMapToParallelDevices(Operator& op,
@@ -266,24 +263,17 @@ HTShapeList P2PRecvOpImpl::DoInferShape(Operator& op,
   return {_shape};
 }
 
-NDArrayList P2PRecvOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
-                                     RuntimeContext& runtime_ctx) const {
+void P2PRecvOpImpl::DoCompute(Operator& op, 
+                              const NDArrayList& inputs,
+                              NDArrayList& outputs,
+                              RuntimeContext& runtime_ctx) const {
   size_t src_device_index = _src_device_index == -1 ?
          op->placement_group().get_index(op->placement()) : _src_device_index;
-  // TODO: receiving the shape in compute fn is just a walkaround,
-  // we shall determine the shape for recv op in executor
-  NDArray recv_shape = NDArray::empty({HT_MAX_NDIM + 1}, Device(kCPU), kInt64);
-  hetu::impl::P2PRecvCpu(recv_shape, _src_group.get(src_device_index),
-                         Stream(Device(kCPU), kBlockingStream));
-  auto* ptr = recv_shape->data_ptr<int64_t>();
-  HTShape shape(ptr + 1, ptr + 1 + ptr[0]);
-  NDArray output = NDArray::empty(shape, op->instantiation_ctx().placement, op->output(0)->dtype());
 
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), 
-                                  type(), hetu::impl::P2PRecv, output,
-                                  _src_group.get(src_device_index), 
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
+                                  type(), hetu::impl::P2PRecv, outputs.at(0),
+                                  _src_group.get(src_device_index),
                                   op->instantiation_ctx().stream());
-  return {output};  
 }
 
 std::vector<NDArrayMeta> 

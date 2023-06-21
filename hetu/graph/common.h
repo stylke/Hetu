@@ -71,5 +71,6 @@ class DefineByRunGraph;
 class DefineAndRunGraph;
 class ExecutableGraph;
 
+#define HT_MAX_NUM_MICRO_BATCHES (128)
 } // namespace graph
 } // namespace hetu

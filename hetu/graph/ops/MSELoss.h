@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Loss.h"
 
 namespace hetu {
 namespace graph {
@@ -11,19 +12,10 @@ class MSELossOp;
 class MSELossGradientOpImpl;
 class MSELossGradientOp;
 
-class MSELossOpImpl : public OpInterface {
+class MSELossOpImpl : public LossOpImpl {
  public:
   MSELossOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(MSELossOp)),
-    _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
+  : LossOpImpl(quote(MSELossOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta> 
@@ -44,8 +36,6 @@ class MSELossOpImpl : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
-  ReductionType _reduction;
-
  public:
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
@@ -64,16 +54,10 @@ Tensor MakeMSELossOp(Tensor preds, Tensor labels,
                      const std::string& reduction = "mean",
                      OpMeta op_meta = OpMeta());
 
-class MSELossGradientOpImpl : public OpInterface {
+class MSELossGradientOpImpl : public LossGradientOpImpl {
  public:
   MSELossGradientOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(MSELossGradientOp)),
-    _reduction(reduction) {
-  }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
+  : LossGradientOpImpl(quote(MSELossGradientOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta> 
@@ -88,8 +72,6 @@ class MSELossGradientOpImpl : public OpInterface {
                  RuntimeContext& ctx) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
-
-  ReductionType _reduction;
 
  public:
   bool operator==(const OpInterface& rhs) const override {

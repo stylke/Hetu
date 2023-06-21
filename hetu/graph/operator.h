@@ -155,8 +155,8 @@ struct OpInstantiationContext {
   DeviceGroup placement_group;
   Device placement;
   StreamIndex stream_index;
-  std::unique_ptr<Event> start;
-  std::unique_ptr<Event> stop;
+  std::unique_ptr<Event> start[HT_MAX_NUM_MICRO_BATCHES];
+  std::unique_ptr<Event> stop[HT_MAX_NUM_MICRO_BATCHES];
 
   Stream stream() const {
     // Question: create stream inside kernels?
@@ -329,16 +329,19 @@ class OpDef : public shared_ptr_target {
     return _body->InferShape(get_self(), input_shapes, runtime_ctx);
   }
 
-  NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx) {
-    BlockOrSyncAllInputs();
-    instantiation_ctx().start->Record(stream());
+  NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx, size_t micro_batch_id = 0) {
+    HT_ASSERT(micro_batch_id < HT_MAX_NUM_MICRO_BATCHES)
+      << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
+      << ", got micro batch id: " << micro_batch_id;
+    BlockOrSyncAllInputs(micro_batch_id);
+    instantiation_ctx().start[micro_batch_id]->Record(stream());
     auto ret = _body->Compute(get_self(), inputs, runtime_ctx);
-    instantiation_ctx().stop->Record(stream());
+    instantiation_ctx().stop[micro_batch_id]->Record(stream());
     return ret;
   }
 
-  void Sync() {
-    instantiation_ctx().stop->Sync();
+  void Sync(size_t micro_batch_id = 0) {
+    instantiation_ctx().stop[micro_batch_id]->Sync();
   }
 
   OpId id() const noexcept {
@@ -508,9 +511,9 @@ class OpDef : public shared_ptr_target {
 
   const Operator& get_self() const;
 
-  void BlockOrSyncAllInputs();
+  void BlockOrSyncAllInputs(size_t micro_batch_id = 0);
   
-  void BlockOrSyncInput(Tensor& input);
+  void BlockOrSyncInput(Tensor& input, size_t micro_batch_id = 0);
 
   const OpIdentifier _ids;
   std::shared_ptr<OpInterface> _body;
@@ -719,7 +722,9 @@ static const uint64_t SCATTER_OP = 1ul << 16;
 static const uint64_t COMM_SPLIT_OP = 1ul << 19;
 static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t UNKNOWN_OP = 1ul << 21;
-static const uint64_t SLICE_OP = 1ul << 61;
+static const uint64_t SLICE_OP = 1ul << 59;
+static const uint64_t LOSS_OP = 1ul << 60;
+static const uint64_t LOSS_GRADIENT_OP = 1ul << 61;
 static const uint64_t OPTIMIZER_UPDATE_OP = 1ul << 62;
 static const uint64_t GROUP_OP = 1ul << 63;
 
@@ -763,7 +768,9 @@ DECLARE_OP_INDICATOR_CHECKER(communucation,
                                BROADCAST_OP | REDUCE_OP |
                                P2P_OP | BATCHED_ISEND_IRECV_OP |
                                GATHER_OP | SCATTER_OP)
-DECLARE_OP_INDICATOR_CHECKER(slice, SLICE_OP)                               
+DECLARE_OP_INDICATOR_CHECKER(slice, SLICE_OP)
+DECLARE_OP_INDICATOR_CHECKER(loss, LOSS_OP)
+DECLARE_OP_INDICATOR_CHECKER(loss_gradient, LOSS_GRADIENT_OP)
 DECLARE_OP_INDICATOR_CHECKER(optimizer_update, OPTIMIZER_UPDATE_OP)
 DECLARE_OP_INDICATOR_CHECKER(group, GROUP_OP)
 

@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Loss.h"
 
 namespace hetu {
 namespace graph {
@@ -11,20 +12,11 @@ class KLDivLossOp;
 class KLDivLossGradientOpImpl;
 class KLDivLossGradientOp;
 
-class KLDivLossOpImpl : public OpInterface {
+class KLDivLossOpImpl : public LossOpImpl {
 
  public:
   KLDivLossOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(KLDivLossOp)),
-    _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
+  : LossOpImpl(quote(KLDivLossOp), reduction) {}
 
 protected:
   std::vector<NDArrayMeta>
@@ -50,7 +42,6 @@ protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
 
-  ReductionType _reduction;
  public:
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
@@ -69,19 +60,13 @@ Tensor MakeKLDivLossOp(Tensor preds, Tensor labels,
                        const std::string& reduction = "mean",
                        OpMeta op_meta = OpMeta());
 
-class KLDivLossGradientOpImpl : public OpInterface {
+class KLDivLossGradientOpImpl : public LossGradientOpImpl {
 
  public:
   KLDivLossGradientOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(KLDivLossGradientOp)),
-    _reduction(reduction) {
-  }
+  : LossGradientOpImpl(quote(KLDivLossGradientOp), reduction) {}
 
-  ReductionType reduction() const {
-    return _reduction;
-  }
-
-protected:
+ protected:
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
     return {inputs[0]->meta()};
@@ -96,7 +81,6 @@ protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
 
-  ReductionType _reduction;
  public:
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {

@@ -23,6 +23,7 @@
 #include "hetu/graph/ops/LayerNorm.h"
 #include "hetu/graph/ops/LeakyRelu.h"
 #include "hetu/graph/ops/Linear.h"
+#include "hetu/graph/ops/Loss.h"
 #include "hetu/graph/ops/Maskedfill.h"
 #include "hetu/graph/ops/MatDot.h"
 #include "hetu/graph/ops/matmul.h"

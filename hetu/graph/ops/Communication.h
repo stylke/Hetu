@@ -164,30 +164,9 @@ class P2PSendOpImpl final : public OpInterface {
                            RuntimeContext& runtime_ctx) const override;  
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const {};
-
-  NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
-                        RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& runtime_ctx) const override;
                         
  public:
-  // Walkaround: bind the send and recv op
-  void BindRecvOp(const Operator& recv_op) {
-    HT_ASSERT(_recv_op == nullptr) << "Try to bind P2PRecvOp twice";
-    if (is_peer_to_peer_recv_op(recv_op)) {
-      _recv_op = std::make_unique<Operator>(recv_op);
-    }    
-  }
-
-  const Operator& recv_op() const {
-    HT_ASSERT(_recv_op != nullptr) << "P2PRecvOp is not bound yet";
-    return *_recv_op;    
-  }
-
-  Operator& recv_op() {
-    HT_ASSERT(_recv_op != nullptr) << "P2PRecvOp is not bound yet";
-    return *_recv_op;    
-  }
-
   const DeviceGroup& dst_group() const {
     return _dst_group;
   }
@@ -199,7 +178,6 @@ class P2PSendOpImpl final : public OpInterface {
  protected:
   DeviceGroup _dst_group;
   int _dst_device_index{-1};
-  std::unique_ptr<Operator> _recv_op;
 };
 
 Tensor MakeP2PSendOp(Tensor input, const DeviceGroup& dst_group, 
@@ -208,7 +186,7 @@ Tensor MakeP2PSendOp(Tensor input, const DeviceGroup& dst_group,
 class P2PRecvOpImpl final : public OpInterface {
  public:
   P2PRecvOpImpl(const DeviceGroup& src_group, DataType dtype,
-                const HTShape& shape = HTShape(), int src_device_index = -1,
+                const HTShape& shape, int src_device_index = -1,
                 const DeviceGroup& device_group = DeviceGroup())
   : OpInterface(quote(P2PRecvOp)), _src_group(src_group), _dtype(dtype),
                 _shape(shape), _src_device_index(src_device_index) {
@@ -219,6 +197,8 @@ class P2PRecvOpImpl final : public OpInterface {
               src_group.num_devices() == device_group.num_devices())
       << "Currently we require equal tensor parallelism degree across "
       << "P2P communication. Got " << src_group << " vs. " << device_group;
+    HT_ASSERT(!shape.empty())
+      << "P2P RecvOp require determined tensor shape to recv. Got empty shape param!";
     HT_ASSERT(dtype != kUndeterminedDataType)
       << "Please specify data type for P2P communication";
   }
@@ -238,28 +218,9 @@ class P2PRecvOpImpl final : public OpInterface {
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const {};
-
-  NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
-                        RuntimeContext& runtime_ctx) const override;  
+                 RuntimeContext& runtime_ctx) const override;
 
  public:
-  // Walkaround: bind the send and recv op
-  void BindSendOp(const Operator& send_op) {
-    HT_ASSERT(_send_op == nullptr) << "Try to bind P2PSendOp twice";
-    _send_op = std::make_unique<Operator>(send_op);  
-  }
-
-  const Operator& send_op() const {
-    HT_ASSERT(_send_op != nullptr) << "P2PSendOp is not bound yet";
-    return *_send_op;    
-  }
-
-  Operator& send_op() {
-    HT_ASSERT(_send_op != nullptr) << "P2PSendOp is not bound yet";
-    return *_send_op;    
-  }
-
   const DeviceGroup& src_group() const {
     return _src_group;
   }
@@ -272,13 +233,12 @@ class P2PRecvOpImpl final : public OpInterface {
   DeviceGroup _src_group;
   int _src_device_index{-1};
   DataType _dtype;
-  HTShape _shape;
-  std::unique_ptr<Operator> _send_op;                
+  HTShape _shape;           
 };
 
 Tensor MakeP2PRecvOp(const DeviceGroup& src_group, DataType dtype,
-                     const HTShape& shape = HTShape(), 
-                     int src_device_index = -1, OpMeta op_meta = OpMeta());
+                     const HTShape& shape, int src_device_index = -1, 
+                     OpMeta op_meta = OpMeta());
 
 class BatchedISendIRecvOpImpl final : public OpInterface {
  public:

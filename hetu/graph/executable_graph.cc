@@ -5,6 +5,8 @@
 #include "hetu/graph/ops/sum.h"
 #include "hetu/graph/ops/Concatenate.h"
 #include "hetu/graph/ops/Communication.h"
+#include "hetu/graph/ops/Arithmetics.h"
+#include "hetu/graph/ops/Loss.h"
 #include "hetu/impl/communication/comm_group.h"
 
 namespace hetu {
@@ -114,6 +116,32 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     }
     if (!stage_group.empty() && std::find(_stages.begin(), _stages.end(), stage_group) == _stages.end()) {
       _stages.push_back(stage_group);
+    }
+
+    // loss & grad should div by num_micro_batches when reduction type = MEAN!!! 
+    if (is_loss_gradient_op(op)) {
+      int dp = op->input(0)->get_distributed_states().get_dim(0);
+      auto& loss_grad_op_impl = reinterpret_cast<LossGradientOpImpl&>(op->body());
+      if ((_num_micro_batches > 1 || dp > 1) && loss_grad_op_impl.reduction() == kMEAN) {
+        auto& grads = op->outputs();
+        for (auto& grad : grads) {
+          if (!grad.is_defined()) {
+            continue;
+          }
+          Tensor grad_scale = MakeDivByConstOp(grad, _num_micro_batches * dp, OpMeta().set_name(grad->name() + "_scale"));
+          auto& grad_scale_op = grad_scale->producer();
+          grad_scale_op->MapToParallelDevices(op->placement_group());
+          for (int i = grad->num_consumers() - 1; i >= 0; i--) {
+            auto& consumer_i = grad->consumer(i);
+            if (consumer_i->id() == grad_scale_op->id()) continue;
+            for (int j = 0; j < consumer_i->num_inputs(); j++) {
+              if (consumer_i->input(j)->id() == grad->id()) {
+                ReplaceInput(consumer_i, j, grad_scale);
+              }
+            }
+          }
+        }
+      }
     }
 
     // add p2p comm_op for pipeline parallel
@@ -708,16 +736,16 @@ void ExecutableGraph::CrossSend(std::unordered_map<int32_t, int32_t> split_cur_s
 
 // schedule: {stage_id: [<is_forward, micro_batch_id>, <is_forward,
 // micro_batch_id>, ...], ...}
-std::unordered_map<int, std::vector<std::pair<bool, int>>>
+std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
 ExecutableGraph::GenerateGpipeSchedule(
-  int num_stages, int num_micro_batches, bool is_inference) {
-  std::unordered_map<int, std::vector<std::pair<bool, int>>> schedule;
+  size_t num_stages, size_t num_micro_batches, bool is_inference) {
+  std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>> schedule;
   // inference time: for only forward
   if (is_inference) {
-    for (int stage_id = 0; stage_id < num_stages; stage_id++) {
-      std::vector<std::pair<bool, int>> tasks;
+    for (size_t stage_id = 0; stage_id < num_stages; stage_id++) {
+      std::vector<std::pair<bool, size_t>> tasks;
       tasks.reserve(num_micro_batches);
-      for (int step_id = 0; step_id < num_micro_batches; step_id++) {
+      for (size_t step_id = 0; step_id < num_micro_batches; step_id++) {
         tasks.push_back({true, step_id});
       }
       schedule[stage_id] = tasks;
@@ -725,13 +753,13 @@ ExecutableGraph::GenerateGpipeSchedule(
     return schedule;
   }
   // traininig time: for forward and backward
-  for (int stage_id = 0; stage_id < num_stages; stage_id++) {
-    std::vector<std::pair<bool, int>> tasks;
+  for (size_t stage_id = 0; stage_id < num_stages; stage_id++) {
+    std::vector<std::pair<bool, size_t>> tasks;
     tasks.reserve(2 * num_micro_batches);
-    for (int step_id = 0; step_id < num_micro_batches; step_id++) {
+    for (size_t step_id = 0; step_id < num_micro_batches; step_id++) {
       tasks.push_back({true, step_id});
     }
-    for (int step_id = 0; step_id < num_micro_batches; step_id++) {
+    for (size_t step_id = 0; step_id < num_micro_batches; step_id++) {
       tasks.push_back({false, step_id});
     }
     schedule[stage_id] = tasks;
@@ -741,18 +769,18 @@ ExecutableGraph::GenerateGpipeSchedule(
 
 // schedule: {stage_id: [<is_forward, micro_batch_id>, <is_forward,
 // micro_batch_id>, ...], ...}
-std::unordered_map<int, std::vector<std::pair<bool, int>>>
+std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
 ExecutableGraph::GeneratePipedreamFlushSchedule(
-  int num_stages, int num_micro_batches, bool is_inference) {
+  size_t num_stages, size_t num_micro_batches, bool is_inference) {
   HT_ASSERT(num_micro_batches >= num_stages)
     << "num_micro_batches must bigger than num_stages in pipedream-flush!";
-  std::unordered_map<int, std::vector<std::pair<bool, int>>> schedule;
+  std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>> schedule;
   // inference time: for only forward
   if (is_inference) {
-    for (int stage_id = 0; stage_id < num_stages; stage_id++) {
-      std::vector<std::pair<bool, int>> tasks;
+    for (size_t stage_id = 0; stage_id < num_stages; stage_id++) {
+      std::vector<std::pair<bool, size_t>> tasks;
       tasks.reserve(num_micro_batches);
-      for (int step_id = 0; step_id < num_micro_batches; step_id++) {
+      for (size_t step_id = 0; step_id < num_micro_batches; step_id++) {
         tasks.push_back({true, step_id});
       }
       schedule[stage_id] = tasks;
@@ -760,23 +788,23 @@ ExecutableGraph::GeneratePipedreamFlushSchedule(
     return schedule;
   }
   // traininig time: for forward and backward
-  for (int stage_id = 0; stage_id < num_stages; stage_id++) {
-    std::vector<std::pair<bool, int>> tasks;
+  for (size_t stage_id = 0; stage_id < num_stages; stage_id++) {
+    std::vector<std::pair<bool, size_t>> tasks;
     tasks.reserve(2 * num_micro_batches);
-    int num_warmup_microbatches = num_stages - stage_id - 1;
-    int num_microbatches_remaining =
+    size_t num_warmup_microbatches = num_stages - stage_id - 1;
+    size_t num_microbatches_remaining =
       num_micro_batches - num_warmup_microbatches;
     // 1. warmup
-    for (int step_id = 0; step_id < num_warmup_microbatches; step_id++) {
+    for (size_t step_id = 0; step_id < num_warmup_microbatches; step_id++) {
       tasks.push_back({true, step_id});
     }
     // 2. 1F1B
-    for (int step_id = 0; step_id < num_microbatches_remaining; step_id++) {
+    for (size_t step_id = 0; step_id < num_microbatches_remaining; step_id++) {
       tasks.push_back({true, num_warmup_microbatches + step_id});
       tasks.push_back({false, step_id});
     }
     // 3. cooldown
-    for (int step_id = 0; step_id < num_warmup_microbatches; step_id++) {
+    for (size_t step_id = 0; step_id < num_warmup_microbatches; step_id++) {
       tasks.push_back({false, num_microbatches_remaining + step_id});
     }
     schedule[stage_id] = tasks;
@@ -784,7 +812,7 @@ ExecutableGraph::GeneratePipedreamFlushSchedule(
   return schedule;
 }
 
-void ExecutableGraph::ComputeFunc(const OpRefList& topo, RuntimeContext& runtime_ctx, 
+void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo, RuntimeContext& runtime_ctx, 
                                   Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
                                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                                   const TensorIdSet& accumulated_tensor, const OpIdSet& accumulated_ops,
@@ -818,16 +846,13 @@ void ExecutableGraph::ComputeFunc(const OpRefList& topo, RuntimeContext& runtime
                       kBlockingStream);
       }
       input_vals.push_back(tensor2data[input->id()]);
+      // should free memory until op aync compute complete!!!
+      // workaround: erase when the stream of input_op is the same as cur_op 
       if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end()) {
-        tensor2data.erase(input->id());
+      //   tensor2data.erase(input->id());
       }
     }
-    NDArrayList output_vals = op->Compute(input_vals, runtime_ctx);
-    op->Sync();
-    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() 
-      << ": exec op " << op->name() 
-      // << ", input_vals = " << input_vals
-      << ", output_vals = " << output_vals;
+    NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
     for (size_t i = 0; i < op->num_outputs(); i++) {
       const auto& output = op->output(i);
       if (accumulated_tensor.find(output->id()) != accumulated_tensor.end()) {
@@ -849,7 +874,8 @@ void ExecutableGraph::ComputeFunc(const OpRefList& topo, RuntimeContext& runtime
 NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
                                  const FeedDict& feed_dict, const int num_micro_batches) {                        
   auto& local_device = hetu::impl::comm::GetLocalDevice();
-  HT_LOG_DEBUG << local_device << ": exec graph run begin .............";                              
+  HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
+  _num_micro_batches = num_micro_batches;
   // TODO: For each pair of `fetches` and `feed_dict`,
   // deduce the optimal execution plan, and cache it.
   for (auto& fetch : fetches) {
@@ -915,6 +941,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   for (const auto& kv : feed_dict) {
     if (!kv.second.is_defined()) continue; // only feed placeholder_op in local device group
     auto micro_batches = NDArray::split(kv.second, num_micro_batches);
+    // 加一个pipeline split的tensor状态
     for (int i = 0; i < num_micro_batches; i++) {
       tensor2data_list[i][kv.first] = NDArray::squeeze(micro_batches[i], 0);
     }
@@ -1006,19 +1033,19 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // HT_LOG_DEBUG << local_device << ": stages = " << _stages << "; stage id = " << stage_id;
   auto& tasks = schedule[stage_id];
   HT_LOG_DEBUG << local_device << ": stage id = " << stage_id;
-  for (std::size_t i = 0; i < tasks.size(); i++) {
+  for (size_t i = 0; i < tasks.size(); i++) {
     auto& task = tasks[i];
     bool is_forward = task.first;
-    int micro_batch_id = task.second;
+    size_t& micro_batch_id = task.second;
     auto& tensor2data = tensor2data_list[micro_batch_id];
     auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
     auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
     if (is_forward) {
-      ComputeFunc(local_fw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
+      ComputeFunc(micro_batch_id, local_fw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
                   false, accumulated_tensor, accumulated_ops, feed_dict, fetches, fetch_indices);
     } else {
       bool grad_accumulation_finished = (i == tasks.size() - 1);
-      ComputeFunc(local_bw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
+      ComputeFunc(micro_batch_id, local_bw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
                   grad_accumulation_finished, accumulated_tensor, accumulated_ops, feed_dict, 
                   fetches, fetch_indices);
     }
@@ -1061,9 +1088,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       }
     });
   }
+  // OpList sync_ops;
   for (auto op_id : to_sync_op_ids) {
-    _op_indexing[op_id]->Sync();
+    _op_indexing[op_id]->Sync(num_micro_batches - 1);
+    // sync_ops.push_back(_op_indexing[op_id]);
   }
+  // HT_LOG_DEBUG << local_device << ": sync ops = " << sync_ops;
   HT_LOG_DEBUG << local_device << ": 3. get results[end]";
   return results;
 }

@@ -36,13 +36,13 @@ class ExecutableGraph : public Graph {
   }
 
  protected:
-  std::unordered_map<int, std::vector<std::pair<bool, int>>>
-  GenerateGpipeSchedule(int num_stages, int num_micro_batches, bool is_inference);
+  std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
+  GenerateGpipeSchedule(size_t num_stages, size_t num_micro_batches, bool is_inference);
 
-  std::unordered_map<int, std::vector<std::pair<bool, int>>>
-  GeneratePipedreamFlushSchedule(int num_stages, int num_micro_batches, bool is_inference);
+  std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
+  GeneratePipedreamFlushSchedule(size_t num_stages, size_t num_micro_batches, bool is_inference);
 
-  void ComputeFunc(const OpRefList& topo, RuntimeContext& runtime_ctx, 
+  void ComputeFunc(size_t& micro_batch_id, const OpRefList& topo, RuntimeContext& runtime_ctx, 
                   Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                   const TensorIdSet& accumulated_tensor, const OpIdSet& accumulated_ops,
@@ -101,6 +101,7 @@ class ExecutableGraph : public Graph {
 
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
   std::vector<DeviceGroup> _stages;
+  int _num_micro_batches;
 };
 
 } // namespace graph

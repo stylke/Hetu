@@ -16,7 +16,7 @@ void imperative_run(Graph& graph) {
     auto x = MakeVariableOp(ConstantInitializer((i + 1) * 0.01), {10,5}, kFloat32, false, OpMeta().set_name("x").set_eager_device(Device(kCUDA, 0)));
     auto y = MakeVariableOp(ZerosInitializer(), {10, 1}, kFloat32, false, OpMeta().set_name("y").set_eager_device(Device(kCUDA, 0)));
     auto pred = MakeMatMulOp(x, w);
-    auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::SUM);
+    auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
     // TODO: zero_grad --> backward --> step
     optimizer.Minimize(loss)->get_or_compute();
     HT_LOG_INFO << "loss = " << loss->get_or_compute();
@@ -32,7 +32,7 @@ void static_run(Graph& graph) {
   auto x = MakePlaceholderOp(NDArrayMeta().set_shape({10,5}).set_dtype(kFloat32), OpMeta().set_name("x"));
   auto y = MakePlaceholderOp(NDArrayMeta().set_shape({10,1}).set_dtype(kFloat32), OpMeta().set_name("y"));
   auto pred = MakeMatMulOp(x, w);
-  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::SUM);
+  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
   SGDOptimizer optimizer(0.1f);
   auto train_op = optimizer.Minimize(loss);
   for (size_t i = 0; i < 5; i++) {
@@ -68,7 +68,7 @@ void static_run_dp_ds(Graph& graph) {
   w->set_distributed_states(ds_dup);
 
   auto pred = MakeSigmoidOp(MakeMatMulOp(x, w));
-  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::SUM);
+  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
   SGDOptimizer optimizer(0.1f);
   auto train_op = optimizer.Minimize(loss);
 
@@ -115,7 +115,7 @@ void static_run_tp_ds(Graph& graph) {
   auto x4 = MakeMatMulOp(x3, w2, false, false, OpMeta().set_name("mm2"));
   auto x5 = MakeSigmoidOp(x4, OpMeta().set_name("sigmoid"));
   auto pred = MakeCommOp(x5, ds_split0_dup, OpMeta().set_name("comm_op2")); 
-  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::SUM);
+  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
   SGDOptimizer optimizer(0.1, 0.0);
   auto train_op = optimizer.Minimize(loss);
 
@@ -214,21 +214,21 @@ void static_run_tp_ds2(Graph& graph) {
   auto x_split1_dup = MakeSigmoidOp(MakeAddElewiseOp(x8, x8));
 
 
-  auto loss_split0 = MakeBinaryCrossEntropyOp(x_split0, y, hetu::ReductionType::SUM);
+  auto loss_split0 = MakeBinaryCrossEntropyOp(x_split0, y, hetu::ReductionType::MEAN);
   x_dup = MakeCommOp(x_dup, ds_split0);
-  auto loss_dup = MakeBinaryCrossEntropyOp(x_dup, y, hetu::ReductionType::SUM);
+  auto loss_dup = MakeBinaryCrossEntropyOp(x_dup, y, hetu::ReductionType::MEAN);
   x_split01 = MakeCommOp(x_split01, ds_split0);
-  auto loss_split01 = MakeBinaryCrossEntropyOp(x_split01, y, hetu::ReductionType::SUM);
+  auto loss_split01 = MakeBinaryCrossEntropyOp(x_split01, y, hetu::ReductionType::MEAN);
   x_split10 = MakeCommOp(x_split10, ds_split0);
-  auto loss_split10 = MakeBinaryCrossEntropyOp(x_split10, y, hetu::ReductionType::SUM);
+  auto loss_split10 = MakeBinaryCrossEntropyOp(x_split10, y, hetu::ReductionType::MEAN);
   x_dup_split0 = MakeCommOp(x_dup_split0, ds_split0);
-  auto loss_dup_split0 = MakeBinaryCrossEntropyOp(x_dup_split0, y, hetu::ReductionType::SUM);
+  auto loss_dup_split0 = MakeBinaryCrossEntropyOp(x_dup_split0, y, hetu::ReductionType::MEAN);
   x_split0_dup = MakeCommOp(x_split0_dup, ds_split0);
-  auto loss_split0_dup = MakeBinaryCrossEntropyOp(x_split0_dup, y, hetu::ReductionType::SUM);
+  auto loss_split0_dup = MakeBinaryCrossEntropyOp(x_split0_dup, y, hetu::ReductionType::MEAN);
   x_dup_split1 = MakeCommOp(x_dup_split1, ds_split0);
-  auto loss_dup_split1 = MakeBinaryCrossEntropyOp(x_dup_split1, y, hetu::ReductionType::SUM);
+  auto loss_dup_split1 = MakeBinaryCrossEntropyOp(x_dup_split1, y, hetu::ReductionType::MEAN);
   x_split1_dup = MakeCommOp(x_split1_dup, ds_split0);
-  auto loss_split1_dup = MakeBinaryCrossEntropyOp(x_split1_dup, y, hetu::ReductionType::SUM);
+  auto loss_split1_dup = MakeBinaryCrossEntropyOp(x_split1_dup, y, hetu::ReductionType::MEAN);
     
   auto loss = MakeSumOp({loss_split0, loss_dup, 
                          loss_split01, loss_split10, 
@@ -296,7 +296,7 @@ void static_run_tp_pp_ds(Graph& graph) {
   auto pred = MakeCommOp(x7, ds_dup, OpMeta().set_name("comm_op3"));
   auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim}).set_dtype(kFloat32), OpMeta().set_device_group(device_group4).set_name("y"));
   y->set_distributed_states(ds_dup);
-  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::SUM, OpMeta().set_device_group(device_group4).set_name("bce_loss"));
+  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN, OpMeta().set_device_group(device_group4).set_name("bce_loss"));
   SGDOptimizer optimizer(0.1, 0.0);
   auto train_op = optimizer.Minimize(loss);
 
@@ -324,6 +324,67 @@ void static_run_tp_pp_ds(Graph& graph) {
   }
 }
 
+void static_run_tp_pp_ds2(Graph& graph) {
+  auto& local_device = hetu::impl::comm::GetLocalDevice();
+  auto& all_devices = hetu::impl::comm::GetGlobalDeviceGroup();  
+  HT_LOG_INFO << local_device << ": static_run_tp_pp_ds2...";
+  Graph::push_graph_ctx(graph.id());
+  HT_ASSERT(all_devices.num_devices() >= 8) << "device num must >= 8 !";
+  DeviceGroup device_group1({all_devices.get(0), all_devices.get(1), all_devices.get(2), all_devices.get(3)});
+  DeviceGroup device_group2({all_devices.get(4), all_devices.get(5), all_devices.get(6), all_devices.get(7)});
+
+  DistributedStates ds_dup(4, {{-1, 4}}, {-1});
+  DistributedStates ds_split(4, {{0, 4}}, {0});
+  DistributedStates ds_split0_dup(4, {{-1, 2}, {0, 2}}, {0, -1});
+  DistributedStates ds_dup_split1(4, {{-1, 2}, {1, 2}}, {-1, 1});
+  DistributedStates ds_split01(4, {{0, 2}, {1, 2}}, {0, 1});  
+
+  int local_n = 2;
+  int dim = 4;
+  // stage1
+  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), OpMeta().set_device_group(device_group1).set_name("x"));
+  x->set_distributed_states(ds_split);
+  auto w_data = NDArray::rand({dim, dim}, Device(kCPU), kFloat32, 0.0, 1.0, 2023, kBlockingStream);
+  auto w = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(device_group1).set_name("w"));
+  w->set_distributed_states(ds_dup);
+  auto x2 = MakeMatMulOp(x, w, false, false, OpMeta().set_name("mm1").set_device_group(device_group1));
+  auto x3 = MakeCommOp(x2, ds_split0_dup, OpMeta().set_name("comm_op1"));
+  
+  // stage2
+  auto w2_data = NDArray::rand({dim, dim/2}, Device(kCPU), kFloat32, 0.0, 1.0, 2023+1+local_device.index()%2, kBlockingStream);
+  auto w2 = MakeParameterOp(w2_data, false, kFloat32, true, OpMeta().set_device_group(device_group2).set_name("w2"));
+  w2->set_distributed_states(ds_dup_split1);
+  auto x4 = MakeMatMulOp(x3, w2, false, false, OpMeta().set_name("mm2").set_device_group(device_group2));
+  auto x5 = MakeSigmoidOp(x4, OpMeta().set_name("sigmoid").set_device_group(device_group2));
+  auto pred = MakeCommOp(x5, ds_split0_dup, OpMeta().set_name("comm_op2"));
+  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim}).set_dtype(kFloat32), OpMeta().set_device_group(device_group2).set_name("y"));
+  y->set_distributed_states(ds_split0_dup);    
+  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
+  SGDOptimizer optimizer(0.1, 0.0);
+  auto train_op = optimizer.Minimize(loss);
+
+  int num_micro_batches = 4;
+  
+  NDArray data, labels;
+  if (device_group1.contains(local_device)) {
+    data = NDArray::randn({local_n * num_micro_batches, dim}, local_device, kFloat32, 0.0, 1.0, (666 + device_group1.get_index(local_device)), kBlockingStream);
+  }
+  if (device_group2.contains(local_device)) {
+    labels = NDArray::zeros({local_n * 2 * num_micro_batches, dim}, local_device, kFloat32, kBlockingStream);
+  }
+
+  auto ret = graph.Run(loss, {loss, w, w2, train_op},
+                       {{x->id(), data}, {y->id(), labels}}, 
+                       num_micro_batches);
+
+  if (device_group1.contains(local_device)) {
+    HT_LOG_INFO << local_device << "\nw_init: " << w_data << "\nw_updated: " << ret[1];
+  }
+  if (device_group2.contains(local_device)) {
+    HT_LOG_INFO << local_device << "\nw2_init: " << w2_data << "\nw2_updated: " << ret[2];
+  }  
+}
+
 int main()
 {
   hetu::impl::comm::SetUpDeviceMappingAndAssignLocalDeviceOnce();
@@ -331,11 +392,12 @@ int main()
   // imperative_run(Graph::get_default_define_by_run_graph());
   // static_run(Graph::get_default_define_and_run_graph());
 
-  // static_run_dp_ds(Graph::get_default_define_and_run_graph());
+  static_run_dp_ds(Graph::get_default_define_and_run_graph());
   // static_run_tp_ds(Graph::get_default_define_and_run_graph());
   // static_run_tp_ds2(Graph::get_default_define_and_run_graph());
 
-  static_run_tp_pp_ds(Graph::get_default_define_and_run_graph());
+  // static_run_tp_pp_ds(Graph::get_default_define_and_run_graph());
+  // static_run_tp_pp_ds2(Graph::get_default_define_and_run_graph());
   return 0;
 }
 

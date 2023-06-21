@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Loss.h"
 
 namespace hetu {
 namespace graph {
@@ -9,14 +10,10 @@ namespace graph {
 class BinaryCrossEntropyOpImpl;
 class BinaryCrossEntropyGradientOpImpl;
 
-class BinaryCrossEntropyOpImpl final : public OpInterface {
+class BinaryCrossEntropyOpImpl final : public LossOpImpl {
  public:
   BinaryCrossEntropyOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(BinaryCrossEntropyOp)), _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
+  : LossOpImpl(quote(BinaryCrossEntropyOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta>
@@ -54,23 +51,12 @@ class BinaryCrossEntropyOpImpl final : public OpInterface {
     }
     return false;
   }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
-
- protected:
-  ReductionType _reduction;
 };
 
-class BinaryCrossEntropyGradientOpImpl final : public OpInterface {
+class BinaryCrossEntropyGradientOpImpl final : public LossGradientOpImpl {
  public:
   BinaryCrossEntropyGradientOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(BinaryCrossEntropyGradientOp)), _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
+  : LossGradientOpImpl(quote(BinaryCrossEntropyGradientOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta>
@@ -98,13 +84,6 @@ class BinaryCrossEntropyGradientOpImpl final : public OpInterface {
     }
     return false;
   }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
-
- protected:
-  ReductionType _reduction;
 };
 
 Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,

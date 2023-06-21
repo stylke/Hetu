@@ -179,6 +179,7 @@ void CUDABFCMemoryPool::DeallocateChunk(ChunkHandle h) {
 }
 
 DataPtr CUDABFCMemoryPool::AllocDataSpace(size_t num_bytes) {
+    std::lock_guard<std::mutex> lock(_mtx);
     // HT_LOG_INFO << "AllocateRaw " << Name() << "  " << num_bytes;
     void *result = AllocateRawInternal(num_bytes);
     if (result == nullptr) {
@@ -416,6 +417,7 @@ void CUDABFCMemoryPool::SplitChunk(CUDABFCMemoryPool::ChunkHandle h,
 }
 
 void CUDABFCMemoryPool::FreeDataSpace(DataPtr ptr) {
+    std::lock_guard<std::mutex> lock(_mtx);
     // HT_LOG_INFO << "DeallocateRaw " << Name() << " "
                 // << (ptr.ptr ? RequestedSize(ptr.ptr) : 0);
     DeallocateRawInternal(ptr.ptr);

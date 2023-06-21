@@ -49,11 +49,15 @@ bool OpInterface::DoInstantiate(Operator& op, const Device& placement,
   inst_ctx.placement = placement;
   inst_ctx.stream_index = stream_index;
   if (placement.is_cuda()) {
-    inst_ctx.start = std::make_unique<hetu::impl::CUDAEvent>(placement);
-    inst_ctx.stop = std::make_unique<hetu::impl::CUDAEvent>(placement);
+    for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) { 
+      inst_ctx.start[i] = std::make_unique<hetu::impl::CUDAEvent>(placement);
+      inst_ctx.stop[i] = std::make_unique<hetu::impl::CUDAEvent>(placement);
+    }
   } else {
-    inst_ctx.start = std::make_unique<hetu::impl::CPUEvent>();
-    inst_ctx.stop = std::make_unique<hetu::impl::CPUEvent>();
+    for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) {     
+      inst_ctx.start[i] = std::make_unique<hetu::impl::CPUEvent>();
+      inst_ctx.stop[i] = std::make_unique<hetu::impl::CPUEvent>();
+    }
   }
   Operator::for_each_output_tensor(
     op, [&](Tensor& tensor) { tensor->set_placement(placement); });
@@ -187,16 +191,22 @@ const Operator& OpDef::get_self() const {
   return Graph::GetGraph(graph_id()).GetOp(id());
 }
 
-void OpDef::BlockOrSyncAllInputs() {
+void OpDef::BlockOrSyncAllInputs(size_t micro_batch_id) {
   for (auto& input : _inputs)
-    BlockOrSyncInput(input);
-  // for (auto& in_dep : _extra_in_dep_linkers)
-  //   BlockOrSyncInput(in_dep);
+    BlockOrSyncInput(input, micro_batch_id);
+  for (auto& in_dep : _extra_in_dep_linkers)
+    BlockOrSyncInput(in_dep, micro_batch_id);
 }
 
-void OpDef::BlockOrSyncInput(Tensor& input) {
+void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
   if (!input.is_defined())
     return;
+  // for pp case
+  const auto& input_placement_group = input->placement_group();
+  const auto& current_placement_group = instantiation_ctx().placement_group;
+  if (input_placement_group != current_placement_group)
+    return;
+  // for commom case
   auto& input_op = input->producer();
   const auto& input_placement = input_op->instantiation_ctx().placement;
   const auto& current_placement = instantiation_ctx().placement;
@@ -207,12 +217,12 @@ void OpDef::BlockOrSyncInput(Tensor& input) {
     << "cur op = " << input->consumers() << ", cur device = " << hetu::impl::comm::GetLocalDevice();
   if (input_placement != current_placement) {
     // We cannot block different devices. Just sync here.
-    input_op->instantiation_ctx().stop->Sync();
+    input_op->instantiation_ctx().stop[micro_batch_id]->Sync();
   } else if (input_op->instantiation_ctx().stream_index !=
              instantiation_ctx().stream_index) {
     // Both ops are on the same device. We can block the current op
     // by waiting for the stop event of the dependency.
-    input_op->instantiation_ctx().stop->Block(instantiation_ctx().stream());
+    input_op->instantiation_ctx().stop[micro_batch_id]->Block(instantiation_ctx().stream());
   }
 }
 

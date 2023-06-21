@@ -6,6 +6,7 @@ namespace hetu {
 namespace impl {
 
 DataPtr CUDAMemoryPool::AllocDataSpace(size_t num_bytes) {
+  std::lock_guard<std::mutex> lock(_mtx);
   if (num_bytes == 0)
     return {nullptr, 0, Device(kCUDA, _device_id)};
 
@@ -21,6 +22,7 @@ DataPtr CUDAMemoryPool::AllocDataSpace(size_t num_bytes) {
 }
 
 void CUDAMemoryPool::FreeDataSpace(DataPtr ptr) {
+  std::lock_guard<std::mutex> lock(_mtx);
   if (ptr.size == 0)
     return;
 
