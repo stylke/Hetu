@@ -102,6 +102,15 @@ bool CommOpImpl::DoMapToParallelDevices(Operator& op,
 
 bool CommOpImpl::DoInstantiate(Operator& op, const Device& placement,
                                StreamIndex stream_index) const {
+  const DistributedStates& src_ds = op->input(0)->get_distributed_states();
+  const DistributedStates& dst_ds = get_dst_distributed_states();
+  const DeviceGroup& src_group = op->input(0)->placement_group();
+  // CommOp should be checked in Instantiate(when placement info assigned) whether it is valid  
+  HT_ASSERT(!src_ds.check_equal(dst_ds) || (!_dst_group.empty() && src_group != _dst_group))
+    << "CommOp must communicate intra/inter device group!"
+    << " src ds = " << src_ds.ds_info() << ", dst ds = " << dst_ds.ds_info()
+    << ", src_group = " << src_group << ", dst_group = " << _dst_group;
+                                  
   auto& inst_ctx = op->instantiation_ctx();
   inst_ctx.placement = placement;
   inst_ctx.stream_index = stream_index;
@@ -130,9 +139,6 @@ CommOpImpl::DoInferMeta(const TensorList& inputs) const {
   const HTShape& input_shape = input->shape();
   const DistributedStates& src_ds = input->get_distributed_states();
   const DistributedStates& dst_ds = get_dst_distributed_states();
-  const DeviceGroup& src_group = input->placement_group();
-  HT_ASSERT(!src_ds.check_equal(dst_ds) || (!_dst_group.empty() && src_group != _dst_group))
-    << "CommOp must communicate intra/inter device group!";
   HTShape shape(input_shape.size());
   for (size_t d = 0; d < input_shape.size(); d++) {
     shape[d] = input_shape[d] * src_ds.get_dim(d) / dst_ds.get_dim(d);
@@ -157,6 +163,9 @@ HTShapeList CommOpImpl::DoInferShape(Operator& op,
 
 TensorList CommOpImpl::DoGradient(Operator& op,
                                   const TensorList& grad_outputs) const {
+  // if input not requires grad, then grad_output also will be Tensor()                                    
+  if (!op->requires_grad(0))
+    return {Tensor()};                                    
   Tensor& input = op->input(0);
   const auto& ds_input = input->get_distributed_states();
   Tensor& output = op->output(0);
@@ -175,8 +184,13 @@ TensorList CommOpImpl::DoGradient(Operator& op,
     auto device_num = ds_grad_input.get_device_num();
     ds_grad_input.set_distributed_states({device_num, res_states, res_order});
   }
-  Tensor grad_input = MakeCommOp(grad_output, ds_grad_input, OpMeta().set_name("grad_" + op->name()));
-  return {grad_input};  
+  // if forward just make partial into dup, then backward was dup to dup, needn't new comm_op
+  if (ds_grad_input.check_equal(ds_grad_output)) {
+    return {grad_output};
+  } else {
+    Tensor grad_input = MakeCommOp(grad_output, ds_grad_input, OpMeta().set_name("grad_" + op->name()));
+    return {grad_input};
+  }
 }
 
 bool AllReduceOpImpl::DoMapToParallelDevices(Operator& op, 

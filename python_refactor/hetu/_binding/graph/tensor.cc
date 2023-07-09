@@ -180,6 +180,12 @@ PyObject* PyTensor_requires_grad(PyTensor* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_distributed_states(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  return PyDistributedStates_New(self->tensor->get_distributed_states());  
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_data(PyTensor* self) {
   HT_PY_FUNC_BEGIN
   return PyNDArray_New(self->tensor->get_or_compute());
@@ -205,15 +211,16 @@ PyObject* PyTensor_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   
   static PyArgParser parser({
-    "from_numpy(numpy.array data, bool requires_grad=false, " OP_META_ARGS ")", 
+    "from_numpy(numpy.array data, bool requires_grad=false, DistributedStates ds=None, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
 
   if (parsed_args.signature_index() == 0) {
     auto* array_obj = parsed_args.get_numpy_array(0);
     bool requires_grad = parsed_args.get_bool_or_default(1);
+    DistributedStates ds = parsed_args.get_distributed_states_or_empty(2);
     new(&self->tensor) Tensor();
-    self->tensor = MakeParameterOp(NDArrayFromNumpy(array_obj), false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 2));
+    self->tensor = MakeParameterOp(NDArrayFromNumpy(array_obj), false, kUndeterminedDataType, requires_grad, ds, parse_op_meta(parsed_args, 3));
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -248,7 +255,8 @@ PyGetSetDef PyTensor_properties[] = {
   {PY_GET_SET_DEF_NAME("shape"), (getter) PyTensor_shape, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("is_variable"), (getter) PyTensor_is_variable, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("is_parameter"), (getter) PyTensor_is_parameter, nullptr, nullptr, nullptr}, 
-  {PY_GET_SET_DEF_NAME("requires_grad"), (getter) PyTensor_requires_grad, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("requires_grad"), (getter) PyTensor_requires_grad, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("distributed_states"), (getter) PyTensor_distributed_states, nullptr, nullptr, nullptr},  
   {PY_GET_SET_DEF_NAME("data"), (getter) PyTensor_data, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("graph"), (getter) PyTensor_graph, nullptr, nullptr, nullptr}, 
   {nullptr}

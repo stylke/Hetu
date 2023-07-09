@@ -115,21 +115,25 @@ class VariableOpImpl : public OpInterface {
   bool _requires_grad;
 };
 
-Tensor MakeVariableOp(const Initializer& init, HTShape shape,
-                      DataType dtype = kFloat32, bool requires_grad = false,
+Tensor MakeVariableOp(const Initializer& init, HTShape shape, 
+                      DataType dtype = kFloat32, bool requires_grad = false, 
+                      const DistributedStates& ds = DistributedStates(), 
                       OpMeta op_meta = OpMeta());
 
 Tensor MakeVariableOp(NDArray provided_data, bool copy_provided_data = false,
-                      DataType dtype = kUndeterminedDataType,
-                      bool requires_grad = false, OpMeta op_meta = OpMeta());
+                      DataType dtype = kUndeterminedDataType, bool requires_grad = false, 
+                      const DistributedStates& ds = DistributedStates(), 
+                      OpMeta op_meta = OpMeta());
 
 Tensor MakeParameterOp(const Initializer& init, HTShape shape,
-                       DataType dtype = kFloat32, bool requires_grad = false,
+                       DataType dtype = kFloat32, bool requires_grad = false, 
+                       const DistributedStates& ds = DistributedStates(), 
                        OpMeta op_meta = OpMeta());
 
-Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data = false,
-                       DataType dtype = kUndeterminedDataType,
-                       bool requires_grad = false, OpMeta op_meta = OpMeta());
+Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data = false, 
+                       DataType dtype = kUndeterminedDataType, bool requires_grad = false, 
+                       const DistributedStates& ds = DistributedStates(),
+                       OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

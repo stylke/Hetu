@@ -7,46 +7,6 @@
 using namespace hetu;
 using namespace hetu::graph;
 
-void imperative_run(Graph& graph) {
-  HT_LOG_INFO << "----------";
-  Graph::push_graph_ctx(graph.id());
-  auto w = MakeParameterOp(OnesInitializer(), {5,1}, kFloat32, true, OpMeta().set_name("w").set_eager_device(Device(kCUDA, 0)));
-  SGDOptimizer optimizer(TensorList{w}, 0.1f);
-  for (int i = 0; i < 5; i++) {
-    auto x = MakeVariableOp(ConstantInitializer((i + 1) * 0.01), {10,5}, kFloat32, false, OpMeta().set_name("x").set_eager_device(Device(kCUDA, 0)));
-    auto y = MakeVariableOp(ZerosInitializer(), {10, 1}, kFloat32, false, OpMeta().set_name("y").set_eager_device(Device(kCUDA, 0)));
-    auto pred = MakeMatMulOp(x, w);
-    auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
-    // TODO: zero_grad --> backward --> step
-    optimizer.Minimize(loss)->get_or_compute();
-    HT_LOG_INFO << "loss = " << loss->get_or_compute();
-    HT_LOG_INFO << "pred = " << pred->get_or_compute();
-    HT_LOG_INFO << "w = " << w->get_or_compute();
-  }
-}
-
-void static_run(Graph& graph) {
-  HT_LOG_INFO << "----------";
-  Graph::push_graph_ctx(graph.id());
-  auto w = MakeParameterOp(OnesInitializer(), {5,1}, kFloat32, true, OpMeta().set_name("w"));
-  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({10,5}).set_dtype(kFloat32), OpMeta().set_name("x"));
-  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({10,1}).set_dtype(kFloat32), OpMeta().set_name("y"));
-  auto pred = MakeMatMulOp(x, w);
-  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
-  SGDOptimizer optimizer(0.1f);
-  auto train_op = optimizer.Minimize(loss);
-  for (size_t i = 0; i < 5; i++) {
-    auto x_val = NDArray::full({10,5}, (i + 1) * 0.01, Device(kCUDA));
-    auto y_val = NDArray::zeros({10,5}, Device(kCUDA));
-    auto ret = graph.Run({loss, pred, w, train_op},
-                         {{x->id(), x_val}, {y->id(), y_val}});
-    HT_LOG_INFO << "loss = " << ret[0];
-    HT_LOG_INFO << "pred = " << ret[1];
-    HT_LOG_INFO << "w = " << ret[2];
-  }
-}
-
-
 void static_run_dp_ds(Graph& graph) {
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   auto& all_devices = hetu::impl::comm::GetGlobalDeviceGroup();  
@@ -60,12 +20,12 @@ void static_run_dp_ds(Graph& graph) {
 
   int local_n = 2;
   int dim = 4;
-  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), OpMeta().set_name("x").set_device_group(all_device_group));
-  x->set_distributed_states(ds_split);
-  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), OpMeta().set_name("y").set_device_group(all_device_group));
-  y->set_distributed_states(ds_split);
-  auto w = MakeParameterOp(OnesInitializer(), {dim, dim}, kFloat32, true, OpMeta().set_name("w").set_device_group(all_device_group));
-  w->set_distributed_states(ds_dup);
+  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), ds_split, OpMeta().set_name("x").set_device_group(all_device_group));
+  // x->set_distributed_states(ds_split);
+  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), ds_split, OpMeta().set_name("y").set_device_group(all_device_group));
+  // y->set_distributed_states(ds_split);
+  auto w = MakeParameterOp(OnesInitializer(), {dim, dim}, kFloat32, true, ds_dup, OpMeta().set_name("w").set_device_group(all_device_group));
+  // w->set_distributed_states(ds_dup);
 
   auto pred = MakeSigmoidOp(MakeMatMulOp(x, w));
   auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
@@ -95,19 +55,19 @@ void static_run_tp_ds(Graph& graph) {
 
   int local_n = 2;
   int dim = 4;
-  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), OpMeta().set_device_group(all_device_group).set_name("x"));
-  x->set_distributed_states(ds_split);
+  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), ds_split, OpMeta().set_device_group(all_device_group).set_name("x"));
+  // x->set_distributed_states(ds_split);
   // auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim/2}).set_dtype(kFloat32), OpMeta().set_device_group(all_device_group).set_name("y"));
   // y->set_distributed_states(ds_split01);
-  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim}).set_dtype(kFloat32), OpMeta().set_device_group(all_device_group).set_name("y"));
-  y->set_distributed_states(ds_split0_dup);  
+  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim}).set_dtype(kFloat32), ds_split0_dup, OpMeta().set_device_group(all_device_group).set_name("y"));
+  // y->set_distributed_states(ds_split0_dup);
 
   auto w_data = NDArray::rand({dim, dim}, Device(kCPU), kFloat32, 0.0, 1.0, 2023, kBlockingStream);
-  auto w = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w"));
-  w->set_distributed_states(ds_dup);
+  auto w = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(all_device_group).set_name("w"));
+  // w->set_distributed_states(ds_dup);
   auto w2_data = NDArray::rand({dim, dim/2}, Device(kCPU), kFloat32, 0.0, 1.0, 2023+1+local_device.index()%2, kBlockingStream);
-  auto w2 = MakeParameterOp(w2_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w2"));
-  w2->set_distributed_states(ds_dup_split1);
+  auto w2 = MakeParameterOp(w2_data, false, kFloat32, true, ds_dup_split1, OpMeta().set_device_group(all_device_group).set_name("w2"));
+  // w2->set_distributed_states(ds_dup_split1);
 
   auto x2 = MakeMatMulOp(x, w, false, false, OpMeta().set_name("mm1"));
   auto x3 = MakeCommOp(x2, ds_split0_dup, OpMeta().set_name("comm_op1"));
@@ -151,43 +111,43 @@ void static_run_tp_ds2(Graph& graph) {
   int dim0 = 8; // n
   int dim1 = 4; // c
 
-  auto x0 = MakePlaceholderOp(NDArrayMeta().set_shape({dim0/n, dim1}).set_dtype(kFloat32), OpMeta().set_device_group(all_device_group).set_name("x0"));
-  x0->set_distributed_states(ds_split0);
-  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({dim0/n, dim1}).set_dtype(kFloat32), OpMeta().set_device_group(all_device_group).set_name("y"));
-  y->set_distributed_states(ds_split0);  
+  auto x0 = MakePlaceholderOp(NDArrayMeta().set_shape({dim0/n, dim1}).set_dtype(kFloat32), ds_split0, OpMeta().set_device_group(all_device_group).set_name("x0"));
+  // x0->set_distributed_states(ds_split0);
+  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({dim0/n, dim1}).set_dtype(kFloat32), ds_split0, OpMeta().set_device_group(all_device_group).set_name("y"));
+  // y->set_distributed_states(ds_split0);
 
   auto w_data = NDArray::rand({dim1, dim1}, Device(kCPU), kFloat32, 0.0, 1.0, 2023, kBlockingStream);
   
-  auto w1 = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w1"));
-  w1->set_distributed_states(ds_dup);
+  auto w1 = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(all_device_group).set_name("w1"));
+  // w1->set_distributed_states(ds_dup);
   auto x1 = MakeMatMulOp(x0, w1, false, false, OpMeta().set_name("mm1"));
 
-  auto w2 = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w2"));
-  w2->set_distributed_states(ds_dup);
+  auto w2 = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(all_device_group).set_name("w2"));
+  // w2->set_distributed_states(ds_dup);
   auto x2 = MakeMatMulOp(x0, w2, false, false, OpMeta().set_name("mm2"));
 
-  auto w3 = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w3"));
-  w3->set_distributed_states(ds_dup);
+  auto w3 = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(all_device_group).set_name("w3"));
+  // w3->set_distributed_states(ds_dup);
   auto x3 = MakeMatMulOp(x0, w3, false, false, OpMeta().set_name("mm3"));
 
-  auto w4 = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w4"));
-  w4->set_distributed_states(ds_dup);
+  auto w4 = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(all_device_group).set_name("w4"));
+  // w4->set_distributed_states(ds_dup);
   auto x4 = MakeMatMulOp(x0, w4, false, false, OpMeta().set_name("mm4"));
 
-  auto w5 = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w5"));
-  w5->set_distributed_states(ds_dup);
+  auto w5 = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(all_device_group).set_name("w5"));
+  // w5->set_distributed_states(ds_dup);
   auto x5 = MakeMatMulOp(x0, w5, false, false, OpMeta().set_name("mm5"));
 
-  auto w6 = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w6"));
-  w6->set_distributed_states(ds_dup);
+  auto w6 = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(all_device_group).set_name("w6"));
+  // w6->set_distributed_states(ds_dup);
   auto x6 = MakeMatMulOp(x0, w6, false, false, OpMeta().set_name("mm6"));
 
-  auto w7 = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w7"));
-  w7->set_distributed_states(ds_dup);
+  auto w7 = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(all_device_group).set_name("w7"));
+  // w7->set_distributed_states(ds_dup);
   auto x7 = MakeMatMulOp(x0, w7, false, false, OpMeta().set_name("mm7"));
 
-  auto w8 = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w8"));
-  w8->set_distributed_states(ds_dup);
+  auto w8 = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(all_device_group).set_name("w8"));
+  // w8->set_distributed_states(ds_dup);
   auto x8 = MakeMatMulOp(x0, w8, false, false, OpMeta().set_name("mm8"));    
 
   auto x_split0 = MakeSigmoidOp(MakeAddElewiseOp(x1, x1));
@@ -273,18 +233,18 @@ void static_run_tp_pp_ds(Graph& graph) {
   int local_n = 2;
   int dim = 4;
   // stage1
-  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), OpMeta().set_device_group(device_group1).set_name("x"));
-  x->set_distributed_states(ds_split0);
+  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), ds_split0, OpMeta().set_device_group(device_group1).set_name("x"));
+  // x->set_distributed_states(ds_split0);
   auto w_data = NDArray::rand({dim, dim}, Device(kCPU), kFloat32, 0.0, 1.0, 2023, kBlockingStream);
-  auto w = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(device_group1).set_name("w"));
-  w->set_distributed_states(ds_dup);
+  auto w = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(device_group1).set_name("w"));
+  // w->set_distributed_states(ds_dup);
   auto x2 = MakeMatMulOp(x, w, false, false, OpMeta().set_device_group(device_group1).set_name("mm1"));
   auto x3 = MakeCommOp(x2, ds_split1, OpMeta().set_name("comm_op1"));
 
   // stage2
   auto w2_data = NDArray::rand({dim/2, dim}, Device(kCPU), kFloat32, 0.0, 1.0, 2023+local_device.index()%2, kBlockingStream);
-  auto w2 = MakeParameterOp(w2_data, false, kFloat32, true, OpMeta().set_device_group(device_group2).set_name("w2"));
-  w2->set_distributed_states(ds_split0);
+  auto w2 = MakeParameterOp(w2_data, false, kFloat32, true, ds_split0, OpMeta().set_device_group(device_group2).set_name("w2"));
+  // w2->set_distributed_states(ds_split0);
   auto x4 = MakeMatMulOp(x3, w2, false, false, OpMeta().set_device_group(device_group2).set_name("mm2"));
   auto x5 = MakeCommOp(x4, ds_split0, OpMeta().set_name("comm_op2"));
 
@@ -294,8 +254,8 @@ void static_run_tp_pp_ds(Graph& graph) {
   // stage4
   auto x7 = MakeSigmoidOp(x6, OpMeta().set_device_group(device_group4).set_name("relu"));
   auto pred = MakeCommOp(x7, ds_dup, OpMeta().set_name("comm_op3"));
-  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim}).set_dtype(kFloat32), OpMeta().set_device_group(device_group4).set_name("y"));
-  y->set_distributed_states(ds_dup);
+  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim}).set_dtype(kFloat32), ds_dup, OpMeta().set_device_group(device_group4).set_name("y"));
+  // y->set_distributed_states(ds_dup);
   auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN, OpMeta().set_device_group(device_group4).set_name("bce_loss"));
   SGDOptimizer optimizer(0.1, 0.0);
   auto train_op = optimizer.Minimize(loss);
@@ -342,23 +302,23 @@ void static_run_tp_pp_ds2(Graph& graph) {
   int local_n = 2;
   int dim = 4;
   // stage1
-  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), OpMeta().set_device_group(device_group1).set_name("x"));
-  x->set_distributed_states(ds_split);
+  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({local_n, dim}).set_dtype(kFloat32), ds_split, OpMeta().set_device_group(device_group1).set_name("x"));
+  // x->set_distributed_states(ds_split);
   auto w_data = NDArray::rand({dim, dim}, Device(kCPU), kFloat32, 0.0, 1.0, 2023, kBlockingStream);
-  auto w = MakeParameterOp(w_data, false, kFloat32, true, OpMeta().set_device_group(device_group1).set_name("w"));
-  w->set_distributed_states(ds_dup);
+  auto w = MakeParameterOp(w_data, false, kFloat32, true, ds_dup, OpMeta().set_device_group(device_group1).set_name("w"));
+  // w->set_distributed_states(ds_dup);
   auto x2 = MakeMatMulOp(x, w, false, false, OpMeta().set_name("mm1").set_device_group(device_group1));
   auto x3 = MakeCommOp(x2, ds_split0_dup, OpMeta().set_name("comm_op1"));
   
   // stage2
   auto w2_data = NDArray::rand({dim, dim/2}, Device(kCPU), kFloat32, 0.0, 1.0, 2023+1+local_device.index()%2, kBlockingStream);
-  auto w2 = MakeParameterOp(w2_data, false, kFloat32, true, OpMeta().set_device_group(device_group2).set_name("w2"));
-  w2->set_distributed_states(ds_dup_split1);
+  auto w2 = MakeParameterOp(w2_data, false, kFloat32, true, ds_dup_split1, OpMeta().set_device_group(device_group2).set_name("w2"));
+  // w2->set_distributed_states(ds_dup_split1);
   auto x4 = MakeMatMulOp(x3, w2, false, false, OpMeta().set_name("mm2").set_device_group(device_group2));
   auto x5 = MakeSigmoidOp(x4, OpMeta().set_name("sigmoid").set_device_group(device_group2));
   auto pred = MakeCommOp(x5, ds_split0_dup, OpMeta().set_name("comm_op2"));
-  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim}).set_dtype(kFloat32), OpMeta().set_device_group(device_group2).set_name("y"));
-  y->set_distributed_states(ds_split0_dup);    
+  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim}).set_dtype(kFloat32), ds_split0_dup, OpMeta().set_device_group(device_group2).set_name("y"));
+  // y->set_distributed_states(ds_split0_dup);    
   auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
   SGDOptimizer optimizer(0.1, 0.0);
   auto train_op = optimizer.Minimize(loss);
@@ -388,12 +348,9 @@ void static_run_tp_pp_ds2(Graph& graph) {
 int main()
 {
   hetu::impl::comm::SetUpDeviceMappingAndAssignLocalDeviceOnce();
-  // imperative_run(Graph::get_default_eager_graph());
-  // imperative_run(Graph::get_default_define_by_run_graph());
-  // static_run(Graph::get_default_define_and_run_graph());
 
-  static_run_dp_ds(Graph::get_default_define_and_run_graph());
-  // static_run_tp_ds(Graph::get_default_define_and_run_graph());
+  // static_run_dp_ds(Graph::get_default_define_and_run_graph());
+  static_run_tp_ds(Graph::get_default_define_and_run_graph());
   // static_run_tp_ds2(Graph::get_default_define_and_run_graph());
 
   // static_run_tp_pp_ds(Graph::get_default_define_and_run_graph());

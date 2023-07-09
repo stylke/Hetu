@@ -170,16 +170,23 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
   
   // Deduce states for output tensor
   if (op_meta.is_deduce_states) {
-    _body->DeduceStates(_inputs, _outputs, _op_meta);
-    // std::ostringstream os;
-    // os << _op_meta.name << ": " << std::endl;
-    // for (auto& in : _inputs) {
-    //   os << in << ": input states: " << in->get_distributed_states().ds_info() << "; input shape: " << in->shape() << std::endl;
-    // }
-    // for (auto& out : _outputs) {
-    //   os << out << ": output states: " << out->get_distributed_states().ds_info() << "; output shape: " << out->shape() << std::endl;
-    // }
-    // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " << os.str();
+    bool exist_ds = false;
+    bool exist_none_ds = false;
+    for (auto& input : _inputs) {
+      if (input->has_distributed_states()) {
+        exist_ds = true;
+      } else {
+        exist_none_ds = true;
+      }
+    }
+    // if ds of all inputs are not none, then do deduce states;
+    // if ds of all inputs are none, then do not deduce states; 
+    // if ds of partial inputs are none, return error
+    if (!exist_none_ds) {
+      _body->DeduceStates(_inputs, _outputs, _op_meta);
+    } else if (exist_ds) {
+      HT_LOG_ERROR << "Only part of " << name() << " inputs has distributed states!";
+    }
   }
 }
 

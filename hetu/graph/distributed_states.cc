@@ -30,6 +30,10 @@ void DistributedStates::set_distributed_states(const DistributedStates& dst_dist
   set_order(dst_distributed_states._order); // set_order会检查是否和states相匹配
 }
 
+bool DistributedStates::is_none() const {
+  return _device_num == -1;
+}
+
 bool DistributedStates::is_valid() const {
   return _device_num == 1 || (_device_num > 1 && _states.size() > 0 && _order.size() > 0); 
 }

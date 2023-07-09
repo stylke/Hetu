@@ -181,9 +181,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
             HT_LOG_DEBUG << local_device << ": " << "backward: partial to duplicate: " << grad_inputs[i] << ", dst states: " << ds_dst.ds_info();
             final_grad = MakeCommOp(grad_inputs[i], ds_dst, OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
           }
-        } else {
-          HT_LOG_DEBUG << local_device << ": " << "grad_op: " << grad_op << " don't have distributed states!";
-        }
+        } 
 
         auto input = op->input(i);
         auto it = tensor_to_grads.find(input->id());

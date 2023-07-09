@@ -31,17 +31,17 @@ Tensor Optimizer::ApplyGradients(const GradAndVarList& grads_and_vars,
 Tensor Optimizer::MakeStates(const Tensor& variable, const OpName& state_name) {
   const auto& producer = variable->producer();
   HT_VALUE_ERROR_IF(!producer->is_parameter());
+  // special case: Varibale States should be set distributed_states
+  const DistributedStates& ds_variable = variable->get_distributed_states(); 
+  HT_ASSERT (ds_variable.is_valid()) 
+    << "Diastributed States for varibale " << variable << " must be valid!";  
   Tensor states = MakeVariableOp(ZerosInitializer(), variable->shape(),
-                                 variable->dtype(), false,
+                                 variable->dtype(), false, ds_variable, 
                                  OpMeta()
                                    .set_device_group(producer->device_group())
                                    .set_eager_device(producer->eager_device())
                                    .set_name(variable->name() + "_" + state_name));
-  // special case: Varibale States should be set distributed_states
-  const DistributedStates& ds_variable = variable->get_distributed_states(); 
-  HT_ASSERT (ds_variable.is_valid()) 
-    << "Diastributed States for varibale " << variable << " must be valid!";
-  states->set_distributed_states(ds_variable);
+
   return std::move(states);
 }
 

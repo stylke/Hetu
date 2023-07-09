@@ -196,4 +196,35 @@ inline std::vector<std::string> StringList_FromPyStringList(PyObject* obj) {
   return ret;
 }
 
+inline std::unordered_map<int32_t, int32_t> UnorderedMap_FromPyDict(PyObject* obj) {
+  if(!PyDict_Check(obj)) {
+    HT_VALUE_ERROR << "Expected a dictionary object.";
+  }
+  std::unordered_map<int32_t, int32_t> ret_map;
+  Py_ssize_t pos = 0;
+  PyObject* key;
+  PyObject* value;
+
+  while (PyDict_Next(obj, &pos, &key, &value)) {
+    if (!PyLong_Check(key) || !PyLong_Check(value)) {
+      HT_VALUE_ERROR << "Expected integer keys and values in the dictionary.";
+    }
+    int32_t key_ = static_cast<int32_t>(PyLong_AsLong(key));
+    int32_t value_ = static_cast<int32_t>(PyLong_AsLong(value));
+    ret_map[key_] = value_;
+  }
+
+  return ret_map;
+}
+
+inline PyObject* PyDict_FromUnorderedMap(std::unordered_map<int32_t, int32_t> map) {
+  PyObject* dict_obj = PyDict_New();
+  for (auto& item : map) {
+    PyObject* key = PyLong_FromInteger(item.first);
+    PyObject* value = PyLong_FromInteger(item.second);
+    PyDict_SetItem(dict_obj, key, value);
+  }
+  return dict_obj;
+}
+
 } // namespace

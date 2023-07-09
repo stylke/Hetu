@@ -79,6 +79,9 @@ class LinearOpImpl : public OpInterface {
   }
 };
 
+Tensor MakeLinearOp(Tensor a, Tensor b, bool trans_a = false,
+                    bool trans_b = true, OpMeta op_meta = OpMeta());
+
 Tensor MakeLinearOp(Tensor a, Tensor b, Tensor bias, bool trans_a = false,
                     bool trans_b = true, OpMeta op_meta = OpMeta());
 

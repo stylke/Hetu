@@ -31,6 +31,8 @@ class DistributedStates {
 
   void set_distributed_states(const DistributedStates& dst_distributed_states);
 
+  bool is_none() const;
+  
   bool is_valid() const;
 
   const std::unordered_map<int32_t, int32_t>& get_states() const {

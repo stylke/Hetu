@@ -159,6 +159,10 @@ class TensorDef : public shared_ptr_target {
 
   NDArray get_or_compute();
 
+  bool has_distributed_states() const {
+    return !_distributed_states.is_none();
+  }
+
   const DistributedStates& get_distributed_states() const {
     return _distributed_states;
   }

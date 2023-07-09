@@ -12,8 +12,12 @@ void LinearOpImpl::DoCompute(Operator& op,const NDArrayList& inputs, NDArrayList
   // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), hetu::impl::Linear,
   //                              inputs.at(0), trans_a(), inputs.at(1), trans_b(),
   //                              inputs.at(2), outputs.at(0), op->instantiation_ctx().stream());
-  NDArray::linear(inputs.at(0), inputs.at(1), inputs.at(2), trans_a(), trans_b(),
-                  op->instantiation_ctx().stream_index, outputs.at(0));
+  if (inputs.size() == 2)
+    NDArray::linear(inputs.at(0), inputs.at(1), NDArray(), trans_a(), trans_b(),
+                    op->instantiation_ctx().stream_index, outputs.at(0));
+  else if (inputs.size() == 3)
+    NDArray::linear(inputs.at(0), inputs.at(1), inputs.at(2), trans_a(), trans_b(),
+                    op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList LinearOpImpl::DoGradient(Operator& op,const TensorList& grad_outputs) const {
@@ -52,10 +56,14 @@ TensorList LinearOpImpl::DoGradient(Operator& op,const TensorList& grad_outputs)
     grad_b = op->requires_grad(1) ? MakeMatMulOp(grad_c, a, true, true, g_op_meta.set_name(op->grad_name(1)))
                                  : Tensor();
   }
-  Tensor grad_bias = op->requires_grad(2) ? MakeReduceOp(grad_outputs.at(0), ReductionType::SUM, {0}, {false},
+  if (op->num_inputs() == 2) {
+    return {grad_a, grad_b};
+  } else if (op->num_inputs() == 3) {
+    Tensor grad_bias = op->requires_grad(2) ? MakeReduceOp(grad_outputs.at(0), ReductionType::SUM, {0}, {false},
                                            g_op_meta.set_name(op->grad_name(2)))
                                          : Tensor();
-  return {grad_a, grad_b, grad_bias};
+    return {grad_a, grad_b, grad_bias};
+  }
 }
 
 HTShapeList LinearOpImpl::DoInferShape(Operator& op,
@@ -75,24 +83,26 @@ void LinearOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
                                   const OpMeta& op_meta) const {
   const Tensor& a = inputs.at(0);
   const Tensor& b = inputs.at(1);
-  const Tensor& bias = inputs.at(2);
   const DistributedStates& ds_a = a->get_distributed_states();
   const DistributedStates& ds_b = b->get_distributed_states();
-  const DistributedStates& ds_bias = bias->get_distributed_states();
   int32_t device_num = ds_a.get_device_num();
-
-  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_bias.is_valid() 
-            && ds_a.get_device_num() == ds_b.get_device_num()
-            && ds_b.get_device_num() == ds_bias.get_device_num())
-            << "cannot convert src distributed states to unpaired dst distributed states!";
-  // check bias states
-  if (trans_b()) { // bias shape = (b.shape[0], )
-    HT_ASSERT(ds_b.get_dim(0) == ds_bias.get_dim(0))
-      << "LinearOp: bias should split same with dimension 0 of b";
-  } else { // bias shape = (b.shape[1], )
-    HT_ASSERT(ds_b.get_dim(1) == ds_bias.get_dim(0))
-      << "LinearOp: bias should split same with dimension 1 of b";
-  }          
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid()
+            && ds_a.get_device_num() == ds_b.get_device_num())
+            << "distributed states for Tensor a & Tensor b should be valid!";  
+  Tensor bias;
+  DistributedStates ds_bias;
+  if (inputs.size() == 3) {
+    bias = inputs.at(2);  
+    ds_bias = bias->get_distributed_states();
+    // check bias states
+    if (trans_b()) { // bias shape = (b.shape[0], )
+      HT_ASSERT(ds_b.get_dim(0) == ds_bias.get_dim(0))
+        << "LinearOp: bias should split same with dimension 0 of b";
+    } else { // bias shape = (b.shape[1], )
+      HT_ASSERT(ds_b.get_dim(1) == ds_bias.get_dim(0))
+        << "LinearOp: bias should split same with dimension 1 of b";
+    }
+  }
   // l,r to result states map  
   std::vector<std::unordered_map<int32_t, int32_t>> l2res_case({
     {{-1, 1}, {0, 0}, {1, -2}}, // no trans
@@ -112,7 +122,7 @@ void LinearOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   HT_ASSERT(lcol == rrow) << "Linear: tensor a.dimension[1] " << lcol 
     << " must be equal to tensor b.dimension[0] " << rrow;
   // if output states contains partial, then requires bias also should be partial
-  HT_ASSERT(lcol == ds_bias.get_dim(-2))
+  HT_ASSERT(inputs.size() == 2 || lcol == ds_bias.get_dim(-2))
     << "Linear: partial in output states = " << lcol << " should be equal to partial of bias = " << ds_bias.get_dim(-2);
   std::unordered_map<int32_t, int32_t> res_states({
     {-2, lcol}, {-1, device_num/(lcol*lrow*rcol)}, {0, lrow}, {1, rcol}
@@ -162,6 +172,14 @@ Tensor MakeLinearOp(Tensor a, Tensor b, Tensor bias, bool trans_a,
   return Graph::MakeOp(
         std::make_shared<LinearOpImpl>(trans_a, trans_b),
         {std::move(a), std::move(b), std::move(bias)},
+        std::move(op_meta))->output(0);
+}
+
+Tensor MakeLinearOp(Tensor a, Tensor b, bool trans_a,
+                    bool trans_b, OpMeta op_meta) {
+  return Graph::MakeOp(
+        std::make_shared<LinearOpImpl>(trans_a, trans_b),
+        {std::move(a), std::move(b)},
         std::move(op_meta))->output(0);
 }
 

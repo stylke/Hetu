@@ -31,36 +31,52 @@ NDArrayList VariableOpImpl::DoAllocOutputs(Operator& op,
 }
 
 // in_degree=0, should set distributed states manually
-Tensor MakeVariableOp(const Initializer& init, HTShape shape, DataType dtype,
-                      bool requires_grad, OpMeta op_meta) {
+Tensor MakeVariableOp(const Initializer& init, HTShape shape, 
+                      DataType dtype, bool requires_grad, 
+                      const DistributedStates& ds, OpMeta op_meta) {
   auto out = Graph::MakeOp(std::make_shared<VariableOpImpl>(
                            init, std::move(shape), dtype, requires_grad), TensorList(), 
                            std::move(op_meta.set_is_deduce_states(false)))->output(0);
+  if (!ds.is_none()) {
+    HT_ASSERT(ds.is_valid() && ds.get_dim(-2) == 1)
+      << "DistributedStates for VariableOp must be valid! got: " 
+      << ds.ds_info();
+    out->set_distributed_states(ds);
+  }
   return out;
 }
 
 // in_degree=0, should set distributed states manually
-Tensor MakeVariableOp(NDArray provided_data, bool copy_provided_data,
-                      DataType dtype, bool requires_grad, OpMeta op_meta) {
+Tensor MakeVariableOp(NDArray provided_data, bool copy_provided_data, 
+                      DataType dtype, bool requires_grad, 
+                      const DistributedStates& ds, OpMeta op_meta) {
   auto out = Graph::MakeOp(std::make_shared<VariableOpImpl>(
                            std::move(provided_data), copy_provided_data, dtype,
                            requires_grad), TensorList(), 
                            std::move(op_meta.set_is_deduce_states(false)))->output(0);
+  if (!ds.is_none()) {
+    HT_ASSERT(ds.is_valid() && ds.get_dim(-2) == 1)
+      << "DistributedStates for VariableOp must be valid! got: " 
+      << ds.ds_info();
+    out->set_distributed_states(ds);
+  }
   return out;
 }
 
-Tensor MakeParameterOp(const Initializer& init, HTShape shape, DataType dtype,
-                       bool requires_grad, OpMeta op_meta) {
-  auto out = MakeVariableOp(init, std::move(shape), dtype, requires_grad,
-                            std::move(op_meta));
+Tensor MakeParameterOp(const Initializer& init, HTShape shape, 
+                       DataType dtype, bool requires_grad, 
+                       const DistributedStates& ds, OpMeta op_meta) {
+  auto out = MakeVariableOp(init, std::move(shape), dtype, 
+                            requires_grad, ds, std::move(op_meta));
   Graph::MarkAsParameter(out);
   return out;
 }
 
-Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data,
-                       DataType dtype, bool requires_grad, OpMeta op_meta) {
-  auto out = MakeVariableOp(std::move(provided_data), copy_provided_data,
-                            dtype, requires_grad, std::move(op_meta));
+Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data, 
+                       DataType dtype, bool requires_grad, 
+                       const DistributedStates& ds, OpMeta op_meta) {
+  auto out = MakeVariableOp(std::move(provided_data), copy_provided_data, 
+                            dtype, requires_grad, ds, std::move(op_meta));
   Graph::MarkAsParameter(out);
   return out;
 }

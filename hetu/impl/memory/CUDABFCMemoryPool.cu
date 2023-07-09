@@ -39,13 +39,20 @@ CUDABFCMemoryPool::CUDABFCMemoryPool(DeviceIndex device_id, size_t total_memory,
 CUDABFCMemoryPool::~CUDABFCMemoryPool() {
     // HT_LOG_INFO << "Number of regions allocated: "
     //             << _region_manager.regions().size();
-    DeviceIndex prev_id = SetDevice();
-    for (const auto &region : _region_manager.regions()) {
-        CudaFree(region.ptr());
+    try
+    {
+      DeviceIndex prev_id = SetDevice();
+      for (const auto &region : _region_manager.regions()) {
+          CudaFree(region.ptr());
+      }
+      ResetDevice(prev_id);
+      for (BinNum b = 0; b < kNumBins; b++) {
+          BinFromIndex(b)->~Bin();
+      }
     }
-    ResetDevice(prev_id);
-    for (BinNum b = 0; b < kNumBins; b++) {
-        BinFromIndex(b)->~Bin();
+    catch(const std::exception& e)
+    {
+      HT_LOG_INFO << "In ~CUDABFCMemoryPool(), catch exception: " << e.what();
     }
 }
 
