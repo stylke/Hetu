@@ -35,15 +35,17 @@ NDArray& ExecutableGraph::GetVariableDataInner(const Tensor& tensor) {
 }
 
 NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
-                                                 const Initializer& init) {
+                                                 const Initializer& init,
+                                                 uint64_t seed,
+                                                 const HTShape& global_shape) {
   // TODO: check meta is valid
   _preserved_data[tensor->id()] =
     NDArray::empty(tensor->shape(), tensor->placement(), tensor->dtype());
   auto it = _add_on_inits.find(tensor->id());
   if (it != _add_on_inits.end()) {
-    it->second->Init(_preserved_data[tensor->id()]);
+    it->second->Init(_preserved_data[tensor->id()], seed, global_shape);
   } else if (!init.vodify()) {
-    init.Init(_preserved_data[tensor->id()]);
+    init.Init(_preserved_data[tensor->id()], seed, global_shape);
   }
   return _preserved_data[tensor->id()];
 }

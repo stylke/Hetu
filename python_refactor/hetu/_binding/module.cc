@@ -10,6 +10,7 @@
 #include "hetu/_binding/graph/distributed_states.h"
 #include "hetu/_binding/graph/graph.h"
 #include "hetu/_binding/graph/sgdoptimizer.h"
+#include "hetu/_binding/graph/init/initializer.h"
 #include "hetu/_binding/distributed/comm_group.h"
 
 PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
@@ -24,6 +25,7 @@ PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::graph::AddPyDistributedStatesTypeToModule(m);
   hetu::graph::AddPyGraphTypeToModule(m);
   hetu::graph::AddPySGDOptimizerTypeToModule(m);
+  hetu::graph::AddPyInitializerTypeToModule(m);
   auto internal_sub_module = m.def_submodule("_internal_context");
   hetu::graph::AddOpContextManagingFunctionsToModule(internal_sub_module);
   hetu::graph::AddGraphContextManagingFunctionsToModule(internal_sub_module);

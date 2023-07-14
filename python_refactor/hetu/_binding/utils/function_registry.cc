@@ -166,6 +166,28 @@ int RegisterOptimizerClassMethod(const char* name, PyCFunction func, int flags,
   return 0;
 }
 
+std::vector<PyMethodDef>& get_registered_initializer_methods() {
+  static std::vector<PyMethodDef> registered_initializer_methods = {{nullptr}};
+  return registered_initializer_methods;
+}
+
+int RegisterInitializerMethod(const char* name, PyCFunction func, int flags,
+                              const char* doc) {
+  AddPyMethodDef(get_registered_initializer_methods(), {name, func, flags, doc});
+  return 0;
+}
+
+std::vector<PyMethodDef>& get_registered_initializer_class_methods() {
+  static std::vector<PyMethodDef> registered_initializer_class_methods = {{nullptr}};
+  return registered_initializer_class_methods;
+}
+
+int RegisterInitializerClassMethod(const char* name, PyCFunction func, int flags,
+                                   const char* doc) {
+  AddPyMethodDef(get_registered_initializer_class_methods(), {name, func, flags, doc});
+  return 0;
+}
+
 } // namespace graph
 
 } // namespace hetu

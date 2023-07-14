@@ -2,6 +2,7 @@
 #include "hetu/graph/ops/op_headers.h"
 #include "hetu/graph/optim/optimizer.h"
 #include "hetu/graph/distributed_states.h"
+#include "hetu/graph/init/initializer.h"
 #include "hetu/impl/communication/comm_group.h"
 
 using namespace hetu;
@@ -87,6 +88,57 @@ void static_run_tp_ds(Graph& graph) {
                        {{x->id(), data}, {y->id(), labels}});
   HT_LOG_INFO << local_device << "\nw_init: " << w_data << "\nw_updated: " << ret[1]
                               << "\nw2_init: " << w2_data << "\nw2_updated: " << ret[2];                       
+}
+
+  // auto w = MakeParallelParameterOp(XavierUniformInitializer(), {dim, dim}, ds_dup, device_group1.get_index(local_device), 
+  //                                  kFloat32, true, OpMeta().set_device_group(device_group1).set_name("w"));
+
+void static_run_tp_ds_parallel_w(Graph& graph) {
+  auto& local_device = hetu::impl::comm::GetLocalDevice();
+  auto& all_devices = hetu::impl::comm::GetGlobalDeviceGroup();  
+  HT_LOG_INFO << local_device << ": static_run_tp_ds...";
+  Graph::push_graph_ctx(graph.id());
+  HT_ASSERT(all_devices.num_devices() >= 4) << "device num must >= 4 !";
+  DeviceGroup all_device_group({all_devices.get(0), all_devices.get(1), all_devices.get(2), all_devices.get(3)});
+
+  DistributedStates ds_dup(4, {{-1, 4}}, {-1});
+  DistributedStates ds_split(4, {{0, 4}}, {0});
+  DistributedStates ds_split0_dup(4, {{-1, 2}, {0, 2}}, {0, -1});
+  DistributedStates ds_dup_split1(4, {{-1, 2}, {1, 2}}, {-1, 1});
+  DistributedStates ds_split01(4, {{0, 2}, {1, 2}}, {0, 1});  
+
+  int n = 8;
+  int local_n = n / all_device_group.num_devices();
+  int dim = 4;
+
+  auto x = MakeParallelPlaceholderOp(NDArrayMeta().set_shape({n, dim}).set_dtype(kFloat32), ds_split, 
+                                     OpMeta().set_device_group(all_device_group).set_name("x"));
+  auto y = MakeParallelPlaceholderOp(NDArrayMeta().set_shape({n, dim}).set_dtype(kFloat32), ds_split0_dup, 
+                                     OpMeta().set_device_group(all_device_group).set_name("y"));
+
+  auto w = MakeParallelParameterOp(XavierUniformInitializer(), {dim, dim}, ds_dup, all_device_group.get_index(local_device), 
+                                   kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w"));  
+  auto w2 = MakeParallelParameterOp(XavierUniformInitializer(), {dim, dim}, ds_dup_split1, all_device_group.get_index(local_device), 
+                                    kFloat32, true, OpMeta().set_device_group(all_device_group).set_name("w2"));
+
+  auto x2 = MakeMatMulOp(x, w, false, false, OpMeta().set_name("mm1"));
+  auto x3 = MakeCommOp(x2, ds_split0_dup, OpMeta().set_name("comm_op1"));
+  // auto pred = MakeMatMulOp(x3, w2, false, false, OpMeta().set_name("mm2"));
+  auto x4 = MakeMatMulOp(x3, w2, false, false, OpMeta().set_name("mm2"));
+  auto x5 = MakeSigmoidOp(x4, OpMeta().set_name("sigmoid"));
+  auto pred = MakeCommOp(x5, ds_split0_dup, OpMeta().set_name("comm_op2")); 
+  auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
+  SGDOptimizer optimizer(0.1, 0.0);
+  auto train_op = optimizer.Minimize(loss);
+
+  NDArray data = NDArray::randn({local_n, dim}, local_device, kFloat32, 0.0, 1.0, (666 + all_device_group.get_index(local_device)), kBlockingStream);
+  NDArray labels = NDArray::zeros({local_n*2, dim}, local_device, kFloat32, kBlockingStream);
+
+  auto ret = graph.Run(loss, {loss, w, w2, train_op},
+                       {{x->id(), data}, {y->id(), labels}});
+
+  HT_LOG_INFO << local_device << "\nw_updated: " << ret[1]
+                              << "\nw2_updated: " << ret[2];  
 }
 
 void static_run_tp_ds2(Graph& graph) {
@@ -350,7 +402,8 @@ int main()
   hetu::impl::comm::SetUpDeviceMappingAndAssignLocalDeviceOnce();
 
   // static_run_dp_ds(Graph::get_default_define_and_run_graph());
-  static_run_tp_ds(Graph::get_default_define_and_run_graph());
+  static_run_tp_ds_parallel_w(Graph::get_default_define_and_run_graph());
+  // static_run_tp_ds(Graph::get_default_define_and_run_graph());
   // static_run_tp_ds2(Graph::get_default_define_and_run_graph());
 
   // static_run_tp_pp_ds(Graph::get_default_define_and_run_graph());

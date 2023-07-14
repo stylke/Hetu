@@ -24,6 +24,10 @@ class DistributedStates {
     set_states(states);
     set_order(order); 
   }
+  DistributedStates(const DistributedStates& ds) {
+    _device_num = -1;
+    set_distributed_states(ds);
+  }
 
   void set_placement_group(const DeviceGroup& placement_group);
 

@@ -164,11 +164,12 @@ class Graph {
 
   virtual NDArray&
   AllocVariableDataInner(const Tensor& tensor,
-                         const Initializer& init = VoidifiedInitializer()) {
+                         const Initializer& init = VoidifiedInitializer(),
+                         uint64_t seed = 0, const HTShape& global_shape = HTShape()) {
     HT_RUNTIME_ERROR << "Cannot allocate variable data in graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
-  }
+  }  
 
   virtual void
   RegisterVariableDataInner(const Tensor& tensor, NDArray data,
@@ -400,10 +401,11 @@ class Graph {
 
   static NDArray&
   AllocVariableData(const Tensor& tensor,
-                    const Initializer& init = VoidifiedInitializer()) {
+                    const Initializer& init = VoidifiedInitializer(),
+                    uint64_t seed = 0, const HTShape& global_shape = HTShape()) {
     HT_VALUE_ERROR_IF(!tensor->is_variable())
       << "'AllocVariableData' does not support non-variable tensor: " << tensor;
-    return Graph::GetGraph(tensor).AllocVariableDataInner(tensor, init);
+    return Graph::GetGraph(tensor).AllocVariableDataInner(tensor, init, seed, global_shape);
   }
 
   static void

@@ -14,6 +14,11 @@ inline DataType _InferDataType(const NDArray& data, DataType dtype) {
 }
 } // namespace
 
+// class VariableOpImpl;
+// class VariableOp;
+// class ParallelVariableOpImpl;
+// class ParallelVariableOp;
+
 class VariableOpImpl : public OpInterface {
  protected:
   VariableOpImpl(OpType&& type, const Initializer& init, HTShape shape,
@@ -115,6 +120,98 @@ class VariableOpImpl : public OpInterface {
   bool _requires_grad;
 };
 
+class ParallelVariableOpImpl : public OpInterface {
+ public:
+  ParallelVariableOpImpl(const Initializer& init, HTShape global_shape, 
+                         const DistributedStates& ds, int64_t local_idx,
+                         DataType dtype = kFloat32, bool requires_grad = false)
+  : OpInterface(quote(ParallelVariableOp)), _init(init.copy()), 
+    _global_shape(global_shape), _local_idx(local_idx), 
+    _dtype(dtype), _ds(ds), _requires_grad(requires_grad) {
+      _local_shape = get_local_shape(global_shape, ds);
+    }
+
+  HTShape get_local_shape(HTShape& global_shape, const DistributedStates& ds) {
+    if (!_local_shape.empty())
+      return _local_shape;
+    HTShape shape(global_shape.size());
+    for (size_t d = 0; d < global_shape.size(); d++) {
+      shape[d] = global_shape[d] / ds.get_dim(d);
+    }
+    return shape;    
+  }
+
+  uint64_t op_indicator() const noexcept override {
+    return VARIABLE_OP;
+  }  
+
+ protected:
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_id) const override;
+
+  std::vector<NDArrayMeta>
+  DoInferMeta(const TensorList& inputs) const override {
+    return {NDArrayMeta().set_shape(local_shape()).set_dtype(dtype())};
+  }                     
+
+  TensorList DoGradient(Operator& op,
+                        const TensorList& grad_outputs) const override {
+    return {Tensor()};
+  }
+
+  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
+                           RuntimeContext& runtime_ctx) const override {
+    return {local_shape()};
+  }
+
+  NDArrayList DoAllocOutputs(Operator& op, const NDArrayList& inputs,
+                             RuntimeContext& runtime_ctx) const override;
+
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& runtime_ctx) const override {}  
+
+ public:
+  bool operator==(const OpInterface& rhs) const override {
+    return false;
+  }
+
+  const Initializer& initializer() const {
+    return *_init;
+  }
+
+  const HTShape& global_shape() const {
+    return _global_shape;
+  }
+
+  const HTShape& local_shape() const {
+    return _local_shape;
+  }
+
+  const DistributedStates& ds() const {
+    return _ds;
+  }
+
+  int64_t local_idx() const {
+    return _local_idx;
+  }
+
+  DataType dtype() const {
+    return _dtype;
+  }
+
+  bool requires_grad() const {
+    return _requires_grad;
+  }
+
+  std::shared_ptr<Initializer> _init;
+  HTShape _global_shape;
+  HTShape _local_shape;
+  DistributedStates _ds;
+  int64_t _local_idx;    
+  DataType _dtype;
+  bool _requires_grad;
+};
+
 Tensor MakeVariableOp(const Initializer& init, HTShape shape, 
                       DataType dtype = kFloat32, bool requires_grad = false, 
                       const DistributedStates& ds = DistributedStates(), 
@@ -135,5 +232,14 @@ Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data = false,
                        const DistributedStates& ds = DistributedStates(),
                        OpMeta op_meta = OpMeta());
 
+Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape, 
+                              const DistributedStates& ds, int64_t local_idx,
+                              DataType dtype = kFloat32, bool requires_grad = false,
+                              OpMeta op_meta = OpMeta());
+
+Tensor MakeParallelParameterOp(const Initializer& init, HTShape global_shape, 
+                               const DistributedStates& ds, int64_t local_idx,
+                               DataType dtype = kFloat32, bool requires_grad = false,
+                               OpMeta op_meta = OpMeta());                              
 } // namespace graph
 } // namespace hetu

@@ -78,6 +78,24 @@ int RegisterOptimizerClassMethod(const char* name, PyCFunction func, int flags,
   static auto __optimizer_class_method_##name##_registry =                        \
     hetu::graph::RegisterOptimizerClassMethod(quote(name), func, flags, doc)
 
+std::vector<PyMethodDef>& get_registered_initializer_methods();
+
+std::vector<PyMethodDef>& get_registered_initializer_class_methods();
+
+int RegisterInitializerMethod(const char* name, PyCFunction func, int flags,
+                              const char* doc);
+
+int RegisterInitializerClassMethod(const char* name, PyCFunction func, int flags,
+                                   const char* doc);
+
+#define REGISTER_INITIALIZER_METHOD(name, func, flags, doc)                         \
+  static auto __initializer_method_##name##_registry =                              \
+    hetu::graph::RegisterInitializerMethod(quote(name), func, flags, doc)
+
+#define REGISTER_INITIALIZER_CLASS_METHOD(name, func, flags, doc)                   \
+  static auto __initializer_class_method_##name##_registry =                        \
+    hetu::graph::RegisterInitializerClassMethod(quote(name), func, flags, doc)    
+
 } // namespace graph
 
 } // namespace hetu

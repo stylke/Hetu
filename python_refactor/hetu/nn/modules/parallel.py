@@ -9,30 +9,7 @@ __all__ = [
     'RowParallelLinear', 
 ]
 
-np.random.seed(2023)
-
-def xavier_normal_(size, gain=1.0):
-    shape = size
-    if len(shape) < 2:
-        raise ValueError("Shape must have at least 2 dimensions")
-
-    fan_in = shape[0] if len(shape) == 2 else np.prod(shape[1:])
-    fan_out = shape[1] if len(shape) == 2 else shape[0]
-
-    std = gain * np.sqrt(2.0 / (fan_in + fan_out))
-    return np.random.normal(0, std, size=shape)
-
-# assume that device_group across different pp stages has the same device num,
-# so we can use device_index in current device_group to generate the dummy data 
-# for other device_group, which will not be used in exec runtime 
-def parallel_data_provider(ds, device_index, init_func='np.random.normal', shape=None, data=None):
-    if init_func == 'data':
-        assert data is not None, "data must be provided in mode {init_func}!"
-        global_data = data
-    else:
-        assert shape is not None, "shape must be provided for generating data in mode {init_func}!"
-        global_data = eval(init_func)(size=shape) # default data generate: from np.random.normal
-
+def parallel_data_provider(global_data, ds, device_index):
     order, states = ds.order, ds.states
     local_map = hetu.map_to_local_data(ds, device_index)
     local_data = global_data.copy()
@@ -73,11 +50,11 @@ class ColumnParallelLinear(Module):
         self.ds_map = {'dup': ds_dup, 'split0': ds_split0}
         # dup [4,8] -> [2,8] + [2,8]
         # local init: if dup, extra comm
-        self.weight = hetu.Tensor(parallel_data_provider(ds_split0, device_index, init_func=init_method, shape=(out_features, in_features)),
-                                  dtype=hetu.float32, requires_grad=True, ds=ds_split0, device_group=device_group, name='w_colparallel')
+        self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), [out_features, in_features], ds_split0, device_index, 
+                                              dtype=hetu.float32, requires_grad=True, device_group=device_group, name='w_colparallel')
         if bias:
-            self.bias = hetu.Tensor(parallel_data_provider(ds_split0, device_index, init_func='data', data=np.zeros(out_features)),
-                                   dtype=hetu.float32, requires_grad=True, ds=ds_split0, device_group=device_group, name='bias_colparallel')
+            self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], ds_split0, device_index,
+                                                dtype=hetu.float32, requires_grad=True, device_group=device_group, name='bias_colparallel')
         else:
             self.bias = None
       
@@ -127,11 +104,11 @@ class RowParallelLinear(Module):
         ds_dup = hetu.DistributedStates(num_devices, {-1: num_devices}, [-1])
         ds_split1 = hetu.DistributedStates(num_devices, {1: num_devices}, [1])
         self.ds_map = {'dup': ds_dup, 'split1': ds_split1}
-        self.weight = hetu.Tensor(parallel_data_provider(ds_split1, device_index, init_func=init_method, shape=(out_features, in_features)),
-                                  dtype=hetu.float32, requires_grad=True, ds=ds_split1, device_group=device_group, name='w_rowparallel')
+        self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), [out_features, in_features], ds_split1, device_index, 
+                                              dtype=hetu.float32, requires_grad=True, device_group=device_group, name='w_rowparallel')        
         if bias:
-            self.bias = hetu.Tensor(parallel_data_provider(ds_dup, device_index, init_func='data', data=np.zeros(out_features)),
-                                   dtype=hetu.float32, requires_grad=True, ds=ds_dup, device_group=device_group, name='bias_rowparallel')
+            self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], ds_dup, device_index,
+                                                dtype=hetu.float32, requires_grad=True, device_group=device_group, name='bias_rowparallel')            
         else:
             self.bias = None
 

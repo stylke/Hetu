@@ -71,7 +71,8 @@ class ExecutableGraph : public Graph {
 
   NDArray& AllocVariableDataInner(
     const Tensor& tensor,
-    const Initializer& init = VoidifiedInitializer()) override;
+    const Initializer& init = VoidifiedInitializer(),
+    uint64_t seed = 0, const HTShape& global_shape = HTShape()) override;
 
   void RegisterVariableDataInner(
     const Tensor& tensor, NDArray data,

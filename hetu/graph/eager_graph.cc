@@ -50,12 +50,14 @@ NDArray& EagerGraph::GetVariableDataInner(const Tensor& tensor) {
 }
 
 NDArray& EagerGraph::AllocVariableDataInner(const Tensor& tensor,
-                                            const Initializer& init) {
+                                            const Initializer& init,
+                                            uint64_t seed, 
+                                            const HTShape& global_shape) {
   // TODO: check meta is valid
   _preserved_data[tensor->id()] =
     NDArray::empty(tensor->shape(), tensor->placement(), tensor->dtype());
   if (!init.vodify()) {
-    init.Init(_preserved_data[tensor->id()]);
+    init.Init(_preserved_data[tensor->id()], seed, global_shape);
   }
   return _preserved_data[tensor->id()];
 }

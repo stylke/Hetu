@@ -11,6 +11,7 @@
 #include "hetu/_binding/graph/tensor.h"
 #include "hetu/_binding/graph/graph.h"
 #include "hetu/_binding/graph/distributed_states.h"
+#include "hetu/_binding/graph/init/initializer.h"
 
 namespace hetu {
 
@@ -49,7 +50,8 @@ enum class ArgType : uint8_t {
   OPERATOR,
   OPERATOR_LIST,
   FEED_DICT,
-  DISTRIBUTED_STATES
+  DISTRIBUTED_STATES,
+  INITIALIZER
 };
 
 std::string ArgType2Str(ArgType);
@@ -379,6 +381,9 @@ class ParsedPyArgs {
     return DistributedStates_FromPyObject(_args[i]);
   }
 
+  inline std::shared_ptr<Initializer> get_initializer(size_t i) {
+    return Initializer_FromPyObject(_args[i]);
+  }
  private:
   const FnSignature& _signature;
   std::vector<PyObject*> _args;
