@@ -54,6 +54,9 @@ class LinearOpImpl : public OpInterface {
     return {NDArrayMeta().set_dtype(a->dtype()).set_shape(shape)};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 
@@ -75,6 +78,9 @@ class LinearOpImpl : public OpInterface {
     return false;
   }
 };
+
+Tensor MakeLinearOp(Tensor a, Tensor b, bool trans_a = false,
+                    bool trans_b = true, OpMeta op_meta = OpMeta());
 
 Tensor MakeLinearOp(Tensor a, Tensor b, Tensor bias, bool trans_a = false,
                     bool trans_b = true, OpMeta op_meta = OpMeta());

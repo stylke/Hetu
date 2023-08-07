@@ -21,6 +21,7 @@ class SoftmaxOpDef : public OperatorDef {
   : OperatorDef(quote(SoftmaxOp), {input}, op_meta),
   _dim(dim) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   int64_t get_dim() {
@@ -29,6 +30,8 @@ class SoftmaxOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -58,6 +61,7 @@ class SoftmaxGradientOpDef : public OperatorDef {
   : OperatorDef(quote(SoftmaxGradientOp), {input, grad_output}, op_meta),
   _dim(dim) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   int64_t get_dim() {
@@ -66,6 +70,8 @@ class SoftmaxGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

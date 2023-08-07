@@ -99,6 +99,16 @@ HTShapeList ConcatenateOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {out_shape};
 }
 
+void ConcatenateOpDef::DoDeduceStates() {
+  for (auto input : _inputs) {
+    DistributedStates ds_input = input->get_distributed_states();
+    HT_ASSERT(ds_input.get_dim(get_axis()) == 1)
+      << "Concat was not allowed in splited dimension: " << get_axis();
+  }
+  // 直接调用默认的states copy函数做检查和赋值
+  OperatorDef::DoDeduceStates();
+}
+
 void ConcatenateGradientOpDef::DoCompute(const NDArrayList& inputs,
                                          NDArrayList& outputs,
                                          RuntimeContext& ctx) {
@@ -116,6 +126,10 @@ HTShapeList
 ConcatenateGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(0)};
+}
+
+void ConcatenateGradientOpDef::DoDeduceStates() {
+  _outputs[0]->set_distributed_states(_inputs[0]->get_distributed_states());
 }
 
 } // namespace autograd

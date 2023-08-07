@@ -26,6 +26,7 @@ class DropoutOpDef : public OperatorDef {
     _recompute(recompute || inplace),
     _inplace(inplace) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double keep_prob() const {
@@ -76,6 +77,7 @@ class DropoutGradientOpDef : public OperatorDef {
   : OperatorDef(quote(DropoutGradientOp), {grad_output, output}, op_meta),
     _keep_prob(keep_prob) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double keep_prob() const {
@@ -118,6 +120,7 @@ class DropoutGradientWithRecomputationOpDef : public OperatorDef {
     _forward_op(forward_op),
     _keep_prob(keep_prob) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double keep_prob() const {

@@ -5,6 +5,7 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/ops/ones_like.h"
 #include "hetu/graph/ops/sum.h"
+#include "hetu/impl/communication/comm_group.h"
 #include <thread>
 
 namespace hetu {
@@ -54,20 +55,23 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
     }
   } else {
     GraphId target_graph_id = std::numeric_limits<GraphId>::max();
+    bool input_graph_changed = false;
     auto find_target_graph = [&](const Tensor& input) mutable {
       auto& input_graph = Graph::GetGraph(input->graph_id());
-      HT_VALUE_ERROR_IF(input_graph.type() != GraphType::EAGER &&
-                        input_graph.type() != GraphType::DEFINE_BY_RUN && 
-                        input_graph.type() != GraphType::DEFINE_AND_RUN)
-        << "The target graph must be explicitly passed "
-        << "when making new op to a " << input_graph.type() << " graph";
       if (target_graph_id == std::numeric_limits<GraphId>::max()) {
         target_graph_id = input->graph_id();
       } else if (target_graph_id != input->graph_id()) {
+        input_graph_changed = true;
         if (input_graph.type() == GraphType::DEFINE_BY_RUN) {
           target_graph_id = input->graph_id();
         }
       }
+      HT_VALUE_ERROR_IF(input_graph_changed &&
+                        input_graph.type() != GraphType::EAGER &&
+                        input_graph.type() != GraphType::DEFINE_BY_RUN && 
+                        input_graph.type() != GraphType::DEFINE_AND_RUN)
+        << "The target graph must be explicitly passed "
+        << "when making new op to a " << input_graph.type() << " graph";
     };
     for (auto& input : inputs)
       find_target_graph(input);
@@ -94,6 +98,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       << y->producer()->type();
   }
 
+  const auto& local_device = hetu::impl::comm::GetLocalDevice();
   // Fill gradients
   TensorList filled_grads;
   filled_grads.reserve(ys.size());
@@ -160,12 +165,30 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       for (size_t i = 0; i < op->num_inputs(); i++) {
         if (!grad_inputs[i].is_defined())
           continue;
+        
+        // states deduce
+        const auto& grad_op = grad_inputs[i]->producer();
+        const auto& ds_grad = grad_inputs[i]->get_distributed_states();
+        Tensor final_grad = grad_inputs[i];
+        if (ds_grad.is_valid()) {
+          // HT_LOG_DEBUG << local_device << ": " << "grad_op: " << grad_op << ": states: " << ds_grad.ds_info() << ", shape: " << grad_inputs[i]->shape();
+          if (ds_grad.get_dim(-2) > 1) { // partial->duplicate
+            int32_t device_num = ds_grad.get_device_num();
+            std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
+            std::unordered_map<int32_t, int32_t> res_states = ds_grad.combine_states(src2dst);
+            std::vector<int32_t> res_order = ds_grad.combine_order(src2dst);
+            DistributedStates ds_dst({device_num, res_states, res_order});
+            HT_LOG_DEBUG << local_device << ": " << "backward: partial to duplicate: " << grad_inputs[i] << ", dst states: " << ds_dst.ds_info();
+            final_grad = MakeCommOp(grad_inputs[i], ds_dst, OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
+          }
+        } 
+
         auto input = op->input(i);
         auto it = tensor_to_grads.find(input->id());
         if (it == tensor_to_grads.end())
-          tensor_to_grads[input->id()] = {grad_inputs[i]};
+          tensor_to_grads[input->id()] = {final_grad};
         else
-          it->second.push_back(grad_inputs[i]);
+          it->second.push_back(final_grad);
       }
     }
 

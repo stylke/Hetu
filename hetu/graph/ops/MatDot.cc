@@ -32,6 +32,21 @@ HTShapeList MatDotOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
+void MatDotOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                  const OpMeta& op_meta) const {
+  const DistributedStates& ds_a = inputs.at(0)->get_distributed_states();
+  const DistributedStates& ds_b = inputs.at(1)->get_distributed_states();
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && 
+            ds_a.get_device_num() == ds_b.get_device_num()) 
+    << "MatDotOpDef: distributed states for a and b must be valid!";
+  HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
+    << "Tensor a and b shouldn't be partial";
+  // TODO: support tensor parallel
+  HT_ASSERT(ds_a.check_pure_duplicate() && ds_b.check_pure_duplicate())
+    << "MatDot only require input tensor a and b are both pure duplicate!";
+  outputs.at(0)->set_distributed_states(ds_a);
+}
+
 Tensor MakeMatDotOp(Tensor a, Tensor b, int64_t axes,
                     OpMeta op_meta) {
   return Graph::MakeOp(

@@ -18,6 +18,7 @@ class OnehotOpDef : public OperatorDef {
               const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(OnehotOp), {input}, op_meta), _classes(num_classes) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   size_t num_classes() const {

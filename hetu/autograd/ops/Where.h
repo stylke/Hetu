@@ -18,6 +18,7 @@ class WhereOpDef : public OperatorDef {
              Tensor inputB, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(WhereOp), {cond, inputA, inputB}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:

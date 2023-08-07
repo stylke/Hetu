@@ -32,6 +32,19 @@ HTShapeList AvgPoolOpImpl::DoInferShape(Operator& op,
   return {{N, C, p_H, p_W}};
 }
 
+void AvgPoolOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                   const OpMeta& op_meta) const {
+  const DistributedStates& ds = inputs.at(0)->get_distributed_states();
+  HT_ASSERT(ds.is_valid()) 
+    << "AvgPoolOpDef: distributed states for input tensor must be valid!";
+  HT_ASSERT(ds.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds.get_dim(2) == 1 && ds.get_dim(3) == 1)
+    << "H & W dimension shouldn't be splited, H: "
+    << ds.get_dim(2) << ", W: " << ds.get_dim(3);
+  outputs.at(0)->set_distributed_states(ds);
+}
+
 void AvgPoolGradientOpImpl::DoCompute(Operator& op,
                                       const NDArrayList& inputs,
                                       NDArrayList& outputs,
@@ -47,6 +60,11 @@ AvgPoolGradientOpImpl::DoInferShape(Operator& op,
                                     const HTShapeList& input_shapes,
                                     RuntimeContext& ctx) const {
   return {input_shapes.at(2)};
+}
+
+void AvgPoolGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                           const OpMeta& op_meta) const {
+  outputs.at(0)->set_distributed_states(inputs.at(2)->get_distributed_states());
 }
 
 Tensor MakeAvgPoolOp(Tensor input, size_t kernel_H, size_t kernel_W, 

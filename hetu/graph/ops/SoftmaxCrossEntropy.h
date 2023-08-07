@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Loss.h"
 
 namespace hetu {
 namespace graph {
@@ -11,20 +12,11 @@ class SoftmaxCrossEntropyOp;
 class SoftmaxCrossEntropyGradientOpImpl;
 class SoftmaxCrossEntropyGradientOp;
 
-class SoftmaxCrossEntropyOpImpl : public OpInterface {
+class SoftmaxCrossEntropyOpImpl : public LossOpImpl {
 
  public:
   SoftmaxCrossEntropyOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(SoftmaxCrossEntropyOp)),
-    _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-    << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-    << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
+  : LossOpImpl(quote(SoftmaxCrossEntropyOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta> 
@@ -41,14 +33,15 @@ class SoftmaxCrossEntropyOpImpl : public OpInterface {
     return {out_meta};
   };
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
   TensorList DoGradient(Operator& op, const TensorList& grad_outputs) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
-
-  ReductionType _reduction;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -68,16 +61,10 @@ Tensor MakeSoftmaxCrossEntropyOp(Tensor preds, Tensor labels,
                                  const std::string& reduction = "mean",
                                  OpMeta op_meta = OpMeta());
 
-class SoftmaxCrossEntropyGradientOpImpl : public OpInterface {
+class SoftmaxCrossEntropyGradientOpImpl : public LossGradientOpImpl {
  public:
   SoftmaxCrossEntropyGradientOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(SoftmaxCrossEntropyGradientOp)),
-    _reduction(reduction) {
-  }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
+  : LossGradientOpImpl(quote(SoftmaxCrossEntropyGradientOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta> 
@@ -88,12 +75,13 @@ class SoftmaxCrossEntropyGradientOpImpl : public OpInterface {
     return {inputs[0]->meta()};
   };
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+  
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
-
-  ReductionType _reduction;
 
  public:
   bool operator==(const OpInterface& rhs) const override {

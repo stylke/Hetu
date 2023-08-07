@@ -36,6 +36,21 @@ HTShapeList PadOpImpl::DoInferShape(Operator& op,
   return {Infer};
 }
 
+void PadOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                               const OpMeta& op_meta) const {
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  size_t input_shape_len = inputs.at(0)->shape().size();
+  size_t padding_len = get_paddings().size();
+  size_t max_split_dimension = input_shape_len - padding_len / 2;
+  HT_ASSERT(ds_input.is_valid()) 
+    << "PadOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(max_split_dimension))
+    << "PadOp only support split dimension < " << max_split_dimension;
+  outputs.at(0)->set_distributed_states(ds_input);  
+}
+
 void PadGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                  NDArrayList& outputs, RuntimeContext& ctx) const {
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(

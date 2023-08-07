@@ -2,15 +2,17 @@
 #include "hetu/execution/dbr_executor.h"
 #include "hetu/autograd/autograd.h"
 #include "hetu/autograd/ops/Variable.h"
+#include "hetu/autograd/distributed_states.h"
+#include "queue"
 
 namespace hetu {
 namespace autograd {
 
 Tensor::Tensor(const TensorName& name, int32_t output_id,
-               const NDArrayMeta& meta)
+               const NDArrayMeta& meta, const DistributedStates& distributed_states)
 : shared_ptr_wrapper<TensorDef>() {
   _ptr = make_ptr<TensorDef>(TensorDef::constrcutor_access_key(), name,
-                             output_id, meta);
+                             output_id, meta, distributed_states);
 }
 
 NDArray& TensorDef::GetOrCompute() {

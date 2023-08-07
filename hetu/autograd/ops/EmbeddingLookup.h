@@ -22,6 +22,7 @@ class EmbeddingLookupGradientOpDef : public OperatorDef {
   : OperatorDef(quote(EmbeddingLookupGradientOp), {grad_output, id, ori_input, input},
                 op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape get_embed_shape() {
@@ -35,6 +36,8 @@ class EmbeddingLookupGradientOpDef : public OperatorDef {
  protected:
   void DoInferMeta() override;
 
+  void DoDeduceStates() override;
+  
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -64,10 +67,13 @@ class EmbeddingLookupOpDef : public OperatorDef {
                        const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(EmbeddingLookupOp), {input, id}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

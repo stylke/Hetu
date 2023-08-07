@@ -52,6 +52,7 @@ using TensorIdSet = std::unordered_set<TensorId>;
 using Tensor2TensorMap = std::unordered_map<TensorId, Tensor>;
 using Tensor2TensorListMap = std::unordered_map<TensorId, TensorList>;
 using Tensor2NDArrayMap = std::unordered_map<TensorId, NDArray>;
+using Tensor2IntMap = std::unordered_map<TensorId, int>;
 
 using GradAndVar = std::pair<Tensor, Tensor>;
 using GradAndVarList = std::vector<GradAndVar>;
@@ -71,5 +72,6 @@ class DefineByRunGraph;
 class DefineAndRunGraph;
 class ExecutableGraph;
 
+#define HT_MAX_NUM_MICRO_BATCHES (128)
 } // namespace graph
 } // namespace hetu

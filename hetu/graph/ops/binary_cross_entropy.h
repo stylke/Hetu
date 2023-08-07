@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Loss.h"
 
 namespace hetu {
 namespace graph {
@@ -9,14 +10,10 @@ namespace graph {
 class BinaryCrossEntropyOpImpl;
 class BinaryCrossEntropyGradientOpImpl;
 
-class BinaryCrossEntropyOpImpl final : public OpInterface {
+class BinaryCrossEntropyOpImpl final : public LossOpImpl {
  public:
   BinaryCrossEntropyOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(BinaryCrossEntropyOp)), _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
+  : LossOpImpl(quote(BinaryCrossEntropyOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta>
@@ -28,6 +25,9 @@ class BinaryCrossEntropyOpImpl final : public OpInterface {
         NDArrayMeta::Reduce(output_meta.shape, HTAxes(), false);
     return {output_meta};
   }
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
 
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
@@ -51,23 +51,12 @@ class BinaryCrossEntropyOpImpl final : public OpInterface {
     }
     return false;
   }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
-
- protected:
-  ReductionType _reduction;
 };
 
-class BinaryCrossEntropyGradientOpImpl final : public OpInterface {
+class BinaryCrossEntropyGradientOpImpl final : public LossGradientOpImpl {
  public:
   BinaryCrossEntropyGradientOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(BinaryCrossEntropyGradientOp)), _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
+  : LossGradientOpImpl(quote(BinaryCrossEntropyGradientOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta>
@@ -95,27 +84,33 @@ class BinaryCrossEntropyGradientOpImpl final : public OpInterface {
     }
     return false;
   }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
-
- protected:
-  ReductionType _reduction;
 };
 
 Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
                                 ReductionType reduction = kMEAN,
                                 OpMeta op_meta = OpMeta());
 
-Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
-                                std::string reduction = "mean",
-                                OpMeta op_meta = OpMeta());
+inline Tensor MakeBinaryCrossEntropyOp(Tensor probs, Tensor labels,
+                                       std::string reduction,
+                                       OpMeta op_meta = OpMeta()) {
+  return MakeBinaryCrossEntropyOp(std::move(probs), std::move(labels),
+                                  Str2ReductionType(reduction),
+                                  std::move(op_meta));
+}
 
 Tensor MakeBinaryCrossEntropyGradientOp(Tensor probs, Tensor labels,
                                         Tensor grad_outputs,
                                         ReductionType reduction = kMEAN,
                                         OpMeta op_meta = OpMeta());
+
+inline Tensor MakeBinaryCrossEntropyGradientOp(Tensor probs, Tensor labels,
+                                               Tensor grad_outputs,
+                                               std::string reduction,
+                                               OpMeta op_meta = OpMeta()) {
+  return MakeBinaryCrossEntropyGradientOp(
+    std::move(probs), std::move(labels), std::move(grad_outputs),
+    Str2ReductionType(reduction), std::move(op_meta));
+}
 
 } // namespace graph
 } // namespace hetu

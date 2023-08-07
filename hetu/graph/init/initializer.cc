@@ -5,15 +5,17 @@
 namespace hetu {
 namespace graph {
 
-void GeneralizedXavierInitializer::Init(NDArray& data, uint64_t seed,
+void GeneralizedXavierInitializer::Init(NDArray& data, uint64_t seed, 
+                                        const HTShape& global_shape,
                                         StreamIndex stream_id) const {
   HT_ASSERT(data->ndim() >= 2)
     << "Number of dimensions should be at least 2. Got " << data->ndim();
   size_t hw_scale = 1;
-  for (size_t i = 2; i < data->ndim(); i++)
-    hw_scale *= data->shape(i);
-  size_t fan_in = hw_scale * data->shape(1);
-  size_t fan_out = hw_scale * data->shape(0);
+  HTShape shape = global_shape.empty() ? data->shape() : global_shape;
+  for (size_t i = 2; i < shape.size(); i++)
+    hw_scale *= shape[i];
+  size_t fan_in = hw_scale * shape[1];
+  size_t fan_out = hw_scale * shape[0];
   double factor;
   if (mode() == "fan_in") {
     factor = fan_in;

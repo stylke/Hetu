@@ -6,17 +6,22 @@ namespace hetu {
 namespace graph {
 
 TensorDef::TensorDef(const constrcutor_access_key&, TensorIdentifier ids,
-                     TensorName name, NDArrayMeta meta)
-: _ids(std::move(ids)), _name(std::move(name)), _meta(std::move(meta)) {
+                     TensorName name, bool requires_grad, NDArrayMeta meta)
+: _ids(std::move(ids)),
+  _name(std::move(name)),
+  _requires_grad(requires_grad),
+  _meta(std::move(meta)) {
   auto& graph = Graph::GetGraph(_ids.graph_id);
   _inform_graph_on_destruction = (graph.type() == GraphType::EAGER ||
                                   graph.type() == GraphType::DEFINE_BY_RUN);
 }
 
-Tensor::Tensor(TensorIdentifier ids, TensorName name, NDArrayMeta meta)
+Tensor::Tensor(TensorIdentifier ids, TensorName name, bool requires_grad,
+               NDArrayMeta meta)
 : shared_ptr_wrapper<TensorDef>() {
-  _ptr = make_ptr<TensorDef>(TensorDef::constrcutor_access_key(),
-                             std::move(ids), std::move(name), std::move(meta));
+  _ptr =
+    make_ptr<TensorDef>(TensorDef::constrcutor_access_key(), std::move(ids),
+                        std::move(name), requires_grad, std::move(meta));
 }
 
 Tensor::~Tensor() {
@@ -87,7 +92,8 @@ bool TensorDef::is_variable() const {
 }
 
 bool TensorDef::is_parameter() const {
-  return is_parameter_op(producer());
+  const auto& graph = Graph::GetGraph(graph_id());
+  return graph._parameter_ops.find(producer_id()) != graph._parameter_ops.end();
 }
 
 NDArray TensorDef::get_or_compute() {

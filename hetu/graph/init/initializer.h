@@ -9,17 +9,21 @@ class Initializer {
  public:
   Initializer() {}
 
-  virtual void Init(NDArray& data, uint64_t seed = 0,
+  virtual void Init(NDArray& data, uint64_t seed = 0, const HTShape& global_shape = HTShape(),
                     StreamIndex stream_id = NDArray::DEFAULT_STREAM) const = 0;
 
   virtual Initializer* copy() const = 0;
+
+  virtual bool vodify() const {
+    return false;
+  }
 };
 
 class VoidifiedInitializer : public Initializer {
  public:
   VoidifiedInitializer() : Initializer() {}
 
-  void Init(NDArray& data, uint64_t seed = 0,
+  void Init(NDArray& data, uint64_t seed = 0, const HTShape& global_shape = HTShape(),
             StreamIndex stream_id = NDArray::DEFAULT_STREAM) const override {
     // suppress un-used warning
     (void) data;
@@ -30,6 +34,36 @@ class VoidifiedInitializer : public Initializer {
   Initializer* copy() const override {
     return new VoidifiedInitializer();
   }
+
+  bool vodify() const override {
+    return true;
+  }
+};
+
+class ProvidedInitializer : public Initializer {
+ public:
+  ProvidedInitializer(NDArray provided_data)
+  : Initializer(), _provided_data(std::move(provided_data)) {}
+
+  void Init(NDArray& data, uint64_t seed = 0, const HTShape& global_shape = HTShape(),
+            StreamIndex stream_id = NDArray::DEFAULT_STREAM) const override {
+    NDArray::copy(_provided_data, stream_id, data);
+  }
+
+  Initializer* copy() const override {
+    return new ProvidedInitializer(_provided_data);
+  }
+
+  const NDArray& provided_data() const noexcept {
+    return _provided_data;
+  }
+
+  NDArray& provided_data() noexcept {
+    return _provided_data;
+  }
+
+ protected:
+  NDArray _provided_data;
 };
 
 class ConstantInitializer : public Initializer {
@@ -37,7 +71,7 @@ class ConstantInitializer : public Initializer {
   ConstantInitializer(double value) : Initializer(), _value(value) {}
 
   virtual void
-  Init(NDArray& data, uint64_t seed = 0,
+  Init(NDArray& data, uint64_t seed = 0, const HTShape& global_shape = HTShape(),
        StreamIndex stream_id = NDArray::DEFAULT_STREAM) const override {
     (void) seed; // suppress un-used warning
     NDArray::full_(data, value(), stream_id);
@@ -71,7 +105,7 @@ class UniformInitializer : public Initializer {
   : Initializer(), _lb(lb), _ub(ub) {}
 
   virtual void
-  Init(NDArray& data, uint64_t seed = 0,
+  Init(NDArray& data, uint64_t seed = 0, const HTShape& global_shape = HTShape(),
        StreamIndex stream_id = NDArray::DEFAULT_STREAM) const override {
     NDArray::uniform_(data, lb(), ub(), seed, stream_id);
   }
@@ -99,7 +133,7 @@ class NormalInitializer : public Initializer {
   : Initializer(), _mean(mean), _stddev(stddev) {}
 
   virtual void
-  Init(NDArray& data, uint64_t seed = 0,
+  Init(NDArray& data, uint64_t seed = 0, const HTShape& global_shape = HTShape(),
        StreamIndex stream_id = NDArray::DEFAULT_STREAM) const override {
     NDArray::normal_(data, mean(), stddev(), seed, stream_id);
   }
@@ -128,7 +162,7 @@ class TruncatedNormalInitializer : public Initializer {
   : Initializer(), _mean(mean), _stddev(stddev), _lb(lb), _ub(ub) {}
 
   virtual void
-  Init(NDArray& data, uint64_t seed = 0,
+  Init(NDArray& data, uint64_t seed = 0, const HTShape& global_shape = HTShape(),
        StreamIndex stream_id = NDArray::DEFAULT_STREAM) const override {
     NDArray::truncated_normal_(data, mean(), stddev(), lb(), ub(), seed,
                                stream_id);
@@ -176,7 +210,7 @@ class GeneralizedXavierInitializer : public Initializer {
 
  public:
   virtual void
-  Init(NDArray& data, uint64_t seed = 0,
+  Init(NDArray& data, uint64_t seed = 0, const HTShape& global_shape = HTShape(),
        StreamIndex stream_id = NDArray::DEFAULT_STREAM) const override;
 
   virtual Initializer* copy() const {

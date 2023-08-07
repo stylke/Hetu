@@ -46,6 +46,9 @@ class AddElewiseOpImpl final: public OpInterface {
     return {output_meta};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 
@@ -114,6 +117,9 @@ class SubElewiseOpImpl : public OpInterface {
                                            .set_device(inputs[0]->device());
     return {output_meta};
   }
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;  
 
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
@@ -251,6 +257,9 @@ public:
     return {output_meta};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 
@@ -319,6 +328,9 @@ class DivElewiseOpImpl : public OpInterface {
                                            .set_device(inputs[0]->device());
     return {output_meta};
   }
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
 
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
@@ -476,6 +488,9 @@ class AddElewiseGradientOpImpl : public OpInterface {
     return {output_meta};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;  
+
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;
 
@@ -535,6 +550,9 @@ class SubElewiseGradientOpImpl : public OpInterface {
     NDArrayMeta output_meta = inputs[2]->meta();
     return {output_meta};
   }
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;
@@ -596,6 +614,9 @@ class MulElewiseGradientOpImpl : public OpInterface {
     return {output_meta};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+  
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;
 
@@ -655,7 +676,10 @@ class DivElewiseGradientOpImpl : public OpInterface {
     NDArrayMeta output_meta = inputs[2]->meta();
     return {output_meta};
   }
-
+  
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+  
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;
 

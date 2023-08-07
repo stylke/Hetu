@@ -45,6 +45,20 @@ HTShapeList ConcatOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {shapeA};
 }
 
+void ConcatOpDef::DoDeduceStates() {
+  DistributedStates ds_a = _inputs[0]->get_distributed_states();
+  DistributedStates ds_b = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
+    << "ConcatOpDef: distributed states for input a and input b must be valid!";
+  HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
+    << "Tensor a & b shouldn't be partial";  
+  HT_ASSERT(ds_a.check_equal(ds_b)) 
+    << "Distributed states for tensor a and tensor b must be equal!";
+  HT_ASSERT(ds_a.get_dim(get_axis()) == 1)
+    << "Concat was not allowed in splited dimension: " << get_axis();
+  _outputs[0]->set_distributed_states(ds_a);
+}
+
 void ConcatGradientOpDef::DoCompute(const NDArrayList& inputs,
                                     NDArrayList& outputs, RuntimeContext& ctx) {
   if (placement().is_cuda()) {
@@ -64,6 +78,10 @@ void ConcatGradientOpDef::DoInferMeta() {
 HTShapeList ConcatGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(0)};
+}
+
+void ConcatGradientOpDef::DoDeduceStates() {
+  _outputs[0]->set_distributed_states(_inputs[0]->get_distributed_states());
 }
 
 } // namespace autograd

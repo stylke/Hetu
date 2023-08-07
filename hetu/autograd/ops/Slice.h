@@ -24,6 +24,7 @@ class SliceGradientOpDef : public OperatorDef {
     _begin_pos(begin_pos),
     _output_shape(output_shape) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape get_begin_pos() const {
@@ -48,6 +49,8 @@ class SliceGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -86,6 +89,7 @@ class SliceOpDef : public OperatorDef {
     _output_shape(output_shape),
     _ori_output_shape(output_shape) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape get_begin_pos() const {
@@ -118,6 +122,8 @@ class SliceOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

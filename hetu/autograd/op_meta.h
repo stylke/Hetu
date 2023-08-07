@@ -58,6 +58,11 @@ class OpMeta {
     return *this;
   }
 
+  inline OpMeta& set_is_deduce_states(bool deduce_states) {
+    is_deduce_states = deduce_states;
+    return *this;
+  }
+
   inline OpMeta& set(const OpMeta& other) {
     operator=(other);
     return *this;
@@ -85,6 +90,7 @@ class OpMeta {
   StreamIndex stream_index{kUndeterminedStream};
   DeviceGroup device_group;
   TensorList extra_deps;
+  bool is_deduce_states{true};
 };
 
 std::ostream& operator<<(std::ostream&, const OpMeta&);

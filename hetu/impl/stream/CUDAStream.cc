@@ -49,16 +49,17 @@ CUDAStream::CUDAStream(const Stream& stream)
   HT_ASSERT(stream.device().is_cuda())
     << "Initializing CUDA stream "
     << "for non-cuda device: " << stream.device();
-  HT_ASSERT(_stream_id >= -1 && _stream_id < HT_NUM_STREAMS_PER_DEVICE)
+  HT_ASSERT(_stream_id >= kBlockingStream &&
+            _stream_id < HT_NUM_STREAMS_PER_DEVICE)
     << "Invalid device stream id: " << _stream_id;
   InitGlobalOnce();
-  if (_stream_id != -1)
+  if (_stream_id != kBlockingStream)
     InitDeviceOnce(_device_id);
 }
 
 cudaStream_t CUDAStream::cuda_stream() const noexcept {
-  return _stream_id == -1 ? static_cast<cudaStream_t>(0)
-                          : device_streams[_device_id][_stream_id];
+  return _stream_id == kBlockingStream ? static_cast<cudaStream_t>(0)
+                                       : device_streams[_device_id][_stream_id];
 }
 
 int GetCUDADeiceCount() {

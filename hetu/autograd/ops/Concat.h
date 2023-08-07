@@ -21,6 +21,7 @@ class ConcatOpDef : public OperatorDef {
               size_t axis, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ConcatOp), {inputA, inputB}, op_meta), _axis(axis) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   size_t get_axis() const {
@@ -29,6 +30,8 @@ class ConcatOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;  
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -61,6 +64,7 @@ class ConcatGradientOpDef : public OperatorDef {
     _axis(axis),
     _id(id) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   size_t get_axis() const {
@@ -73,6 +77,8 @@ class ConcatGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

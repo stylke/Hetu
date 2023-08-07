@@ -22,6 +22,7 @@ class SoftmaxCrossEntropyOpDef : public OperatorDef {
   : OperatorDef(quote(SoftmaxCrossEntropyOp), {preds, labels}, op_meta),
     _reduction(reduction) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   ReductionType reduction() const {
@@ -30,6 +31,8 @@ class SoftmaxCrossEntropyOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -72,6 +75,7 @@ class SoftmaxCrossEntropyGradientOpDef : public OperatorDef {
                 {preds, labels, grad_output}, op_meta),
     _reduction(reduction) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   ReductionType reduction() const {
@@ -80,6 +84,8 @@ class SoftmaxCrossEntropyGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

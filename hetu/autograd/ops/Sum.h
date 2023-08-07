@@ -25,6 +25,9 @@ class SumOpDef : public OperatorDef {
       output_shape = Broadcast(output_shape, inputs[i]->shape());
     }
     AddOutput(NDArrayMeta(output_shape, inputs[0]->dtype(), inputs[0]->device()));
+    if (op_meta.is_deduce_states) {  
+      DoDeduceStates();
+    }    
   }
 
  protected:

@@ -86,7 +86,7 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
           engine_stream.wait();
         },
         "BinaryEleWise");
-        cpu_stream.Sync();
+        // cpu_stream.Sync();
     });
 }
 

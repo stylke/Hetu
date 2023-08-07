@@ -3,6 +3,7 @@
 #include "hetu/common/macros.h"
 #include "hetu/core/ndarray.h"
 #include "hetu/graph/common.h"
+#include "hetu/graph/distributed_states.h"
 
 namespace hetu {
 namespace graph {
@@ -25,7 +26,7 @@ class TensorDef : public shared_ptr_target {
 
  public:
   TensorDef(const constrcutor_access_key&, TensorIdentifier ids,
-            TensorName name, NDArrayMeta meta);
+            TensorName name, bool requires_grad, NDArrayMeta meta);
 
   ~TensorDef() = default;
 
@@ -140,11 +141,12 @@ class TensorDef : public shared_ptr_target {
   }
 
   const Device& placement() const noexcept {
-    return device();
+    return _distributed_states.get_placement();
   }
 
   void set_placement(const Device& p) {
     _meta.set_device(p);
+    _distributed_states.set_placement(p);
   }
 
   const bool requires_grad() const noexcept {
@@ -156,6 +158,26 @@ class TensorDef : public shared_ptr_target {
   }
 
   NDArray get_or_compute();
+
+  bool has_distributed_states() const {
+    return !_distributed_states.is_none();
+  }
+
+  const DistributedStates& get_distributed_states() const {
+    return _distributed_states;
+  }
+
+  void set_distributed_states(const DistributedStates& distributed_states) {
+    _distributed_states.set_distributed_states(distributed_states);
+  }
+
+  const DeviceGroup& placement_group() const {
+    return _distributed_states.get_placement_group();
+  }
+
+  void set_placement_group(const DeviceGroup& placement_group) {
+    _distributed_states.set_placement_group(placement_group);
+  }  
 
  protected:
   void AddConsumer(Operator& op);
@@ -169,10 +191,11 @@ class TensorDef : public shared_ptr_target {
   
   const TensorIdentifier _ids;
   const TensorName _name;
+  bool _requires_grad;
   NDArrayMeta _meta;
   OpRefList _consumers;
-  bool _requires_grad;
   bool _inform_graph_on_destruction;
+  DistributedStates _distributed_states;
 };
 
 class Tensor : public shared_ptr_wrapper<TensorDef> {
@@ -181,7 +204,8 @@ class Tensor : public shared_ptr_wrapper<TensorDef> {
   friend class Graph;
   friend class ExecutableGraph;
 
-  Tensor(TensorIdentifier ids, TensorName name, NDArrayMeta meta = {});
+  Tensor(TensorIdentifier ids, TensorName name, bool requires_grad,
+         NDArrayMeta meta = {});
 
   Tensor() = default;
 

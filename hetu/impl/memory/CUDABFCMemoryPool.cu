@@ -39,13 +39,20 @@ CUDABFCMemoryPool::CUDABFCMemoryPool(DeviceIndex device_id, size_t total_memory,
 CUDABFCMemoryPool::~CUDABFCMemoryPool() {
     // HT_LOG_INFO << "Number of regions allocated: "
     //             << _region_manager.regions().size();
-    DeviceIndex prev_id = SetDevice();
-    for (const auto &region : _region_manager.regions()) {
-        CudaFree(region.ptr());
+    try
+    {
+      DeviceIndex prev_id = SetDevice();
+      for (const auto &region : _region_manager.regions()) {
+          CudaFree(region.ptr());
+      }
+      ResetDevice(prev_id);
+      for (BinNum b = 0; b < kNumBins; b++) {
+          BinFromIndex(b)->~Bin();
+      }
     }
-    ResetDevice(prev_id);
-    for (BinNum b = 0; b < kNumBins; b++) {
-        BinFromIndex(b)->~Bin();
+    catch(const std::exception& e)
+    {
+      HT_LOG_INFO << "In ~CUDABFCMemoryPool(), catch exception: " << e.what();
     }
 }
 
@@ -179,6 +186,7 @@ void CUDABFCMemoryPool::DeallocateChunk(ChunkHandle h) {
 }
 
 DataPtr CUDABFCMemoryPool::AllocDataSpace(size_t num_bytes) {
+    std::lock_guard<std::mutex> lock(_mtx);
     // HT_LOG_INFO << "AllocateRaw " << Name() << "  " << num_bytes;
     void *result = AllocateRawInternal(num_bytes);
     if (result == nullptr) {
@@ -416,6 +424,7 @@ void CUDABFCMemoryPool::SplitChunk(CUDABFCMemoryPool::ChunkHandle h,
 }
 
 void CUDABFCMemoryPool::FreeDataSpace(DataPtr ptr) {
+    std::lock_guard<std::mutex> lock(_mtx);
     // HT_LOG_INFO << "DeallocateRaw " << Name() << " "
                 // << (ptr.ptr ? RequestedSize(ptr.ptr) : 0);
     DeallocateRawInternal(ptr.ptr);

@@ -7,10 +7,11 @@ namespace graph {
 
 bool OptimizerUpdateOpInterface::DoMapToParallelDevices(
   Operator& op, const DeviceGroup& placement_group) const {
-  if (placement_group.num_devices() > 1) {
-    // TODO
-    HT_NOT_IMPLEMENTED << "Fill this up with AllReduceOpImpl";
-  }
+  // use comm_op instead
+  // if (placement_group.num_devices() > 1) {
+  //   // TODO
+  //   HT_NOT_IMPLEMENTED << "Fill this up with AllReduceOpImpl";
+  // }
   return OpInterface::DoMapToParallelDevices(op, placement_group);
 }
 

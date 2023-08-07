@@ -170,6 +170,9 @@ bool OperatorDef::MapToParallelDevices(const DeviceGroup& placement_group) {
 bool OperatorDef::DoMapToParallelDevices(const DeviceGroup& placement_group) {
   _placement_group = placement_group;
   // TODO: set the parallel statuses of outputs
+  for (auto& output : _outputs) {
+    output->set_placement_group(placement_group);
+  }
 
   // add P2P communication ops
   auto& dst_group = _placement_group;
@@ -217,6 +220,7 @@ bool OperatorDef::DoMapToParallelDevices(const DeviceGroup& placement_group) {
       p2p_recv_op->MapToParallelDevices(dst_group);
       p2p_send_op->BindRecvOp(p2p_recv_op);
       p2p_recv_op->BindSendOp(p2p_send_op);
+      p2p_recv_op->output(0)->set_placement_group(placement_group);
       ReplaceInput(i, p2p_recv_op->output(0));
     }
   }
@@ -252,6 +256,8 @@ bool OperatorDef::DoPlaceToLocalDevice(const Device& placement,
     _start = std::make_shared<DefaultEvent>(_placement);
     _stop = std::make_shared<DefaultEvent>(_placement);
   }
+  
+  // 顺便给tensor的distributed_states也增加placement的attribute
   for (auto& output : _outputs)
     output->set_placement(placement);
 
@@ -308,8 +314,32 @@ bool OperatorDef::DoPlaceToLocalDevice(const Device& placement,
   return true;
 }
 
+void OperatorDef::DoDeduceStates() {
+  // default: distributed states of output tensor directly copy from input tensor
+  // check input states is valid & check distributed states of all input tensor are the same.
+  HT_LOG_DEBUG << name() << ": default copy states from inputs";
+  DistributedStates default_ds;
+  for (auto& input : _inputs) {
+    auto input_ds = input->get_distributed_states(); 
+    HT_ASSERT(input_ds.is_valid()) << name() << ": input states must be valid!";
+    HT_ASSERT(input_ds.get_dim(-2) == 1) << name() << ": input shouldn't be partial!";      
+    if (!default_ds.is_valid()) {
+      default_ds.set_distributed_states(input_ds);
+    } else {
+      HT_ASSERT(default_ds.check_equal(input_ds))
+        << name() << ": in default DoDeduceStates: distributed states of all input tensor must be same!"
+        << ", " << default_ds.ds_info() << " vs " << input_ds.ds_info();
+    }
+  }
+  for (auto& output : _outputs) {
+    output->set_distributed_states(default_ds);
+  }
+}
+
 void OperatorDef::BlockOrSync(Tensor& dep) {
   if (!dep.is_defined())
+    return;
+  if (is_placeholder_op(dep->producer()))
     return;
   auto& dep_op = dep->producer();
   if (dep_op->placement() != _placement) {
@@ -336,6 +366,19 @@ void OperatorDef::ReplaceInput(size_t index, Tensor new_input) {
                    [&](const Operator& op) { return op->id() == _id; }));
   _inputs[index] = new_input;
   new_input->AddConsumer(get_self());
+}
+
+void OperatorDef::AddInDeps(const TensorList& in_deps) {
+  if (in_deps.empty()) {
+    return;
+  }
+  if (in_deps.size() == 1) {
+    _extra_in_dep_linkers.push_back(in_deps.front());
+  } else {
+    auto in_dep = GroupOp(in_deps, OpMeta().set_name(_op_meta.name + "_extra_in_dep"))->out_dep_linker();
+    _extra_in_dep_linkers.push_back(in_dep);
+  }
+  _extra_in_dep_linkers.back()->AddConsumer(get_self());
 }
 
 void OperatorDef::MarkAsComputed(const NDArrayList& output_vals) {

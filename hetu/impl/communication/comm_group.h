@@ -10,6 +10,7 @@ namespace impl {
 namespace comm {
 
 using hetu::operator<<;
+using Task = std::function<void()>;
 
 class CommunicationGroupDef : public shared_ptr_target {
  protected:
@@ -50,6 +51,19 @@ class CommunicationGroupDef : public shared_ptr_target {
   virtual void AllReduce(const NDArray& input, NDArray& output,
                          ReductionType red_type = kSUM) {
     HT_NOT_IMPLEMENTED << "AllReduce fn of backend \"" << backend()
+                       << "\" is not defined.";
+  }
+
+  virtual void AllReduceCoalesce(const NDArrayList& inputs,
+                                 NDArrayList& outputs,
+                                 NDArray contiguous_buffers,
+                                 ReductionType red_type = kSUM) {
+    HT_NOT_IMPLEMENTED << "AllReduce fn of backend \"" << backend()
+                       << "\" is not defined.";
+  }
+
+  virtual void AlltoAll(const NDArray& input, NDArray& output) {
+    HT_NOT_IMPLEMENTED << "AlltoAll fn of backend \"" << backend()
                        << "\" is not defined.";
   }
 
@@ -94,6 +108,21 @@ class CommunicationGroupDef : public shared_ptr_target {
     HT_NOT_IMPLEMENTED << "Recv fn of backend \"" << backend()
                        << "\" is not defined.";
   }
+
+  virtual Task ISend(const NDArray& data, int receiver) {
+    HT_NOT_IMPLEMENTED << "ISend fn of backend \"" << backend()
+                       << "\" is not defined.";
+  }
+
+  virtual Task IRecv(NDArray& data, int sender) {
+    HT_NOT_IMPLEMENTED << "IRecv fn of backend \"" << backend()
+                       << "\" is not defined.";
+  }
+
+  virtual void BatchedISendIRecv(const std::vector<Task>& tasks) {
+    HT_NOT_IMPLEMENTED << "BatchedISendIRecv fn of backend \"" << backend()
+                       << "\" is not defined.";
+  }  
 
   virtual void Barrier(bool sync = false) {
     HT_NOT_IMPLEMENTED << "Barrier fn of backend \"" << backend()

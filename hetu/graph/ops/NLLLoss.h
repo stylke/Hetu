@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Loss.h"
 
 namespace hetu {
 namespace graph {
@@ -11,19 +12,10 @@ class NLLLossOp;
 class NLLLossGradientOpImpl;
 class NLLLossGradientOp;
 
-class NLLLossOpImpl : public OpInterface {
+class NLLLossOpImpl : public LossOpImpl {
  public:
   NLLLossOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(NLLLossOp)),
-    _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
+  : LossOpImpl(quote(NLLLossOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta> 
@@ -44,14 +36,15 @@ class NLLLossOpImpl : public OpInterface {
     return {output_meta};
   };
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
   TensorList DoGradient(Operator& op, const TensorList& grad_outputs) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
-
-  ReductionType _reduction;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -71,19 +64,10 @@ Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
                      const std::string& reduction = "mean",
                      OpMeta op_meta = OpMeta());
 
-class NLLLossGradientOpImpl : public OpInterface {
+class NLLLossGradientOpImpl : public LossGradientOpImpl {
  public:
   NLLLossGradientOpImpl(ReductionType reduction = kMEAN)
-  : OpInterface(quote(NLLLossGradientOp)),
-    _reduction(reduction) {
-    HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kNONE)
-      << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'none\']";
-  }
-
-  ReductionType reduction() const {
-    return _reduction;
-  }
+  : LossGradientOpImpl(quote(NLLLossGradientOp), reduction) {}
 
  protected:
   std::vector<NDArrayMeta> 
@@ -94,12 +78,13 @@ class NLLLossGradientOpImpl : public OpInterface {
     return {inputs[0]->meta()};
   };
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+                      
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
-
-  ReductionType _reduction;
 
  public:
   bool operator==(const OpInterface& rhs) const override {

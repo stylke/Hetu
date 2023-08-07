@@ -25,6 +25,7 @@ protected:
     _keepdims(keepdims),
     _reduction(reduction) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  public:
@@ -85,6 +86,8 @@ protected:
  protected:
   void DoInferMeta() override;
 
+  void DoDeduceStates() override;
+
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -143,6 +146,7 @@ class ReduceGradientOpDef : public OperatorDef {
     _keepdims(keepdims),
     _reduction(reduction) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   const HTShape& get_shape() const {
@@ -195,6 +199,8 @@ class ReduceGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

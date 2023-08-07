@@ -11,6 +11,7 @@ from .loss import *
 from .dropout import *
 from .sparse import *
 
+from .parallel import *
 
 __all__ = [
     'Module', 
@@ -30,4 +31,6 @@ __all__ = [
     'Dropout', 'Dropout2d',
     #sparse
     'Embedding',
+    #parallel
+    'ColumnParallelLinear', 'RowParallelLinear',
 ]

@@ -66,6 +66,11 @@ class OpMeta {
     return *this;
   }
 
+  inline OpMeta& set_is_deduce_states(bool deduce_states) {
+    is_deduce_states = deduce_states;
+    return *this;
+  }
+  
   inline OpMeta& set(const OpMeta& other) {
     operator=(other);
     return *this;
@@ -96,6 +101,7 @@ class OpMeta {
   Device eager_device{kUndeterminedDevice};
   DeviceGroup device_group;
   TensorList extra_deps;
+  bool is_deduce_states{true};  
 };
 
 std::ostream& operator<<(std::ostream&, const OpMeta&);
@@ -149,8 +155,8 @@ struct OpInstantiationContext {
   DeviceGroup placement_group;
   Device placement;
   StreamIndex stream_index;
-  std::unique_ptr<Event> start;
-  std::unique_ptr<Event> stop;
+  std::unique_ptr<Event> start[HT_MAX_NUM_MICRO_BATCHES];
+  std::unique_ptr<Event> stop[HT_MAX_NUM_MICRO_BATCHES];
 
   Stream stream() const {
     // Question: create stream inside kernels?
@@ -197,6 +203,11 @@ class OpInterface : public shared_ptr_target {
     return DoInferMeta(inputs);
   }
 
+  inline void DeduceStates(const TensorList& inputs, TensorList& outputs, 
+                           const OpMeta& op_meta) const {
+    return DoDeduceStates(inputs, outputs, op_meta);
+  }
+
   inline TensorList Gradient(Operator& op,
                              const TensorList& grad_outputs) const {
     return DoGradient(op, grad_outputs);
@@ -235,6 +246,9 @@ class OpInterface : public shared_ptr_target {
  protected:
   virtual std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const = 0;
+
+  virtual void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                              const OpMeta& op_meta) const;
 
   virtual TensorList DoGradient(Operator&, const TensorList&) const {
     HT_RUNTIME_ERROR << "Op with type " << type() << "is not differentiable";
@@ -327,6 +341,10 @@ class OpDef : public shared_ptr_target {
     return _body->MapToParallelDevices(get_self(), placement_group);
   }
 
+  inline void DeduceStates() {
+    return _body->DeduceStates(inputs(), outputs(), op_meta());
+  }
+
   inline bool Instantiate(const Device& placement, StreamIndex stream_id) {
     return _body->Instantiate(get_self(), placement, stream_id);
   }
@@ -336,6 +354,7 @@ class OpDef : public shared_ptr_target {
     return _body->InferShape(get_self(), input_shapes, runtime_ctx);
   }
 
+<<<<<<< HEAD
   NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx) {
     BlockOrSyncAllInputs();
     instantiation_ctx().start->Record(stream());
@@ -344,11 +363,21 @@ class OpDef : public shared_ptr_target {
     // if (ret.size() > 0)
     // HT_LOG_INFO << ret[0];
     instantiation_ctx().stop->Record(stream());
+=======
+  NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx, size_t micro_batch_id = 0) {
+    HT_ASSERT(micro_batch_id < HT_MAX_NUM_MICRO_BATCHES)
+      << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
+      << ", got micro batch id: " << micro_batch_id;
+    BlockOrSyncAllInputs(micro_batch_id);
+    instantiation_ctx().start[micro_batch_id]->Record(stream());
+    auto ret = _body->Compute(get_self(), inputs, runtime_ctx);
+    instantiation_ctx().stop[micro_batch_id]->Record(stream());
+>>>>>>> 984218bd9d37ecf54e6ecb64b54a53a9f283b8fe
     return ret;
   }
 
-  void Sync() {
-    instantiation_ctx().stop->Sync();
+  void Sync(size_t micro_batch_id = 0) {
+    instantiation_ctx().stop[micro_batch_id]->Sync();
   }
 
   OpId id() const noexcept {
@@ -366,6 +395,11 @@ class OpDef : public shared_ptr_target {
   const OpInterface& body() const {
     return *_body;
   }
+
+  // for op interface specific func call
+  OpInterface& body() {
+    return *_body;
+  }  
 
   const OpName& name() const noexcept {
     return _op_meta.name;
@@ -501,6 +535,8 @@ class OpDef : public shared_ptr_target {
     return false;
   }
 
+  bool is_parameter() const;
+
   bool requires_grad(size_t i) const {
     return _inputs[i]->requires_grad();
   }
@@ -511,9 +547,9 @@ class OpDef : public shared_ptr_target {
 
   const Operator& get_self() const;
 
-  void BlockOrSyncAllInputs();
+  void BlockOrSyncAllInputs(size_t micro_batch_id = 0);
   
-  void BlockOrSyncInput(Tensor& input);
+  void BlockOrSyncInput(Tensor& input, size_t micro_batch_id = 0);
 
   const OpIdentifier _ids;
   std::shared_ptr<OpInterface> _body;
@@ -703,7 +739,6 @@ std::ostream& operator<<(std::ostream&, const Operator&);
  * Indicators of Operators
  ******************************************************/
 
-static const uint64_t PARAMETER_OP = 1ul;
 static const uint64_t PLACEHOLDER_OP = 1ul << 1;
 static const uint64_t VARIABLE_OP = 1ul << 2;
 static const uint64_t HOST_TO_DEVICE_OP = 1ul << 3;
@@ -712,6 +747,20 @@ static const uint64_t PEER_TO_PEER_SEND_OP = 1ul << 5;
 static const uint64_t PEER_TO_PEER_RECV_OP = 1ul << 6;
 static const uint64_t ALL_TO_ALL_OP = 1ul << 7;
 static const uint64_t ALL_REDUCE_OP = 1ul << 8;
+static const uint64_t ALL_GATHER_OP = 1ul << 9;
+static const uint64_t REDUCE_SCATTER_OP = 1ul << 10;
+static const uint64_t BROADCAST_OP = 1ul << 11;
+static const uint64_t REDUCE_OP = 1ul << 12;
+static const uint64_t P2P_OP = 1ul << 13;
+static const uint64_t BATCHED_ISEND_IRECV_OP = 1ul << 14;
+static const uint64_t GATHER_OP = 1ul << 15;
+static const uint64_t SCATTER_OP = 1ul << 16;
+static const uint64_t COMM_SPLIT_OP = 1ul << 19;
+static const uint64_t COMM_OP = 1ul << 20;
+static const uint64_t UNKNOWN_OP = 1ul << 21;
+static const uint64_t SLICE_OP = 1ul << 59;
+static const uint64_t LOSS_OP = 1ul << 60;
+static const uint64_t LOSS_GRADIENT_OP = 1ul << 61;
 static const uint64_t OPTIMIZER_UPDATE_OP = 1ul << 62;
 static const uint64_t GROUP_OP = 1ul << 63;
 
@@ -729,7 +778,6 @@ static const uint64_t GROUP_OP = 1ul << 63;
     return is_##type##_op(x.get());                                            \
   }
 
-DECLARE_OP_INDICATOR_CHECKER(parameter, PARAMETER_OP)
 DECLARE_OP_INDICATOR_CHECKER(placeholder, PLACEHOLDER_OP)
 DECLARE_OP_INDICATOR_CHECKER(variable, VARIABLE_OP)
 DECLARE_OP_INDICATOR_CHECKER(host_to_device, HOST_TO_DEVICE_OP)
@@ -738,9 +786,27 @@ DECLARE_OP_INDICATOR_CHECKER(peer_to_peer_send, PEER_TO_PEER_SEND_OP)
 DECLARE_OP_INDICATOR_CHECKER(peer_to_peer_recv, PEER_TO_PEER_RECV_OP)
 DECLARE_OP_INDICATOR_CHECKER(all_to_all, ALL_TO_ALL_OP)
 DECLARE_OP_INDICATOR_CHECKER(all_reduce, ALL_REDUCE_OP)
+DECLARE_OP_INDICATOR_CHECKER(all_gather, ALL_GATHER_OP)
+DECLARE_OP_INDICATOR_CHECKER(reduce_scatter, REDUCE_SCATTER_OP)
+DECLARE_OP_INDICATOR_CHECKER(broadcast, BROADCAST_OP)
+DECLARE_OP_INDICATOR_CHECKER(reduce, REDUCE_OP)
+DECLARE_OP_INDICATOR_CHECKER(p2p, P2P_OP)
+DECLARE_OP_INDICATOR_CHECKER(batched_isend_irecv, BATCHED_ISEND_IRECV_OP)
+DECLARE_OP_INDICATOR_CHECKER(gather, GATHER_OP)
+DECLARE_OP_INDICATOR_CHECKER(scatter, SCATTER_OP)
+DECLARE_OP_INDICATOR_CHECKER(comm_split, COMM_SPLIT_OP)
+DECLARE_OP_INDICATOR_CHECKER(comm, COMM_OP)
+DECLARE_OP_INDICATOR_CHECKER(unknown, UNKNOWN_OP)
 DECLARE_OP_INDICATOR_CHECKER(communucation,
                              PEER_TO_PEER_SEND_OP | PEER_TO_PEER_RECV_OP |
-                               ALL_TO_ALL_OP | ALL_REDUCE_OP)
+                               ALL_TO_ALL_OP | ALL_REDUCE_OP |
+                               ALL_GATHER_OP | REDUCE_SCATTER_OP |
+                               BROADCAST_OP | REDUCE_OP |
+                               P2P_OP | BATCHED_ISEND_IRECV_OP |
+                               GATHER_OP | SCATTER_OP)
+DECLARE_OP_INDICATOR_CHECKER(slice, SLICE_OP)
+DECLARE_OP_INDICATOR_CHECKER(loss, LOSS_OP)
+DECLARE_OP_INDICATOR_CHECKER(loss_gradient, LOSS_GRADIENT_OP)
 DECLARE_OP_INDICATOR_CHECKER(optimizer_update, OPTIMIZER_UPDATE_OP)
 DECLARE_OP_INDICATOR_CHECKER(group, GROUP_OP)
 

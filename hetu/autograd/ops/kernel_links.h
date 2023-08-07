@@ -282,7 +282,23 @@ DECLARE_KERNEL_CPU_AND_CUDA(AllReduce, const NDArray&, NDArray&,
 DECLARE_KERNEL_CPU_AND_CUDA(P2PSend, const NDArray&, const Device&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(P2PRecv, NDArray&, const Device&, const Stream&);
-
+DECLARE_KERNEL_CPU_AND_CUDA(BatchedISendIRecv, const NDArrayList&, 
+                            const std::vector<Device>&, NDArrayList&,
+                            const std::vector<Device>&, const std::vector<Device>&, 
+                            const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(AllGather, const NDArray&, NDArray&,
+                            const DeviceGroup&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(ReduceScatter, const NDArray&, NDArray&,
+                            const DeviceGroup&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(BroadcastComm, const NDArray&, NDArray&, int,
+                            const DeviceGroup&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(ReduceComm, const NDArray&, NDArray&, int,
+                            const DeviceGroup&, const Stream&);                                                                                            
+DECLARE_KERNEL_CPU_AND_CUDA(Gather, const NDArray&, NDArray&, int,
+                            const DeviceGroup&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(Scatter, const NDArray&, NDArray&, int,
+                            const DeviceGroup&, const Stream&);
+                            
 /******************************************************
  * Dispatching kernels for operations
  ******************************************************/

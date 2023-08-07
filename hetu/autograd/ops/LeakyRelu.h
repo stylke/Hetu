@@ -20,6 +20,7 @@ class LeakyReluOpDef : public OperatorDef {
                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(LeakyReluOp), {input}, op_meta), _alpha(alpha) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double get_alpha() const {
@@ -58,6 +59,7 @@ class LeakyReluGradientOpDef : public OperatorDef {
   : OperatorDef(quote(LeakyReluGradientOp), {input, grad_output}, op_meta),
     _alpha(alpha) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double get_alpha() const {

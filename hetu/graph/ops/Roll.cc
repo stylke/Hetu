@@ -18,6 +18,22 @@ void RollOpImpl::DoCompute(Operator& op,
                 op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
+void RollOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                  const OpMeta& op_meta) const {
+  const DistributedStates& ds = inputs.at(0)->get_distributed_states();
+  HT_ASSERT(ds.is_valid()) 
+    << "RollOpImpl: distributed states for input tensor must be valid!";
+  HT_ASSERT(ds.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+
+  for (auto dim : dims()) {
+    HT_ASSERT(ds.get_dim(dim) == 1)
+      << "The shift dim " << dim << " shouldn't be split!";
+  }
+
+  outputs.at(0)->set_distributed_states(ds);
+}
+
 TensorList RollOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   HTShape negshifts = shifts();
   for (auto &bit: negshifts) {

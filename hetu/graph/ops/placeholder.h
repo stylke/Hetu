@@ -5,7 +5,7 @@
 namespace hetu {
 namespace graph {
 
-class PlaceholderOpImpl final : public OpInterface {
+class PlaceholderOpImpl : public OpInterface {
  public:
   PlaceholderOpImpl(const NDArrayMeta& data_meta)
   : OpInterface(quote(PlaceholderOp)), _data_meta(std::move(data_meta)) {}
@@ -54,7 +54,9 @@ class PlaceholderOpImpl final : public OpInterface {
   NDArrayMeta _data_meta;
 };
 
-Tensor MakePlaceholderOp(NDArrayMeta data_meta, OpMeta op_meta = OpMeta());
+Tensor MakePlaceholderOp(NDArrayMeta data_meta, const DistributedStates& ds = DistributedStates(), OpMeta op_meta = OpMeta());
+
+Tensor MakeParallelPlaceholderOp(NDArrayMeta data_meta, const DistributedStates& ds, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

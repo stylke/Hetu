@@ -38,6 +38,15 @@ HTShapeList InstanceNormOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0), local_shape, local_shape};
 }
 
+void InstanceNormOpDef::DoDeduceStates() {
+  auto ds_input = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) << "InstanceNormOpDef: input states must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1) << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(2))
+    << "InstanceNormOp only support split dimensions N&C in [N, C, H, W]!";  
+  _outputs[0]->set_distributed_states(ds_input);
+}
+
 void InstanceNormGradientOpDef::DoCompute(const NDArrayList& inputs,
                                           NDArrayList& outputs,
                                           RuntimeContext& ctx) {
@@ -55,6 +64,10 @@ HTShapeList
 InstanceNormGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(0)};
+}
+
+void InstanceNormGradientOpDef::DoDeduceStates() {
+  _outputs[0]->set_distributed_states(_inputs[1]->get_distributed_states());
 }
 
 } // namespace autograd

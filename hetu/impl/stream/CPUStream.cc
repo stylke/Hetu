@@ -31,13 +31,14 @@ CPUStream::CPUStream(const Stream& stream) : _stream_id{stream.stream_index()} {
   HT_ASSERT(stream.device().is_cpu())
     << "Initializing CPU stream "
     << "for non-host device: " << stream.device();
-  HT_ASSERT(_stream_id >= -1 && _stream_id < HT_NUM_STREAMS_PER_DEVICE)
+  HT_ASSERT(_stream_id >= kBlockingStream &&
+            _stream_id < HT_NUM_STREAMS_PER_DEVICE)
     << "Invalid device stream id: " << _stream_id;
 }
 
 std::future<void> CPUStream::EnqueueTask(std::function<void()> f,
                                          const std::string& name) {
-  if (_stream_id == -1) {
+  if (_stream_id == kBlockingStream) {
     f();
     return std::future<void>();
   } else {
@@ -47,7 +48,8 @@ std::future<void> CPUStream::EnqueueTask(std::function<void()> f,
 }
 
 void CPUStream::Sync() {
-  if (_stream_id == -1 || cpu_stream_task_queues[_stream_id] == nullptr ||
+  if (_stream_id == kBlockingStream ||
+      cpu_stream_task_queues[_stream_id] == nullptr ||
       !cpu_stream_task_queues[_stream_id]->running())
     return;
   // Walkaround: Instead of blocking the task queues,

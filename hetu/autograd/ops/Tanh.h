@@ -20,6 +20,7 @@ class TanhOpDef : public OperatorDef {
             const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(TanhOp), {input}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
@@ -50,6 +51,7 @@ class TanhGradientOpDef : public OperatorDef {
                     Tensor grad_output, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(TanhGradientOp), {input, grad_output}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:

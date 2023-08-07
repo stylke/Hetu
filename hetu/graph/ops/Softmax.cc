@@ -25,6 +25,19 @@ HTShapeList SoftmaxOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
+void SoftmaxOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                   const OpMeta& op_meta) const {
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  int ndim = inputs.at(0)->ndim();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "SoftmaxOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(ndim - 1)) // cannot split in last dimension
+    << "Input tensor can only support split in dimension < " << ndim - 1;
+  outputs.at(0)->set_distributed_states(ds_input);        
+}
+
 void SoftmaxGradientOpImpl::DoCompute(Operator& op,
                                       const NDArrayList& inputs,
                                       NDArrayList& outputs,
@@ -40,6 +53,11 @@ SoftmaxGradientOpImpl::DoInferShape(Operator& op,
                                     const HTShapeList& input_shapes, 
                                     RuntimeContext& ctx) const {
   return {input_shapes.at(0)};
+}
+
+void SoftmaxGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                           const OpMeta& op_meta) const {  
+  outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());    
 }
 
 Tensor MakeSoftmaxOp(Tensor input, int64_t dim, OpMeta op_meta) {

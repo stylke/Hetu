@@ -26,6 +26,7 @@ class Dropout2dOpDef : public OperatorDef {
     // TODO: support without recomputation
     HT_ASSERT(inplace) << "Currently we require Conv2D to be in place";
     AddOutput(input->meta());
+    DoDeduceStates();
   }
 
   double keep_prob() const {
@@ -41,6 +42,8 @@ class Dropout2dOpDef : public OperatorDef {
   }
 
  protected:
+  void DoDeduceStates() override;
+
   NDArrayList DoCompute(const NDArrayList& inputs,
                         RuntimeContext& ctx) override;
 
@@ -76,6 +79,7 @@ class Dropout2dGradientWithRecomputationOpDef : public OperatorDef {
                 op_meta),
     _forward_op(forward_op) {
     AddOutput(grad_output->meta());
+    DoDeduceStates();
   }
 
   double keep_prob() const {

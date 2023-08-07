@@ -55,11 +55,14 @@ class AddElewiseOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(AddElewiseOp), {a, b}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
   void DoInferMeta() override;
 
+  void DoDeduceStates() override;
+  
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -85,6 +88,7 @@ class AddByConstOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(AddByConstOp), {input}, op_meta), _value(value) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   inline double const_value() const {
@@ -125,10 +129,13 @@ class SubElewiseOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SubElewiseOp), {a, b}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -155,6 +162,7 @@ class SubByConstOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SubByConstOp), {input}, op_meta), _value(value) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   inline double const_value() const {
@@ -191,6 +199,7 @@ class SubFromConstOpDef : public OperatorDef {
                     const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SubFromConstOp), {input}, op_meta), _value(value) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   inline double const_value() const {
@@ -227,6 +236,7 @@ class NegateOpDef : public OperatorDef {
               const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(NegateOp), {input}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
@@ -257,10 +267,13 @@ class MulElewiseOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(MulElewiseOp), {a, b}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -287,6 +300,7 @@ class MulByConstOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(MulByConstOp), {input}, op_meta), _value(value) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   inline double const_value() const {
@@ -327,10 +341,13 @@ class DivElewiseOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DivElewiseOp), {a, b}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -357,6 +374,7 @@ class DivByConstOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DivByConstOp), {input}, op_meta), _value(value) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   inline double const_value() const {
@@ -393,6 +411,7 @@ class DivFromConstOpDef : public OperatorDef {
                     const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(DivFromConstOp), {input}, op_meta), _value(value) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   inline double const_value() const {
@@ -429,6 +448,7 @@ class ReciprocalOpDef : public OperatorDef {
                   const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReciprocalOp), {input}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
@@ -462,6 +482,7 @@ class AddElewiseGradientOpDef : public OperatorDef {
   : OperatorDef(quote(AddElewiseGradientOp), {a, b, input, output}, op_meta),
   _index(index) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   void set_axes(HTAxes axe) {
@@ -486,6 +507,8 @@ class AddElewiseGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -519,6 +542,7 @@ class SubElewiseGradientOpDef : public OperatorDef {
   : OperatorDef(quote(SubElewiseGradientOp), {a, b, input, output}, op_meta),
   _index(index) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   void set_axes(HTAxes axe) {
@@ -543,6 +567,8 @@ class SubElewiseGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -576,6 +602,7 @@ class MulElewiseGradientOpDef : public OperatorDef {
   : OperatorDef(quote(MulElewiseGradientOp), {a, b, input, output}, op_meta),
   _index(index) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   void set_axes(HTAxes axe) {
@@ -600,6 +627,8 @@ class MulElewiseGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -633,6 +662,7 @@ class DivElewiseGradientOpDef : public OperatorDef {
   : OperatorDef(quote(DivElewiseGradientOp), {a, b, input, output}, op_meta),
   _index(index) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   void set_axes(HTAxes axe) {
@@ -657,6 +687,8 @@ class DivElewiseGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

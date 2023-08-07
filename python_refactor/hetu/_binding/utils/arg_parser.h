@@ -11,6 +11,8 @@
 #include "hetu/_binding/graph/tensor.h"
 #include "hetu/_binding/graph/graph.h"
 #include "hetu/_binding/graph/sgdoptimizer.h"
+#include "hetu/_binding/graph/distributed_states.h"
+#include "hetu/_binding/graph/init/initializer.h"
 
 namespace hetu {
 
@@ -22,6 +24,7 @@ enum class ArgType : uint8_t {
   INT64, 
   FLOAT64, 
   STRING, 
+  DICT,
   
   /* Python sequences of primitives */
   BOOL_LIST,
@@ -48,6 +51,8 @@ enum class ArgType : uint8_t {
   OPERATOR,
   OPERATOR_LIST,
   FEED_DICT,
+  DISTRIBUTED_STATES,
+  INITIALIZER,
   SGDOPTIMIZER
 };
 
@@ -248,6 +253,10 @@ class ParsedPyArgs {
                   : nullopt;
   }
 
+  inline std::unordered_map<int32_t, int32_t> get_unordered_map(size_t i) const {
+    return UnorderedMap_FromPyDict(_args[i]);
+  }
+
   inline PyObject* get_numpy_array(size_t i) const {
     return _args[i];
   }
@@ -370,6 +379,17 @@ class ParsedPyArgs {
     return SGDOptimizer_FromPyObject(_args[i]);
   }  
 
+  inline DistributedStates get_distributed_states_or_empty(size_t i) {
+    return has(i) ? DistributedStates_FromPyObject(_args[i]) : DistributedStates();
+  }
+
+  inline DistributedStates get_distributed_states(size_t i) {
+    return DistributedStates_FromPyObject(_args[i]);
+  }
+
+  inline std::shared_ptr<Initializer> get_initializer(size_t i) {
+    return Initializer_FromPyObject(_args[i]);
+  }
  private:
   const FnSignature& _signature;
   std::vector<PyObject*> _args;
@@ -404,6 +424,8 @@ class PyArgParser {
 
 inline OpMeta parse_op_meta(const ParsedPyArgs& parsed_args, size_t offset) {
   OpMeta ret = CurrentOpMetaCtx();
+  if (parsed_args.has(offset + 1))
+    ret.set_device_group(parsed_args.get_device_group(offset + 1));
   if (parsed_args.has(offset + 2))
     ret.set_extra_deps(parsed_args.get_tensor_list(offset + 2));
   if (parsed_args.has(offset + 3))

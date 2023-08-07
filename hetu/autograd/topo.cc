@@ -1,6 +1,7 @@
 #include "hetu/autograd/topo.h"
 #include "hetu/autograd/ops/Optimizer.h"
 #include "hetu/autograd/ops/Communicate.h"
+#include "hetu/autograd/ops/Split.h"
 #include <queue>
 
 namespace hetu {
@@ -24,7 +25,7 @@ OpList TopoSort(const OpList& nodes, bool connect_p2p, bool skip_computed) {
       if (in_degrees[node->id()] == 0)
         topo_sort_queue.push(node);
       traverse_queue.push(node);
-      visited.insert(node->id());
+      visited.insert(node->id()); 
     }
   };
 
@@ -34,21 +35,22 @@ OpList TopoSort(const OpList& nodes, bool connect_p2p, bool skip_computed) {
     const Operator& node = traverse_queue.front().get();
     traverse_queue.pop();
     OpRefList in_nodes_refs = node->input_ops_ref();
-    for (const auto& in_node_ref : in_nodes_refs)
+    for (const auto& in_node_ref : in_nodes_refs) {
       traverse_fn(in_node_ref);
+    }
     if (connect_p2p && is_peer_to_peer_recv_op(node)) {
-      const auto& send_node = reinterpret_cast<const Operator&>(
-        reinterpret_cast<const P2PRecvOp&>(node)->send_op());
+      auto& recv_op = reinterpret_cast<const P2PRecvOp&>(node);
+      const auto& send_node = reinterpret_cast<const Operator&>(recv_op->send_op());
       traverse_fn(send_node);
     }
   }
-
   // iteratively find the topo order
   while (!topo_sort_queue.empty()) {
     const Operator& node = topo_sort_queue.front().get();
-    topo_sort_queue.pop();
-    if (!skip_computed || !node->is_computed())
+    topo_sort_queue.pop();   
+    if (!skip_computed || !node->is_computed()) {
       topo_order.push_back(node);
+    }
     OpRefList out_nodes_refs = node->output_ops_ref();
     for (const auto& out_node_ref : out_nodes_refs) {
       const Operator& out_node = out_node_ref.get();
@@ -56,13 +58,32 @@ OpList TopoSort(const OpList& nodes, bool connect_p2p, bool skip_computed) {
       if (visited.find(out_node_id) == visited.end())
         continue;
       in_degrees[out_node_id]--;
-      if (in_degrees[out_node_id] == 0)
+      if (in_degrees[out_node_id] == 0) {
         topo_sort_queue.push(out_node);
+      }
     }
   }
 
   // ensure update ops are executed later
   for (size_t i = 0; i < topo_order.size(); i++) {
+    // BatchISendIRecvOp must be directly after SplitOp
+    if (is_batched_isend_irecv_op(topo_order[i])) {
+      Operator batched_isend_irecv_op = topo_order[i];
+      // input must be split_op
+      if (batched_isend_irecv_op->num_inputs() > 0) {
+        for (size_t j = i - 1; i >= 2 && j >= 1; j--) {
+          if (is_split_op(topo_order[j]) && topo_order[j]->output(0)->consumer(0)->id() == batched_isend_irecv_op->id()) {
+            // move batched_isend_irecv_op (topo_order[i]) after split_op (topo_order[j])
+            for (size_t k = i; k > j + 1; k--) {
+              topo_order[k] = topo_order[k - 1];
+            } 
+            topo_order[j + 1] = batched_isend_irecv_op;
+            break;
+          }
+        }
+      }
+    }
+
     if (is_optimizer_update_op(topo_order[i])) {
       Operator& update_op = topo_order[i];
       TensorId update_var_id = update_op->input(0)->id();

@@ -30,6 +30,7 @@ void LayerNormOpDef::DoInferMeta() {
     output_shape[_inputs[0]->ndim() - 1 - i] = 1;
   }
   AddOutput(_inputs[0]->meta());
+  // TODO: scale and bias shape should be normalized_shape
   AddOutput(NDArrayMeta().set_device(_inputs[0]->device()).set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
   AddOutput(NDArrayMeta().set_device(_inputs[0]->device()).set_dtype(_inputs[0]->dtype()).set_shape(output_shape));
 }
@@ -44,7 +45,34 @@ HTShapeList LayerNormOpDef::DoInferShape(const HTShapeList& input_shapes) {
     << normalized_shape() << " and input shape:" << _inputs[0]->shape();
     output_shape[input_shapes.at(0).size() - 1 - i] = 1;
   }
+  // TODO: scale and bias shape should be normalized_shape
   return {input_shapes.at(0), output_shape, output_shape};
+}
+
+void LayerNormOpDef::DoDeduceStates() {
+  size_t dim = normalized_shape().size();
+  HTShape local_shape = _inputs[0]->shape();
+  int max_dim = local_shape.size() - dim;
+  auto ds_input = _inputs[0]->get_distributed_states();
+  auto ds_scale = _inputs[1]->get_distributed_states();
+  auto ds_bias = _inputs[2]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid() && ds_scale.is_valid() && ds_bias.is_valid()
+            && ds_input.get_device_num() == ds_scale.get_device_num()
+            && ds_scale.get_device_num() == ds_bias.get_device_num()) 
+    << "LayerNormOpDef: input states must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1 && ds_scale.get_dim(-2) == 1 
+            && ds_bias.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds_input.check_max_dim(max_dim) && 
+            ds_scale.check_max_dim(max_dim) &&
+            ds_bias.check_max_dim(max_dim))
+    << "LayerNormOp only support input, scale and bias split in dimension < " << max_dim;
+  // scale and bias shape should be normalized_shape, so keep duplicate
+  HT_ASSERT(ds_scale.check_pure_duplicate() && ds_bias.check_pure_duplicate())
+    << "Scale and bias should be duplicate!";
+  _outputs[0]->set_distributed_states(ds_input);
+  _outputs[1]->set_distributed_states(ds_scale);
+  _outputs[2]->set_distributed_states(ds_bias);
 }
 
 void LayerNormGradientOpDef::DoCompute(const NDArrayList& inputs,
@@ -67,6 +95,12 @@ HTShapeList
 LayerNormGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(1), input_shapes.at(2), input_shapes.at(2)};
+}
+
+void LayerNormGradientOpDef::DoDeduceStates() {
+  _outputs[0]->set_distributed_states(_inputs[1]->get_distributed_states());
+  _outputs[1]->set_distributed_states(_inputs[2]->get_distributed_states());
+  _outputs[2]->set_distributed_states(_inputs[2]->get_distributed_states());
 }
 
 } // namespace autograd

@@ -6,6 +6,7 @@
 #include "hetu/autograd/topo.h"
 #include "hetu/autograd/runtime_context.h"
 #include "hetu/execution/run_metadata.h"
+#include "hetu/autograd/ops/Communicate.h"
 
 namespace hetu {
 namespace execution {
@@ -95,7 +96,15 @@ class DARExecutor {
 
  protected:
   bool PlaceDevices(const OpList& topo_order);
-
+  void SubstituteCommOp(const OpList& local_topo_order);
+  void CrossSend(std::unordered_map<int32_t, int32_t> split_cur_state, 
+                 std::unordered_map<int32_t, int32_t> split_target_state,
+                 int32_t depth, bool need_split, int32_t& device_index, 
+                 CommOp& op, TensorList& send_datas, std::vector<int32_t>& dsts, 
+                 int32_t& used_device_index);
+  Tensor CrossReceive(int32_t depth, int32_t& device_index, CommOp& op, 
+                      TensorList& recv_datas, std::vector<int32_t>& srcs,
+                      Tensor& self_send_data, int32_t& used_device_index);
   std::shared_ptr<DARSubExecutor>
   GetOrCreateSubExecutor(const TensorList& fetches);
 

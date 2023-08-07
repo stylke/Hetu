@@ -1,5 +1,6 @@
 #include "hetu/autograd/ops/MatMul.h"
 #include "hetu/autograd/ops/kernel_links.h"
+#include "hetu/autograd/distributed_states.h"
 
 namespace hetu {
 namespace autograd {
@@ -87,6 +88,76 @@ HTShapeList MatMulOpDef::DoInferShape(const HTShapeList& input_shapes) {
     << "Invalid input shapes: " << a << " (transpose_a = " << trans_a()
     << ") vs. " << b << " (transpose_b = " << trans_b() << "). ";
   return {{a.at(trans_a() ? 1 : 0), b.at(trans_b() ? 0 : 1)}};
+}
+
+void MatMulOpDef::DoDeduceStates() {
+  Tensor& a = _inputs[0];
+  Tensor& b = _inputs[1];
+  DistributedStates ds_a = a->get_distributed_states();
+  DistributedStates ds_b = b->get_distributed_states();
+  int32_t device_num = ds_a.get_device_num();
+
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num())
+            << "cannot convert src distributed states to unpaired dst distributed states!";
+  std::vector<std::unordered_map<int32_t, int32_t>> l2res_case({
+    {{-1, 1}, {0, 0}, {1, -2}}, // no trans
+    {{-1, 1}, {1, 0}, {0, -2}}  // trans A
+  });
+  auto& l2res_map = l2res_case[trans_a()];
+  std::vector<std::unordered_map<int32_t, int32_t>> r2res_case({
+    {{-1, 0}, {0, -2}, {1, 1}}, // no trans
+    {{-1, 0}, {0, 1}, {1, -2}}  // trans A
+  });
+  auto& r2res_map = r2res_case[trans_b()];
+  // deduce states
+  int32_t lrow = ds_a.get_dim(trans_a());
+  int32_t lcol = ds_a.get_dim(1-trans_a());
+  int32_t rrow = ds_b.get_dim(trans_b());
+  int32_t rcol = ds_b.get_dim(1-trans_b());
+  HT_ASSERT(lcol == rrow) << "MatMul: tensor a.dimension[1] " << lcol 
+                << " must be equal to tensor b.dimension[0] " << rrow;
+
+  std::unordered_map<int32_t, int32_t> res_states({
+    {-2, lcol}, {-1, device_num/(lcol*lrow*rcol)}, {0, lrow}, {1, rcol}
+  });
+  // deduce order
+  std::vector<int32_t> lorder = ds_a.get_order();
+  std::vector<int32_t> rorder = ds_b.get_order();
+  auto get_new_order = [](std::unordered_map<int32_t, int32_t>& _map,
+  std::vector<int32_t>& _order) -> std::vector<int32_t> {
+    std::vector<int32_t> new_order;
+    for (int32_t x : _order) {
+      new_order.push_back(_map[x]);
+    }
+    return new_order;
+  };
+  auto get_index = [](std::vector<int32_t>& _order, int32_t val) -> int32_t {
+    auto it = std::find(_order.begin(), _order.end(), val);
+    HT_ASSERT(it != _order.end()) << "dimension " << val << " is not in order!";
+    return it - _order.begin();
+  };
+  auto new_lorder = get_new_order(l2res_map, lorder);
+  auto new_rorder = get_new_order(r2res_map, rorder);
+  if (new_lorder != new_rorder) {
+    new_lorder[get_index(new_lorder, 1)] = -1;
+    new_rorder[get_index(new_rorder, 0)] = -1;
+    HT_ASSERT(new_lorder == new_rorder) << "new_lorder is not equal to new_rorder!";
+  } else if (std::find(new_lorder.begin(), new_lorder.end(), 0) != new_lorder.end()
+             && ds_a.get_dim(-1) > 1) {
+    int32_t ind0 = get_index(new_lorder, 0);
+    int32_t ind1 = get_index(new_lorder, 1);
+    if (ind0 > ind1) {
+      int32_t tmp = ind0;
+      ind0 = ind1;
+      ind1 = tmp;
+    }
+    HT_ASSERT(ind0 + 1 == ind1) << "ind0 + 1 != ind1";
+    new_lorder.insert(new_lorder.begin() + ind1, -1);
+  }
+  std::vector<int32_t> res_order(new_lorder);
+  // set distributed states for result c
+  Tensor& c = _outputs[0];
+  c->set_distributed_states({device_num, res_states, res_order});
 }
 
 } // namespace autograd

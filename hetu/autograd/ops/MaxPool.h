@@ -25,6 +25,7 @@ class MaxPoolOpDef : public OperatorDef {
     _padding(padding),
     _stride(stride) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   size_t get_kernel_H() const {
@@ -45,6 +46,8 @@ class MaxPoolOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -87,7 +90,8 @@ class MaxPoolGradientOpDef : public OperatorDef {
     _kernel_W(kernel_W),
     _padding(padding),
     _stride(stride) {
-    DoInferMeta();;
+    DoInferMeta();
+    DoDeduceStates();
   }
 
   size_t get_kernel_H() const {
@@ -108,6 +112,8 @@ class MaxPoolGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

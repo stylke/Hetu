@@ -31,6 +31,7 @@ class BatchNormOpDef : public OperatorDef {
     _momentum(momentum),
     _eps(eps) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double get_momentum() const {
@@ -43,6 +44,8 @@ class BatchNormOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;  
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -82,6 +85,7 @@ class BatchNormGradientOpDef : public OperatorDef {
                 op_meta),
     _eps(eps) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double get_eps() const {
@@ -90,6 +94,8 @@ class BatchNormGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

@@ -162,7 +162,11 @@
 
 - name: linear
   op: LinearOp
-  args: Tensor a, Tensor b, Tensor bias=None, bool trans_a=False, bool trans_b=False
+  args: Tensor a, Tensor b, bool trans_a=False, bool trans_b=False
+
+- name: linear
+  op: LinearOp
+  args: Tensor a, Tensor b, Tensor bias, bool trans_a=False, bool trans_b=False  
 
 - name: matmul
   op: MatMulOp
@@ -332,6 +336,18 @@
 - name: group
   op: GroupOp
   args: List[Tensor] deps
+
+#######################################################
+# Communication
+#######################################################
+
+- name: comm
+  op: CommOp
+  args: Tensor input, DistributedStates dst_ds, DeviceGroup dst_group
+
+- name: comm
+  op: CommOp
+  args: Tensor input, DistributedStates dst_ds  
 
 #######################################################
 # Others

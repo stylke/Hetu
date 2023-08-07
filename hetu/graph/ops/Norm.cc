@@ -29,6 +29,40 @@ HTShapeList NormOpImpl::DoInferShape(Operator& op, const HTShapeList& input_shap
   return {outshape};
 }
 
+void NormOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                const OpMeta& op_meta) const {
+  const DistributedStates& ds = inputs.at(0)->get_distributed_states();
+  HT_ASSERT(ds.is_valid()) 
+    << "NormOpImpl: distributed states for input tensor must be valid!";
+  HT_ASSERT(ds.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HTShape outshape = inputs.at(0)->shape();    
+  int64_t axi = dim() >= 0 ? dim(): dim() + outshape.size();
+  HT_ASSERT(ds.get_dim(axi) == 1)
+    << "The norm dim " << axi << " shouldn't be split!";
+  if (keepdim()) {
+    outputs.at(0)->set_distributed_states(ds);
+  } else {
+    std::unordered_map<int32_t, int32_t> new_states;
+    std::vector<int32_t> new_order;
+    for (auto& state : ds.get_states()) {
+      if (state.first < axi) {
+        new_states[state.first] = state.second;
+      } else {
+        new_states[state.first - 1] = state.second;
+      }
+    }
+    for (auto& o : ds.get_order()) {
+      if (o < axi) {
+        new_order.push_back(o);
+      } else {
+        new_order.push_back(o - 1);
+      }
+    }
+    outputs.at(0)->set_distributed_states({ds.get_device_num(), new_states, new_order});
+  }
+}
+
 void NormGradientOpImpl::DoCompute(Operator& op,
                                    const NDArrayList& inputs, NDArrayList& outputs,
                                    RuntimeContext& ctx) const {
@@ -40,6 +74,11 @@ void NormGradientOpImpl::DoCompute(Operator& op,
 
 HTShapeList NormGradientOpImpl::DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const {
   return {input_shapes.at(0)};
+}
+
+void NormGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                        const OpMeta& op_meta) const {
+  outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
 }
 
 Tensor MakeNormOp(Tensor input, int64_t p, int64_t dim, 

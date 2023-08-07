@@ -322,6 +322,20 @@ PyObject* PyDeviceGroup_get(PyDeviceGroup* self, PyObject* args) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyDeviceGroup_get_index(PyDeviceGroup* self, PyObject* args) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({"get_index(Device device)"});
+  auto parsed_args = parser.parse(args, nullptr);
+  if (parsed_args.signature_index() == 0) {
+    Device device = parsed_args.get_device(0);
+    return PyLong_FromInteger(self->device_group.get_index(device));
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
 PyObject* PyDeviceGroup_rich_cmp(PyObject* obj_x, PyObject* obj_y, int op) {
   HT_PY_FUNC_BEGIN
   if (!PyDeviceGroup_Check(obj_x) || !PyDeviceGroup_Check(obj_y)) {
@@ -376,6 +390,7 @@ PyGetSetDef PyDeviceGroup_properties[] = {
 PyMethodDef PyDeviceGroup_methods[] = {
   {"contains", (PyCFunction) PyDeviceGroup_contains, METH_VARARGS, nullptr }, 
   {"get", (PyCFunction) PyDeviceGroup_get, METH_VARARGS, nullptr }, 
+  {"get_index", (PyCFunction) PyDeviceGroup_get_index, METH_VARARGS, nullptr }, 
   {"__reduce__", (PyCFunction) PyDeviceGroup_reduce, METH_NOARGS, nullptr}, 
   {nullptr}
 };

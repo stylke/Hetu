@@ -22,14 +22,17 @@ class BinaryCrossEntropyOpDef : public OperatorDef {
   : OperatorDef(quote(BinaryCrossEntropyOp), {preds, labels}, op_meta),
     _reduction(reduction) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   ReductionType reduction() const {
     return _reduction;
   }
-
+  
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;  
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -72,6 +75,7 @@ class BinaryCrossEntropyGradientOpDef : public OperatorDef {
                 {preds, labels, grad_output}, op_meta),
     _reduction(reduction) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   ReductionType reduction() const {

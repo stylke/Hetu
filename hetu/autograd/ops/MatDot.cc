@@ -34,5 +34,19 @@ HTShapeList MatDotOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(0)};
 }
 
+void MatDotOpDef::DoDeduceStates() {
+  DistributedStates ds_a = _inputs[0]->get_distributed_states();
+  DistributedStates ds_b = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && 
+            ds_a.get_device_num() == ds_b.get_device_num()) 
+    << "MatDotOpDef: distributed states for a and b must be valid!";
+  HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
+    << "Tensor a and b shouldn't be partial";
+  // TODO: support tensor parallel
+  HT_ASSERT(ds_a.check_pure_duplicate() && ds_b.check_pure_duplicate())
+    << "MatDot only require input tensor a and b are both pure duplicate!";
+  _outputs[0]->set_distributed_states(ds_a);
+}
+
 } // namespace autograd
 } // namespace hetu

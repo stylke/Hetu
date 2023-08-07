@@ -18,6 +18,7 @@ class TransposeOpDef : public OperatorDef {
                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(TransposeOp), {input}, op_meta), _perms(perms) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape get_perms() const {
@@ -26,6 +27,8 @@ class TransposeOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

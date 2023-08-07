@@ -25,7 +25,11 @@ class DefineByRunGraph : public Graph {
                    size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
   : DefineByRunGraph(name, init_capacity) {}
 
-  NDArrayList Run(const TensorList& fetches, const FeedDict& feed_dict = {});
+  NDArrayList Run(const TensorList& fetches, 
+                  const FeedDict& feed_dict = {}) {}
+
+  NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
+                  const FeedDict& feed_dict = {}, const int num_micro_batches = 1);
 
   GraphType type() const {
     return GraphType::DEFINE_BY_RUN;
@@ -35,7 +39,13 @@ class DefineByRunGraph : public Graph {
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);
 
+  void ResetVariableDataInner(const Tensor& tensor,
+                              const Initializer& init) override;
+
   NDArray GetOrCompute(Tensor& tensor);
+
+  NDArray GetOrCompute(const Tensor& loss, Tensor& tensor, 
+                       const int num_micro_batches = 1) {}
 
   std::tuple<TensorList, TensorList, FeedDict>
   GenerateExecutionTargets(const TensorList& fetches,
@@ -103,6 +113,7 @@ class DefineByRunGraph : public Graph {
   std::shared_ptr<ExecutableGraph> _exec_graph;
   Op2OpMap _op_to_exec_op_mapping;
   Tensor2TensorMap _tensor_to_exec_tensor_mapping;
+  std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
   std::unordered_map<OpId, size_t> _op_to_num_destructed_outputs;
 };
 

@@ -20,6 +20,7 @@ class SqrtOpDef : public OperatorDef {
             const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(SqrtOp), {input}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
@@ -50,6 +51,7 @@ class ReciprocalSqrtOpDef : public OperatorDef {
                       const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ReciprocalSqrtOp), {grad_output}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:

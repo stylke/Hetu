@@ -207,6 +207,9 @@ class OperatorDef : public shared_ptr_target {
   bool is_computed() const {
     return _computed;
   }
+  
+  void ReplaceInput(size_t index, Tensor new_input); // 暂时先挪到public来
+  void AddInDeps(const TensorList& in_deps);
 
  protected:
   // Walkaround methods to get the corresponding wrapper
@@ -231,8 +234,6 @@ class OperatorDef : public shared_ptr_target {
     for (const auto& output_meta : output_meta_list)
       AddOutput(output_meta);
   }
-
-  void ReplaceInput(size_t index, Tensor new_input);
 
   virtual NDArrayList DoCompute(const NDArrayList& inputs,
                                 RuntimeContext& ctx) {
@@ -265,6 +266,8 @@ class OperatorDef : public shared_ptr_target {
                        << "\" is not defined";
     return {};
   }
+
+  virtual void DoDeduceStates();
 
   virtual NDArrayList DoAllocOutputs(const NDArrayList& inputs,
                                      RuntimeContext& ctx);
@@ -371,9 +374,24 @@ static const uint64_t PEER_TO_PEER_SEND_OP = 1ul << 5;
 static const uint64_t PEER_TO_PEER_RECV_OP = 1ul << 6;
 static const uint64_t ALL_TO_ALL_OP = 1ul << 7;
 static const uint64_t ALL_REDUCE_OP = 1ul << 8;
+static const uint64_t ALL_GATHER_OP = 1ul << 9;
+static const uint64_t REDUCE_SCATTER_OP = 1ul << 10;
+static const uint64_t BROADCAST_OP = 1ul << 11;
+static const uint64_t REDUCE_OP = 1ul << 12;
+static const uint64_t P2P_OP = 1ul << 13;
+static const uint64_t BATCHED_ISEND_IRECV_OP = 1ul << 14;
+static const uint64_t GATHER_OP = 1ul << 15;
+static const uint64_t SCATTER_OP = 1ul << 16;
+static const uint64_t COMM_SPLIT_OP = 1ul << 19;
+static const uint64_t COMM_OP = 1ul << 20;
+static const uint64_t UNKNOWN_OP = 1ul << 21;
+static const uint64_t SPLIT_OP = 1ul << 61;
 static const uint64_t OPTIMIZER_UPDATE_OP = 1ul << 62;
 static const uint64_t GROUP_OP = 1ul << 63;
 
+inline bool is_comm_op(const Operator& op) {
+  return (op->op_indicator() & COMM_OP) != 0;
+}
 inline bool is_data_loader_op(const Operator& op) {
   return (op->op_indicator() & DATA_LOADER_OP) != 0;
 }
@@ -402,9 +420,15 @@ inline bool is_all_to_all_op(const Operator& op) {
 inline bool is_all_reduce_op(const Operator& op) {
   return (op->op_indicator() & ALL_REDUCE_OP) != 0;
 }
+inline bool is_batched_isend_irecv_op(const Operator& op) {
+  return (op->op_indicator() & BATCHED_ISEND_IRECV_OP) != 0;
+}
 inline bool is_communucation_op(const Operator& op) {
   return is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op) ||
     is_all_to_all_op(op) || is_all_reduce_op(op);
+}
+inline bool is_split_op(const Operator& op) {
+  return (op->op_indicator() & SPLIT_OP) != 0;
 }
 inline bool is_optimizer_update_op(const Operator& op) {
   return (op->op_indicator() & OPTIMIZER_UPDATE_OP) != 0;

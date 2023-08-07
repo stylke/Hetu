@@ -20,6 +20,7 @@ class InstanceNormOpDef : public OperatorDef {
                     double eps = 1e-7, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(InstanceNormOp), {input}, op_meta), _eps(eps) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double get_momentum() const {
@@ -40,6 +41,8 @@ class InstanceNormOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -76,6 +79,7 @@ class InstanceNormGradientOpDef : public OperatorDef {
   : OperatorDef(quote(InstanceNormGradientOp), {output_grad, input, save_mean, save_var}, op_meta),
   _eps(eps) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double get_eps() const {
@@ -84,6 +88,8 @@ class InstanceNormGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

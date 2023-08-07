@@ -51,6 +51,22 @@ inline MPI_Datatype to_MPI_Datatype(DataType dtype) {
   }
 }
 
+inline int to_num_bytes(DataType dtype) {
+  switch (dtype) {
+    case kUInt8: return 1;
+    case kInt8: return 1;
+    case kInt16: return 2;
+    case kInt32: return 4;
+    case kInt64: return 8;
+    case kFloat32: return 4;
+    case kFloat64: return 8;
+    default:
+      HT_NOT_IMPLEMENTED << "Data type " << dtype
+                         << " is not supported for MPI.";
+      __builtin_unreachable();
+  }
+}
+
 static std::once_flag mpi_init_flag;
 static int mpi_world_rank = -1;
 static int mpi_world_size = -1;
@@ -210,6 +226,81 @@ void MPICommunicationGroupDef::AllReduce(const NDArray& input, NDArray& output,
                              recv_buf, numel, mpi_dtype, mpi_red_op, _comm));
     },
     "MPI_AllReduce(reduction=" + ReductionType2Str(red_type) + ")");
+}
+
+void MPICommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
+                                                 NDArrayList& outputs,
+                                                 NDArray contiguous_buffers,
+                                                 ReductionType red_type) {
+  size_t n_bytes = 0;
+  for (size_t i = 0; i < inputs.size(); i++) {
+    HT_ASSERT_CPU_DEVICE(inputs[i]);
+    HT_ASSERT_CPU_DEVICE(outputs[i]);
+    HT_ASSERT_EXCHANGABLE(inputs[i], outputs[i]);
+    n_bytes += inputs[i]->numel();
+  }
+  HT_ASSERT(contiguous_buffers->numel() >= n_bytes);
+  auto mpi_dtype = to_MPI_Datatype(inputs[0]->dtype());
+  auto mpi_red_op = to_MPI_Op(red_type);
+
+  if (contiguous_buffers->numel() > 0) {
+    void* buffer_ptr = contiguous_buffers->raw_data_ptr();
+    _latest_future = CPUStream(_stream).EnqueueTask(
+      [inputs, outputs, buffer_ptr, mpi_dtype, mpi_red_op, this]() {
+        int offset = 0;
+        int num_bytes_per_element = to_num_bytes(inputs[0]->dtype());
+        for (size_t i = 0; i < inputs.size(); i++) {
+          void* send_buf = inputs[i]->raw_data_ptr();
+          int num_bytes = inputs[i]->numel() * num_bytes_per_element;
+          std::memcpy(buffer_ptr + offset, send_buf, num_bytes);
+          offset += num_bytes;
+        }
+        MPICallGuard();
+        MPI_CALL(MPI_Allreduce(MPI_IN_PLACE, buffer_ptr,
+                               int(offset / num_bytes_per_element), mpi_dtype,
+                               mpi_red_op, _comm));
+        offset = 0;
+        for (size_t i = 0; i < outputs.size(); i++) {
+          void* recv_buf = outputs[i]->raw_data_ptr();
+          int num_bytes = outputs[i]->numel() * num_bytes_per_element;
+          std::memcpy(recv_buf, buffer_ptr + offset, num_bytes);
+          offset += num_bytes;
+        }
+      },
+      "AllReduceCoalesce(reduction=" + ReductionType2Str(red_type) + ")");
+  } else {
+    _latest_future = CPUStream(_stream).EnqueueTask(
+      [inputs, outputs, mpi_dtype, mpi_red_op, this]() {
+        MPICallGuard();
+        for (size_t i = 0; i < inputs.size(); i++) {
+          void* send_buf = inputs[i]->raw_data_ptr();
+          void* recv_buf = outputs[i]->raw_data_ptr();
+          auto numel = inputs[i]->numel();
+          MPI_CALL(MPI_Allreduce(send_buf == recv_buf ? MPI_IN_PLACE : send_buf,
+                                 recv_buf, numel, mpi_dtype, mpi_red_op,
+                                 _comm));
+        }
+      },
+      "MPI_AllReduce(reduction=" + ReductionType2Str(red_type) + ")");
+  }
+}
+
+void MPICommunicationGroupDef::AlltoAll(const NDArray& input, NDArray& output) {
+  HT_ASSERT_CPU_DEVICE(input);
+  HT_ASSERT_CPU_DEVICE(output);
+  HT_ASSERT_EXCHANGABLE(input, output);
+  void* send_buf = input->raw_data_ptr();
+  void* recv_buf = output->raw_data_ptr();
+  auto send_numl = input->numel() / _size;
+  auto recv_numl = output->numel() / _size;
+  auto mpi_dtype = to_MPI_Datatype(input->dtype());
+  _latest_future = CPUStream(_stream).EnqueueTask(
+    [send_buf, recv_buf, send_numl, recv_numl, mpi_dtype, this]() {
+      MPICallGuard();
+      MPI_CALL(MPI_Alltoall(send_buf, send_numl, mpi_dtype, recv_buf, recv_numl,
+                            mpi_dtype, _comm));
+    },
+    "MPI_AlltoAll");
 }
 
 void MPICommunicationGroupDef::Reduce(const NDArray& input, NDArray& output,
@@ -379,6 +470,53 @@ void MPICommunicationGroupDef::Recv(NDArray& data, int sender) {
       HT_ASSERT(s.MPI_ERROR == MPI_SUCCESS) << "Failed in MPI_RECV.";
     },
     "MPI_Recv(sender=" + std::to_string(sender) + ")");
+}
+
+Task MPICommunicationGroupDef::ISend(const NDArray& data, int receiver) {
+  int dst = world_to_group_rank(receiver);
+  HT_ASSERT(dst != _rank) << "Cannot send to self.";
+  size_t size = data->numel();
+  if (size == 0)
+    return Task();
+  void* send_buf = data->raw_data_ptr();
+  auto mpi_dtype = to_MPI_Datatype(data->dtype());
+  int tag = static_cast<int>(data->dtype()); // simply use type as tag
+  auto task =
+    std::function<void()>([send_buf, size, mpi_dtype, dst, tag, this]() {
+      MPI_CALL(MPI_Send(send_buf, size, mpi_dtype, dst, tag, _comm));
+    });
+  return task;
+}
+
+Task MPICommunicationGroupDef::IRecv(NDArray& data, int sender) {
+  int src = world_to_group_rank(sender);
+  HT_ASSERT(src != _rank) << "Cannot receive from self.";
+  size_t size = data->numel();
+  if (size == 0)
+    return Task();
+  void* recv_buf = data->raw_data_ptr();
+  auto mpi_dtype = to_MPI_Datatype(data->dtype());
+  int tag = static_cast<int>(data->dtype()); // simply use type as tag
+  auto task =
+    std::function<void()>([recv_buf, size, mpi_dtype, src, tag, this]() {
+      MPI_Status s;
+      memset(&s, 0, sizeof(MPI_Status));
+      MPI_CALL(MPI_Recv(recv_buf, size, mpi_dtype, src, tag, _comm, &s));
+      HT_ASSERT(s.MPI_ERROR == MPI_SUCCESS) << "Failed in MPI_RECV.";
+    });
+  return task;
+}
+
+void MPICommunicationGroupDef::BatchedISendIRecv(
+  const std::vector<Task>& tasks) {
+  _latest_future = CPUStream(_stream).EnqueueTask(
+    [tasks, this]() {
+      MPICallGuard();
+      for (auto& task : tasks) {
+        task();
+      }
+    },
+    "MPI_BatchedISendIRecv");
 }
 
 void MPICommunicationGroupDef::Barrier(bool sync) {

@@ -22,6 +22,7 @@ class BatchMatMulOpDef : public OperatorDef {
     _trans_a(trans_a),
     _trans_b(trans_b) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   inline bool trans_a() const {
@@ -34,6 +35,8 @@ class BatchMatMulOpDef : public OperatorDef {
 
  protected:  
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

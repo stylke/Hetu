@@ -4,6 +4,7 @@
 #include "hetu/autograd/common.h"
 #include "hetu/autograd/op_meta.h"
 #include "hetu/autograd/init/initializer.h"
+#include "hetu/autograd/distributed_states.h"
 #include "hetu/utils/shared_ptr_wrapper.h"
 #include <functional>
 
@@ -18,7 +19,7 @@ class Tensor : public shared_ptr_wrapper<TensorDef> {
  public:
   Tensor() = default;
   Tensor(const TensorName& name, int32_t output_id,
-         const NDArrayMeta& meta = {});
+         const NDArrayMeta& meta = {}, const DistributedStates& distributed_states = {});
 };
 
 class TensorDef : public shared_ptr_target {
@@ -31,8 +32,8 @@ class TensorDef : public shared_ptr_target {
 
  public:
   TensorDef(const constrcutor_access_key&, const TensorName& name,
-            int32_t output_id, const NDArrayMeta& meta = {})
-  : _id{_next_tensor_id()}, _name(name), _output_id(output_id), _meta(meta) {}
+            int32_t output_id, const NDArrayMeta& meta = {}, const DistributedStates& distributed_states = {})
+  : _id{_next_tensor_id()}, _name(name), _output_id(output_id), _meta(meta), _distributed_states(distributed_states) {}
 
   ~TensorDef() = default;
 
@@ -122,6 +123,7 @@ class TensorDef : public shared_ptr_target {
 
   void set_placement(const Device& p) {
     _meta.set_device(p);
+    _distributed_states.set_placement(p);
   }
 
   bool is_computed() const {
@@ -152,6 +154,19 @@ class TensorDef : public shared_ptr_target {
 
   void ZeroGrad();
 
+  DistributedStates get_distributed_states() {
+    return _distributed_states;
+  }
+
+  void set_distributed_states(const DistributedStates& distributed_states) {
+    _distributed_states.set_distributed_states(distributed_states);
+  }
+
+  // do when MapToParallelDevices
+  void set_placement_group(const DeviceGroup& placement_group) {
+    _distributed_states.set_placement_group(placement_group);
+  }
+
  protected:
   void SetProducer(Operator& op);
 
@@ -176,6 +191,9 @@ class TensorDef : public shared_ptr_target {
   bool _computed{false};
   NDArray _data;
   Tensor _grad;
+
+  // for distributed attributes
+  DistributedStates _distributed_states;  
 
  private:
   static TensorId _next_tensor_id() {

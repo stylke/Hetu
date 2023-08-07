@@ -34,6 +34,21 @@ HTShapeList ConcatOpImpl::DoInferShape(Operator& op,
   return {shapeA};
 }
 
+void ConcatOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                  const OpMeta& op_meta) const {
+  const DistributedStates& ds_a = inputs.at(0)->get_distributed_states();
+  const DistributedStates& ds_b = inputs.at(1)->get_distributed_states();
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
+    << "ConcatOpDef: distributed states for input a and input b must be valid!";
+  HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
+    << "Tensor a & b shouldn't be partial";  
+  HT_ASSERT(ds_a.check_equal(ds_b)) 
+    << "Distributed states for tensor a and tensor b must be equal!";
+  HT_ASSERT(ds_a.get_dim(get_axis()) == 1)
+    << "Concat was not allowed in splited dimension: " << get_axis();
+  outputs.at(0)->set_distributed_states(ds_a);
+}
+
 void ConcatGradientOpImpl::DoCompute(Operator& op,
                                      const NDArrayList& inputs,
                                      NDArrayList& outputs, RuntimeContext& ctx) const {
@@ -47,6 +62,11 @@ HTShapeList ConcatGradientOpImpl::DoInferShape(Operator& op,
                                                const HTShapeList& input_shapes,
                                                RuntimeContext& ctx) const {
   return {input_shapes.at(0)};
+}
+
+void ConcatGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                          const OpMeta& op_meta) const {
+  outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
 }
 
 Tensor MakeConcatOp(Tensor inputA, Tensor inputB, size_t axis,

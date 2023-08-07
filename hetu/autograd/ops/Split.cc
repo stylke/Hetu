@@ -85,6 +85,20 @@ HTShapeList SplitOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {output_shape};
 }
 
+void SplitOpDef::DoDeduceStates() {
+  DistributedStates ds_input = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid())
+    << "SplitOpDef: distributed states for input tensor must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Tensor input shouldn't be partial!";
+  HTShape axes = get_axes();    
+  for (int i = 0; i < axes.size(); i++) {
+    HT_ASSERT(ds_input.get_dim(axes[i]) == 1)
+      << "Dimension in axes shouldn't be split: " << axes[i];
+  }
+  _outputs[0]->set_distributed_states(ds_input);    
+}
+
 void SplitGradientOpDef::DoCompute(const NDArrayList& inputs,
                                    NDArrayList& outputs, RuntimeContext& ctx) {
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
@@ -134,6 +148,10 @@ HTShapeList SplitGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   }
   set_ori_output_shape(ori_shape);
   return {output_shape};
+}
+
+void SplitGradientOpDef::DoDeduceStates() {
+  _outputs[0]->set_distributed_states(_inputs[2]->get_distributed_states());  
 }
 
 } // namespace autograd

@@ -23,6 +23,7 @@ class PadOpDef : public OperatorDef {
     _paddings(paddings),
     _constant(constant) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   const std::string& get_mode() const {
@@ -39,6 +40,8 @@ class PadOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -76,6 +79,7 @@ class PadGradientOpDef : public OperatorDef {
     _mode(mode),
     _paddings(paddings) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   const std::string& get_mode() const {

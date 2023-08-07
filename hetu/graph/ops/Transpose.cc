@@ -44,6 +44,46 @@ HTShapeList TransposeOpImpl::DoInferShape(Operator& op,
   return {res_shape};
 }
 
+void TransposeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                     const OpMeta& op_meta) const {
+  HTShape perm = get_perms();
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "TransposeOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  std::unordered_map<int32_t, int32_t> states = ds_input.get_states();
+  std::vector<int32_t> order = ds_input.get_order();
+  int32_t device_num = ds_input.get_device_num();
+  auto get_perm_index = [&](int32_t key) -> int32_t {
+    for (int i = 0; i < perm.size(); i++) {
+      if (perm[i] == key) {
+        return i;
+      }
+    }
+    return -1;
+  };
+  // states
+  std::unordered_map<int32_t, int32_t> new_states;
+  for (auto& pair: states) {
+    if (pair.first >= 0) {
+      new_states[get_perm_index(pair.first)] = pair.second;
+    } else {
+      new_states[pair.first] = pair.second;
+    }
+  }
+  // order
+  std::vector<int32_t> new_order;
+  for (auto o : order) {
+    if (o >= 0) {
+      new_order.push_back(get_perm_index(o));
+    } else {
+      new_order.push_back(o);
+    }
+  }
+  outputs.at(0)->set_distributed_states({device_num, new_states, new_order});     
+}
+
 Tensor MakeTransposeOp(Tensor input, HTShape perms, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<TransposeOpImpl>(perms),

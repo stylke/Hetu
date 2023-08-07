@@ -44,6 +44,18 @@ HTShapeList AvgPoolOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {{N, C, p_H, p_W}};
 }
 
+void AvgPoolOpDef::DoDeduceStates() {
+  DistributedStates ds = _inputs[0]->get_distributed_states();
+  HT_ASSERT(ds.is_valid()) 
+    << "AvgPoolOpDef: distributed states for input tensor must be valid!";
+  HT_ASSERT(ds.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  HT_ASSERT(ds.get_dim(2) == 1 && ds.get_dim(3) == 1)
+    << "H & W dimension shouldn't be splited, H: "
+    << ds.get_dim(2) << ", W: " << ds.get_dim(3);
+  _outputs[0]->set_distributed_states(ds);
+}
+
 void AvgPoolGradientOpDef::DoCompute(const NDArrayList& inputs,
                                      NDArrayList& outputs,
                                      RuntimeContext& ctx) {
@@ -61,6 +73,10 @@ HTShapeList
 AvgPoolGradientOpDef::DoInferShape(const HTShapeList& input_shapes) {
   CheckNumInputsEqual(input_shapes.size());
   return {input_shapes.at(2)};
+}
+
+void AvgPoolGradientOpDef::DoDeduceStates() {
+  _outputs[0]->set_distributed_states(_inputs[2]->get_distributed_states());
 }
 
 } // namespace autograd

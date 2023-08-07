@@ -52,6 +52,10 @@ std::string ArgType2Str(ArgType type) {
       return "FeedDict";
     case ArgType::SGDOPTIMIZER:
       return "SGDOptimizer";
+    case ArgType::DISTRIBUTED_STATES:
+      return "hetu.DistributedStates";
+    case ArgType::INITIALIZER:
+      return "hetu.Initializer";
     default:
       HT_VALUE_ERROR << "Unknown argument type: " << static_cast<int>(type);
       __builtin_unreachable();
@@ -72,6 +76,8 @@ ArgType Str2ArgType(const std::string& type) {
       type == "std::vector<bool>" || type == "vector<bool>" || 
       type == "HTKeepDims")
     return ArgType::BOOL_LIST;
+  if (type == "std::unordered_map<int,int>")
+    return ArgType::DICT;
   if (type == "List[int]" || type == "IntList" ||
       type == "std::vector<int64_t>" || type == "vector<int64_t>" || 
       type == "HTShape" || type == "HTStride" || type == "HTAxes")
@@ -120,6 +126,10 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::FEED_DICT;
   if (type == "Optimizer" || type == "SGDOptimizer")
     return ArgType::SGDOPTIMIZER;
+  if (type == "hetu.DistributedStates" || type == "DistributedStates")
+    return ArgType::DISTRIBUTED_STATES;
+  if (type == "hetu.Initializer" || type == "Initializer")
+    return ArgType::INITIALIZER;
   HT_VALUE_ERROR << "Unknown argument type: " << type;
   __builtin_unreachable();
 }
@@ -128,7 +138,7 @@ std::ostream& operator<<(std::ostream& os, const ArgType& type) {
   os << ArgType2Str(type);
   return os;
 }
-
+// TODO: FnArg & Check Dict for unordered_map
 FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
   auto space = fmt.find(' ');
   HT_ASSERT(space != std::string::npos)
@@ -240,6 +250,8 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
       case ArgType::OPERATOR:
       case ArgType::OPERATOR_LIST:
       case ArgType::FEED_DICT:
+      case ArgType::DISTRIBUTED_STATES:
+      case ArgType::INITIALIZER:
         if (!_default_as_none) {
           HT_VALUE_ERROR << "Default " << _arg_type << " can only be None";
         }
@@ -261,6 +273,10 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyFloat(obj);
     case ArgType::STRING:
       return CheckPyString(obj);
+    case ArgType::DICT:
+      return true;
+      // TODO:
+      // return CheckPyDict(obj);
     case ArgType::BOOL_LIST:
       return CheckPyBoolList(obj);
     case ArgType::INT64_LIST:
@@ -297,6 +313,10 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyFeedDict(obj);
     case ArgType::SGDOPTIMIZER:
       return CheckPySGDOptimizer(obj);
+    case ArgType::DISTRIBUTED_STATES:
+      return CheckPyDistributedStates(obj);
+    case ArgType::INITIALIZER:
+      return CheckPyInitializer(obj);
     default:
       HT_VALUE_ERROR << "Unknown argument type: " 
         << static_cast<int>(_arg_type);

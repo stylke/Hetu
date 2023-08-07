@@ -30,13 +30,19 @@ Tensor Optimizer::ApplyGradients(const GradAndVarList& grads_and_vars,
 
 Tensor Optimizer::MakeStates(const Tensor& variable, const OpName& state_name) {
   const auto& producer = variable->producer();
-  HT_VALUE_ERROR_IF(!is_parameter_op(producer));
-  return MakeVariableOp(ZerosInitializer(), variable->shape(),
-                        variable->dtype(), false,
-                        OpMeta()
-                          .set_device_group(producer->device_group())
-                          .set_eager_device(producer->eager_device())
-                          .set_name(variable->name() + "_" + state_name));
+  HT_VALUE_ERROR_IF(!producer->is_parameter());
+  // special case: Varibale States should be set distributed_states
+  const DistributedStates& ds_variable = variable->get_distributed_states(); 
+  HT_ASSERT (ds_variable.is_valid()) 
+    << "Diastributed States for varibale " << variable << " must be valid!";  
+  Tensor states = MakeVariableOp(ZerosInitializer(), variable->shape(),
+                                 variable->dtype(), false, ds_variable, 
+                                 OpMeta()
+                                   .set_device_group(producer->device_group())
+                                   .set_eager_device(producer->eager_device())
+                                   .set_name(variable->name() + "_" + state_name));
+
+  return std::move(states);
 }
 
 GradAndVarList Optimizer::ComputeGradients(const Tensor& loss,
@@ -46,7 +52,7 @@ GradAndVarList Optimizer::ComputeGradients(const Tensor& loss,
   if (vars.empty()) {
     auto topo_order = Graph::TopoSort(loss);
     for (auto& op_ref : topo_order)
-      if (is_parameter_op(op_ref))
+      if (op_ref.get()->is_parameter())
         vars.push_back(op_ref.get()->output(0));
   }
   TensorList grads = Graph::Gradients(loss, vars, grad_loss);

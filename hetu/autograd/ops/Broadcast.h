@@ -18,6 +18,7 @@ class BroadcastOpDef : public OperatorDef {
                  const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(BroadcastOp), {input, output}, op_meta), _mode(0) {
     DoInferMeta();
+    // DoDeduceStates(); // not sure
   }
 
   BroadcastOpDef(const constrcutor_access_key&, Tensor input,
@@ -28,6 +29,7 @@ class BroadcastOpDef : public OperatorDef {
     _shape(shape),
     _add_axes(add_axes) {
     DoInferMeta();
+    // DoDeduceStates(); // not sure
   }
 
   const HTShape& get_shape() const {
@@ -68,6 +70,8 @@ class BroadcastOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  // void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

@@ -29,6 +29,7 @@ class LayerNormOpDef : public OperatorDef {
     _normalized_shape(normalized_shape),
     _eps(eps) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   double get_momentum() const {
@@ -46,6 +47,8 @@ class LayerNormOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -87,6 +90,7 @@ class LayerNormGradientOpDef : public OperatorDef {
     _normalized_shape(normalized_shape),
     _eps(eps) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape normalized_shape() const {
@@ -99,6 +103,8 @@ class LayerNormGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

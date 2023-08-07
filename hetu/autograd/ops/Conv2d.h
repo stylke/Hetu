@@ -27,6 +27,7 @@ class Conv2dOpDef : public OperatorDef {
     _padding = {padding, padding};
     _stride = {stride, stride};
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape get_padding() const {
@@ -39,6 +40,8 @@ class Conv2dOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -78,6 +81,7 @@ class Conv2dGradientofFilterOpDef : public OperatorDef {
     _padding(padding),
     _stride(stride) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape get_padding() const {
@@ -91,6 +95,8 @@ class Conv2dGradientofFilterOpDef : public OperatorDef {
  protected:
   void DoInferMeta() override;
 
+  void DoDeduceStates() override;
+  
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 
@@ -130,6 +136,7 @@ class Conv2dGradientofDataOpDef : public OperatorDef {
     _padding(padding),
     _stride(stride) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape get_padding() const {
@@ -142,6 +149,8 @@ class Conv2dGradientofDataOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -179,6 +188,7 @@ class Conv2dAddBiasOpDef : public OperatorDef {
     _padding = {padding, padding};
     _stride = {stride, stride};
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape get_padding() const {
@@ -192,6 +202,8 @@ class Conv2dAddBiasOpDef : public OperatorDef {
  protected:
   void DoInferMeta() override;
 
+  void DoDeduceStates() override;
+  
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
 

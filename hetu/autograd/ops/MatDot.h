@@ -19,6 +19,7 @@ class MatDotOpDef : public OperatorDef {
               int64_t axes = 0, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(MatDotOp), {a, b}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   int64_t get_axes() const {
@@ -27,6 +28,8 @@ class MatDotOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

@@ -12,7 +12,7 @@ namespace hetu {
 namespace graph {
 
 #define _PY_TENSOR_CTOR_COMMON_ARGS                                            \
-  "DataType dtype=None, bool requires_grad=false, " OP_META_ARGS
+  "DataType dtype=None, bool requires_grad=false, DistributedStates ds=None, " OP_META_ARGS
 
 inline PyObject* _from_shape_ctor_helper(ParsedPyArgs& parsed_args, 
                                          Initializer&& init, 
@@ -24,8 +24,9 @@ inline PyObject* _from_shape_ctor_helper(ParsedPyArgs& parsed_args,
   self->tensor = MakeParameterOp(
     std::move(init), parsed_args.get_int64_list(0),
     parsed_args.get_dtype_or_peek(arg_offset + 1).value_or(kFloat32), 
-    parsed_args.get_bool_or_default(arg_offset + 2), 
-    parse_op_meta(parsed_args, arg_offset + 3));
+    parsed_args.get_bool_or_default(arg_offset + 2),
+    parsed_args.get_distributed_states_or_empty(arg_offset + 3),     
+    parse_op_meta(parsed_args, arg_offset + 4));
   return reinterpret_cast<PyObject*>(self);
 }
 
@@ -40,7 +41,8 @@ inline PyObject* _like_tensor_ctor_helper(ParsedPyArgs& parsed_args,
     std::move(init), parsed_args.get_tensor(0)->shape(),
     parsed_args.get_dtype_or_peek(arg_offset + 1).value_or(kFloat32),
     parsed_args.get_bool_or_default(arg_offset + 2),
-    parse_op_meta(parsed_args, arg_offset + 3));
+    parsed_args.get_distributed_states_or_empty(arg_offset + 3),
+    parse_op_meta(parsed_args, arg_offset + 4));
   return reinterpret_cast<PyObject*>(self);
 }
 
@@ -72,21 +74,24 @@ PyObject* TensorCopyCtor(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
       nullopt);
     self->tensor = MakeParameterOp(data, false, kUndeterminedDataType,
                                   parsed_args.get_bool_or_default(2),
-                                  parse_op_meta(parsed_args, 3));
+                                  parsed_args.get_distributed_states_or_empty(3),
+                                  parse_op_meta(parsed_args, 4));
   } else if (parsed_args.signature_index() == 1) {
     new (&self->tensor) Tensor();
     NDArray data = NDArrayCopyFromNDArrayCtor(
       parsed_args.get_ndarray(0), parsed_args.get_dtype_or_peek(1), nullopt);
     self->tensor = MakeParameterOp(data, false, kUndeterminedDataType,
                                   parsed_args.get_bool_or_default(2),
-                                  parse_op_meta(parsed_args, 3));
+                                  parsed_args.get_distributed_states_or_empty(3),
+                                  parse_op_meta(parsed_args, 4));
   } else if (parsed_args.signature_index() == 2) {
     new (&self->tensor) Tensor();
     NDArray data = NDArrayCopyFromSequenceCtor(
       parsed_args.get_py_obj(0), parsed_args.get_dtype_or_peek(1), nullopt);
     self->tensor = MakeParameterOp(data, false, kUndeterminedDataType,
                                   parsed_args.get_bool_or_default(2),
-                                  parse_op_meta(parsed_args, 3));
+                                  parsed_args.get_distributed_states_or_empty(3),
+                                  parse_op_meta(parsed_args, 4));
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -108,7 +113,7 @@ PyObject* PyTensor_placeholder(PyTypeObject* type, PyObject* args, PyObject* kwa
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   
   static PyArgParser parser({
-    "placeholder(DataType dtype, HTShape shape, " OP_META_ARGS ")", 
+    "placeholder(DataType dtype, HTShape shape, DistributedStates ds=None, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
   
@@ -118,7 +123,8 @@ PyObject* PyTensor_placeholder(PyTypeObject* type, PyObject* args, PyObject* kwa
       MakePlaceholderOp(NDArrayMeta()
                           .set_dtype(parsed_args.get_dtype(0))
                           .set_shape(parsed_args.get_int64_list(1)),
-                        parse_op_meta(parsed_args, 2));
+                        parsed_args.get_distributed_states_or_empty(2),
+                        parse_op_meta(parsed_args, 3));
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -134,6 +140,78 @@ REGISTER_TENSOR_CLASS_METHOD(
   (PyCFunction) PyTensor_placeholder, 
   METH_VARARGS | METH_KEYWORDS, 
   nullptr);
+
+PyObject* PyTensor_parallel_placeholder(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  auto* unsafe_self = PyTensor_Type->tp_alloc(PyTensor_Type, 0);
+  HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyTensor";
+  auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
+  
+  static PyArgParser parser({
+    "parallel_placeholder(DataType dtype, HTShape global_shape, DistributedStates ds, " OP_META_ARGS ")", 
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  
+  if (parsed_args.signature_index() == 0) {
+    new(&self->tensor) Tensor();    
+    self->tensor =
+      MakeParallelPlaceholderOp(NDArrayMeta()
+                                .set_dtype(parsed_args.get_dtype(0))
+                                .set_shape(parsed_args.get_int64_list(1)),
+                              parsed_args.get_distributed_states(2), 
+                              parse_op_meta(parsed_args, 3));
+  } else {
+    Py_TYPE(self)->tp_free(self);
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  
+  return reinterpret_cast<PyObject*>(self);
+  HT_PY_FUNC_END
+}
+
+REGISTER_TENSOR_CLASS_METHOD(
+  parallel_placeholder, 
+  (PyCFunction) PyTensor_parallel_placeholder, 
+  METH_VARARGS | METH_KEYWORDS, 
+  nullptr);
+
+PyObject* PyTensor_parallel_parameter(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  auto* unsafe_self = PyTensor_Type->tp_alloc(PyTensor_Type, 0);
+  HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyTensor";
+  auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
+  
+  static PyArgParser parser({
+    "parallel_parameter(Initializer init, HTShape global_shape, DistributedStates ds, \
+     int64_t local_idx, DataType dtype=None, bool requires_grad=false, " OP_META_ARGS ")", 
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  
+  if (parsed_args.signature_index() == 0) {
+    new(&self->tensor) Tensor();    
+    self->tensor =
+      MakeParallelParameterOp(*(parsed_args.get_initializer(0)),
+                              parsed_args.get_int64_list(1),
+                              parsed_args.get_distributed_states(2),
+                              parsed_args.get_int64(3),
+                              parsed_args.get_dtype_or_peek(4).value_or(kFloat32),
+                              parsed_args.get_bool_or_default(5),
+                              parse_op_meta(parsed_args, 6));
+  } else {
+    Py_TYPE(self)->tp_free(self);
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  return reinterpret_cast<PyObject*>(self);
+  HT_PY_FUNC_END
+}
+
+REGISTER_TENSOR_CLASS_METHOD(
+  parallel_parameter, 
+  (PyCFunction) PyTensor_parallel_parameter, 
+  METH_VARARGS | METH_KEYWORDS, 
+  nullptr);  
 
 /******************************************************
  * Empty Tensors

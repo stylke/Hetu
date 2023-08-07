@@ -24,5 +24,15 @@ HTShapeList
 Conv2dBroadcastOpDef::DoInferShape(const HTShapeList& input_shapes) {
   return {input_shapes.at(1)};
 }
+
+void Conv2dBroadcastOpDef::DoDeduceStates() {
+  DistributedStates ds_output = _inputs[1]->get_distributed_states();
+  HT_ASSERT(ds_output.is_valid())
+    << "Conv2dBroadcastOpDef: distributed states for output tensor must be valid!";
+  HT_ASSERT(ds_output.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";    
+  _outputs[0]->set_distributed_states(ds_output);
+}
+
 } // namespace autograd
 } // namespace hetu

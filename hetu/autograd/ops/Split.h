@@ -28,6 +28,7 @@ class SplitGradientOpDef : public OperatorDef {
     _begin_pos(begin_pos),
     _output_shape(output_shape) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   HTShape get_axes() const {
@@ -68,6 +69,8 @@ class SplitGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -113,7 +116,14 @@ class SplitOpDef : public OperatorDef {
     _indices(indices),
     _splits(splits) {
     DoInferMeta();
+    if (op_meta.is_deduce_states) {
+      DoDeduceStates();
+    }
   }
+
+  uint64_t op_indicator() const noexcept {
+    return SPLIT_OP;
+  }  
 
   HTShape get_axes() const {
     return _axes;
@@ -171,6 +181,8 @@ class SplitOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

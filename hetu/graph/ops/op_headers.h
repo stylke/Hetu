@@ -6,7 +6,11 @@
 #include "hetu/graph/ops/BatchNorm.h"
 #include "hetu/graph/ops/binary_cross_entropy.h"
 #include "hetu/graph/ops/Broadcast.h"
+<<<<<<< HEAD
 #include "hetu/graph/ops/CheckFinite.h"
+=======
+#include "hetu/graph/ops/Communication.h"
+>>>>>>> 984218bd9d37ecf54e6ecb64b54a53a9f283b8fe
 #include "hetu/graph/ops/Concat.h"
 #include "hetu/graph/ops/Concatenate.h"
 #include "hetu/graph/ops/Conv2d.h"
@@ -23,6 +27,7 @@
 #include "hetu/graph/ops/LayerNorm.h"
 #include "hetu/graph/ops/LeakyRelu.h"
 #include "hetu/graph/ops/Linear.h"
+#include "hetu/graph/ops/Loss.h"
 #include "hetu/graph/ops/Maskedfill.h"
 #include "hetu/graph/ops/MatDot.h"
 #include "hetu/graph/ops/matmul.h"

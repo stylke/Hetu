@@ -22,6 +22,7 @@ class ArrayReshapeOpDef : public OperatorDef {
   : OperatorDef(quote(ArrayReshapeOp), {input}, op_meta),
     _output_shape(output_shape) {
     DoInferMeta();
+    DoDeduceStates(); // TODO: local shape vs global shape?
   }
 
   HTShape get_output_shape() const {
@@ -38,6 +39,8 @@ class ArrayReshapeOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+  
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -70,10 +73,13 @@ class ArrayReshapeGradientOpDef : public OperatorDef {
                             Tensor ori_input, const OpMeta& op_meta = OpMeta())
   : OperatorDef(quote(ArrayReshapeGradientOp), {grad_output, ori_input}, op_meta) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;

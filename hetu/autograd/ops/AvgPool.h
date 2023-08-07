@@ -25,6 +25,7 @@ class AvgPoolOpDef : public OperatorDef {
     _padding(padding),
     _stride(stride) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   size_t get_kernel_H() const {
@@ -45,6 +46,8 @@ class AvgPoolOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
@@ -88,6 +91,7 @@ class AvgPoolGradientOpDef : public OperatorDef {
     _padding(padding),
     _stride(stride) {
     DoInferMeta();
+    DoDeduceStates();
   }
 
   size_t get_kernel_H() const {
@@ -108,6 +112,8 @@ class AvgPoolGradientOpDef : public OperatorDef {
 
  protected:
   void DoInferMeta() override;
+
+  void DoDeduceStates() override;  
 
   void DoCompute(const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) override;
