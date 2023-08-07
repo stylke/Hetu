@@ -10,6 +10,7 @@
 #include "hetu/_binding/utils/decl_utils.h"
 #include "hetu/_binding/utils/arg_parser.h"
 #include "hetu/graph/ops/variable.h"
+#include "hetu/graph/ops/data_transfer.h"
 
 namespace hetu {
 namespace graph {
@@ -26,6 +27,19 @@ PyObject* PyTensor_New(Tensor&& tensor, bool return_none_if_undefined) {
     self->tensor = std::move(tensor);
     return reinterpret_cast<PyObject*>(self);
   }
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensorList_New(TensorList&& tensors,
+                           bool return_none_if_undefined) {
+  HT_PY_FUNC_BEGIN
+  PyObject* ret = PyList_New(tensors.size());
+  HT_RUNTIME_ERROR_IF(!ret) << "Failed to alloc list";
+  for (size_t i = 0; i < tensors.size(); i++) {
+    auto* tensor_obj = PyTensor_New(std::move(tensors[i]), return_none_if_undefined);
+    PyList_SET_ITEM(ret, i, tensor_obj);
+  }
+  return ret;
   HT_PY_FUNC_END
 }
 
@@ -161,6 +175,18 @@ PyObject* PyTensor_stride(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_device(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  return PyDevice_New(self->tensor->device());
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_dtype(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  return PyDataType_New(self->tensor->dtype());
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_is_variable(PyTensor* self) {
   HT_PY_FUNC_BEGIN
   Py_RETURN_BOOLEAN_COND(self->tensor->is_variable());
@@ -224,6 +250,32 @@ PyObject* PyTensor_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_data_transfer(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  auto* unsafe_self = PyTensor_Type->tp_alloc(PyTensor_Type, 0);
+  HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyTensor";
+  auto* new_self = reinterpret_cast<PyTensor*>(unsafe_self);
+  
+  static PyArgParser parser({
+    "to(dtype datatype, device dev=None, " OP_META_ARGS ")"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+
+  if (parsed_args.signature_index() == 0) {
+    new(&new_self->tensor) Tensor();
+    auto dev = parsed_args.get_device_or_peek(1);
+    new_self->tensor = MakeDataTransferOp(parsed_args.get_dtype(0), 
+                                          self->tensor, 
+                                          dev.value_or(kUndeterminedDevice),
+                                          parse_op_meta(parsed_args, 2));
+    return reinterpret_cast<PyObject*>(new_self);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_to_numpy(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -246,6 +298,8 @@ PyGetSetDef PyTensor_properties[] = {
   {PY_GET_SET_DEF_NAME("name"), (getter) PyTensor_name, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("ndim"), (getter) PyTensor_ndim, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("shape"), (getter) PyTensor_shape, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("device"), (getter) PyTensor_device, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("dtype"), (getter) PyTensor_dtype, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("is_variable"), (getter) PyTensor_is_variable, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("is_parameter"), (getter) PyTensor_is_parameter, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("requires_grad"), (getter) PyTensor_requires_grad, nullptr, nullptr, nullptr}, 
@@ -303,6 +357,7 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"size", (PyCFunction) PyTensor_shape, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"stride", (PyCFunction) PyTensor_stride, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"numpy", (PyCFunction) PyTensor_to_numpy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"to", (PyCFunction) PyTensor_data_transfer, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {nullptr}

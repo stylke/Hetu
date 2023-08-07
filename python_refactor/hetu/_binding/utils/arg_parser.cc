@@ -50,6 +50,8 @@ std::string ArgType2Str(ArgType type) {
       return "List[hetu.Operator]";
     case ArgType::FEED_DICT:
       return "FeedDict";
+    case ArgType::SGDOPTIMIZER:
+      return "SGDOptimizer";
     default:
       HT_VALUE_ERROR << "Unknown argument type: " << static_cast<int>(type);
       __builtin_unreachable();
@@ -116,6 +118,8 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::OPERATOR_LIST;
   if (type == "FeedDict" || type == "feed_dict")
     return ArgType::FEED_DICT;
+  if (type == "Optimizer" || type == "SGDOptimizer")
+    return ArgType::SGDOPTIMIZER;
   HT_VALUE_ERROR << "Unknown argument type: " << type;
   __builtin_unreachable();
 }
@@ -291,6 +295,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyOperatorList(obj);
     case ArgType::FEED_DICT:
       return CheckPyFeedDict(obj);
+    case ArgType::SGDOPTIMIZER:
+      return CheckPySGDOptimizer(obj);
     default:
       HT_VALUE_ERROR << "Unknown argument type: " 
         << static_cast<int>(_arg_type);

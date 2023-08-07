@@ -143,6 +143,10 @@ class Sequential(Module):
         for module in self:
             input = module(input)
         return input
+    
+    def to(self, dtype):
+        for module in self:
+            module = module.to(dtype)
 
     def append(self, module: Module) -> 'Sequential':
         r"""Appends a given module to the end.

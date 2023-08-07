@@ -14,88 +14,93 @@ _member_t = Union[Optional[Parameter], Optional['Module'], Optional[Tensor]]
 class Module(object):
 
     def __init__(self):
-        super().__setattr__("_parameters", OrderedDict())
-        super().__setattr__("_modules", OrderedDict())
-        super().__setattr__("_buffers", OrderedDict())
-        super().__setattr__("_modules", OrderedDict())
-        super().__setattr__("_non_persistent_buffers_set", set())
+        with hetu.graph("define_and_run"):
+            super().__setattr__("_parameters", OrderedDict())
+            super().__setattr__("_modules", OrderedDict())
+            super().__setattr__("_buffers", OrderedDict())
+            super().__setattr__("_modules", OrderedDict())
+            super().__setattr__("_non_persistent_buffers_set", set())
     
     def __getattr__(self, name: str) -> Any:
-        _parameters = self.__dict__.get('_parameters')
-        if _parameters is not None:
-            param = _parameters.get(name)
-            if param is not None:
-                return param
-        _buffers = self.__dict__.get('_buffers')
-        if _buffers is not None:
-            buffers = _buffers.get(name)
-            if buffers is not None:
-                return buffers
-        _modules = self.__dict__.get('_modules')
-        if _modules is not None:
-            module = _modules.get(name)
-            if module is not None:
-                return module
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{name}'")
+        with hetu.graph("define_and_run"):
+            _parameters = self.__dict__.get('_parameters')
+            if _parameters is not None:
+                param = _parameters.get(name)
+                if param is not None:
+                    return param
+            _buffers = self.__dict__.get('_buffers')
+            if _buffers is not None:
+                buffers = _buffers.get(name)
+                if buffers is not None:
+                    return buffers
+            _modules = self.__dict__.get('_modules')
+            if _modules is not None:
+                module = _modules.get(name)
+                if module is not None:
+                    return module
+            return None
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'")
     
     def __setattr__(self, name: str, value: Any) -> None:
-        def remove_from_members(*members):
-            for dict_or_set in members:
-                if dict_or_set is not None and name in dict_or_set:
-                    if isinstance(dict_or_set, dict):
-                        del dict_or_set[name]
-                    else:
-                        dict_or_set.discard(name)
-        
-        _parameters = self.__dict__.get('_parameters')
-        _modules = self.__dict__.get('_modules')
-        _buffers = self.__dict__.get('_buffers')
-        _non_persistent_buffers_set = self.__dict__.get('_non_persistent_buffers_set')
-        
-        # Parameters
-        if isinstance(value, Parameter):
-            remove_from_members(self.__dict__, _modules, _buffers, 
+        with hetu.graph("define_and_run"):
+            def remove_from_members(*members):
+                for dict_or_set in members:
+                    if dict_or_set is not None and name in dict_or_set:
+                        if isinstance(dict_or_set, dict):
+                            del dict_or_set[name]
+                        else:
+                            dict_or_set.discard(name)
+            
+            _parameters = self.__dict__.get('_parameters')
+            _modules = self.__dict__.get('_modules')
+            _buffers = self.__dict__.get('_buffers')
+            _non_persistent_buffers_set = self.__dict__.get('_non_persistent_buffers_set')
+            
+            # Parameters
+            if isinstance(value, hetu.Tensor):
+                remove_from_members(self.__dict__, _modules, _buffers, 
+                                    _non_persistent_buffers_set)
+                self.register_parameter(name, value)
+                return
+            
+            # Modules
+            if isinstance(value, hetu.nn.Module):
+                remove_from_members(self.__dict__, _parameters, _buffers, 
+                                    _non_persistent_buffers_set)
+                self.register_module(name, value)
+                return
+            
+            # Buffers
+            if isinstance(value, hetu.Tensor):
+                remove_from_members(self.__dict__, _parameters, _modules)
+                self.register_buffer(name, value, persistent=True)
+                return
+            
+            remove_from_members(self.__dict__, _parameters, _modules, _buffers, 
                                 _non_persistent_buffers_set)
-            self.register_parameter(name, value)
-            return
-        
-        # Modules
-        if isinstance(value, Module):
-            remove_from_members(self.__dict__, _parameters, _buffers, 
-                                _non_persistent_buffers_set)
-            self.register_module(name, value)
-            return
-        
-        # Buffers
-        if isinstance(value, Tensor):
-            remove_from_members(self.__dict__, _parameters, _modules)
-            self.register_buffer(name, value, persistent=True)
-            return
-        
-        remove_from_members(self.__dict__, _parameters, _modules, _buffers, 
-                            _non_persistent_buffers_set)
-        super().__setattr__(name, value)
+            super().__setattr__(name, value)
     
     def __delattr__(self, name: str) -> None:
-        _parameters = self.__dict__.get('_parameters')
-        if _parameters is not None and name in _parameters:
-            del _parameters[name]
-            return
-        
-        _modules = self.__dict__.get('_modules')
-        if _modules is not None and name in _modules:
-            del _modules[name]
-            return
-        
-        _buffers = self.__dict__.get('_buffers')
-        if _buffers is not None and name in _buffers:
-            del _buffers[name]
-            _non_persistent_buffers_set = self.__dict__.get('_non_persistent_buffers_set')
-            del _non_persistent_buffers_set[name]
-            return
-        
-        super().__delattr__(name)
+        with hetu.graph("define_and_run"):
+            _parameters = self.__dict__.get('_parameters')
+            if _parameters is not None and name in _parameters:
+                del _parameters[name]
+                return
+            
+            _modules = self.__dict__.get('_modules')
+            if _modules is not None and name in _modules:
+                del _modules[name]
+                return
+            
+            _buffers = self.__dict__.get('_buffers')
+            if _buffers is not None and name in _buffers:
+                del _buffers[name]
+                _non_persistent_buffers_set = self.__dict__.get('_non_persistent_buffers_set')
+                del _non_persistent_buffers_set[name]
+                return
+            
+            super().__delattr__(name)
         
     
     def __dir__(self):
@@ -113,54 +118,59 @@ class Module(object):
     
     def _register_member(self, name: str, value: _member_t, members: dict, 
                          reg_type: _member_type_t) -> None:
-        if not isinstance(name, str):
-            raise TypeError(
-                f"Name of {reg_type.__name__} must be string "
-                f"(got {type(name).__name__})")
-        if name == '':
-            raise KeyError(f"Name of {reg_type.__name__} must not be empty")
-        if '.' in name:
-            raise KeyError(
-                f"Name of {reg_type.__name__} must not contain \".\" "
-                f"(got \"{name}\")")
-        
-        if value is None:
-            members[name] = None
-        elif not isinstance(value, reg_type):
-            raise TypeError(
-                f"Cannot register a '{type(value).__name__}' object as "
-                f"a {reg_type.__name__} object")
-        else:
-            members[name] = value
+        with hetu.graph("define_and_run"):
+            if not isinstance(name, str):
+                raise TypeError(
+                    f"Name of {reg_type.__name__} must be string "
+                    f"(got {type(name).__name__})")
+            if name == '':
+                raise KeyError(f"Name of {reg_type.__name__} must not be empty")
+            if '.' in name:
+                raise KeyError(
+                    f"Name of {reg_type.__name__} must not contain \".\" "
+                    f"(got \"{name}\")")
+            
+            if value is None:
+                members[name] = None
+            elif not isinstance(value, reg_type):
+                raise TypeError(
+                    f"Cannot register a '{type(value).__name__}' object as "
+                    f"a {reg_type.__name__} object")
+            else:
+                members[name] = value
     
-    def register_parameter(self, name: str, value: Optional[Parameter]) -> None:
-        _parameters = self.__dict__.get('_parameters')
-        if _parameters is None:
-            raise AttributeError(
-                "Cannot register parameters before calling Module.__init__()")
-        self._register_member(name, value, _parameters, Parameter)
+    def register_parameter(self, name: str, value: Optional[Tensor]) -> None:
+        with hetu.graph("define_and_run"):
+            _parameters = self.__dict__.get('_parameters')
+            if _parameters is None:
+                raise AttributeError(
+                    "Cannot register parameters before calling Module.__init__()")
+            self._register_member(name, value, _parameters, Tensor)
     
     def register_module(self, name: str, value: Optional['Module']) -> None:
-        _modules = self.__dict__.get('_modules')
-        if _modules is None:
-            raise AttributeError(
-                "Cannot register modules before calling Module.__init__()")
-        self._register_member(name, value, _modules, Module)
+        with hetu.graph("define_and_run"):
+            _modules = self.__dict__.get('_modules')
+            if _modules is None:
+                raise AttributeError(
+                    "Cannot register modules before calling Module.__init__()")
+            self._register_member(name, value, _modules, Module)
     
     def add_module(self, name: str, value: Optional['Module']) -> None:
-        self.register_module(name, value)
+        with hetu.graph("define_and_run"):
+            self.register_module(name, value)
     
     def register_buffer(self, name: str, value: Optional[Tensor], 
                         persistent: bool = True) -> None:
-        _buffers = self.__dict__.get('_buffers')
-        if _buffers is None:
-            raise AttributeError(
-                "Cannot register buffers before calling Module.__init__()")
-        self._register_member(name, value, _buffers, Tensor)
-        if persistent:
-            self._non_persistent_buffers_set.discard(name)
-        else:
-            self._non_persistent_buffers_set.add(name)
+        with hetu.graph("define_and_run"):
+            _buffers = self.__dict__.get('_buffers')
+            if _buffers is None:
+                raise AttributeError(
+                    "Cannot register buffers before calling Module.__init__()")
+            self._register_member(name, value, _buffers, Tensor)
+            if persistent:
+                self._non_persistent_buffers_set.discard(name)
+            else:
+                self._non_persistent_buffers_set.add(name)
 
     ############################################################################
     # Iterator/Generator of members
@@ -227,7 +237,7 @@ class Module(object):
                 yield name, child
 
     def children(self) -> Iterator['Module']:
-        for _, child in named_children:
+        for _, child in self.named_children():
             yield child
     
     ############################################################################
@@ -235,8 +245,46 @@ class Module(object):
     ############################################################################
 
     def __call__(self, *input, **kwargs) -> Any:
-        return self.forward(*input, **kwargs)
+        with hetu.graph("define_and_run"):
+            return self.forward(*input, **kwargs)
     
     def forward(self, *input: Any, **kwargs: Any) -> Any:
         raise NotImplementedError(
             f"Forward of module '{type(self).__name__}' is not implemented")
+        
+    def _apply(self, fn):
+        for module in self.children():
+            module._apply(fn)
+
+        _parameters = self.__dict__.get('_parameters')
+        for key, param in _parameters.items():
+            if param is None:
+                continue
+            # Tensors stored in modules are graph leaves, and we don't want to
+            # track autograd history of `param_applied`, so we have to use
+            # `with torch.no_grad():`
+            # param_applied = fn(param)
+            # should_use_set_data = compute_should_use_set_data(param, param_applied)
+            # if should_use_set_data:
+            #     param.data = param_applied
+            #     out_param = param
+            # else:
+            #     assert isinstance(param, Parameter)
+            #     assert param.is_leaf
+            # out_param = Parameter(param_applied, param.requires_grad)
+            out_param = fn(param)
+            _parameters[key] = out_param
+
+        _buffers = self.__dict__.get('_buffers')
+        for key, buf in _buffers.items():
+            if buf is not None:
+                _buffers[key] = fn(buf)
+
+        return self        
+    
+    def to(self, dtype=None, device=None):
+        if dtype == None and device == None:
+            return
+        def convert(t):
+            return t.to(dtype, device)
+        return self._apply(convert)  
