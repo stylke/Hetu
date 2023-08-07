@@ -55,7 +55,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     for (size_t i = 0; i < output_shapes.size(); i++) {
       outputs.push_back(NDArray::empty(output_shapes[i],
                                        op->instantiation_ctx().placement,
-                                       op->output(0)->dtype()));
+                                       op->output(i)->dtype()));
     }
   }
   return outputs;

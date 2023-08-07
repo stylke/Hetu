@@ -314,23 +314,186 @@ NDArray NDArray::reduce(const NDArray& input, ReductionType red_type,
   return out;
 }
 
+/*
+  Matrix product of two tensors.
+  The behavior depends on the dimensionality of input tensors:
+  - If both tensors are 1-dimensional (1D), return the dot product (scalar).
+  - If both tensors are 2D, return matrix-matrix product.
+  - If tensors are 1D - 2D, a 1 is prepended to first tensor's dimension
+    for the purpose of the matrix multiply.
+    After the matrix multiply, the prepended dimension is removed.
+  - If tensors are 2D - 1D, return matrix-vector product.
+  - If one of the tensors is ND (N >= 3) and the other is 1D or 2D, fold the 
+    first N-1 dimensions of the ND tensor to form a matrix and go back to
+    the previous two cases, reshape it and return.
+  - Otherwise, broadcast and fold the batched dimensions if
+    there's more than one, return bmm.
+*/
 NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
                         bool trans_right, StreamIndex stream_id,
                         NDArray& output) {
-  HT_ASSERT(x->ndim() == 2 && y->ndim() == 2 &&
-            x->shape(trans_left ? 0 : 1) == y->shape(trans_right ? 1 : 0))
-    << "Invalid shapes for matrix multiplication: " << x->shape()
-    << " (transpose = " << trans_left << ") vs. " << y->shape()
-    << " (transpose = " << trans_right << "). ";
-  NDArray out = output.is_defined()
-    ? output
-    : NDArray::empty(
+  auto dim_x = x->ndim();
+  auto dim_y = y->ndim();
+
+  HT_ASSERT(dim_x != 0 && dim_y != 0)
+    << "Invalid ndims for matrix multiplication: "
+    << "Both arguments to matmul need to be at least 1D, but they are"
+    << dim_x << "D and " << dim_y << "D. ";
+  
+  NDArray out;
+  Stream stream(x->device(), stream_id);
+
+  if (dim_x == 1 && dim_y == 1) {
+    out = output.is_defined()
+      ? output
+      : NDArray::empty({}, x->device(), x->dtype());
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
+                                    hetu::impl::Dot, x, y, out, stream);
+  } else if (dim_x == 2 && dim_y == 2) {
+    HT_ASSERT(x->shape(trans_left ? 0 : 1) == y->shape(trans_right ? 1 : 0))
+      << "Invalid shapes for matrix multiplication: " << x->shape()
+      << " (transpose = " << trans_left << ") vs. " << y->shape()
+      << " (transpose = " << trans_right << "). ";
+    out = output.is_defined()
+      ? output
+      : NDArray::empty(
         {x->shape(trans_left ? 1 : 0), y->shape(trans_right ? 0 : 1)},
         x->device(), x->dtype());
-  Stream stream(x->device(), stream_id);
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
-                                  hetu::impl::MatMul, x, trans_left, y,
-                                  trans_right, out, stream);
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
+                                    hetu::impl::MatMul, x, trans_left, y,
+                                    trans_right, out, stream);
+  } else if (dim_x == 1 && dim_y == 2) {
+    auto out_ = NDArray::empty({1, y->shape(trans_right ? 0 : 1)}, x->device(), x->dtype());
+    out_ = NDArray::matmul(NDArray::unsqueeze(x, 0), y, false, trans_right, stream_id, out_);
+    out = NDArray::squeeze(out_, 0);
+    if (output.is_defined()) {
+      NDArray::copy(out, stream_id, output);
+      out = output;
+    }
+  } else if (dim_x == 2 && dim_y == 1) {
+    HT_ASSERT(x->shape(trans_left ? 0 : 1) == y->shape(0))
+      << "Invalid shapes for matrix multiplication: " << x->shape()
+      << " (transpose = " << trans_left << ") vs. " << y->shape()
+      << " (transpose = " << trans_right << "). ";
+    out = output.is_defined()
+      ? output
+      : NDArray::empty({x->shape(trans_left ? 1 : 0)}, x->device(), x->dtype());
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
+                                    hetu::impl::MatVecMul, x, trans_left, y, 
+                                    out, stream);
+  } else if ((dim_x >= 3 && (dim_y == 1 || dim_y == 2))
+          || ((dim_x == 1 || dim_x == 2) && dim_y >= 3)) {
+    const auto transpose = dim_y > dim_x;
+    const auto x_ = transpose ? y : x;
+    const auto y_ = transpose ? x : y;
+    const auto dim_y_ = transpose ? dim_x : dim_y;
+    const auto output_transpose = dim_y_ == 2 && transpose;
+
+    if (transpose) {
+      std::swap(trans_left, trans_right);
+      trans_left = !trans_left;
+      trans_right = !trans_right;
+    }
+    
+    auto x_shape = x_->shape();
+    NDArray x_trans = x_;
+    if (trans_left) {
+      std::iter_swap(x_shape.end() - 2, x_shape.end() - 1);
+      const auto dim_x_ = transpose ? dim_y : dim_x;
+      auto ndims_x_ = HTAxes(dim_x_);
+      std::iota(ndims_x_.begin(), ndims_x_.end(), 0);
+      std::iter_swap(ndims_x_.end() - 2, ndims_x_.end() - 1);
+      x_trans = NDArray::empty(x_shape, x->device(), x->dtype());
+      x_trans = NDArray::permute(x_, ndims_x_, stream_id, x_trans);
+    }
+    
+    auto output_shape = HTShape(x_shape.begin(), x_shape.end() - 1);
+    auto folded_dim = std::accumulate(output_shape.begin(), output_shape.end(), 1,
+                                      [](int64_t x, int64_t y) { return x * y; });
+    if (dim_y_ == 2) {
+      output_shape.emplace_back(y_->shape(trans_right ? 0 : 1));
+    }
+    const auto x_folded = NDArray::reshape(x_trans, {folded_dim, x_shape.back()}, stream_id);
+    auto folded_shape = HTShape({folded_dim});
+    if (dim_y_ == 2) {
+      folded_shape.emplace_back(y_->shape(trans_right ? 0 : 1));
+    }
+    auto out_folded = NDArray::empty(folded_shape, x->device(), x->dtype());
+
+    if (output_transpose) {
+      auto out_trans = NDArray::empty(output_shape, x->device(), x->dtype());
+      out_folded = NDArray::matmul(x_folded, y_, false, trans_right, stream_id, out_folded);
+      out_trans = NDArray::reshape(out_folded, output_shape, stream_id);
+      std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
+      out = output.is_defined()
+        ? output
+        : NDArray::empty(output_shape, x->device(), x->dtype());
+      const auto dim_out = out->ndim();
+      auto ndims_out = HTAxes(dim_out);
+      std::iota(ndims_out.begin(), ndims_out.end(), 0);
+      std::iter_swap(ndims_out.end() - 2, ndims_out.end() - 1);
+      out = NDArray::permute(out_trans, ndims_out, stream_id, out);
+    } else {
+      out_folded = NDArray::matmul(x_folded, y_, false, trans_right, stream_id, out_folded);
+      if (output.is_defined()) {
+        NDArray::copy(NDArray::reshape(out_folded, output_shape, stream_id),
+                      stream_id, output);
+        out = output;
+      } else {
+        out = NDArray::reshape(out_folded, output_shape, stream_id);
+      }
+    }
+  } else {
+    const auto x_shape = x->shape();
+    const auto y_shape = y->shape();
+
+    const auto n = x_shape.cend()[-2];
+    const auto m_x = x_shape.back();
+    const auto m_y = y_shape.cend()[-2];
+    const auto p = y_shape.back();
+
+    const auto batch_shape_x = HTShape(x_shape.begin(), x_shape.end() - 2);
+    const auto batch_shape_y = HTShape(y_shape.begin(), y_shape.end() - 2);
+    auto output_shape = NDArrayMeta::Broadcast(batch_shape_x, batch_shape_y);
+    const auto batch_size = std::accumulate(output_shape.begin(), output_shape.end(), 1,
+                                            [](int64_t x, int64_t y) { return x * y; });
+
+    const auto broadcast_shape_x = [&output_shape, n, m_x] {
+                                      HTShape ret(output_shape);
+                                      ret.emplace_back(n);
+                                      ret.emplace_back(m_x);
+                                      return ret; }();
+    const auto broadcast_shape_y = [&output_shape, m_y, p] {
+                                      HTShape ret(output_shape);
+                                      ret.emplace_back(m_y);
+                                      ret.emplace_back(p);
+                                      return ret; }();
+    auto broadcast_x = (x_shape == broadcast_shape_x) ? x : NDArray::empty(broadcast_shape_x, x->device(), x->dtype());
+    broadcast_x = NDArray::reshape(x_shape != broadcast_shape_x
+                                      ? NDArray::broadcast(x, broadcast_shape_x, stream_id, broadcast_x)
+                                      : x,
+                                    {batch_size, n, m_x}, stream_id);
+    auto broadcast_y = (y_shape == broadcast_shape_y) ? y : NDArray::empty(broadcast_shape_y, y->device(), y->dtype());
+    broadcast_y = NDArray::reshape(y_shape != broadcast_shape_y
+                                      ? NDArray::broadcast(y, broadcast_shape_y, stream_id, broadcast_y)
+                                      : y,
+                                    {batch_size, m_y, p}, stream_id);
+
+    output_shape.emplace_back(trans_left ? m_x : n);
+    output_shape.emplace_back(trans_right ? m_y : p);
+
+    out = NDArray::empty({batch_size, output_shape.cend()[-2], output_shape.back()}, x->device(), x->dtype());
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
+                                  hetu::impl::BatchMatMul, broadcast_x, trans_left,
+                                  broadcast_y, trans_right, out, stream);
+    if (output.is_defined()) {
+      NDArray::copy(NDArray::reshape(out, output_shape, stream_id),
+                    stream_id, output);
+      out = output;
+    } else {
+      out = NDArray::reshape(out, output_shape, stream_id);
+    }
+  }
   return out;
 }
 
@@ -677,8 +840,8 @@ NDArray NDArray::conv2d(const NDArray& input, const NDArray& filter,
     out = output;
   else {
     int64_t N = input->shape(0);
-    int64_t H = input->shape(0);
-    int64_t W = input->shape(0);
+    int64_t H = input->shape(2);
+    int64_t W = input->shape(3);
     int64_t f_O = filter->shape(0);
     int64_t f_H = filter->shape(2);
     int64_t f_W = filter->shape(3);

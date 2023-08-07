@@ -83,18 +83,24 @@ HTShapeList SCESGradOpImpl::DoInferShape(Operator& op,
 Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_t ignored_index, 
                                        ReductionType reduction,
                                        OpMeta op_meta) {
+  TensorList inputs = {preds, labels};
+  DataType input_type = DataType::FLOAT32;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
     std::make_shared<SoftmaxCrossEntropySparseOpImpl>(ignored_index, reduction),
-    {std::move(preds), std::move(labels)},
+    std::move(inputs),
     std::move(op_meta))->output(0);
 }
 
 Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_t ignored_index, 
                                        const std::string& reduction,
                                        OpMeta op_meta) {
+  TensorList inputs = {preds, labels};
+  DataType input_type = DataType::FLOAT32;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
     std::make_shared<SoftmaxCrossEntropySparseOpImpl>(ignored_index, Str2ReductionType(reduction)),
-    {std::move(preds), std::move(labels)},
+    std::move(inputs),
     std::move(op_meta))->output(0);
 }
 

@@ -14,7 +14,7 @@ __global__ void onehot_kernel(const spec_t* input, size_t size, size_t last_dim,
     return;
   int offset = (int) (idx % last_dim);
   float writein = 0;
-  if (offset == (int) input[idx / last_dim]) {
+  if (offset == (int)input[idx / last_dim]) {
     writein = 1.0;
   } else {
     writein = 0.0;

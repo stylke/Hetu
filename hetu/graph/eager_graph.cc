@@ -1,4 +1,5 @@
 #include "hetu/graph/eager_graph.h"
+#include "hetu/graph/ops/variable.h"
 
 namespace hetu {
 namespace graph {
@@ -11,6 +12,16 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
 
   // Eager instantiation and execution
   Device placement = op->eager_device();
+  if (placement.is_undetermined()) {
+      if (op->op_indicator() == VARIABLE_OP) {
+      const auto& opimpl = reinterpret_cast<const VariableOpImpl&>(op->body());
+      placement = opimpl.device();
+    }
+    else if (op->op_indicator() == (VARIABLE_OP | PARAMETER_OP)) {
+      const auto& opimpl = reinterpret_cast<const ParameterOpImpl&>(op->body()); 
+      placement = opimpl.device();
+    }
+  }
   if (placement.is_undetermined()) {
     if (op->num_inputs() > 0) {
       placement = op->input(0)->device();
@@ -30,9 +41,12 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   input_arrays.reserve(op->num_inputs());
   for (auto& input : op->inputs())
     input_arrays.push_back(_preserved_data[input->id()]);
+  // HT_LOG_INFO << op << "\nInputs:" << input_arrays;
   auto output_arrays = op->Compute(input_arrays, _runtime_ctxs);
   for (size_t i = 0; i < op->num_outputs(); i++)
     _preserved_data[op->output(i)->id()] = output_arrays[i];
+
+  // HT_LOG_INFO << op << "\nOutputs:" << output_arrays;
 
   return _op_indexing[op->id()];
 }

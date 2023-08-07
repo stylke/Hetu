@@ -87,11 +87,14 @@ ConcatenateGradientOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-Tensor MakeConcatenateOp(const TensorList& inputs, size_t axis,
+Tensor MakeConcatenateOp(TensorList inputs, size_t axis,
                          OpMeta op_meta) {
+  TensorList inputs_ = inputs;
+  DataType input_type = DataType::UNDETERMINED;
+  AutoCast::Tensor_AutoCast(inputs_, input_type);
   return Graph::MakeOp(
           std::make_shared<ConcatenateOpImpl>(axis),
-          std::move(inputs),
+          std::move(inputs_),
           std::move(op_meta))->output(0);
 }
 

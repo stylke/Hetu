@@ -1,4 +1,5 @@
 #pragma once
+#define __CUDA_NO_HALF_OPERATORS__
 
 #include "hetu/common/macros.h"
 #include "hetu/core/device.h"

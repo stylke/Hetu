@@ -12,6 +12,7 @@ namespace impl {
 void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
                 const int padding_h, const int padding_w, const int stride_h,
                 const int stride_w, const Stream& stream) {
+  // HT_LOG_INFO << input_x << "\n" << input_f << "\n" << output;
   HT_ASSERT_CUDA_DEVICE(input_x);
   HT_ASSERT_SAME_DEVICE(input_x, input_f);
   HT_ASSERT_SAME_DEVICE(input_x, output);
@@ -25,6 +26,16 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
     datatype = CUDNN_DATA_FLOAT;
   } else if (input_x->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
+  } else if (input_x->dtype() == DataType::FLOAT16) {
+    datatype = CUDNN_DATA_HALF;
+  }
+  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
+  else if (input_x->dtype() == DataType::BFLOAT16) {
+    datatype = CUDNN_DATA_BFLOAT16;
+  }
+  #endif
+  else {
+    HT_NOT_IMPLEMENTED << "UNSUPPORTED TYPE:" << input_x->dtype();
   }
 
   size_t input_N = input_x->shape(0);
@@ -44,6 +55,10 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dCuda", [&]() {
+      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
+      if (input_x->dtype() == DataType::BFLOAT16)
+        return;
+      #endif
 
       // input
       cudnnTensorDescriptor_t input_desc;
@@ -65,7 +80,9 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
       CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
       CUDNN_CALL(cudnnSetConvolution2dDescriptor(
         conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, datatype));
+        CUDNN_CROSS_CORRELATION, input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype));
+      if (input_x->dtype() == DataType::FLOAT16)
+        CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
       // output
       cudnnTensorDescriptor_t out_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&out_desc));
@@ -110,18 +127,31 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
         AllocFromMemoryPool(input_x->device(), workspace_size);
       void* work_data = work_data_ptr.ptr;
 
-      spec_t alpha = 1.0;
-      spec_t beta = 0.0;
-      CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_x->data_ptr<spec_t>(),
-                                         filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
-                                         algo, work_data, workspace_size, &beta,
-                                         out_desc, output->data_ptr<spec_t>()));
+      spec_t alpha = 1.0f;
+      spec_t beta = 0.0f;
+
+      float alpha_f = 1.0f;
+      float beta_f = 0.0f;
+
+      if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16) {
+        CUDNN_CALL(cudnnConvolutionForward(handle, &alpha_f, input_desc, input_x->data_ptr<spec_t>(),
+                                           filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
+                                           algo, work_data, workspace_size, &beta_f,
+                                           out_desc, output->data_ptr<spec_t>()));
+      }
+      else {
+        CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_x->data_ptr<spec_t>(),
+                                           filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
+                                           algo, work_data, workspace_size, &beta,
+                                           out_desc, output->data_ptr<spec_t>()));
+      }
       FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(out_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
       CUDNN_CALL(cudnnDestroyFilterDescriptor(filter_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
     });
+  CudaStreamSynchronize(cuda_stream);
   return;
 }
 
@@ -143,6 +173,16 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
     datatype = CUDNN_DATA_FLOAT;
   } else if (input_x->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
+  } else if (input_x->dtype() == DataType::FLOAT16) {
+    datatype = CUDNN_DATA_HALF;
+  }
+  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
+  else if (input_x->dtype() == DataType::BFLOAT16) {
+    datatype = CUDNN_DATA_BFLOAT16;
+  }
+  #endif
+  else {
+    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_x->dtype();
   }
 
   // input
@@ -163,6 +203,10 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dGradientofFilterCuda", [&]() {
+      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
+      if (input_x->dtype() == DataType::BFLOAT16)
+        return;
+      #endif
       // input
       cudnnTensorDescriptor_t input_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
@@ -181,7 +225,10 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
       CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
       CUDNN_CALL(cudnnSetConvolution2dDescriptor(
         conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, datatype));
+        CUDNN_CROSS_CORRELATION, input_x->dtype() == DataType::FLOAT16 || 
+        input_x->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype));
+      if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16)
+        CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
 
       // dw
       cudnnFilterDescriptor_t df_desc;
@@ -227,9 +274,20 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
       void* work_data = work_data_ptr.ptr;
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
-      CUDNN_CALL(cudnnConvolutionBackwardFilter(
-        handle, &alpha, input_desc, input_x->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
-        conv_desc, algo, work_data, workspace_size, &beta, df_desc, gradient_f->data_ptr<spec_t>()));
+
+      float alpha_f = 1.0f;
+      float beta_f = 0.0f;
+
+      if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16) {
+        CUDNN_CALL(cudnnConvolutionBackwardFilter(
+          handle, &alpha_f, input_desc, input_x->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
+          conv_desc, algo, work_data, workspace_size, &beta_f, df_desc, gradient_f->data_ptr<spec_t>()));
+      }
+      else {
+        CUDNN_CALL(cudnnConvolutionBackwardFilter(
+          handle, &alpha, input_desc, input_x->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
+          conv_desc, algo, work_data, workspace_size, &beta, df_desc, gradient_f->data_ptr<spec_t>()));
+      }
       FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(dy_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
@@ -256,7 +314,18 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
     datatype = CUDNN_DATA_FLOAT;
   } else if (input_f->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
+  } else if (input_f->dtype() == DataType::FLOAT16) {
+    datatype = CUDNN_DATA_HALF;
   }
+  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
+  else if (input_f->dtype() == DataType::BFLOAT16) {
+    datatype = CUDNN_DATA_BFLOAT16;
+  }
+  #endif
+  else {
+    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_f->dtype();
+  }
+
   // filter
   size_t filter_N = input_f->shape(0);
   size_t filter_C = input_f->shape(1);
@@ -274,6 +343,10 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
   size_t dx_W = gradient_x->shape(3);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_f->dtype(), spec_t, "Conv2dGradientofDataCuda", [&]() {
+      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
+      if (input_f->dtype() == DataType::BFLOAT16)
+        return;
+      #endif
       // filter
       cudnnFilterDescriptor_t filter_desc;
       CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc));
@@ -290,7 +363,9 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
       CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
       CUDNN_CALL(cudnnSetConvolution2dDescriptor(
         conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, datatype));
+        CUDNN_CROSS_CORRELATION, input_f->dtype() == DataType::FLOAT16 || input_f->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype));
+      if (input_f->dtype() == DataType::FLOAT16 || input_f->dtype() == DataType::BFLOAT16)
+        CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
       // dx
       cudnnTensorDescriptor_t dx_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&dx_desc));
@@ -337,9 +412,20 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
 
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
-      CUDNN_CALL(cudnnConvolutionBackwardData(
-        handle, &alpha, filter_desc, input_f->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
-        conv_desc, algo, work_data, workspace_size, &beta, dx_desc, gradient_x->data_ptr<spec_t>()));
+
+      float alpha_f = 1.0f;
+      float beta_f = 0.0f;
+
+      if (input_f->dtype() == DataType::FLOAT16 || input_f->dtype() == DataType::BFLOAT16) {
+        CUDNN_CALL(cudnnConvolutionBackwardData(
+          handle, &alpha_f, filter_desc, input_f->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
+          conv_desc, algo, work_data, workspace_size, &beta_f, dx_desc, gradient_x->data_ptr<spec_t>()));
+      }
+      else {
+        CUDNN_CALL(cudnnConvolutionBackwardData(
+          handle, &alpha, filter_desc, input_f->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
+          conv_desc, algo, work_data, workspace_size, &beta, dx_desc, gradient_x->data_ptr<spec_t>()));        
+      }
 
       FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(dy_desc));
@@ -358,7 +444,7 @@ __global__ void conv2d_add_bias_kernel(const spec_t* input, spec_t* output,
   if (idx >= size)
     return;
   size_t input_idx = idx % input_size / output_size;
-  output[idx] += input[input_idx];
+  output[idx] = output[idx] + input[input_idx];
 }
 
 void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
@@ -380,6 +466,16 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
     datatype = CUDNN_DATA_FLOAT;
   } else if (input_f->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
+  } else if (input_f->dtype() == DataType::FLOAT16) {
+    datatype = CUDNN_DATA_HALF;
+  }
+  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
+  else if (input_f->dtype() == DataType::BFLOAT16) {
+    datatype = CUDNN_DATA_BFLOAT16;
+  }
+  #endif
+  else {
+    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_f->dtype();
   }
 
   size_t input_N = input_x->shape(0);
@@ -406,6 +502,10 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dAddBiasCuda", [&]() {
+      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
+      if (input_x->dtype() == DataType::BFLOAT16)
+        return;
+      #endif
       // input
       cudnnTensorDescriptor_t input_desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
@@ -424,7 +524,9 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
       CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
       CUDNN_CALL(cudnnSetConvolution2dDescriptor(
         conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, datatype));
+        CUDNN_CROSS_CORRELATION, input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16? CUDNN_DATA_FLOAT : datatype));
+      if (input_x->dtype() == DataType::FLOAT16)
+        CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
 
       // output
       cudnnTensorDescriptor_t out_desc;
@@ -468,17 +570,35 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
         AllocFromMemoryPool(input_x->device(), workspace_size);
       void* work_data = work_data_ptr.ptr;
 
-      spec_t alpha = 1.0;
-      spec_t beta = 0.0;
-      CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_x->data_ptr<spec_t>(),
-                                         filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
-                                         algo, work_data, workspace_size, &beta,
-                                         out_desc, output->data_ptr<spec_t>()));
+      spec_t alpha = 1.0f;
+      spec_t beta = 0.0f;
+
+      float alpha_f = 1.0f;
+      float beta_f = 0.0f;
+
+      if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16) {
+        CUDNN_CALL(cudnnConvolutionForward(handle, &alpha_f, input_desc, input_x->data_ptr<spec_t>(),
+                                          filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
+                                          algo, work_data, workspace_size, &beta_f,
+                                          out_desc, output->data_ptr<spec_t>()));
+      } 
+      else {
+        CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_x->data_ptr<spec_t>(),
+                                          filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
+                                          algo, work_data, workspace_size, &beta,
+                                          out_desc, output->data_ptr<spec_t>()));
+      }
+
+
       FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(out_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
       CUDNN_CALL(cudnnDestroyFilterDescriptor(filter_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
+
+      CudaStreamSynchronize(cuda_stream);
+
+      // HT_LOG_INFO << "Origin:" << output;
 
       conv2d_add_bias_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         bias->data_ptr<spec_t>(), output->data_ptr<spec_t>(), bias_input_size,

@@ -30,9 +30,9 @@ __global__ void dropout_gradient_kernel(const spec_t* grad,
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  float fw_out = fw_output[idx];
-  float keep_mask = (float) (fw_out > 1e-10 || fw_out < -1e-10);
-  output[idx] = grad[idx] * keep_mask / (1 - drop_rate);
+  spec_t fw_out = fw_output[idx];
+  spec_t keep_mask = (spec_t) (fw_out > 1e-20 || fw_out < -1e-20);
+  output[idx] = grad[idx] * keep_mask  / (1 - drop_rate);
 }
 
 void DropoutCuda(const NDArray& input, double drop_rate, uint64_t seed,

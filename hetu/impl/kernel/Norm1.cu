@@ -11,7 +11,7 @@ template <typename spec_t>
 __device__ spec_t sgn(spec_t x) {
     if (x == 0.0)
         return 0.0;
-    return x / abs(x);
+    return x / hetu::cuda::cuda_abs(x);
 }
 
 template <typename spec_t>
@@ -46,10 +46,10 @@ __global__ void norm_kernel(const spec_t* input, spec_t* output, size_t size,
 
   spec_t sum_thread = 0;
   for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride)
-      sum_thread += hetu::cuda::cuda_pow(abs(input[ptr]), spec_t(p));
+      sum_thread += hetu::cuda::cuda_pow(spec_t(hetu::cuda::cuda_abs(input[ptr])), spec_t(p));
   hetu::cuda::BlockReduceSum(sum_thread, shared_sum);
   if (threadIdx.x == 0)
-      output[output_ptr] = hetu::cuda::cuda_pow(sum_thread, spec_t(1.0 / p));
+      output[output_ptr] = hetu::cuda::cuda_pow(spec_t(sum_thread), spec_t(1.0 / p));
 }
 
 template <typename spec_t>
@@ -80,8 +80,8 @@ __global__ void norm_gradient_kernel(const spec_t *input, const spec_t *norm,
       if (norm_val == 0)
           output[idx] = 0;
       else
-          output[idx] = input_val * pow(abs(input_val), p - 2) * grad_val
-                        / pow(norm_val, p - 1);
+          output[idx] = input_val * hetu::cuda::cuda_pow(hetu::cuda::cuda_abs(input_val), spec_t(p - 2)) * grad_val
+                        / hetu::cuda::cuda_pow(norm_val, spec_t(p - 1));
   }
 }
 

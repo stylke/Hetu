@@ -10,7 +10,7 @@ template <typename spec_t>
 __global__ void range_kernel(spec_t start, spec_t step, size_t size, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < size)
-    output[idx] = start + step * idx;
+    output[idx] = start + step * size_t(idx);
 }
 
 void ArangeCuda(double start, double step, NDArray& output, const Stream& stream) {

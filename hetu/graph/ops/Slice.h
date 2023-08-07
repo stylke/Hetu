@@ -34,7 +34,7 @@ class SliceOpImpl : public OpInterface {
               inputs[0]->ndim() == _output_shape.size());
     int len = _begin_pos.size();
     for (int i = 0; i < len; ++i) {
-      HT_ASSERT(_begin_pos[i] >= 0 && _output_shape[i] > 0);
+      HT_ASSERT(_begin_pos[i] >= 0 && (_output_shape[i] > 0 || _output_shape[i] == -1));
       HT_ASSERT(_begin_pos[i] + _output_shape[i] <= inputs[0]->shape(i));
     }
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())

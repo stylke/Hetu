@@ -9,15 +9,9 @@ void BroadcastOpImpl::DoCompute(Operator& op,
                                 const NDArrayList& inputs, NDArrayList& outputs,
                                 RuntimeContext& ctx) const {
   if (mode() == 0) {
-    // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-    //                                 hetu::impl::Broadcast, inputs.at(0),
-    //                                 outputs.at(0), op->instantiation_ctx().stream());
     NDArray::broadcast(inputs.at(0), outputs.at(0)->shape(), 
                        op->instantiation_ctx().stream_index, outputs.at(0));
   } else {
-    // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-    //                                 hetu::impl::BroadcastShape, inputs.at(0),
-    //                                 outputs.at(0), get_add_axes(), op->instantiation_ctx().stream());
     NDArray::broadcast(inputs.at(0), outputs.at(0)->shape(), get_add_axes(), 
                        op->instantiation_ctx().stream_index, outputs.at(0));
   }
@@ -54,9 +48,6 @@ void BroadcastGradientOpImpl::DoCompute(Operator& op,
                                         const NDArrayList& inputs,
                                         NDArrayList& outputs,
                                         RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(
-  //   op->instantiation_ctx().placement.type(), type(), hetu::impl::ReduceSum, inputs.at(0),
-  //   outputs.at(0), get_axes().data(), get_axes().size(), op->instantiation_ctx().stream());
   NDArray::sum(inputs.at(0), get_axes(), false, 
                op->instantiation_ctx().stream_index, outputs.at(0));
 }
@@ -113,9 +104,10 @@ Tensor MakeBroadcastGradientOp(Tensor input, Tensor ori_input,
       n_input_shape[i] = input_shape[i - diff];
     }
     for (size_t i = 0; i < ndim; ++i) {
-      HT_ASSERT(output_shape[i] > 0);
+      // HT_ASSERT(output_shape[i] > 0)
+      // << "Invalid output shape:" << output_shape;
       HT_ASSERT(n_input_shape[i] == 1 || n_input_shape[i] == output_shape[i]);
-      if (i >= diff && input_shape[i] == 1 && output_shape[i] > 1) {
+      if (i >= diff && n_input_shape[i] == 1 && output_shape[i] > 1) {
         add_axes.emplace_back(i);
         keep_dims.emplace_back(true);
       }

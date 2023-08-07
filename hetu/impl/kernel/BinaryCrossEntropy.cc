@@ -15,7 +15,7 @@ void binary_cross_entropy_cpu(const spec_t* pred, const spec_t* label,
     spec_t v1 = std::log(pred[idx]);
     spec_t v2 = std::log(1 - pred[idx]);
     // clip to -100 following PyTorch
-    constexpr spec_t min_value = -100;
+    spec_t min_value = -100;
     loss[idx] =
       -label[idx] * MAX(v1, min_value) - (1 - label[idx]) * MAX(v2, min_value);
   }
@@ -30,7 +30,7 @@ void binary_cross_entropy_gradient_cpu(const spec_t* pred, const spec_t* label,
 #endif
   for (size_t idx = 0; idx < n_rows; idx++) {
     spec_t denominator = pred[idx] * (1 - pred[idx]);
-    output[idx] = grad_loss[idx] * (pred[idx] - label[idx]) / MAX(denominator, 1e-12);
+    output[idx] = grad_loss[idx] * (pred[idx] - label[idx]) / MAX(denominator, spec_t(1e-12));
   }
 }
 

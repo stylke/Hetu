@@ -39,7 +39,9 @@ void AddConstCpu(const NDArray& input, double value,
       dnnl::memory::data_type mtype;
       if (input->dtype() == DataType::FLOAT32)
         mtype = dnnl::memory::data_type::f32;
-      else 
+      else if (input->dtype() == DataType::FLOAT16) 
+        mtype = dnnl::memory::data_type::f16;
+      else
         mtype = dnnl::memory::data_type::f64;
       auto mat_md = dnnl::memory::desc(input->shape(), mtype, input->stride());
       auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
@@ -70,7 +72,14 @@ void SubConstCpu(const NDArray& input, double value,
     auto _future = cpu_stream.EnqueueTask(
     [stream, input, output, value]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
-      auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+      dnnl::memory::data_type mtype;
+      if (input->dtype() == DataType::FLOAT32)
+        mtype = dnnl::memory::data_type::f32;
+      else if (input->dtype() == DataType::FLOAT16) 
+        mtype = dnnl::memory::data_type::f16;
+      else
+        mtype = dnnl::memory::data_type::f64;
+      auto mat_md = dnnl::memory::desc(input->shape(), mtype, input->stride());
       auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
       auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 
@@ -100,7 +109,14 @@ void MulConstCpu(const NDArray& input, double value,
     auto _future = cpu_stream.EnqueueTask(
       [stream, input, output, value]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
-      auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+      dnnl::memory::data_type mtype;
+      if (input->dtype() == DataType::FLOAT32)
+        mtype = dnnl::memory::data_type::f32;
+      else if (input->dtype() == DataType::FLOAT16) 
+        mtype = dnnl::memory::data_type::f16;
+      else
+        mtype = dnnl::memory::data_type::f64;
+      auto mat_md = dnnl::memory::desc(input->shape(), mtype, input->stride());
       auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
       auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 
@@ -131,7 +147,14 @@ void DivConstCpu(const NDArray& input, double value,
     auto _future = cpu_stream.EnqueueTask(
       [stream, input, output, value]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
-      auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+      dnnl::memory::data_type mtype;
+      if (input->dtype() == DataType::FLOAT32)
+        mtype = dnnl::memory::data_type::f32;
+      else if (input->dtype() == DataType::FLOAT16) 
+        mtype = dnnl::memory::data_type::f16;
+      else
+        mtype = dnnl::memory::data_type::f64;
+      auto mat_md = dnnl::memory::desc(input->shape(), mtype, input->stride());
       auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
       auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 

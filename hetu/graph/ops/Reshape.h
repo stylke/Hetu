@@ -29,8 +29,40 @@ class ArrayReshapeOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
+    int64_t input_size = 1;
+    HTShape input_shape = inputs[0]->shape();
+    int64_t input_len = input_shape.size();
+    int64_t idx = -1;
+    size_t cnt = 0;
+    int64_t output_size = 1;
+    HTShape output_shape = get_output_shape();
+    int64_t output_len = output_shape.size();
+    for (size_t i = 0; i < input_len; ++i) {
+      if (input_shape[i] == -1) {
+        cnt = cnt + 1;
+        HT_ASSERT(cnt != 2) << "Input shape has more than one '-1' dims. ";
+      }
+      input_size *= input_shape[i];
+    }
+    cnt = 0;
+    for (int64_t i = 0; i < output_len; ++i) {
+      if (output_shape[i] == -1) {
+        idx = i;
+        cnt = cnt + 1;
+        HT_ASSERT(cnt != 2) << "Output shape has more than one '-1' dims. ";
+      }
+      output_size *= output_shape[i];
+    }
+    if (idx == -1) {
+      HT_ASSERT(input_size == output_size) << "Invalid output size.";
+    } else {
+      output_size = output_size * (-1);
+      HT_ASSERT(input_size % output_size == 0) << "Invalid output size." << input_shape << "," << output_shape
+                                              << input_size << "," << output_size;
+      output_shape[idx] = input_size / output_size;
+    }
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
-                                           .set_shape(get_output_shape())
+                                           .set_shape(output_shape)
                                            .set_device(inputs[0]->device());
     return {output_meta};
   };

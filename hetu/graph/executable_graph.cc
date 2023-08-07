@@ -31,6 +31,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     Device placement =
       is_device_to_host_op(op) ? Device(kCPU) : preferred_device;
     StreamIndex stream_id = get_suggested_stream_index(op);
+    // stream_id = kBlockingStream;
     HT_LOG_TRACE << "Instantiating op " << op << " (placement=" << placement
                  << ", stream_index=" << stream_id << ")";
     bool ok = op->Instantiate(placement, stream_id);
@@ -125,12 +126,24 @@ NDArrayList ExecutableGraph::Run(const TensorList& fetches,
       if (data->device() != op->input(i)->placement() ||
           data->dtype() != op->input(i)->dtype()) {
         tensor2data[op->input(i)->id()] =
-          NDArray::to(data, op->input(i)->placement(), op->input(i)->dtype(),
-                      kBlockingStream);
+          NDArray::to(data, op->input(i)->placement(), op->input(i)->dtype(), op->stream_index());
       }
       inputs.push_back(tensor2data[op->input(i)->id()]);
     }
     auto outputs = op->Compute(inputs, runtime_ctx);
+    op->Sync();
+    // HT_LOG_INFO << op << "\n"; 
+    // HT_LOG_INFO << "inputs:\n" << inputs << "\n";
+    // HT_LOG_INFO << "outputs:\n" << outputs << "\n";
+    // auto sum_ = NDArray::sum(outputs[0], HTAxes(), false,
+    //                          kBlockingStream);
+    // HT_LOG_INFO << "SUM_OUT:" << sum_;
+    // NDArrayList f32inputs = inputs;
+    // for (auto& input: f32inputs) {
+    //   input = NDArray::to(input, input->device(), DataType::FLOAT32, kBlockingStream);
+    // }
+    // auto f32outputs = op1->body()  Compute(f32inputs, runtime_ctx);
+    // HT_LOG_INFO << op << "\nF32Inputs:" << f32inputs << "\nF32Outputs:" << f32outputs;
     for (size_t i = 0; i < outputs.size(); i++) {
       tensor2data.insert({op->output(i)->id(), outputs[i]});
       auto it = fetch_indices.find(op->output(i)->id());
@@ -141,9 +154,19 @@ NDArrayList ExecutableGraph::Run(const TensorList& fetches,
     }
     // TODO: remove inputs that are no longer used
   }
+  // HT_LOG_INFO << "TO_SYNC:" << to_sync_op_ids << " " << fetch_indices;
   for (auto op_id : to_sync_op_ids) {
     _op_indexing[op_id]->Sync();
+    // HT_LOG_INFO <<  _op_indexing[op_id]->name() << "\n" << tensor2data[_op_indexing[op_id]->output(0)->id()];
   }
+  // std::vector<OpId> ops = {};
+  // for (auto op_id : to_sync_op_ids) {
+  //   ops.emplace_back(op_id);
+  // }
+  // for (int i = ops.size() - 1; i >= 0; --i) {
+  //   _op_indexing[ops[i]]->Sync();
+  //   HT_LOG_INFO <<  _op_indexing[ops[i]]->name() << "\n" << tensor2data[_op_indexing[ops[i]]->output(0)->id()];
+  // }
   return results;
 }
 

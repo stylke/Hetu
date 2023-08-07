@@ -2,6 +2,7 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/cuda_math.h"
 
 namespace hetu {
 namespace impl {
@@ -10,7 +11,7 @@ template <typename spec_t>
 __global__ void abs_kernel(const spec_t* input, size_t size, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < size)
-    output[idx] = abs(input[idx]);
+    output[idx] = hetu::cuda::cuda_abs(input[idx]);
 }
 
 void AbsCuda(const NDArray& input, NDArray& output, const Stream& stream) {

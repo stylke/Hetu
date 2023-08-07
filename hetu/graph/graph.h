@@ -128,7 +128,6 @@ class Graph {
     }
     for (size_t i = 0; i < op->num_outputs(); i++) {
       op->output(i)->set_requires_grad(false);
-      // HT_LOG_INFO << op << ", output" << i;
     }
     if (require_flag && op->num_outputs() > 0)
       op->output(0)->set_requires_grad(true);

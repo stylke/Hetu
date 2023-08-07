@@ -16,8 +16,8 @@ __global__ void kldivloss_kernel(const spec_t* pred,
     return;
   spec_t lglabel = hetu::cuda::cuda_log(label[idx]);
   // clip to -100 following PyTorch
-  constexpr spec_t min_value = -100;
-  loss[idx] = label[idx] * (MAX(lglabel, min_value) - pred[idx]); 
+  spec_t min_value = -100;
+  loss[idx] = label[idx] * (hetu::cuda::cuda_max(lglabel, min_value) - pred[idx]); 
 }
 
 template <typename spec_t>

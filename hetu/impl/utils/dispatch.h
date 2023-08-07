@@ -26,6 +26,12 @@
   } while (0)
 
 #define HT_DISPATH_CASE_FLOATING_TYPES(SPEC_TYPE, ...)                         \
+  HT_DISPATH_CASE(hetu::DataType::FLOAT16, SPEC_TYPE, __VA_ARGS__)             \
+  HT_DISPATH_CASE(hetu::DataType::BFLOAT16, SPEC_TYPE, __VA_ARGS__)            \
+  HT_DISPATH_CASE(hetu::DataType::FLOAT32, SPEC_TYPE, __VA_ARGS__)             \
+  HT_DISPATH_CASE(hetu::DataType::FLOAT64, SPEC_TYPE, __VA_ARGS__)
+
+#define HT_DISPATH_CASE_FLOATING_TYPES_EXCEPT_FLOAT16(SPEC_TYPE, ...)          \
   HT_DISPATH_CASE(hetu::DataType::FLOAT32, SPEC_TYPE, __VA_ARGS__)             \
   HT_DISPATH_CASE(hetu::DataType::FLOAT64, SPEC_TYPE, __VA_ARGS__)
 
@@ -48,10 +54,19 @@
   HT_DISPATH_CASE_FLOATING_TYPES(SPEC_TYPE, __VA_ARGS__)                       \
   HT_DISPATH_CASE_INTEGER_TYPES(SPEC_TYPE, __VA_ARGS__)
 
+#define HT_DISPATH_CASE_INTEGER_AND_FLOATING_TYPES_EXCEPT_FLOAT16(SPEC_TYPE, ...)             \
+  HT_DISPATH_CASE_FLOATING_TYPES_EXCEPT_FLOAT16(SPEC_TYPE, __VA_ARGS__)                       \
+  HT_DISPATH_CASE_INTEGER_TYPES(SPEC_TYPE, __VA_ARGS__)
+
 #define HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(DTYPE, SPEC_TYPE, NAME, ...)    \
   HT_DISPATH_SWITCH(                                                           \
     DTYPE, NAME,                                                               \
     HT_DISPATH_CASE_INTEGER_AND_FLOATING_TYPES(SPEC_TYPE, __VA_ARGS__))
+
+#define HT_DISPATCH_INTEGER_AND_FLOATING_TYPES_EXCEPT_FLOAT16(DTYPE, SPEC_TYPE, NAME, ...)    \
+  HT_DISPATH_SWITCH(                                                                          \
+    DTYPE, NAME,                                                                              \
+    HT_DISPATH_CASE_INTEGER_AND_FLOATING_TYPES_EXCEPT_FLOAT16(SPEC_TYPE, __VA_ARGS__))
 
 /******************************************************
  * Dispatch Utils for Paired Types.
@@ -89,6 +104,22 @@ constexpr int paired_dtype(DataType t1, DataType t2) {
   } while (0)
 
 #define HT_DISPATH_PAIRED_CASE_FLOATING_TYPES(SPEC_A, SPEC_B, ...)             \
+  HT_DISPATH_PAIRED_CASE(hetu::DataType::FLOAT16, hetu::DataType::BFLOAT16,    \
+                         SPEC_A, SPEC_B, __VA_ARGS__)                          \
+  HT_DISPATH_PAIRED_CASE(hetu::DataType::FLOAT16, hetu::DataType::FLOAT16,     \
+                         SPEC_A, SPEC_B, __VA_ARGS__)                          \
+  HT_DISPATH_PAIRED_CASE(hetu::DataType::FLOAT16, hetu::DataType::FLOAT32,     \
+                         SPEC_A, SPEC_B, __VA_ARGS__)                          \
+  HT_DISPATH_PAIRED_CASE(hetu::DataType::BFLOAT16, hetu::DataType::FLOAT16,    \
+                         SPEC_A, SPEC_B, __VA_ARGS__)                          \
+  HT_DISPATH_PAIRED_CASE(hetu::DataType::BFLOAT16, hetu::DataType::BFLOAT16,    \
+                         SPEC_A, SPEC_B, __VA_ARGS__)                          \
+  HT_DISPATH_PAIRED_CASE(hetu::DataType::BFLOAT16, hetu::DataType::FLOAT32,    \
+                         SPEC_A, SPEC_B, __VA_ARGS__)                          \
+  HT_DISPATH_PAIRED_CASE(hetu::DataType::FLOAT32, hetu::DataType::BFLOAT16,     \
+                         SPEC_A, SPEC_B, __VA_ARGS__)                          \
+  HT_DISPATH_PAIRED_CASE(hetu::DataType::FLOAT32, hetu::DataType::FLOAT16,     \
+                         SPEC_A, SPEC_B, __VA_ARGS__)                          \
   HT_DISPATH_PAIRED_CASE(hetu::DataType::FLOAT32, hetu::DataType::FLOAT32,     \
                          SPEC_A, SPEC_B, __VA_ARGS__)                          \
   HT_DISPATH_PAIRED_CASE(hetu::DataType::FLOAT32, hetu::DataType::FLOAT64,     \

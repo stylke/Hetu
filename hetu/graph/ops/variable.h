@@ -22,6 +22,7 @@ class VariableOpImpl : public OpInterface {
     _init(init.copy()),
     _shape(std::move(shape)),
     _dtype(dtype),
+    _device(kUndeterminedDevice),
     _requires_grad(requires_grad) {
     _check_init();
   }
@@ -33,6 +34,7 @@ class VariableOpImpl : public OpInterface {
     _copy_provided_data(copy_provided_data),
     _shape(provided_data->shape()),
     _dtype(_InferDataType(provided_data, dtype)),
+    _device(provided_data->device()),
     _requires_grad(requires_grad) {
     _check_init();
   }
@@ -66,7 +68,7 @@ class VariableOpImpl : public OpInterface {
 
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
-    return {NDArrayMeta().set_shape(shape()).set_dtype(dtype())};
+    return {NDArrayMeta().set_shape(shape()).set_dtype(dtype()).set_device(device())};
   }
 
   TensorList DoGradient(Operator& op,
@@ -102,6 +104,10 @@ class VariableOpImpl : public OpInterface {
     return _dtype;
   }
 
+  Device device() const {
+    return _device;
+  }
+
   bool requires_grad() const {
     return _requires_grad;
   }
@@ -112,6 +118,7 @@ class VariableOpImpl : public OpInterface {
   bool _copy_provided_data;
   HTShape _shape;
   DataType _dtype;
+  Device _device;
   bool _requires_grad;
 };
 

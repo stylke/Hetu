@@ -22,16 +22,17 @@ __global__ void softmax_cross_entropy_sparse_kernel(const spec_t* pred,
   }  
   spec_t maxval = pred[idx * n_cols];
   for (size_t i = 1; i < n_cols; ++i) {
-    maxval = MAX(maxval, pred[idx * n_cols + i]);
+    maxval = hetu::cuda::cuda_max(maxval, pred[idx * n_cols + i]);
   }
 
-  spec_t sum = 0;
+  float sum = 0;
   for (int i = 0; i < n_cols; ++i) {
-    sum += hetu::cuda::cuda_exp(pred[idx * n_cols + i] - maxval);
+    sum += hetu::cuda::cuda_exp(float(pred[idx * n_cols + i] - maxval));
   }
 
   size_t curid = idx * n_cols + int64_t(label[idx]);
-  loss[idx] = -(pred[curid] - maxval) + hetu::cuda::cuda_log(sum);
+  // loss[idx] = -(pred[curid] - maxval) + hetu::cuda::cuda_log(sum);
+  loss[idx] = -(pred[curid] - maxval) + spec_t(hetu::cuda::cuda_log(sum));
 }
 
 template <typename spec_t>
@@ -58,23 +59,22 @@ softmax_cross_entropy_sparse_gradient_kernel(const spec_t* pred, const int64_t* 
       maxval = MAX(maxval, pred[idx * n_cols + i]);
   }
 
-  spec_t sum = 0;
+  float sum = 0;
   for (size_t i = 0; i < n_cols; ++i) {
-      sum += hetu::cuda::cuda_exp(pred[idx * n_cols + i] - maxval);
+      sum += hetu::cuda::cuda_exp(float(pred[idx * n_cols + i] - maxval));
   }
   for (size_t i = 0; i < n_cols; ++i) {
       size_t curid = idx * n_cols + i;
       if(i == int64_t(label[idx]))
-        output[curid] = (hetu::cuda::cuda_exp(pred[curid] - maxval) / sum - 1.0) * grad_loss[idx];
+        output[curid] = (hetu::cuda::cuda_exp(pred[curid] - maxval) / spec_t(sum) - 1.0) * grad_loss[idx];
       else
-        output[curid] = (hetu::cuda::cuda_exp(pred[curid] - maxval) / sum) * grad_loss[idx];
+        output[curid] = (hetu::cuda::cuda_exp(pred[curid] - maxval) / spec_t(sum)) * grad_loss[idx];
   }
 }
 
 void SoftmaxCrossEntropySparseCuda(const NDArray& pred, const NDArray& label,
                                    NDArray& loss, const int64_t ignored_index, 
                                    const Stream& stream) {
-
   size_t n_rows = 1;
   for (size_t i = 0; i < pred->ndim() - 1; i++)
     n_rows *= pred->shape(i);
@@ -92,6 +92,7 @@ void SoftmaxCrossEntropySparseCuda(const NDArray& pred, const NDArray& label,
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(), n_rows, n_cols,
         ignored_index, loss->data_ptr<spec_t>());
     });
+  // CudaStreamSynchronize(cuda_stream);
 }
 
 void SoftmaxCrossEntropySparseGradientCuda(const NDArray& pred, const NDArray& label,

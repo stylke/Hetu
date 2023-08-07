@@ -26,18 +26,26 @@ TensorList ArrayReshapeOpImpl::DoGradient(Operator& op,
 HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op, 
                                              const HTShapeList& input_shapes, 
                                              RuntimeContext& ctx) const {
-  size_t input_size = 1;
+  int64_t input_size = 1;
   HTShape input_shape = input_shapes.at(0);
-  size_t input_len = input_shape.size();
-  for (size_t i = 0; i < input_len; ++i) {
-    input_size *= input_shape[i];
-  }
+  int64_t input_len = input_shape.size();
+  // for (size_t i = 0; i < input_len; ++i) {
+  //   input_size *= input_shape[i];
+  // }
   // check if there exists -1 in output_shape
   int64_t idx = -1;
   size_t cnt = 0;
-  size_t output_size = 1;
+  int64_t output_size = 1;
   HTShape output_shape = get_output_shape();
   int64_t output_len = output_shape.size();
+  for (size_t i = 0; i < input_len; ++i) {
+    if (input_shape[i] == -1) {
+      cnt = cnt + 1;
+      HT_ASSERT(cnt != 2) << "Input shape has more than one '-1' dims. ";
+    }
+    input_size *= input_shape[i];
+  }
+  cnt = 0;
   for (int64_t i = 0; i < output_len; ++i) {
     if (output_shape[i] == -1) {
       idx = i;
@@ -50,7 +58,8 @@ HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op,
     HT_ASSERT(input_size == output_size) << "Invalid output size.";
   } else {
     output_size = output_size * (-1);
-    HT_ASSERT(input_size % output_size == 0) << "Invalid output size.";
+    HT_ASSERT(input_size % output_size == 0) << "Invalid output size." << input_shape << "," << output_shape
+                                             << input_size << "," << output_size;
     output_shape[idx] = input_size / output_size;
   }
   return {output_shape};

@@ -34,12 +34,23 @@ void BatchMatMulCuda(const NDArray& a, bool trans_a, const NDArray& b,
 
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "BatchMatMul", [&]() {
     spec_t alpha = 1, beta = 0;
-    cublas_batch_gemm<spec_t>(
-      cublas_handle, trans_b ? CUBLAS_OP_T : CUBLAS_OP_N,
-      trans_a ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, &alpha,
-      b->data_ptr<spec_t>(), trans_b ? k : m, strideB, a->data_ptr<spec_t>(),
-      trans_a ? n : k, strideA, &beta, output->data_ptr<spec_t>(), m, strideC,
-      batchCount);
+    float alpha_f = 1, beta_f = 0;
+    if (output->dtype() == DataType::FLOAT16 || output->dtype() == DataType::BFLOAT16) {
+      cublas_batch_gemm<spec_t>(
+        cublas_handle, trans_b ? CUBLAS_OP_T : CUBLAS_OP_N,
+        trans_a ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, static_cast<const void*>(&alpha_f),
+        b->data_ptr<spec_t>(), trans_b ? k : m, strideB, a->data_ptr<spec_t>(),
+        trans_a ? n : k, strideA, static_cast<const void*>(&beta_f), output->data_ptr<spec_t>(), m, strideC,
+        batchCount);
+    }
+    else {
+      cublas_batch_gemm<spec_t>(
+        cublas_handle, trans_b ? CUBLAS_OP_T : CUBLAS_OP_N,
+        trans_a ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, &alpha,
+        b->data_ptr<spec_t>(), trans_b ? k : m, strideB, a->data_ptr<spec_t>(),
+        trans_a ? n : k, strideA, &beta, output->data_ptr<spec_t>(), m, strideC,
+        batchCount);
+    }
   });
 }
 

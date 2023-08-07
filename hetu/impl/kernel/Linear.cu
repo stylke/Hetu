@@ -52,11 +52,14 @@ void LinearCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
 
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "MatMul", [&]() {
     spec_t alpha = 1, beta = 1;
+    // HT_LOG_INFO << output;
     cublas_gemm<spec_t>(cublas_handle, trans_b ? CUBLAS_OP_T : CUBLAS_OP_N,
                         trans_a ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, &alpha,
                         b->data_ptr<spec_t>(), trans_b ? k : m,
                         a->data_ptr<spec_t>(), trans_a ? n : k, &beta,
                         output->data_ptr<spec_t>(), m);
+    CudaStreamSynchronize(cuda_stream);
+    // HT_LOG_INFO << a << "\n" <<  b << "\n"  << output;
   });
 }
 

@@ -18,13 +18,13 @@ Tensor Optimizer::Minimize(const Tensor& loss, const TensorList& var_list,
 }
 
 Tensor Optimizer::ApplyGradients(const GradAndVarList& grads_and_vars,
-                                 const OpName& name) {
+                                 const OpName& name, const Tensor& infinite_count) {
   TensorList updated_params;
   updated_params.reserve(grads_and_vars.size());
   std::transform(
     grads_and_vars.begin(), grads_and_vars.end(),
     std::back_inserter(updated_params),
-    [&](const GradAndVar& grad_and_var) { return ApplyDense(grad_and_var); });
+    [&](const GradAndVar& grad_and_var) { return ApplyDense(grad_and_var, infinite_count); });
   return MakeGroupOp(OpMeta().set_extra_deps(updated_params).set_name(name));
 }
 
@@ -57,13 +57,15 @@ GradAndVarList Optimizer::ComputeGradients(const Tensor& loss,
   return grads_and_vars;
 }
 
-Tensor SGDOptimizer::ApplyDense(const GradAndVar& grad_and_var) {
+Tensor SGDOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& infinite_count) {
   const Tensor& grad = grad_and_var.first;
   const Tensor& var = grad_and_var.second;
   auto update_op_meta = OpMeta()
                           .set_device_group(var->producer()->device_group())
                           .set_name("Update_" + var->name());
   if (momentum() == 0) {
+    if (infinite_count != Tensor())
+      return MakeSGDUpdateWithGradScalerOp(var, grad, infinite_count, learning_rate(), update_op_meta);
     return MakeSGDUpdateOp(var, grad, learning_rate(), update_op_meta);
   } else {
     return MakeMomentumUpdateOp(var, grad, MakeStates(var, "velocity"),

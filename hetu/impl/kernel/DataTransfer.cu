@@ -14,7 +14,7 @@ __global__ void data_transfer_kernel(const spec_a_t* src, spec_b_t* dst,
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= numel)
     return;
-  dst[idx] = src[idx];
+  dst[idx] = static_cast<spec_b_t>(src[idx]);
 }
 
 void DataTransferCuda(const NDArray& from, NDArray& to, const Stream& stream) {

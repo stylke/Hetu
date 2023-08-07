@@ -1,4 +1,4 @@
-#pragma once
+#pragma oncehalf
 
 #include "hetu/impl/utils/cuda_utils.h"
 #include <cublas_v2.h>
@@ -9,45 +9,119 @@ namespace impl {
 cublasHandle_t GetCublasHandle(int32_t device_id);
 
 template <typename T>
+inline void cublas_dot(cublasHandle_t cublas_handle, int n, const T* x,
+                       int incx, const T* y, int incy, T* result) {
+  HT_NOT_IMPLEMENTED << "cublas_dot is not implemented for type "
+                     << typeid(T).name();
+}
+
+template <>
+void cublas_dot<float>(cublasHandle_t cublas_handle, int n, const float* x,
+                       int incx, const float* y, int incy, float* result);
+
+template <>
+void cublas_dot<double>(cublasHandle_t cublas_handle, int n, const double* x,
+                       int incx, const double* y, int incy, double* result);
+
+template <typename T>
+inline void cublas_gemv(cublasHandle_t cublas_handle, cublasOperation_t trans,
+                        int32_t m, int32_t n, const T* alpha, const T* A,
+                        int32_t lda, const T* x, int32_t incx, const T* beta,
+                        T* y, int32_t incy) {
+  HT_NOT_IMPLEMENTED << "cublas_gemv is not implemented for type "
+                     << typeid(T).name();
+}
+
+template <>
+void cublas_gemv<float>(cublasHandle_t cublas_handle, cublasOperation_t trans,
+                        int32_t m, int32_t n, const float* alpha, const float* A,
+                        int32_t lda, const float* x, int32_t incx,
+                        const float* beta, float* y, int32_t incy);
+
+template <>
+void cublas_gemv<double>(cublasHandle_t cublas_handle, cublasOperation_t trans,
+                        int32_t m, int32_t n, const double* alpha, const double* A,
+                        int32_t lda, const double* x, int32_t incx,
+                        const double* beta, double* y, int32_t incy);
+
+
+template <typename T>
 inline void cublas_gemm(cublasHandle_t cublas_handle, cublasOperation_t trans_a,
                         cublasOperation_t trans_b, int32_t m, int32_t n,
-                        int32_t k, const T* alpha, const T* A, int32_t lda,
-                        const T* B, int32_t ldb, const T* beta, T* C,
+                        int32_t k, const void* alpha, const T* A, int32_t lda,
+                        const T* B, int32_t ldb, const void* beta, T* C,
                         int32_t ldc) {
   HT_NOT_IMPLEMENTED << "cublas_gemm is not implemented for type "
                      << typeid(T).name();
 }
 
 template <>
+void cublas_gemm<float16>(cublasHandle_t cublas_handle, cublasOperation_t trans_a,
+                        cublasOperation_t trans_b, int32_t m, int32_t n,
+                        int32_t k, const void* alpha, const float16* A,
+                        int32_t lda, const float16* B, int32_t ldb,
+                        const void* beta, float16* C, int32_t ldc);
+
+template <>
+void cublas_gemm<bfloat16>(cublasHandle_t cublas_handle, cublasOperation_t trans_a,
+                           cublasOperation_t trans_b, int32_t m, int32_t n,
+                           int32_t k, const void* alpha, const bfloat16* A,
+                           int32_t lda, const bfloat16* B, int32_t ldb,
+                           const void* beta, bfloat16* C, int32_t ldc);
+
+template <>
 void cublas_gemm<float>(cublasHandle_t cublas_handle, cublasOperation_t trans_a,
                         cublasOperation_t trans_b, int32_t m, int32_t n,
-                        int32_t k, const float* alpha, const float* A,
+                        int32_t k, const void* alpha, const float* A,
                         int32_t lda, const float* B, int32_t ldb,
-                        const float* beta, float* C, int32_t ldc);
+                        const void* beta, float* C, int32_t ldc);
 
 template <>
 void cublas_gemm<double>(cublasHandle_t cublas_handle,
                          cublasOperation_t trans_a, cublasOperation_t trans_b,
-                         int32_t m, int32_t n, int32_t k, const double* alpha,
+                         int32_t m, int32_t n, int32_t k, const void* alpha,
                          const double* A, int32_t lda, const double* B,
-                         int32_t ldb, const double* beta, double* C,
+                         int32_t ldb, const void* beta, double* C,
                          int32_t ldc);
 
 template <typename T>
 inline void
 cublas_batch_gemm(cublasHandle_t cublas_handle, cublasOperation_t trans_a,
                   cublasOperation_t trans_b, int32_t m, int32_t n, int32_t k,
-                  const T* alpha, const T* A, int32_t lda, int32_t strideA,
-                  const T* B, int32_t ldb, int32_t strideB, const T* beta, T* C,
-                  int32_t ldc, int32_t strideC, int32_t batch_count) {}
+                  const void* alpha, const T* A, int32_t lda, int32_t strideA,
+                  const T* B, int32_t ldb, int32_t strideB, const void* beta, T* C,
+                  int32_t ldc, int32_t strideC, int32_t batch_count) {
+  HT_NOT_IMPLEMENTED << "cublas_gemm is not implemented for type "
+                     << typeid(T).name();
+}
+
+template <>
+void cublas_batch_gemm<float16>(cublasHandle_t cublas_handle,
+                              cublasOperation_t trans_a,
+                              cublasOperation_t trans_b, int32_t m, int32_t n,
+                              int32_t k, const void* alpha, const float16* A,
+                              int32_t lda, int32_t strideA, const float16* B,
+                              int32_t ldb, int32_t strideB, const void* beta,
+                              float16* C, int32_t ldc, int32_t strideC,
+                              int32_t batch_count);
+
+template <>
+void cublas_batch_gemm<bfloat16>(cublasHandle_t cublas_handle,
+                               cublasOperation_t trans_a,
+                               cublasOperation_t trans_b, int32_t m, int32_t n,
+                               int32_t k, const void* alpha, const bfloat16* A,
+                               int32_t lda, int32_t strideA, const bfloat16* B,
+                               int32_t ldb, int32_t strideB, const void* beta,
+                               bfloat16* C, int32_t ldc, int32_t strideC,
+                               int32_t batch_count);
 
 template <>
 void cublas_batch_gemm<float>(cublasHandle_t cublas_handle,
                               cublasOperation_t trans_a,
                               cublasOperation_t trans_b, int32_t m, int32_t n,
-                              int32_t k, const float* alpha, const float* A,
+                              int32_t k, const void* alpha, const float* A,
                               int32_t lda, int32_t strideA, const float* B,
-                              int32_t ldb, int32_t strideB, const float* beta,
+                              int32_t ldb, int32_t strideB, const void* beta,
                               float* C, int32_t ldc, int32_t strideC,
                               int32_t batch_count);
 
@@ -55,9 +129,9 @@ template <>
 void cublas_batch_gemm<double>(cublasHandle_t cublas_handle,
                                cublasOperation_t trans_a,
                                cublasOperation_t trans_b, int32_t m, int32_t n,
-                               int32_t k, const double* alpha, const double* A,
+                               int32_t k, const void* alpha, const double* A,
                                int32_t lda, int32_t strideA, const double* B,
-                               int32_t ldb, int32_t strideB, const double* beta,
+                               int32_t ldb, int32_t strideB, const void* beta,
                                double* C, int32_t ldc, int32_t strideC,
                                int32_t batch_count);
 

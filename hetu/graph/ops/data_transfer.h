@@ -98,9 +98,65 @@ class DataD2HOpImpl final : public OpInterface {
   Device _device;
 };
 
+class DataTransferOpImpl final : public OpInterface {
+ public:
+  DataTransferOpImpl(DataType datatype, Device dev = kUndeterminedDevice)
+  : OpInterface(quote(DataTransfer)),
+  _dtype(datatype),
+  _dev(dev) {}
+
+ protected:
+  std::vector<NDArrayMeta>
+  DoInferMeta(const TensorList& inputs) const override {
+    NDArrayMeta out_meta = inputs.front()->meta();
+    out_meta.set_dtype(_dtype);
+    if (_dev != kUndeterminedDevice)
+      out_meta.set_device(_dev);
+    return {out_meta};
+  }
+
+  TensorList DoGradient(Operator& op,
+                        const TensorList& grad_outputs) const override;
+
+  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
+                           RuntimeContext& runtime_ctx) const override {
+    return {input_shapes.front()};
+  }
+
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& runtime_ctx) const override;
+
+  NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
+                        RuntimeContext& runtime_ctx) const override;
+
+ public:
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const DataTransferOpImpl&>(rhs);
+      return datatype() == rhs_.datatype() &&
+             dev() == rhs_.dev();
+    }
+    return false;
+  }
+
+  const DataType& datatype() const {
+    return _dtype;
+  }
+
+  const Device& dev() const {
+    return _dev;
+  }
+
+ protected:
+  DataType _dtype;
+  Device _dev;
+};
+
 Tensor MakeDataH2DOp(Device device, Tensor input, OpMeta op_meta = OpMeta());
 
 Tensor MakeDataD2HOp(Device device, Tensor input, OpMeta op_meta = OpMeta());
+
+Tensor MakeDataTransferOp(DataType datatype, Tensor input, Device dev = kUndeterminedDevice, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

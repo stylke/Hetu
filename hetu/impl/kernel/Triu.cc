@@ -13,7 +13,7 @@ void triutril_cpu(const spec_t* input, spec_t* output, bool lower,
     int row = (idx / W) % H;
     int col = idx % W;
     bool mask = lower ? (col - row > diagonal) : (col - row < diagonal);
-    output[idx] = mask ? 0 : input[idx];
+    output[idx] = mask ? spec_t(0) : input[idx];
   }
 }
 

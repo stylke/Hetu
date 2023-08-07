@@ -18,7 +18,7 @@ __global__ void Concat_kernel(const spec_t* inputA, const spec_t* inputB,
   int temp = idx / concat_size;
   int mid_ind = temp % all_offset;
   int pre_ind = temp / all_offset;
-  float val;
+  spec_t val;
   if (mid_ind < offset1) {
     int x_ind = (pre_ind * offset1 + mid_ind) * concat_size + post_ind;
     val = inputA[x_ind];

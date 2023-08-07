@@ -62,6 +62,7 @@ template <>
 struct is_tensor_list<TensorList> : std::true_type {};
 
 using GraphId = uint64_t;
+using AutoCastId = uint64_t;
 using GraphName = std::string;
 using FeedDict = Tensor2NDArrayMap;
 class Graph;

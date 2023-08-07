@@ -1,6 +1,8 @@
 #pragma once
 
 #include "hetu/common/macros.h"
+#include "hetu/core/float16.h"
+#include "hetu/core/bfloat16.h"
 
 namespace hetu {
 
@@ -13,6 +15,7 @@ enum class DataType : int8_t {
   FLOAT16,
   FLOAT32,
   FLOAT64,
+  BFLOAT16,
   BOOL,
   NUM_DATA_TYPES,
   UNDETERMINED
@@ -34,9 +37,10 @@ DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::INT16, int16_t, int16);
 DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::INT32, int32_t, int32);
 DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::INT64, int64_t, int64);
 // TODO: support half-precision floating points
-DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::FLOAT16, int16_t, float16);
+DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::FLOAT16, float16, float16);
 DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::FLOAT32, float, float32);
 DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::FLOAT64, double, float64);
+DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::BFLOAT16, bfloat16, bfloat16);
 DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::BOOL, bool, bool);
 
 #define HT_DATA_TYPE_CASE_RETURN(DTYPE, RETURN_VALUE)                          \
@@ -59,6 +63,7 @@ constexpr DataType kFloat32 = DataType::FLOAT32;
 constexpr DataType kFloat = DataType::FLOAT32;
 constexpr DataType kFloat64 = DataType::FLOAT64;
 constexpr DataType kDouble = DataType::FLOAT64;
+constexpr DataType kBFloat16 = DataType::BFLOAT16;
 constexpr DataType kBool = DataType::BOOL;
 constexpr DataType kUndeterminedDataType = DataType::UNDETERMINED;
 constexpr int16_t NUM_DATA_TYPES =

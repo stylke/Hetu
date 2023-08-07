@@ -261,7 +261,32 @@ class OpInterface : public shared_ptr_target {
   virtual NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
                                 RuntimeContext& runtime_ctx) const {
     auto outputs = DoAllocOutputs(op, inputs, runtime_ctx);
+    // NDArrayList f32inputs = inputs;
+    // for (auto& input: f32inputs) {
+    //   if (input->dtype() != DataType::FLOAT32)
+    //     input = NDArray::to(input, input->device(), DataType::FLOAT32);
+    //   else
+    //     input = NDArray::copy(input);
+    // }
+    // auto f32outputs = DoAllocOutputs(op, f32inputs, runtime_ctx);
+    // for (auto& output: f32outputs) {
+    //   if (output->dtype() != DataType::FLOAT32)
+    //     output = NDArray::to(output, output->device(), DataType::FLOAT32);
+    //   else
+    //     output = NDArray::copy(output);
+    // }
     DoCompute(op, inputs, outputs, runtime_ctx);
+    // if (_type != "DataTransfer") {
+    //   HT_LOG_INFO << _type <<  "\nInputs";
+    //   for (auto& input: inputs){
+    //     HT_LOG_INFO << input->raw_data_ptr() <<  " "  << NDArray::sum(NDArray::abs(input, kBlockingStream), {0}, false, kBlockingStream) << " " << input;
+    //   }
+    //   HT_LOG_INFO << "\nOutputs";
+    //   for (auto& output: outputs){
+    //     HT_LOG_INFO << output->raw_data_ptr() <<  " "  << NDArray::sum(NDArray::abs(output, kBlockingStream), {0}, false, kBlockingStream) << " " << output;
+    //   }
+    //   // HT_LOG_INFO  << "\nF32Inputs:" << f32inputs << "\nF32Outputs:" << f32outputs;
+    // }
     return outputs;
   }
 
@@ -314,7 +339,10 @@ class OpDef : public shared_ptr_target {
   NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx) {
     BlockOrSyncAllInputs();
     instantiation_ctx().start->Record(stream());
+    // HT_LOG_INFO << name() << "\n" << inputs;
     auto ret = _body->Compute(get_self(), inputs, runtime_ctx);
+    // if (ret.size() > 0)
+    // HT_LOG_INFO << ret[0];
     instantiation_ctx().stop->Record(stream());
     return ret;
   }

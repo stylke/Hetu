@@ -28,14 +28,15 @@ class Optimizer {
                                           const Tensor& grad_loss = {});
 
   virtual Tensor ApplyGradients(const GradAndVarList& grads_and_vars,
-                                const OpName& name = OpName());
+                                const OpName& name = OpName(),
+                                const Tensor& infinite_count = Tensor());
 
   float learning_rate() const {
     return _learning_rate;
   }
 
  protected:
-  virtual Tensor ApplyDense(const GradAndVar& grad_and_var) = 0;
+  virtual Tensor ApplyDense(const GradAndVar& grad_and_var, const Tensor& infinite_count = Tensor()) { return Tensor(); }
 
   virtual Tensor MakeStates(const Tensor& variable, const OpName& state_name);
 
@@ -59,7 +60,7 @@ class SGDOptimizer : public Optimizer {
     _init(momentum, nesterov);
   }
 
-  Tensor ApplyDense(const GradAndVar& grad_and_var);
+  Tensor ApplyDense(const GradAndVar& grad_and_var, const Tensor& infinite_count = Tensor());
 
   float momentum() const {
     return _momentum;

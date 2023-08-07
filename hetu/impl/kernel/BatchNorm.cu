@@ -30,6 +30,16 @@ void BatchNormCuda(const NDArray& input_X, const NDArray& bn_scale,
     datatype = CUDNN_DATA_FLOAT;
   } else if (input_X->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
+  } else if (input_X->dtype() == DataType::FLOAT16) {
+    datatype = CUDNN_DATA_HALF;
+  }
+  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
+  else if (input_X->dtype() == DataType::BFLOAT16) {
+    datatype = CUDNN_DATA_BFLOAT16;
+  }
+  #endif
+  else {
+    HT_NOT_IMPLEMENTED << "UNSUPPORTED TYPE:" << input_X->dtype();
   }
 
   // input
@@ -62,11 +72,24 @@ void BatchNormCuda(const NDArray& input_X, const NDArray& bn_scale,
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
 
-      CUDNN_CALL(cudnnBatchNormalizationForwardTraining(
-        handle, CUDNN_BATCHNORM_SPATIAL, &alpha, &beta, input_desc, input_X->data_ptr<spec_t>(),
-        output_desc, output_Y->data_ptr<spec_t>(), bnScaleBiasMeanVar_desc, bn_scale->data_ptr<spec_t>(),
-        bn_bias->data_ptr<spec_t>(), momentum, running_mean->data_ptr<void>(), running_var->data_ptr<void>(), eps,
-        save_mean->data_ptr<void>(), save_var->data_ptr<void>()));
+      float alpha_f = 1.0f;
+      float beta_f = 0.0f;
+      if (input_X->dtype() == DataType::UNDETERMINED) {
+      }
+      else if (input_X->dtype() == DataType::FLOAT16 || input_X->dtype() == DataType::BFLOAT16 ) {
+        CUDNN_CALL(cudnnBatchNormalizationForwardTraining(
+          handle, CUDNN_BATCHNORM_SPATIAL, &alpha_f, &beta_f, input_desc, input_X->data_ptr<spec_t>(),
+          output_desc, output_Y->data_ptr<spec_t>(), bnScaleBiasMeanVar_desc, bn_scale->data_ptr<float>(),
+          bn_bias->data_ptr<float>(), momentum, running_mean->data_ptr<void>(), running_var->data_ptr<void>(), eps,
+          save_mean->data_ptr<void>(), save_var->data_ptr<void>()));
+      }
+      else {
+        CUDNN_CALL(cudnnBatchNormalizationForwardTraining(
+          handle, CUDNN_BATCHNORM_SPATIAL, &alpha, &beta, input_desc, input_X->data_ptr<spec_t>(),
+          output_desc, output_Y->data_ptr<spec_t>(), bnScaleBiasMeanVar_desc, bn_scale->data_ptr<spec_t>(),
+          bn_bias->data_ptr<spec_t>(), momentum, running_mean->data_ptr<void>(), running_var->data_ptr<void>(), eps,
+          save_mean->data_ptr<void>(), save_var->data_ptr<void>()));
+      }
 
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
@@ -99,6 +122,16 @@ void BatchNormGradientCuda(const NDArray& gradient_Y, const NDArray& input_X,
     datatype = CUDNN_DATA_FLOAT;
   } else if (input_X->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
+  } else if (input_X->dtype() == DataType::FLOAT16) {
+    datatype = CUDNN_DATA_HALF;
+  }
+  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
+  else if (input_X->dtype() == DataType::BFLOAT16) {
+    datatype = CUDNN_DATA_BFLOAT16;
+  }
+  #endif
+  else {
+    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_X->dtype();
   }
 
   // input
@@ -131,12 +164,25 @@ void BatchNormGradientCuda(const NDArray& gradient_Y, const NDArray& input_X,
       spec_t one = 1.0;
       spec_t zero = 0.0;
 
-      CUDNN_CALL(cudnnBatchNormalizationBackward(
-        handle, CUDNN_BATCHNORM_SPATIAL_PERSISTENT, &one, &zero, &one, &zero,
-        input_desc, input_X->data_ptr<spec_t>(), output_desc, gradient_Y->data_ptr<spec_t>(), input_desc,
-        gradient_X->data_ptr<spec_t>(), bnScaleBiasMeanVar_desc, bn_scale->data_ptr<spec_t>(),
-        gradient_bn_scale->data_ptr<spec_t>(), gradient_bn_bias->data_ptr<spec_t>(), eps, 
-        save_mean->data_ptr<void>(), save_var->data_ptr<void>()));
+      float one_f = 1.0f;
+      float zero_f = 0.0f;
+
+      if (input_X->dtype() == DataType::FLOAT16 || input_X->dtype() == DataType::BFLOAT16) {  
+        CUDNN_CALL(cudnnBatchNormalizationBackward(
+          handle, CUDNN_BATCHNORM_SPATIAL, &one_f, &zero_f, &one_f, &zero_f,
+          input_desc, input_X->data_ptr<spec_t>(), output_desc, gradient_Y->data_ptr<spec_t>(), input_desc,
+          gradient_X->data_ptr<spec_t>(), bnScaleBiasMeanVar_desc, bn_scale->data_ptr<spec_t>(),
+          gradient_bn_scale->data_ptr<float>(), gradient_bn_bias->data_ptr<float>(), eps, 
+          save_mean->data_ptr<void>(), save_var->data_ptr<void>()));
+      }
+      else {
+        CUDNN_CALL(cudnnBatchNormalizationBackward(
+          handle, CUDNN_BATCHNORM_SPATIAL, &one, &zero, &one, &zero,
+          input_desc, input_X->data_ptr<spec_t>(), output_desc, gradient_Y->data_ptr<spec_t>(), input_desc,
+          gradient_X->data_ptr<spec_t>(), bnScaleBiasMeanVar_desc, bn_scale->data_ptr<spec_t>(),
+          gradient_bn_scale->data_ptr<spec_t>(), gradient_bn_bias->data_ptr<spec_t>(), eps, 
+          save_mean->data_ptr<void>(), save_var->data_ptr<void>()));
+      }
 
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));

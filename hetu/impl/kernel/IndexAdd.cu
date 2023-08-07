@@ -18,7 +18,7 @@ __global__ void index_add_kernel(const spec_t* input, const spec_t* ids,
   size_t p_index = idx % (cur_stride * after_stride);
   size_t c_index = p_index / after_stride;
   size_t a_index = p_index % after_stride;
-  size_t id_num = ids[c_index];
+  size_t id_num = int64_t(float(ids[c_index]));
   size_t i_index =
     b_index * (cur_stride * after_stride) + id_num * after_stride + a_index;
   output[idx] = input[i_index];

@@ -26,6 +26,19 @@ void SGDUpdateOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                   op->instantiation_ctx().stream());
 }
 
+void SGDUpdateWithGradScalerOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                                              NDArrayList& outputs,
+                                              RuntimeContext& runtime_ctx) const {
+  NDArray& param = outputs.at(0);
+  const NDArray& grad = inputs.at(1);
+  const NDArray& infinite_count = inputs.at(2);
+  NDArray velocity;
+  HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(),
+                               type(), hetu::impl::SGDUpdateWithGradScaler, grad, infinite_count, 
+                               param, velocity, learning_rate(), 0, false,
+                               op->instantiation_ctx().stream());
+}
+
 void MomentumUpdateOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                      NDArrayList& outputs,
                                      RuntimeContext& runtime_ctx) const {
@@ -44,6 +57,14 @@ Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, float learning_rate,
                        {std::move(param), std::move(grad)}, std::move(op_meta))
     ->output(0);
 }
+
+Tensor MakeSGDUpdateWithGradScalerOp(Tensor param, Tensor grad, Tensor infinite_count, 
+                                     float learning_rate, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<SGDUpdateWithGradScalerOpImpl>(learning_rate),
+                       {std::move(param), std::move(grad), std::move(infinite_count)}, std::move(op_meta))
+    ->output(0);
+}
+
 
 Tensor MakeMomentumUpdateOp(Tensor param, Tensor grad, Tensor velocity,
                             float learning_rate, float momentum, bool nesterov,

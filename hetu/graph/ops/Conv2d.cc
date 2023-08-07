@@ -84,20 +84,27 @@ void Conv2dAddBiasOpImpl::DoCompute(Operator& op,
     op->instantiation_ctx().placement.type(), type(), hetu::impl::Conv2dAddBias, inputs.at(0),
     inputs.at(1), inputs.at(2), outputs.at(0), get_padding()[0],
     get_padding()[1], get_stride()[0], get_stride()[1], op->instantiation_ctx().stream());
+  
+  // auto input_0 = NDArray::to(inputs.at(0), inputs.at(0)->device(), DataType::FLOAT32, kBlockingStream);
+  // auto input_1 = NDArray::to(inputs.at(1), inputs.at(1)->device(), DataType::FLOAT32, kBlockingStream);
+  // auto output_0 = NDArray::conv2d(input_0, input_1, get_padding(), get_stride(), kBlockingStream);
+  // HT_LOG_INFO << "F32:" << output_0;
 }
 
 TensorList Conv2dAddBiasOpImpl::DoGradient(Operator& op,
                                            const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_input = MakeConv2dGradientofDataOp(
-                      op->input(1), grad_outputs.at(0), op->input(0), get_padding(),
-                      get_stride(), g_op_meta.set_name(op->grad_name(0)));
-  auto grad_filter =
-    MakeConv2dGradientofFilterOp(op->input(0), grad_outputs.at(0), op->input(1),
-                             get_padding(), get_stride(),
-                             g_op_meta.set_name(op->grad_name(1)));
-  auto grad_bias = MakeReduceOp(grad_outputs.at(0), ReductionType::SUM, {0, 2, 3}, {false},
-                                g_op_meta.set_name(op->grad_name(2)));
+  auto grad_input = op->requires_grad(0) ? MakeConv2dGradientofDataOp(
+                                           op->input(1), grad_outputs.at(0), op->input(0), get_padding(),
+                                           get_stride(), g_op_meta.set_name(op->grad_name(0)))
+                                          : Tensor();
+  auto grad_filter = op->requires_grad(1) ? MakeConv2dGradientofFilterOp(op->input(0), grad_outputs.at(0), op->input(1),
+                                            get_padding(), get_stride(),
+                                            g_op_meta.set_name(op->grad_name(1)))
+                                          : Tensor();
+  auto grad_bias = op->requires_grad(2) ? MakeReduceOp(grad_outputs.at(0), ReductionType::SUM, {0, 2, 3}, {false},
+                                          g_op_meta.set_name(op->grad_name(2)))
+                                        : Tensor();
   return {grad_input, grad_filter, grad_bias};
 }
 
@@ -119,9 +126,12 @@ HTShapeList Conv2dAddBiasOpImpl::DoInferShape(Operator& op,
 
 Tensor MakeConv2dOp(Tensor input, Tensor filter, int64_t padding, int64_t stride,
                     OpMeta op_meta) {
+  TensorList inputs = {std::move(input), std::move(filter)};
+  DataType input_type = DataType::FLOAT32;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<Conv2dOpImpl>(padding, stride),
-          {std::move(input), std::move(filter)},
+          std::move(inputs),
           std::move(op_meta))->output(0);
 }
 
@@ -145,9 +155,12 @@ Tensor MakeConv2dGradientofDataOp(Tensor filter, Tensor grad_output, Tensor inpu
 
 Tensor MakeConv2dAddBiasOp(Tensor input, Tensor filter, Tensor bias, int64_t padding,
                            int64_t stride, OpMeta op_meta) {
+  TensorList inputs = {std::move(input), std::move(filter), std::move(bias)};
+  DataType input_type = DataType::FLOAT32;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<Conv2dAddBiasOpImpl>(padding, stride),
-          {std::move(input), std::move(filter), std::move(bias)},
+          std::move(inputs),
           std::move(op_meta))->output(0);
 }
 
