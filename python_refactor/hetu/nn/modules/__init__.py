@@ -28,5 +28,5 @@ __all__ = [
     #dropout
     'Dropout', 'Dropout2d',
     #parallel
-    'ColumnParallelLinear', 'RowParallelLinear',
+    'ParallelLayerNorm', 'ParallelEmbedding', 'ColumnParallelLinear', 'RowParallelLinear',
 ]
