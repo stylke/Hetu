@@ -90,6 +90,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     // op->placement_group + tensor->placement_group
     if (!op->device_group().empty()) {
       op->MapToParallelDevices(op->device_group());
+      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op " << op << " assigned placement group = " << op->placement_group();
     } else {
       DeviceGroup inferred;
       if (is_group_op(op)) {
@@ -104,9 +105,20 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         HT_ASSERT(op->num_inputs() > 0)
           << "Currently we cannot infer the devices "
           << "for operators with zero in-degree. : " << op;
-        inferred = op->input(0)->placement_group();
+        // TODO: Tensor add is_grad attribute, and firstly infer non-grad input tensor's placement group
+        // if all input tensor are grad tensor, then infer the first input's placement group
+        // inferred = op->input(0)->placement_group();
+        for (auto input : op->inputs()) {
+          if (!input->is_grad()) {
+            inferred = input->placement_group();
+            break;
+          }
+        }
+        if (inferred.empty())
+          inferred = op->input(0)->placement_group();
       }
       op->MapToParallelDevices(inferred);
+      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op " << op << " inferred placement group = " << inferred;
     }
     // udpate stages
     DeviceGroup stage_group;
@@ -878,30 +890,33 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
   _num_micro_batches = num_micro_batches;
-  // TODO: For each pair of `fetches` and `feed_dict`,
-  // deduce the optimal execution plan, and cache it.
-  for (auto& fetch : fetches) {
-    if (fetch->placement().is_undetermined()) {
-      Instantiate(fetches, local_device);
-      break;
-    }
-  }
 
-  // init topo contains comm_op
   auto is_op_computed = [&](const Operator& op) -> bool {
     return Operator::all_output_tensors_of(op, [&](const Tensor& tensor) {
       return feed_dict.find(tensor->id()) != feed_dict.end();
     });
   };
-  OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
-  HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo;
+  // TODO: For each pair of `fetches` and `feed_dict`,
+  // deduce the optimal execution plan, and cache it.
+  for (auto& fetch : fetches) {
+    if (fetch->placement_group().empty() || 
+        (fetch->placement_group().contains(local_device) && 
+         fetch->placement().is_undetermined())) {
+      // instantiate ops
+      Instantiate(fetches, local_device);
+      // init topo contains comm_op
+      OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo;
 
-  // substitute comm_op
-  HT_LOG_DEBUG << local_device << ": substitute comm_op begin...";
-  Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
-  SubstituteCommOp(topo);
-  Graph::pop_graph_ctx();
-  HT_LOG_DEBUG << local_device << ": substitute comm_op end...";
+      // substitute comm_op
+      HT_LOG_DEBUG << local_device << ": substitute comm_op begin...";
+      Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
+      SubstituteCommOp(topo);
+      Graph::pop_graph_ctx();
+      HT_LOG_DEBUG << local_device << ": substitute comm_op end...";      
+      break;
+    }
+  }
 
   // update topo
   OpRefList updated_topo = Graph::TopoSort(fetches, -1, is_op_computed);
@@ -945,7 +960,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     auto micro_batches = NDArray::split(kv.second, num_micro_batches);
     // 加一个pipeline split的tensor状态
     for (int i = 0; i < num_micro_batches; i++) {
-      tensor2data_list[i][kv.first] = NDArray::squeeze(micro_batches[i], 0);
+      // tensor2data_list[i][kv.first] = NDArray::squeeze(micro_batches[i], 0);
+      tensor2data_list[i][kv.first] = micro_batches[i];
     }
   }
 

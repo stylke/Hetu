@@ -140,6 +140,10 @@ class TensorDef : public shared_ptr_target {
     return _meta.shape.size() > 0;
   }
 
+  bool has_global_shape() const {
+    return _global_shape.size() > 0;
+  }
+
   const Device& placement() const noexcept {
     return _distributed_states.get_placement();
   }
@@ -157,6 +161,14 @@ class TensorDef : public shared_ptr_target {
     _requires_grad = new_requires_grad;
   }
 
+  const bool is_grad() const noexcept {
+    return _is_grad;
+  }
+
+  void set_is_grad(bool is_grad) {
+    _is_grad = is_grad;
+  }
+
   NDArray get_or_compute();
 
   bool has_distributed_states() const {
@@ -169,6 +181,22 @@ class TensorDef : public shared_ptr_target {
 
   void set_distributed_states(const DistributedStates& distributed_states) {
     _distributed_states.set_distributed_states(distributed_states);
+  }
+
+  const HTShape& global_shape() {
+    if (has_global_shape()) {
+      return _global_shape;
+    }
+    HTShape local_shape = shape();
+    if (!has_distributed_states()) {
+      return local_shape;
+    }
+    HTShape global_shape(local_shape.size());
+    for (size_t d = 0; d < local_shape.size(); d++) {
+      global_shape[d] = local_shape[d] * _distributed_states.get_dim(d);
+    }
+    _global_shape = global_shape;
+    return _global_shape;
   }
 
   const DeviceGroup& placement_group() const {
@@ -196,6 +224,8 @@ class TensorDef : public shared_ptr_target {
   OpRefList _consumers;
   bool _inform_graph_on_destruction;
   DistributedStates _distributed_states;
+  HTShape _global_shape;
+  bool _is_grad{false};
 };
 
 class Tensor : public shared_ptr_wrapper<TensorDef> {
