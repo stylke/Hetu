@@ -1,6 +1,7 @@
 #include "hetu/graph/ops/Arithmetics.h"
 #include "hetu/graph/headers.h"
 #include "hetu/graph/ops/kernel_links.h"
+#include "hetu/graph/ops/Reduce.h"
 
 namespace hetu {
 namespace graph {
@@ -37,6 +38,61 @@ std::pair<HTAxes, HTKeepDims> GradInfer(const HTShapeList& input_shapes) {
   return std::make_pair(add_axes, keep_dims);
 }
 
+DistributedStates ElewiseDeduceStates(Tensor a, Tensor b) {
+  const DistributedStates& ds_a = a->get_distributed_states();
+  const DistributedStates& ds_b = b->get_distributed_states();
+  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
+    << "AddElewiseOpDef: distributed states for input a and input b must be valid!";
+  // allow sum/sub input tensor states to be partial
+  HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
+    << "Tensor a & b shouldn't be partial";
+  HTShape shape_a = a->global_shape();
+  HTShape shape_b = b->global_shape();
+  int size_a = shape_a.size();
+  int size_b = shape_b.size();
+  int min_size = std::min(size_a, size_b);
+  // now only allow dim extention(1) in one of the two input tensor
+  int last_ext_distributed = -1; // -1: init, 0: tensor_a, 1: tensor_b
+  for (int i = 0; i < min_size; i++) {
+    int dim_a = size_a - 1 - i;
+    int dim_b = size_b - 1 - i;
+    if (shape_a[dim_a] == shape_b[dim_b]) {
+      HT_ASSERT(ds_a.get_dim(dim_a) == ds_b.get_dim(dim_b))
+        << "Split states in " << dim_a << " for tensor a should be equal to split states in " << dim_b << " for tensor b!";
+    } else if (shape_a[dim_a] == 1) {
+      HT_ASSERT(last_ext_distributed != 1)
+        << "Only allow shape [1] appear in one of the two input tensor!";
+      if (last_ext_distributed == -1) {
+        last_ext_distributed = 0;
+      }
+    } else if (shape_b[dim_b] == 1) {
+      HT_ASSERT(last_ext_distributed != 0)
+        << "Only allow shape [1] appear in one of the two input tensor!";
+      if (last_ext_distributed == -1) {
+        last_ext_distributed = 1;
+      }    
+    } else {
+      HT_LOG_ERROR << "This case shouldn't be happened!"; 
+    }
+  }
+  if (size_a > size_b) { // [1] is only in tensor b
+    HT_ASSERT(last_ext_distributed != 0)
+      << "Only allow shape [1] appear in one of the two input tensor!";    
+    return ds_a;
+  } else if (size_a < size_b) { // [1] is only in tensor a
+    HT_ASSERT(last_ext_distributed != 1)
+      << "Only allow shape [1] appear in one of the two input tensor!";    
+    return ds_b;
+  } else {
+    if (last_ext_distributed == 0)
+      return ds_b;
+    else if (last_ext_distributed == 1)
+      return ds_a;
+    else
+      return ds_a;
+  }  
+}
+
 void AddElewiseOpImpl::DoCompute(Operator& op,
                                  const NDArrayList& inputs, NDArrayList& outputs,
                                  RuntimeContext& ctx) const {
@@ -67,48 +123,7 @@ HTShapeList AddElewiseOpImpl::DoInferShape(Operator& op, const HTShapeList& inpu
 
 void AddElewiseOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                       const OpMeta& op_meta) const {
-  const DistributedStates& ds_a = inputs.at(0)->get_distributed_states();
-  const DistributedStates& ds_b = inputs.at(1)->get_distributed_states();
-  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
-    << "AddElewiseOpDef: distributed states for input a and input b must be valid!";
-  // allow sum/sub input tensor states to be partial
-  // HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
-  //   << "Tensor a & b shouldn't be partial";
-  // local shape
-  HTShape shape_a = inputs.at(0)->shape();
-  HTShape shape_b = inputs.at(1)->shape();
-
-  int size_a = shape_a.size();
-  int size_b = shape_b.size();
-  int min_size = std::min(size_a, size_b);
-  // global shape
-  for (int i = 0; i < size_a; i++) {
-    shape_a[i] *= ds_a.get_dim(i);
-  }
-  for (int i = 0; i < size_b; i++) {
-    shape_b[i] *= ds_b.get_dim(i);
-  }
-  for (int i = 0; i < min_size; i++) {
-    int dim_a = size_a - 1 - i;
-    int dim_b = size_b - 1 - i;
-    if (shape_a[dim_a] == shape_b[dim_b]) {
-      HT_ASSERT(ds_a.get_dim(dim_a) == ds_b.get_dim(dim_b))
-        << "Split states in " << dim_a << " for tensor a should be equal to split states in " << dim_b << " for tensor b!";
-    } else if (shape_a[dim_a] == 1) {
-      HT_ASSERT(ds_b.get_dim(dim_b) == 1)
-        << "Dimension " << dim_b << " of tensor b shouldn't be splited!";
-    } else if (shape_b[dim_b] == 1) {
-      HT_ASSERT(ds_a.get_dim(dim_a) == 1) 
-        << "Dimension " << dim_a << " of tensor a shouldn't be splited!";      
-    } else {
-      HT_LOG_ERROR << "This case shouldn't be happened!"; 
-    }
-  }
-  if (size_a >= size_b) {
-    outputs.at(0)->set_distributed_states(ds_a);
-  } else {
-    outputs.at(0)->set_distributed_states(ds_b);
-  }
+  outputs.at(0)->set_distributed_states(ElewiseDeduceStates(inputs.at(0), inputs.at(1)));
 }
 
 void AddByConstOpImpl::DoCompute(Operator& op,
@@ -159,46 +174,7 @@ HTShapeList SubElewiseOpImpl::DoInferShape(Operator& op, const HTShapeList& inpu
 
 void SubElewiseOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                       const OpMeta& op_meta) const {
-  const DistributedStates& ds_a = inputs.at(0)->get_distributed_states();
-  const DistributedStates& ds_b = inputs.at(1)->get_distributed_states();
-  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
-    << "SubElewiseOpDef: distributed states for input a and input b must be valid!";
-  // HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
-  //   << "Tensor a & b shouldn't be partial";  
-  // local shape
-  HTShape shape_a = inputs.at(0)->shape();
-  HTShape shape_b = inputs.at(1)->shape();
-  int size_a = shape_a.size();
-  int size_b = shape_b.size();
-  int min_size = std::min(size_a, size_b);
-  // global shape
-  for (int i = 0; i < size_a; i++) {
-    shape_a[i] *= ds_a.get_dim(i);
-  }
-  for (int i = 0; i < size_b; i++) {
-    shape_b[i] *= ds_b.get_dim(i);
-  }
-  for (int i = 0; i < min_size; i++) {
-    int dim_a = size_a - 1 - i;
-    int dim_b = size_b - 1 - i;
-    if (shape_a[dim_a] == shape_b[dim_b]) {
-      HT_ASSERT(ds_a.get_dim(dim_a) == ds_b.get_dim(dim_b))
-        << "Split states in " << dim_a << " for tensor a should be equal to split states in " << dim_b << " for tensor b!";
-    } else if (shape_a[dim_a] == 1) {
-      HT_ASSERT(ds_b.get_dim(dim_b) == 1)
-        << "Dimension " << dim_b << " of tensor b shouldn't be splited!";
-    } else if (shape_b[dim_b] == 1) {
-      HT_ASSERT(ds_a.get_dim(dim_a) == 1) 
-        << "Dimension " << dim_a << " of tensor a shouldn't be splited!";      
-    } else {
-      HT_LOG_ERROR << "This case shouldn't be happened!"; 
-    }
-  }
-  if (size_a >= size_b) {
-    outputs.at(0)->set_distributed_states(ds_a);
-  } else {
-    outputs.at(0)->set_distributed_states(ds_b);
-  }
+  outputs.at(0)->set_distributed_states(ElewiseDeduceStates(inputs.at(0), inputs.at(1)));
 }
 
 void SubByConstOpImpl::DoCompute(Operator& op,
@@ -291,46 +267,7 @@ HTShapeList MulElewiseOpImpl::DoInferShape(Operator& op, const HTShapeList& inpu
 
 void MulElewiseOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                       const OpMeta& op_meta) const {
-  const DistributedStates& ds_a = inputs.at(0)->get_distributed_states();
-  const DistributedStates& ds_b = inputs.at(1)->get_distributed_states();
-  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
-    << "MulElewiseOpDef: distributed states for input a and input b must be valid!";
-  HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
-    << "Tensor a & b shouldn't be partial";  
-  // local shape
-  HTShape shape_a = inputs.at(0)->shape();
-  HTShape shape_b = inputs.at(1)->shape();
-  int size_a = shape_a.size();
-  int size_b = shape_b.size();
-  int min_size = std::min(size_a, size_b);
-  // global shape
-  for (int i = 0; i < size_a; i++) {
-    shape_a[i] *= ds_a.get_dim(i);
-  }
-  for (int i = 0; i < size_b; i++) {
-    shape_b[i] *= ds_b.get_dim(i);
-  }
-  for (int i = 0; i < min_size; i++) {
-    int dim_a = size_a - 1 - i;
-    int dim_b = size_b - 1 - i;
-    if (shape_a[dim_a] == shape_b[dim_b]) {
-      HT_ASSERT(ds_a.get_dim(dim_a) == ds_b.get_dim(dim_b))
-        << "Split states in " << dim_a << " for tensor a should be equal to split states in " << dim_b << " for tensor b!";
-    } else if (shape_a[dim_a] == 1) {
-      HT_ASSERT(ds_b.get_dim(dim_b) == 1)
-        << "Dimension " << dim_b << " of tensor b shouldn't be splited!";
-    } else if (shape_b[dim_b] == 1) {
-      HT_ASSERT(ds_a.get_dim(dim_a) == 1) 
-        << "Dimension " << dim_a << " of tensor a shouldn't be splited!";      
-    } else {
-      HT_LOG_ERROR << "This case shouldn't be happened!"; 
-    }
-  }
-  if (size_a >= size_b) {
-    outputs.at(0)->set_distributed_states(ds_a);
-  } else {
-    outputs.at(0)->set_distributed_states(ds_b);
-  }
+  outputs.at(0)->set_distributed_states(ElewiseDeduceStates(inputs.at(0), inputs.at(1)));
 }
 
 void MulByConstOpImpl::DoCompute(Operator& op,
@@ -384,46 +321,7 @@ HTShapeList DivElewiseOpImpl::DoInferShape(Operator& op, const HTShapeList& inpu
 
 void DivElewiseOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                       const OpMeta& op_meta) const {
-  const DistributedStates& ds_a = inputs.at(0)->get_distributed_states();
-  const DistributedStates& ds_b = inputs.at(1)->get_distributed_states();
-  HT_ASSERT(ds_a.is_valid() && ds_b.is_valid() && ds_a.get_device_num() == ds_b.get_device_num()) 
-    << "DivElewiseOpDef: distributed states for input a and input b must be valid!";
-  HT_ASSERT(ds_a.get_dim(-2) == 1 && ds_b.get_dim(-2) == 1) 
-    << "Tensor a & b shouldn't be partial";   
-  // local shape
-  HTShape shape_a = inputs.at(0)->shape();
-  HTShape shape_b = inputs.at(1)->shape();
-  int size_a = shape_a.size();
-  int size_b = shape_b.size();
-  int min_size = std::min(size_a, size_b);
-  // global shape
-  for (int i = 0; i < size_a; i++) {
-    shape_a[i] *= ds_a.get_dim(i);
-  }
-  for (int i = 0; i < size_b; i++) {
-    shape_b[i] *= ds_b.get_dim(i);
-  }
-  for (int i = 0; i < min_size; i++) {
-    int dim_a = size_a - 1 - i;
-    int dim_b = size_b - 1 - i;
-    if (shape_a[dim_a] == shape_b[dim_b]) {
-      HT_ASSERT(ds_a.get_dim(dim_a) == ds_b.get_dim(dim_b))
-        << "Split states in " << dim_a << " for tensor a should be equal to split states in " << dim_b << " for tensor b!";
-    } else if (shape_a[dim_a] == 1) {
-      HT_ASSERT(ds_b.get_dim(dim_b) == 1)
-        << "Dimension " << dim_b << " of tensor b shouldn't be splited!";
-    } else if (shape_b[dim_b] == 1) {
-      HT_ASSERT(ds_a.get_dim(dim_a) == 1) 
-        << "Dimension " << dim_a << " of tensor a shouldn't be splited!";      
-    } else {
-      HT_LOG_ERROR << "This case shouldn't be happened!"; 
-    }
-  }
-  if (size_a >= size_b) {
-    outputs.at(0)->set_distributed_states(ds_a);
-  } else {
-    outputs.at(0)->set_distributed_states(ds_b);
-  }
+  outputs.at(0)->set_distributed_states(ElewiseDeduceStates(inputs.at(0), inputs.at(1)));
 }
 
 void DivByConstOpImpl::DoCompute(Operator& op,
@@ -513,8 +411,10 @@ HTShapeList AddElewiseGradientOpImpl::DoInferShape(Operator& op,
 
 void AddElewiseGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                               const OpMeta& op_meta) const {
-  // ds for grad_input is equal to input; TODO: special case: input is partial
-  outputs.at(0)->set_distributed_states(inputs.at(2)->get_distributed_states());
+  DistributedStates ds_output = inputs.at(2)->get_distributed_states();
+  if (axes().size() > 0) 
+    ds_output = ReduceOpImpl::StatesForDistributedReduce(inputs.at(0), axes(), keep_dims());
+  outputs.at(0)->set_distributed_states(ds_output);
 }
 
 void SubElewiseGradientOpImpl::DoCompute(Operator& op,
@@ -539,8 +439,10 @@ HTShapeList SubElewiseGradientOpImpl::DoInferShape(Operator& op,
 
 void SubElewiseGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                               const OpMeta& op_meta) const {
-  // ds for grad_input is equal to input; TODO: special case: input is partial
-  outputs.at(0)->set_distributed_states(inputs.at(2)->get_distributed_states());  
+  DistributedStates ds_output = inputs.at(2)->get_distributed_states();
+  if (axes().size() > 0) 
+    ds_output = ReduceOpImpl::StatesForDistributedReduce(inputs.at(0), axes(), keep_dims());
+  outputs.at(0)->set_distributed_states(ds_output);
 }
 
 void MulElewiseGradientOpImpl::DoCompute(Operator& op,
@@ -562,7 +464,10 @@ HTShapeList MulElewiseGradientOpImpl::DoInferShape(Operator& op,
 
 void MulElewiseGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                               const OpMeta& op_meta) const {
-  outputs.at(0)->set_distributed_states(inputs.at(2)->get_distributed_states());
+  DistributedStates ds_output = inputs.at(2)->get_distributed_states();
+  if (axes().size() > 0) 
+    ds_output = ReduceOpImpl::StatesForDistributedReduce(inputs.at(0), axes(), keep_dims());
+  outputs.at(0)->set_distributed_states(ds_output);
 }
 
 void DivElewiseGradientOpImpl::DoCompute(Operator& op,
@@ -591,7 +496,10 @@ HTShapeList DivElewiseGradientOpImpl::DoInferShape(Operator& op,
 
 void DivElewiseGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                               const OpMeta& op_meta) const {
-  outputs.at(0)->set_distributed_states(inputs.at(2)->get_distributed_states());
+  DistributedStates ds_output = inputs.at(2)->get_distributed_states();
+  if (axes().size() > 0) 
+    ds_output = ReduceOpImpl::StatesForDistributedReduce(inputs.at(0), axes(), keep_dims());
+  outputs.at(0)->set_distributed_states(ds_output);
 }
 
 Tensor MakeAddElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {

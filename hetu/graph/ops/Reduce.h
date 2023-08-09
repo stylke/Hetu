@@ -53,6 +53,10 @@ protected:
     _keepdims = keepdims;
   }
 
+  static DistributedStates StatesForDistributedReduce(const Tensor& input, 
+                                                      const HTShape& axes, 
+                                                      const HTKeepDims& keepdims);
+
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {

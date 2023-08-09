@@ -52,7 +52,7 @@ CUDABFCMemoryPool::~CUDABFCMemoryPool() {
     }
     catch(const std::exception& e)
     {
-      HT_LOG_INFO << "In ~CUDABFCMemoryPool(), catch exception: " << e.what();
+      HT_LOG_DEBUG << "In ~CUDABFCMemoryPool(), catch exception: " << e.what();
     }
 }
 

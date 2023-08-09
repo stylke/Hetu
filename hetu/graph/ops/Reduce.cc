@@ -65,15 +65,11 @@ HTShapeList ReduceOpImpl::DoInferShape(Operator& op,
   return outputlist;
 }
 
-void ReduceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
-                                  const OpMeta& op_meta) const {
-  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
-  HT_ASSERT(ds_input.is_valid()) 
-    << "ReduceOpDef: distributed states for input must be valid!";
-  HT_ASSERT(ds_input.get_dim(-2) == 1)
-    << "Tensor input shouldn't be partial!";
-  HTShape axes = get_axes();
-  HTKeepDims keepdims = get_keepdims();  
+DistributedStates ReduceOpImpl::StatesForDistributedReduce(
+  const Tensor& input, 
+  const HTShape& axes, 
+  const HTKeepDims& keepdims) {
+  const DistributedStates& ds_input = input->get_distributed_states();
   int32_t partial = ds_input.get_dim(-2);
   // device_num
   int32_t device_num = ds_input.get_device_num();
@@ -140,7 +136,20 @@ void ReduceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
     }
     order[i] -= reduce_dimensions;
   }
-  outputs.at(0)->set_distributed_states({device_num, states, order});
+  return DistributedStates({device_num, states, order});
+}
+
+void ReduceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                  const OpMeta& op_meta) const {
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "ReduceOpDef: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Tensor input shouldn't be partial!";
+  HTShape axes = get_axes();
+  HTKeepDims keepdims = get_keepdims();  
+  DistributedStates ds_output = StatesForDistributedReduce(inputs.at(0), axes, keepdims);
+  outputs.at(0)->set_distributed_states(ds_output);
 }
 
 void  ReduceGradientOpImpl::DoCompute(Operator& op,

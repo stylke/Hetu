@@ -94,6 +94,19 @@ PyObject* PyDistributedStates_check_equal(PyDistributedStates* self, PyObject* a
   HT_PY_FUNC_END
 }
 
+PyObject* PyDistributedStates_get_dim(PyDistributedStates* self, PyObject* args) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({"get_dim(int dim)"});
+  auto parsed_args = parser.parse(args, nullptr);
+  if (parsed_args.signature_index() == 0) {
+    return PyLong_FromInteger(self->distributed_states.get_dim(parsed_args.get_int64(0)));
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }  
+  HT_PY_FUNC_END
+}
+
 PyObject* PyDistributedStates_map_to_local_data(PyDistributedStates* self, PyObject* args) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({"map_to_local_data(DistributedStates ds, int device_index)"});
@@ -120,6 +133,7 @@ PyGetSetDef PyDistributedStates_properties[] = {
 // NOLINTNEXTLINE
 PyMethodDef PyDistributedStates_methods[] = {
   {"check_equal", (PyCFunction) PyDistributedStates_check_equal, METH_VARARGS, nullptr },
+  {"get_dim", (PyCFunction) PyDistributedStates_get_dim, METH_VARARGS, nullptr },
   {nullptr}
 };
 

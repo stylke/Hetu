@@ -184,7 +184,7 @@ PyObject* PyTensor_parallel_parameter(PyTypeObject* type, PyObject* args, PyObje
   
   static PyArgParser parser({
     "parallel_parameter(Initializer init, HTShape global_shape, DistributedStates ds, \
-     int64_t local_idx, DataType dtype=None, bool requires_grad=false, " OP_META_ARGS ")", 
+     int64_t local_idx=-1, DataType dtype=None, bool requires_grad=false, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
   
@@ -194,10 +194,10 @@ PyObject* PyTensor_parallel_parameter(PyTypeObject* type, PyObject* args, PyObje
       MakeParallelParameterOp(*(parsed_args.get_initializer(0)),
                               parsed_args.get_int64_list(1),
                               parsed_args.get_distributed_states(2),
-                              parsed_args.get_int64(3),
+                              parsed_args.get_int64_or_default(3),
                               parsed_args.get_dtype_or_peek(4).value_or(kFloat32),
                               parsed_args.get_bool_or_default(5),
-                              parse_op_meta(parsed_args, 6));
+                              parse_op_meta(parsed_args, 6));                              
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);

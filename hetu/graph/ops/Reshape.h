@@ -19,18 +19,120 @@ class ArrayReshapeOpImpl : public OpInterface {
  public:
   ArrayReshapeOpImpl(const HTShape& output_shape)
   : OpInterface(quote(ArrayReshapeOp)),
-    _output_shape(output_shape) {
+    _global_output_shape(output_shape) { // default is global output shape, if distributed, then turn into local output shape
   }
 
   HTShape get_output_shape() const {
-    return _output_shape;
+    return _global_output_shape;
   }
+
+  HTShape get_output_shape(const HTShape& input_shape) const {
+    int numel = 1;
+    for (auto d : input_shape) {
+      numel *= d;
+    }
+    HTShape output_shape = get_output_shape();
+    int index = -1;
+    int numel_output = 1;
+    for (int i = 0; i < output_shape.size(); i++) {
+      if (output_shape[i] == -1) {
+        HT_ASSERT(index == -1)
+          << "not allow multi -1 appears in shape!";
+        index = i; 
+      } else {
+        numel_output *= output_shape[i];
+      }
+    }
+    if (index != -1) {
+      output_shape[index] = numel / numel_output;
+    }
+    return output_shape;
+  }
+
+  // input_shape & output_shape should be global shape
+  static DistributedStates get_output_ds(const HTShape& input_shape,
+                                         const DistributedStates& ds_input, 
+                                         const HTShape& output_shape) {
+    int dim_i = input_shape.size() - 1;
+    int dim_o = output_shape.size() - 1;
+    std::unordered_map<int, int> dim_map;
+    while (dim_i >= 0 && dim_o >= 0) {
+      int last_dim_i = dim_i;
+      int last_dim_o = dim_o;
+      int i_size = input_shape[dim_i];
+      int o_size = output_shape[dim_o];
+      while (i_size != o_size) {
+        if (i_size < o_size) {
+          i_size *= input_shape[--dim_i];
+        } else {
+          o_size *= output_shape[--dim_o];
+        }
+      }
+      // shape[dim_i~last_dim_i] == shape[dim_o~last_dim_o]
+      // case 0: 1 to 1
+      if (dim_i == last_dim_i && dim_o == last_dim_o) {
+        if (ds_input.get_dim(dim_i) > 0) {
+          dim_map[dim_i] = dim_o;
+        }
+      }
+      // case 1: 1 to many
+      else if (dim_i == last_dim_i && dim_o != last_dim_o) {
+        if (ds_input.get_dim(dim_i) > 0) {
+            dim_map[dim_i] = dim_o;
+        }
+      }
+      // case 2: many to 1
+      else if (dim_i != last_dim_i && dim_o == last_dim_o) {
+        for (int d = dim_i + 1; d <= last_dim_i; d++) {
+          HT_ASSERT(ds_input.get_dim(d) == 1)
+            << "ReShapeOp: dimension " << d << " shouldn't be splited!";
+        }
+        if (ds_input.get_dim(dim_i) > 0) {
+          dim_map[dim_i] = dim_o;
+        }
+      }
+      // case 3: many to many
+      else {
+        for (int d = dim_i; d <= last_dim_i; d++) {
+          HT_ASSERT(ds_input.get_dim(d) == 1)
+            << "ReshapeOp: dimension " << d << " shouldn't be splited!";
+        }
+      }
+      dim_i--;
+      dim_o--;
+    }
+    dim_map[-1] = -1;
+    std::unordered_map<int32_t, int32_t> states;
+    std::vector<int32_t> order;
+    for (int d : ds_input.get_order()) {
+      order.push_back(dim_map[d]);
+      states[dim_map[d]] = ds_input.get_dim(d);
+    }
+    DistributedStates ds_output({ds_input.get_device_num(), states, order});
+    return ds_output;
+  }
+
+  HTShape get_local_output_shape(const HTShape& global_input_shape,
+                                 const DistributedStates& input_ds) const {
+    HTShape global_output_shape = get_output_shape(global_input_shape);
+    DistributedStates output_ds = get_output_ds(global_input_shape, input_ds, global_output_shape);
+    HTShape local_shape(global_output_shape.size());
+    for (size_t d = 0; d < global_output_shape.size(); d++) {
+      local_shape[d] = global_output_shape[d] / output_ds.get_dim(d);
+    }
+    return local_shape;
+  }  
 
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
+    HTShape output_shape = get_output_shape();
+    if (inputs[0]->has_distributed_states()) {
+      output_shape = get_local_output_shape(inputs[0]->global_shape(), 
+                                            inputs[0]->get_distributed_states());                                       
+    }
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
-                                           .set_shape(get_output_shape())
+                                           .set_shape(output_shape)
                                            .set_device(inputs[0]->device());
     return {output_meta};
   };
@@ -45,7 +147,8 @@ class ArrayReshapeOpImpl : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
-  HTShape _output_shape;
+  HTShape _global_output_shape;
+  // HTShape _local_output_shape;
 
  public:
   bool operator==(const OpInterface& rhs) const override {

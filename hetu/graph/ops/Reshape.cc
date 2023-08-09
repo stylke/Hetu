@@ -37,6 +37,10 @@ HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op,
   size_t cnt = 0;
   size_t output_size = 1;
   HTShape output_shape = get_output_shape();
+  if (op->input(0)->has_distributed_states()) {
+    output_shape = get_local_output_shape(op->input(0)->global_shape(), 
+                                          op->input(0)->get_distributed_states());
+  }  
   int64_t output_len = output_shape.size();
   for (int64_t i = 0; i < output_len; ++i) {
     if (output_shape[i] == -1) {
@@ -63,9 +67,9 @@ void ArrayReshapeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& ou
     << "ArrayReshapeOpDef: distributed states for input must be valid!";
   HT_ASSERT(ds_input.get_dim(-2) == 1)
     << "Input tensor shouldn't be partial!";
-  HT_ASSERT(ds_input.check_pure_duplicate())
-    << "Input tensor cannot be splited in any dimension!";
-  outputs.at(0)->set_distributed_states(ds_input);    
+  HTShape global_output_shape = get_output_shape(inputs[0]->global_shape());
+  DistributedStates ds_output = get_output_ds(inputs[0]->global_shape(), ds_input, global_output_shape);
+  outputs.at(0)->set_distributed_states(ds_output);
 }
 
 void ArrayReshapeGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
