@@ -68,7 +68,7 @@ void PadCpu(const NDArray& input, NDArray& output, const HTShape& paddings,
     << output->device();
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t pad_len = paddings.size();
   size_t len = pad_len;
@@ -115,7 +115,7 @@ void PadGradientCpu(const NDArray& output_grad, NDArray& input_grad,
     << output_grad->device();
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t pad_len = paddings.size();
   size_t len = pad_len;

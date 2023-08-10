@@ -63,7 +63,7 @@ void SliceCpu(const NDArray& input, NDArray& output, int64_t* begin_pos,
     << "input and output has different dims. ";
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t ndim = input->ndim();
   size_t o_size = 1;
@@ -109,7 +109,7 @@ void SliceGradientCpu(const NDArray& output_grad, NDArray& input_grad,
     << "input and output grad has different dims. ";
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   
   size_t ndim = output_grad->ndim();
   size_t o_size = 1;

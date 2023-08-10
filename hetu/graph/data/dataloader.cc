@@ -15,8 +15,8 @@ void Dataloader::init_states() {
   auto& inst_ctx = instantiation_ctx();
   inst_ctx.placement = Device(kCPU, 0);
   inst_ctx.stream_index = 0;
-  inst_ctx.start = std::make_unique<hetu::impl::CPUEvent>();
-  inst_ctx.stop = std::make_unique<hetu::impl::CPUEvent>();
+  inst_ctx.start[0] = std::make_unique<hetu::impl::CPUEvent>();
+  inst_ctx.stop[0] = std::make_unique<hetu::impl::CPUEvent>();
 
   if (_dp_nrank != -1) {
     int cur_size = _data->shape(0);
@@ -119,12 +119,12 @@ Tensor Dataloader::get_arr() {
   NDArray res = _get_arr(_batch_idx);
   _last_batch_size = res->shape(0); 
   _batch_idx = (_batch_idx + 1) ;
-  return MakeVariableOp(res, false, res->meta().dtype, false, OpMeta().set_eager_device(res->meta().device));
+  return MakeVariableOp(res, false, res->meta().dtype, false, DistributedStates(), OpMeta().set_eager_device(res->meta().device));
 }
 
 Tensor Dataloader::get_next_arr() {
   NDArray res = _get_arr(_batch_idx);
-  return MakeVariableOp(res, false, res->meta().dtype, false, OpMeta().set_eager_device(res->meta().device));
+  return MakeVariableOp(res, false, res->meta().dtype, false, DistributedStates(), OpMeta().set_eager_device(res->meta().device));
 }
 
 void Dataloader::set_dp_rank(int dp_rank, int dp_nrank) {

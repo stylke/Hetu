@@ -69,8 +69,8 @@ class Dataloader{
     auto& inst_ctx = instantiation_ctx();
     inst_ctx.placement = Device(kCPU, 0);
     inst_ctx.stream_index = 0;
-    inst_ctx.start = std::make_unique<hetu::impl::CPUEvent>();
-    inst_ctx.stop = std::make_unique<hetu::impl::CPUEvent>();
+    inst_ctx.start[0] = std::make_unique<hetu::impl::CPUEvent>();
+    inst_ctx.stop[0] = std::make_unique<hetu::impl::CPUEvent>();
     processers = std::vector<std::future<void>>();
     processers.resize(resource.processers.size());
     for (int i = 0; i < _queue_size; ++i) {
@@ -158,7 +158,7 @@ class Dataloader{
   }
 
   void Sync() {
-    instantiation_ctx().stop->Sync();
+    instantiation_ctx().stop[0]->Sync();
   }
 
  protected:

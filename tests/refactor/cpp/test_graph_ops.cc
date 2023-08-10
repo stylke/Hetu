@@ -56,12 +56,12 @@ struct PyOptimizer {
 void imperative_run(Graph& graph) {
   HT_LOG_INFO << "----------";
   Graph::push_graph_ctx(graph.id());
-  auto w = MakeParameterOp(OnesInitializer(), {5,1}, kFloat32, true, OpMeta().set_name("w").set_eager_device(Device(kCPU, 0)));
+  auto w = MakeParameterOp(OnesInitializer(), {5,1}, kFloat32, true, DistributedStates(), OpMeta().set_name("w").set_eager_device(Device(kCPU, 0)));
   // SGDOptimizer optimizer(TensorList{w}, 0.1f);
   HT_LOG_INFO << graph.id();
   for (int i = 0; i < 1; i++) {
-    auto x = MakeParameterOp(NormalInitializer(), {3, 4}, kFloat32, true, OpMeta().set_name("x").set_eager_device(Device(kCPU, 0)));
-    auto y = MakeVariableOp(NormalInitializer(), {3, 2, 10, 5}, kFloat32, false, OpMeta().set_name("y").set_eager_device(Device(kCPU, 0)));
+    auto x = MakeParameterOp(NormalInitializer(), {3, 4}, kFloat32, true, DistributedStates(), OpMeta().set_name("x").set_eager_device(Device(kCPU, 0)));
+    auto y = MakeVariableOp(NormalInitializer(), {3, 2, 10, 5}, kFloat32, false, DistributedStates(), OpMeta().set_name("y").set_eager_device(Device(kCPU, 0)));
     // auto bias = MakeVariableOp(NormalInitializer(), {3, 1, 10, 10}, kFloat32, false, OpMeta().set_name("bias").set_eager_device(Device(kCPU, 0)));
     // auto label = MakeVariableOp(ZerosInitializer(), {64, 16}, kInt64, false, OpMeta().set_name("bias").set_eager_device(Device(kCPU, 0)));
     // // auto pred = MakeSubElewiseOp(x, y);
@@ -102,9 +102,9 @@ void static_run(Graph& graph) {
   HT_LOG_INFO << "----------";
   Graph::push_graph_ctx(graph.id());
   for (size_t i = 0; i < 2; i++) {
-    auto w = MakeParameterOp(OnesInitializer(), {5,1}, kFloat32, true, OpMeta().set_name("w"));
-    auto x = MakePlaceholderOp(NDArrayMeta().set_shape({10, 5}).set_dtype(kFloat32), OpMeta().set_name("x"));
-    auto y = MakePlaceholderOp(NDArrayMeta().set_shape({10, 1}).set_dtype(kFloat32), OpMeta().set_name("y"));
+    auto w = MakeParameterOp(OnesInitializer(), {5,1}, kFloat32, true, DistributedStates(), OpMeta().set_name("w"));
+    auto x = MakePlaceholderOp(NDArrayMeta().set_shape({10, 5}).set_dtype(kFloat32), DistributedStates(), OpMeta().set_name("x"));
+    auto y = MakePlaceholderOp(NDArrayMeta().set_shape({10, 1}).set_dtype(kFloat32), DistributedStates(), OpMeta().set_name("y"));
     auto pred = MakeMatMulOp(x, w);
     // auto pred = MakeAvgPoolOp(x, 2, 2, 0, 2, OpMeta().set_name("pred"));
     // auto loss = MakeBCEOp(pred, y);

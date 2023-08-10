@@ -23,10 +23,10 @@ class ExecutableGraph : public Graph {
 
   // bool MapOpsToParallelDevices(const DeviceGroup& placement_group);
 
-  bool Instantiate(const TensorList& fetches, const Device& placement);
+  bool Instantiate(const TensorList& fetches, const Device& placement, int instantiate_type = 0);
 
   NDArrayList Run(const TensorList& fetches, 
-                  const FeedDict& feed_dict = {}) {}
+                  const FeedDict& feed_dict = {});
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                   const FeedDict& feed_dict = {}, const int num_micro_batches = 1);

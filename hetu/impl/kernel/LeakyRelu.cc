@@ -48,7 +48,7 @@ void LeakyReluCpu(const NDArray& input, double alpha, NDArray& output,
     input->dtype(), spec_t, "LeakyReluCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
       [stream, input, output, alpha]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());\
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);\
       dnnl::stream engine_stream(eng);
       auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
       auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
@@ -83,7 +83,7 @@ void LeakyReluGradientCpu(const NDArray& input, const NDArray& output_grad,
     input->dtype(), spec_t, "LeakyReluGradientCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
       [stream, output_grad, input, input_grad, alpha]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());\
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);\
       dnnl::stream engine_stream(eng);
       auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
       auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());

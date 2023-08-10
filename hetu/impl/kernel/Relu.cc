@@ -37,13 +37,13 @@ void ReluCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   if (size == 0)
     return;
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   dnnl::stream engine_stream(eng);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "ReluCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output]() {
-          dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+          dnnl::engine eng(dnnl::engine::kind::cpu, 0);
           auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
           auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
           auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
@@ -73,7 +73,7 @@ void ReluGradientCpu(const NDArray& input, const NDArray& output_grad,
   HT_ASSERT_EXCHANGABLE(input, input_grad);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   dnnl::stream engine_stream(eng);
   size_t size = input_grad->numel();
   if (size == 0)
@@ -82,7 +82,7 @@ void ReluGradientCpu(const NDArray& input, const NDArray& output_grad,
     input->dtype(), spec_t, "ReluGradientCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output_grad, input_grad]() {
-        dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+        dnnl::engine eng(dnnl::engine::kind::cpu, 0);
           auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
           auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
           auto g_dst_mem = dnnl::memory(mat_md, eng, output_grad->data_ptr<spec_t>());

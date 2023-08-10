@@ -354,16 +354,6 @@ class OpDef : public shared_ptr_target {
     return _body->InferShape(get_self(), input_shapes, runtime_ctx);
   }
 
-<<<<<<< HEAD
-  NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx) {
-    BlockOrSyncAllInputs();
-    instantiation_ctx().start->Record(stream());
-    // HT_LOG_INFO << name() << "\n" << inputs;
-    auto ret = _body->Compute(get_self(), inputs, runtime_ctx);
-    // if (ret.size() > 0)
-    // HT_LOG_INFO << ret[0];
-    instantiation_ctx().stop->Record(stream());
-=======
   NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx, size_t micro_batch_id = 0) {
     HT_ASSERT(micro_batch_id < HT_MAX_NUM_MICRO_BATCHES)
       << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
@@ -372,7 +362,6 @@ class OpDef : public shared_ptr_target {
     instantiation_ctx().start[micro_batch_id]->Record(stream());
     auto ret = _body->Compute(get_self(), inputs, runtime_ctx);
     instantiation_ctx().stop[micro_batch_id]->Record(stream());
->>>>>>> 984218bd9d37ecf54e6ecb64b54a53a9f283b8fe
     return ret;
   }
 
@@ -739,6 +728,7 @@ std::ostream& operator<<(std::ostream&, const Operator&);
  * Indicators of Operators
  ******************************************************/
 
+static const uint64_t PARAMETER_OP = 1ul;
 static const uint64_t PLACEHOLDER_OP = 1ul << 1;
 static const uint64_t VARIABLE_OP = 1ul << 2;
 static const uint64_t HOST_TO_DEVICE_OP = 1ul << 3;

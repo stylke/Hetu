@@ -247,6 +247,8 @@ std::vector<PyMethodDef>& get_registered_dataloader_class_methods() {
 int RegisterDataloaderClassMethod(const char* name, PyCFunction func, int flags,
                                   const char* doc) {
   AddPyMethodDef(get_registered_dataloader_class_methods(), {name, func, flags, doc});
+}
+
 std::vector<PyMethodDef>& get_registered_initializer_methods() {
   static std::vector<PyMethodDef> registered_initializer_methods = {{nullptr}};
   return registered_initializer_methods;

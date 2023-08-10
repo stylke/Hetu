@@ -23,7 +23,7 @@ void FloorCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_EXCHANGABLE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = input->numel();
   if (size == 0)
@@ -54,7 +54,7 @@ void CeilCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_EXCHANGABLE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = input->numel();
   if (size == 0)
@@ -85,7 +85,7 @@ void RoundCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_EXCHANGABLE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = input->numel();
   if (size == 0)

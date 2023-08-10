@@ -103,7 +103,7 @@ void ConcatenateGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorL
   outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
 }
 
-Tensor MakeConcatenateOp(const TensorList& inputs, size_t axis,
+Tensor MakeConcatenateOp(TensorList inputs, size_t axis,
                          OpMeta op_meta) {
   TensorList inputs_ = inputs;
   DataType input_type = DataType::UNDETERMINED;

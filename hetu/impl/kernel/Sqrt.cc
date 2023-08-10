@@ -42,7 +42,7 @@ void SqrtCpu(const NDArray& input, NDArray& output, const Stream& stream) {
     input->dtype(), spec_t, "SqrtCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output, size]() {
-          dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+          dnnl::engine eng(dnnl::engine::kind::cpu, 0);
           dnnl::memory::data_type mtype;
           if (input->dtype() == DataType::FLOAT32)
             mtype = dnnl::memory::data_type::f32;
@@ -82,7 +82,7 @@ void ReciprocalSqrtCpu(const NDArray& output_grad, NDArray& input_grad,
     input_grad->dtype(), spec_t, "ReciprocalSqrtCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input_grad, output_grad, size]() {
-          dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+          dnnl::engine eng(dnnl::engine::kind::cpu, 0);
           auto mat_md = dnnl::memory::desc(input_grad->shape(), dnnl::memory::data_type::f32, input_grad->stride());
           auto src_mem = dnnl::memory(mat_md, eng, output_grad->data_ptr<spec_t>());
           auto dst_mem = dnnl::memory(mat_md, eng, input_grad->data_ptr<spec_t>());

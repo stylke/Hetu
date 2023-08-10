@@ -42,7 +42,7 @@ void TanhCpu(const NDArray& input, NDArray& output, const Stream& stream) {
     input->dtype(), spec_t, "TanhCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output, size]() {
-          dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+          dnnl::engine eng(dnnl::engine::kind::cpu, 0);
           auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
           auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
           auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
@@ -77,7 +77,7 @@ void TanhGradientCpu(const NDArray& input, const NDArray& output_grad,
     return;
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   dnnl::stream engine_stream(eng);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "TanhGradientCpu", [&]() {

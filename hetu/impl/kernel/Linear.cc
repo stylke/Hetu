@@ -30,11 +30,11 @@ void LinearCpu(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
   int32_t k = trans_a ? a->shape(0) : a->shape(1);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "Linear", [&]() {
     auto _future = cpu_stream.EnqueueTask(
     [stream, a, b, bias, trans_a, trans_b, output, m, n, k]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::memory::desc srcA_md, srcB_md, bias_md, dst_md;
       if (!trans_a)
           srcA_md = dnnl::memory::desc({m, k}, dnnl::memory::data_type::f32, 

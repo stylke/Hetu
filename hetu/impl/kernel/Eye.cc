@@ -23,7 +23,7 @@ void EyeCpu(NDArray& output, const Stream& stream) {
   HT_ASSERT(output->ndim() == 2);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   size_t ncols = output->shape(1);

@@ -70,7 +70,7 @@ void MSELossGradientCpu(const NDArray& pred, const NDArray& label,
   HT_ASSERT_SAME_NDIM(pred, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t n_rows = 1;
   for (size_t i = 0; i < pred->ndim() - 1; i++)

@@ -194,9 +194,9 @@ void EinsumOpImpl::DoCompute(Operator& op,
         HT_ASSERT(input_tensor->shape(j) == input_tensor->shape(dim))
           << j << ":" << input_tensor->shape(j) << "," << dim << ":"
           << input_tensor->shape(dim);
-
-        input_tensor = NDArray::diagonal(input_tensor, dim, j, op->instantiation_ctx().stream_index);
-
+        HT_LOG_INFO << input_tensor;
+        input_tensor = NDArray::diagonal(input_tensor, dim, j, 0, op->instantiation_ctx().stream_index);
+        HT_LOG_INFO << input_tensor;
         input_tensor = NDArray::movedim(input_tensor, -1, dim, op->instantiation_ctx().stream_index);
       } else {
         // Lookup output index for label
@@ -417,7 +417,7 @@ void EinsumGradientOpImpl::DoCompute(Operator& op,
         int dim = label_dim[label];
         HT_ASSERT(input_shape[j] == input_shape[dim]);
 
-        input_tensor = NDArray::diagonal(input_tensor, dim, j, op->instantiation_ctx().stream_index);
+        input_tensor = NDArray::diagonal(input_tensor, dim, j, 0, op->instantiation_ctx().stream_index);
 
         input_tensor = NDArray::movedim(input_tensor, -1, dim, op->instantiation_ctx().stream_index);
       } else {

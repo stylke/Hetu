@@ -13,7 +13,7 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
   HT_ASSERT_SAME_DEVICE(inputA, output);
   HT_ASSERT_SAME_DEVICE(inputB, output);
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   dnnl::memory::dims A_dims(output->ndim());
   dnnl::memory::dims A_stride(output->ndim());
@@ -86,7 +86,6 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
           engine_stream.wait();
         },
         "BinaryEleWise");
-        // cpu_stream.Sync();
     });
 }
 

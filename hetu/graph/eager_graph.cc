@@ -18,7 +18,7 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
       placement = opimpl.device();
     }
     else if (op->op_indicator() == (VARIABLE_OP | PARAMETER_OP)) {
-      const auto& opimpl = reinterpret_cast<const ParameterOpImpl&>(op->body()); 
+      const auto& opimpl = reinterpret_cast<const VariableOpImpl&>(op->body()); 
       placement = opimpl.device();
     }
   }

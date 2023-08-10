@@ -26,7 +26,7 @@ void MatMulCpu(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "MatMul", [&]() {
     auto _future = cpu_stream.EnqueueTask(
     [stream, a, b, trans_a, trans_b, output, m, n, k]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::memory::desc srcA_md, srcB_md, dst_md;
       if (!trans_a)
           srcA_md = dnnl::memory::desc({m, k}, dnnl::memory::data_type::f32, 

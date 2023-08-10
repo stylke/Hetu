@@ -70,7 +70,7 @@ void imperative_run(Graph& graph) {
       int length = shapes.size();
       TensorList inputs(length);
       for (int i = 0; i < length; ++i) {
-        inputs[i] = MakeParameterOp(NormalInitializer(), shapes[i], kFloat32, true, OpMeta().set_name("x" + std::to_string(i))
+        inputs[i] = MakeParameterOp(NormalInitializer(), shapes[i], kFloat32, true, DistributedStates(), OpMeta().set_name("x" + std::to_string(i))
                                                                                             .set_eager_device(Device(kCPU, 0)));
       }
       HT_LOG_INFO << msg;
@@ -95,9 +95,9 @@ void imperative_run(Graph& graph) {
 void static_run(Graph& graph) {
   HT_LOG_INFO << "----------";
   Graph::push_graph_ctx(graph.id());
-  auto w = MakeParameterOp(OnesInitializer(), {5,1}, kFloat32, true, OpMeta().set_name("w"));
-  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({10, 5}).set_dtype(kFloat32), OpMeta().set_name("x"));
-  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({10, 1}).set_dtype(kFloat32), OpMeta().set_name("y"));
+  auto w = MakeParameterOp(OnesInitializer(), {5,1}, kFloat32, true, DistributedStates(), OpMeta().set_name("w"));
+  auto x = MakePlaceholderOp(NDArrayMeta().set_shape({10, 5}).set_dtype(kFloat32), DistributedStates(), OpMeta().set_name("x"));
+  auto y = MakePlaceholderOp(NDArrayMeta().set_shape({10, 1}).set_dtype(kFloat32), DistributedStates(), OpMeta().set_name("y"));
   auto pred = MakeMatMulOp(x, w);
   // auto pred = MakeAvgPoolOp(x, 2, 2, 0, 2, OpMeta().set_name("pred"));
   // auto loss = MakeBCEOp(pred, y);

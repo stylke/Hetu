@@ -84,7 +84,7 @@ void SoftmaxCrossEntropySparseCpu(const NDArray& pred, const NDArray& label,
   size_t n_cols = pred->shape(pred->ndim() - 1);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   if (n_rows == 0)
     return;
   HT_DISPATCH_FLOATING_TYPES(
@@ -110,7 +110,7 @@ void SoftmaxCrossEntropySparseGradientCpu(const NDArray& pred, const NDArray& la
   size_t n_cols = pred->shape(pred->ndim() - 1);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   if (n_rows == 0)
     return;
   HT_DISPATCH_FLOATING_TYPES(

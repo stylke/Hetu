@@ -30,7 +30,7 @@ void BatchMatMulCpu(const NDArray& a, bool trans_a, const NDArray& b,
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "BatchMatMul", [&]() {
     auto _future = cpu_stream.EnqueueTask(
     [stream, a, b, trans_a, trans_b, output, m, n, k, batchCount]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::memory::desc srcA_md, srcB_md, dst_md;
       if (!trans_a)
           srcA_md = dnnl::memory::desc({batchCount, m, k}, dnnl::memory::data_type::f32, 

@@ -35,7 +35,7 @@ void AddConstCpu(const NDArray& input, double value,
   input->dtype(), spec_t, "AddConstCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
       [stream, input, output, value]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index() - 1);
       dnnl::memory::data_type mtype;
       if (input->dtype() == DataType::FLOAT32)
         mtype = dnnl::memory::data_type::f32;
@@ -60,7 +60,6 @@ void AddConstCpu(const NDArray& input, double value,
     },
     "AddConst");
   });
-  //cpu_stream.Sync();
 }
 
 void SubConstCpu(const NDArray& input, double value,
@@ -71,7 +70,7 @@ void SubConstCpu(const NDArray& input, double value,
   input->dtype(), spec_t, "SubConstCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
     [stream, input, output, value]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::memory::data_type mtype;
       if (input->dtype() == DataType::FLOAT32)
         mtype = dnnl::memory::data_type::f32;
@@ -102,13 +101,13 @@ void SubConstCpu(const NDArray& input, double value,
 void MulConstCpu(const NDArray& input, double value,
                  NDArray& output, const Stream& stream) {
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   dnnl::stream engine_stream(eng);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
   input->dtype(), spec_t, "MulConstCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
       [stream, input, output, value]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::memory::data_type mtype;
       if (input->dtype() == DataType::FLOAT32)
         mtype = dnnl::memory::data_type::f32;
@@ -140,13 +139,13 @@ void DivConstCpu(const NDArray& input, double value,
                  NDArray& output, const Stream& stream) {
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   dnnl::stream engine_stream(eng);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
   input->dtype(), spec_t, "DivConstCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
       [stream, input, output, value]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::memory::data_type mtype;
       if (input->dtype() == DataType::FLOAT32)
         mtype = dnnl::memory::data_type::f32;

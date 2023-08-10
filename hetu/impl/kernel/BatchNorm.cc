@@ -21,7 +21,7 @@ void BatchNormCpu(const NDArray& input_X, const NDArray& bn_scale,
   HT_ASSERT_SAME_DEVICE(input_X, save_var);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_X->dtype(), spec_t, "BatchNormCuda", [&]() {
@@ -82,7 +82,7 @@ void BatchNormGradientCpu(const NDArray& gradient_Y, const NDArray& input_X,
   HT_ASSERT_SAME_DEVICE(gradient_Y, save_var);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_X->dtype(), spec_t, "BatchNormGradientCpu", [&]() {
         auto _future = cpu_stream.EnqueueTask(

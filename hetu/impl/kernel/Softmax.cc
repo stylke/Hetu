@@ -16,7 +16,7 @@ void SoftmaxCpu(const NDArray& input, NDArray& output, int64_t dim, const Stream
     input->dtype(), spec_t, "SoftmaxCuda", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output, dim]() {
-          dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+          dnnl::engine eng(dnnl::engine::kind::cpu, 0);
           auto src_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
           auto dst_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
           auto src_mem = dnnl::memory(src_md, eng, input->data_ptr<spec_t>());
@@ -58,7 +58,7 @@ void SoftmaxGradientCpu(const NDArray& input_Y, const NDArray& output_grad,
     input_Y->dtype(), spec_t, "SoftmaxGradientCuda", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input_Y, output_grad, input_grad, dim]() {
-          dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+          dnnl::engine eng(dnnl::engine::kind::cpu, 0);
           auto src_md = dnnl::memory::desc(input_Y->shape(), dnnl::memory::data_type::f32, input_Y->stride());
           auto dst_md = dnnl::memory::desc(input_Y->shape(), dnnl::memory::data_type::f32, input_Y->stride());
           auto dst_mem = dnnl::memory(dst_md, eng, input_Y->data_ptr<spec_t>());

@@ -109,8 +109,10 @@ class Graph {
       if (op->requires_grad(i))
         require_flag = true;  
     }
-    for (size_t i = 0; i < op->num_outputs(); i++) {
-      op->output(i)->set_requires_grad(false);
+    if (op->num_inputs() > 0) {
+      for (size_t i = 0; i < op->num_outputs(); i++) {
+        op->output(i)->set_requires_grad(false);
+      }
     }
     if (require_flag && op->num_outputs() > 0)
       op->output(0)->set_requires_grad(true);
