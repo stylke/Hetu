@@ -30,33 +30,85 @@ cublasHandle_t GetCublasHandle(int32_t device_id) {
 }
 
 template <>
-void cublas_dot<float>(cublasHandle_t cublas_handle, int n, const float* x,
-                       int incx, const float* y, int incy, float* result) {
+void cublas_dot<float16>(cublasHandle_t cublas_handle, int32_t n, const float16* x,
+                         int32_t incx, const float16* y, int32_t incy, float16* result) {
+  CUBLAS_CALL(cublasDotEx(cublas_handle, n, x, CUDA_R_16F, incx, y, CUDA_R_16F, incy, result,
+                          CUDA_R_16F, CUDA_R_32F));
+}
+
+template <>
+void cublas_dot<bfloat16>(cublasHandle_t cublas_handle, int32_t n, const bfloat16* x,
+                          int32_t incx, const bfloat16* y, int32_t incy, bfloat16* result) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  CUBLAS_CALL(cublasDotEx(cublas_handle, n, x, CUDA_R_16BF, incx, y, CUDA_R_16BF, incy, result,
+                          CUDA_R_16BF, CUDA_R_32F));
+#else
+  HT_NOT_IMPLEMENTED << "bfloat16 is not supported on this device.";
+#endif
+}
+
+template <>
+void cublas_dot<float>(cublasHandle_t cublas_handle, int32_t n, const float* x,
+                       int32_t incx, const float* y, int32_t incy, float* result) {
   CUBLAS_CALL(cublasSdot(cublas_handle, n, x, incx, y, incy, result));
 }
 
 template <>
-void cublas_dot<double>(cublasHandle_t cublas_handle, int n, const double* x,
-                       int incx, const double* y, int incy, double* result) {
+void cublas_dot<double>(cublasHandle_t cublas_handle, int32_t n, const double* x,
+                        int32_t incx, const double* y, int32_t incy, double* result) {
   CUBLAS_CALL(cublasDdot(cublas_handle, n, x, incx, y, incy, result));
 }
 
 template <>
+void cublas_gemv<float16>(cublasHandle_t cublas_handle, cublasOperation_t trans,
+                          int32_t m, int32_t n, const void* alpha, const float16* A,
+                          int32_t lda, const float16* x, int32_t incx,
+                          const void* beta, float16* y, int32_t incy) {
+  if (trans != CUBLAS_OP_N) {
+    std::swap(m, n);
+    cublas_gemm<float16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, 1, m, n, alpha,
+                         x, incx, A, lda, beta, y, incy);
+  } else {
+    cublas_gemm<float16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_T, 1, m, n, alpha,
+                         x, incx, A, lda, beta, y, incy);
+  }
+}
+
+template <>
+void cublas_gemv<bfloat16>(cublasHandle_t cublas_handle, cublasOperation_t trans,
+                          int32_t m, int32_t n, const void* alpha, const bfloat16* A,
+                          int32_t lda, const bfloat16* x, int32_t incx,
+                          const void* beta, bfloat16* y, int32_t incy) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (trans != CUBLAS_OP_N) {
+    std::swap(m, n);
+    cublas_gemm<bfloat16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, 1, m, n, alpha,
+                         x, incx, A, lda, beta, y, incy);
+  } else {
+    cublas_gemm<bfloat16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_T, 1, m, n, alpha,
+                         x, incx, A, lda, beta, y, incy);
+  }
+#else
+  HT_NOT_IMPLEMENTED << "bfloat16 is not supported on this device.";
+#endif
+}
+
+template <>
 void cublas_gemv<float>(cublasHandle_t cublas_handle, cublasOperation_t trans,
-                        int32_t m, int32_t n, const float* alpha, const float* A,
+                        int32_t m, int32_t n, const void* alpha, const float* A,
                         int32_t lda, const float* x, int32_t incx,
-                        const float* beta, float* y, int32_t incy) {
-  CUBLAS_CALL(cublasSgemv(cublas_handle, trans, m, n, alpha, A, lda, x, incx,
-                          beta, y, incy));
+                        const void* beta, float* y, int32_t incy) {
+  CUBLAS_CALL(cublasSgemv(cublas_handle, trans, m, n, static_cast<const float*>(alpha), A, lda, x, incx,
+                          static_cast<const float*>(beta), y, incy));
 }
 
 template <>
 void cublas_gemv<double>(cublasHandle_t cublas_handle, cublasOperation_t trans,
-                        int32_t m, int32_t n, const double* alpha, const double* A,
+                        int32_t m, int32_t n, const void* alpha, const double* A,
                         int32_t lda, const double* x, int32_t incx,
-                        const double* beta, double* y, int32_t incy) {
-  CUBLAS_CALL(cublasDgemv(cublas_handle, trans, m, n, alpha, A, lda, x, incx,
-                          beta, y, incy));
+                        const void* beta, double* y, int32_t incy) {
+  CUBLAS_CALL(cublasDgemv(cublas_handle, trans, m, n, static_cast<const double*>(alpha), A, lda, x, incx,
+                          static_cast<const double*>(beta), y, incy));
 }
 
 
