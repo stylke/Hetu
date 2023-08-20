@@ -8,6 +8,8 @@ from test_utils import allclose
 import os
 import sys
 
+# Warning: Remember to set rtol = 1e-02, atol = 1e-02 in `test_utils.py`
+
 GRAD_TEST = True
 
 class TestArithmeticOps(unittest.TestCase):
@@ -28,12 +30,10 @@ class TestArithmeticOps(unittest.TestCase):
 
     def test_elementwise_add(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            y_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np)
-            x = x.to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np)
-            y = y.to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            y = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             c = np.random.randn()
 
 
@@ -52,12 +52,10 @@ class TestArithmeticOps(unittest.TestCase):
     
     def test_broadcast_add(self):
         for shape_x, shape_y in TestArithmeticOps._test_broadcast_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
-            y_np = np.random.randn(*shape_y).astype(np.float32)
-            x = hetu.from_numpy(x_np)
-            x = x.to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np)
-            y = y.to(hetu.bfloat16)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            y = hetu.randn(shape_y, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             gt = x_np + y_np
             self.assertTrue(allclose(x + y, gt))
             self.assertTrue(allclose(y + x, gt))
@@ -81,12 +79,10 @@ class TestArithmeticOps(unittest.TestCase):
 
     def test_elementwise_sub(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            y_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np)
-            x = x.to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np)
-            y = y.to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            y = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             c = np.random.randn()
             # tensor - tensor
             gt = x_np - y_np
@@ -109,12 +105,10 @@ class TestArithmeticOps(unittest.TestCase):
     
     def test_broadcast_sub(self):
         for shape_x, shape_y in TestArithmeticOps._test_broadcast_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
-            y_np = np.random.randn(*shape_y).astype(np.float32)
-            x = hetu.from_numpy(x_np)
-            x = x.to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np)
-            y = y.to(hetu.bfloat16)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            y = hetu.randn(shape_y, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             gt = x_np - y_np
             self.assertTrue(allclose(x - y, gt))
             self.assertTrue(allclose(x.sub(y), gt))
@@ -140,21 +134,18 @@ class TestArithmeticOps(unittest.TestCase):
     
     def test_neg(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np)
-            x = x.to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = np.negative(x_np)
             self.assertTrue(allclose(x.neg(), gt))
             self.assertTrue(allclose(hetu.neg(x), gt))
 
     def test_elementwise_mul(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            y_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np)
-            x = x.to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np)
-            y = y.to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            y = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             c = np.random.randn()
             # tensor * tensor
             gt = x_np * y_np
@@ -173,12 +164,10 @@ class TestArithmeticOps(unittest.TestCase):
     
     def test_broadcast_mul(self):
         for shape_x, shape_y in TestArithmeticOps._test_broadcast_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
-            y_np = np.random.randn(*shape_y).astype(np.float32)
-            x = hetu.from_numpy(x_np)
-            x = x.to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np)
-            y = y.to(hetu.bfloat16)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            y = hetu.randn(shape_y, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             gt = x_np * y_np
             self.assertTrue(allclose(x * y, gt))
             self.assertTrue(allclose(y * x, gt))
@@ -202,12 +191,10 @@ class TestArithmeticOps(unittest.TestCase):
     
     def test_elementwise_div(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            y_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np)
-            x = x.to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np)
-            y = y.to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            y = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             c = np.random.randn()
             # tensor / tensor
             gt = x_np / y_np
@@ -234,6 +221,8 @@ class TestArithmeticOps(unittest.TestCase):
             y_np = np.random.randn(*shape_y).astype(np.float32) + 10
             x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             y = hetu.from_numpy(y_np).to(hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             gt = x_np / y_np
             self.assertTrue(allclose(x / y, gt))
             self.assertTrue(allclose(x.div(y), gt))
@@ -272,8 +261,8 @@ class TestArithmeticOps(unittest.TestCase):
 
     def test_reciprocal(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = np.reciprocal(x_np)
             self.assertTrue(allclose(x.reciprocal(), gt))
             self.assertTrue(allclose(hetu.reciprocal(x), gt))
@@ -282,6 +271,7 @@ class TestArithmeticOps(unittest.TestCase):
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.abs(np.random.randn(*shape)).astype(np.float32)
             x = hetu.from_numpy(x_np).to(hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = np.sqrt(x_np)
             self.assertTrue(allclose(x.sqrt(), gt))
             self.assertTrue(allclose(hetu.sqrt(x), gt))
@@ -296,35 +286,88 @@ class TestArithmeticOps(unittest.TestCase):
 
     def test_sum(self):
         for shape in TestArithmeticOps._test_elementwise_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            y_np = np.random.randn(*shape).astype(np.float32)
-            z_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np).to(hetu.bfloat16)
-            z = hetu.from_numpy(z_np).to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            y = hetu.randn(shape, dtype=hetu.bfloat16)
+            z = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
+            z_np = z.to(hetu.float32).numpy(force=True)
             gt = x_np + y_np + z_np
             self.assertTrue(allclose(hetu.add([x,y,z]), gt))
 
 class TestMatMulOps(unittest.TestCase):
 
     _test_shapes = [
+        # 1D x 1D
+        ((64,), (64,)),
+        ((128,), (128,)),
+        ((256,), (256,)),
+        ((512,), (512,)),
+        ((1024,), (1024,)),
+        # 2D x 1D
+        ((64, 128), (128,)),
+        ((64, 256), (256,)),
+        ((64, 512), (512,)),
+        ((256, 512), (512,)),
+        ((1024, 256), (256,)),
+        # 1D x 2D
+        ((128,), (128, 64)),
+        ((256,), (256, 64)),
+        ((512,), (512, 64)),
+        ((512,), (512, 1024)),
+        ((256,), (256, 1024)),
+        # 2D x 2D
+        ((64, 128), (128, 512)),
         ((64, 256), (256, 128)),
-        # ((8, 64, 256), (256, 128))
+        ((64, 256), (256, 1024)),
+        ((128, 256), (256, 256)),
+        ((1024, 256), (256, 512)),
+        # ND x 1D
+        ((8, 64, 128), (128,)),
+        ((8, 64, 256), (256,)),
+        ((8, 64, 512), (512,)),
+        ((8, 256, 128), (128,)),
+        ((8, 256, 512), (512,)),
+        # 1D x ND
+        ((128,), (8, 128, 64)),
+        ((256,), (8, 256, 64)),
+        ((512,), (8, 512, 64)),
+        ((128,), (8, 128, 256)),
+        ((1024,), (4, 1024, 32)),
+        # ND x 2D
+        ((2, 64, 128), (128, 512)),
+        ((2, 64, 256), (256, 512)),
+        ((8, 64, 256), (256, 128)),
+        ((8, 64, 128), (128, 128)),
+        ((8, 64, 256), (256, 256)),
+        # 2D x ND
+        ((512, 128), (2, 128, 64)),
+        ((512, 256), (2, 256, 64)),
+        ((128, 256), (8, 256, 64)),
+        ((128, 128), (8, 128, 64)),
+        ((256, 256), (16, 256, 64)),
+        # ND x ND
+        ((8, 64, 256), (8, 256, 8)),
+        ((8, 64, 256), (8, 8, 256, 64)),
+        ((8, 16, 8, 64), (8, 16, 64, 256)),
+        ((8, 1, 64, 256), (8, 1, 256, 16)),
+        ((8, 1, 256, 512), (8, 1, 512, 1024)),
     ]
     
     def test_matmul_op(self):
         for shape_x, shape_y in TestMatMulOps._test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
-            y_np = np.random.randn(*shape_y).astype(np.float32)
+            print(f"shape_x: {shape_x}, shape_y: {shape_y}")
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            y = hetu.randn(shape_y, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             gt = np.matmul(x_np, y_np)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.matmul(x, y), gt))
             self.assertTrue(allclose(x.matmul(y), gt))
 
             if GRAD_TEST:
-              torch_in = torch.tensor(x_np, requires_grad=True)
-              torch_out = torch.matmul(torch_in, torch.from_numpy(y_np))
+              torch_in = torch.tensor(x_np, requires_grad=True, device="cuda:0")
+              torch_out = torch.matmul(torch_in, torch.from_numpy(y_np).to("cuda:0"))
               torch_loss = torch_out.sum()
               torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True, dtype=hetu.bfloat16)
@@ -334,7 +377,7 @@ class TestMatMulOps(unittest.TestCase):
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
-              self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+              self.assertTrue(allclose(hetu_in, torch_in.cpu().detach().numpy()))
     
     # def test_linear_op(self):
     #     for shape_x, shape_y in TestMatMulOps._test_shapes:
@@ -367,11 +410,11 @@ class TestBatchMatMulOps(unittest.TestCase):
     
     def test_batch_matmul_op(self):
         for shape_x, shape_y in TestBatchMatMulOps._test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
-            y_np = np.random.randn(*shape_y).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            y = hetu.randn(shape_y, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
             gt = torch.bmm(torch.from_numpy(x_np), torch.from_numpy(y_np)).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.bmm(x, y), gt))
             self.assertTrue(allclose(x.bmm(y), gt))
 
@@ -425,9 +468,9 @@ class TestActivationOps(unittest.TestCase):
 
     def test_sigmoid_op(self):
         for shape in TestActivationOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = 1 / (1 + np.exp(-x_np))
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.sigmoid(x), gt))
             self.assertTrue(allclose(x.sigmoid(), gt))
 
@@ -447,9 +490,9 @@ class TestActivationOps(unittest.TestCase):
     
     def test_sin_op(self):
         for shape in TestActivationOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = np.sin(x_np)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.sin(x), gt))
             self.assertTrue(allclose(x.sin(), gt))
 
@@ -470,8 +513,9 @@ class TestActivationOps(unittest.TestCase):
     def test_relu_op(self):
         for shape in TestActivationOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32) - 0.5
-            gt = x_np * (x_np > 0).astype(x_np.dtype)
             x = hetu.from_numpy(x_np).to(hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            gt = x_np * (x_np > 0).astype(x_np.dtype)
             self.assertTrue(allclose(hetu.relu(x), gt))
             self.assertTrue(allclose(x.relu(), gt))
 
@@ -492,11 +536,11 @@ class TestActivationOps(unittest.TestCase):
     
     def test_leaky_relu_op(self):
         for shape in TestActivationOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             alphas = [0.1, 0.2, 0.5]
             for alpha in alphas:
                 gt = np.where(x_np > 0, x_np, alpha * x_np)
-                x = hetu.from_numpy(x_np).to(hetu.bfloat16)
                 self.assertTrue(allclose(hetu.leakyrelu(x, alpha), gt))
                 self.assertTrue(allclose(x.leakyrelu(alpha), gt))
 
@@ -516,9 +560,9 @@ class TestActivationOps(unittest.TestCase):
 
     def test_tanh_op(self):
         for shape in TestActivationOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = np.tanh(x_np)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.tanh(x), gt))
             self.assertTrue(allclose(x.tanh(), gt))
 
@@ -538,9 +582,9 @@ class TestActivationOps(unittest.TestCase):
 
     def test_triu_op(self):
         for shape in TestActivationOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = torch.triu(torch.from_numpy(x_np), 0).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.triu(x, False, 0), gt))
             self.assertTrue(allclose(x.triu(False, 0), gt))
 
@@ -560,9 +604,9 @@ class TestActivationOps(unittest.TestCase):
 
     def test_tril_op(self):
         for shape in TestActivationOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = torch.tril(torch.from_numpy(x_np), 0).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.triu(x, True, 0), gt))
             self.assertTrue(allclose(x.triu(True, 0), gt))
 
@@ -583,9 +627,9 @@ class TestActivationOps(unittest.TestCase):
     
     def test_softmax_op(self):
         for shape, dim in TestActivationOps._test_softmax_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = torch.softmax(torch.from_numpy(x_np).cuda(), dim).cpu().numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             # print(int(dim))
 
             self.assertTrue(allclose(hetu.softmax(x, dim), gt))
@@ -625,12 +669,12 @@ class TestTransformOps(unittest.TestCase):
 
     def test_reshape_op(self):
         for shape in TestTransformOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             shape_to = list(shape)
             shape_to[0] = int(shape_to[0] / 2)
             shape_to[1] *= 2
             gt = np.reshape(x_np, tuple(shape_to))
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.reshape(x, shape_to), gt))
             self.assertTrue(allclose(x.reshape(shape_to), gt))
 
@@ -650,11 +694,11 @@ class TestTransformOps(unittest.TestCase):
 
     def test_broadcast_op(self):
         for shape in TestTransformOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             shape_to = list(shape)
             shape_to = [16] + shape_to
             gt = np.broadcast_to(x_np, tuple(shape_to))
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.broadcast(x, shape_to, []), gt))
             self.assertTrue(allclose(x.broadcast(shape_to, []), gt))
 
@@ -674,13 +718,13 @@ class TestTransformOps(unittest.TestCase):
 
     def test_concat_op(self):
         for shape in TestTransformOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            y_np = np.random.randn(*shape).astype(np.float32)
-            z_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            y = hetu.randn(shape, dtype=hetu.bfloat16)
+            z = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y_np = y.to(hetu.float32).numpy(force=True)
+            z_np = z.to(hetu.float32).numpy(force=True)
             gt = np.concatenate((x_np, y_np), 0)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np).to(hetu.bfloat16)
-            z = hetu.from_numpy(z_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.concat(x, y, 0), gt))
             self.assertTrue(allclose(x.concat(y, 0), gt))
             self.assertTrue(allclose(hetu.concat([x, y], 0), gt))
@@ -689,8 +733,8 @@ class TestTransformOps(unittest.TestCase):
     
     def test_pad_op(self):
         for shape in TestTransformOps._pad_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = np.pad(x_np, ((0,0),(0,0),(1,1),(2,2)), "constant", constant_values = 0.1)
             self.assertTrue(allclose(hetu.pad(x, [1,1,2,2], "constant", 0.1), gt))
             self.assertTrue(allclose(x.pad([1,1,2,2], "constant", 0.1), gt))
@@ -711,28 +755,28 @@ class TestTransformOps(unittest.TestCase):
 
     def test_slice_op(self):
         for shape in TestTransformOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             begin_pos = list(np.random.randint(0, 16 ,size = [2]))
             out_size = list(np.random.randint(16, 32 ,size = [2]))
             gt = x_np[begin_pos[0]:begin_pos[0]+out_size[0], begin_pos[1]:begin_pos[1]+out_size[1]]
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.slice(x, begin_pos, out_size), gt))
             self.assertTrue(allclose(x.slice(begin_pos, out_size), gt))
 
     def test_split_op(self):
         for shape in TestTransformOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             idx = list(np.random.randint(0, 8 ,size = [1]))
             gt = np.split(x_np, 8, 0)[idx[0]]
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.split(x, 8, 0)[idx[0]], gt))
             self.assertTrue(allclose(x.split(8, 0)[idx[0]], gt))
     
     def test_transpose_op(self):
         for shape in TestTransformOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = np.transpose(x_np, (1, 0))
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.transpose(x, [1, 0]), gt))
             self.assertTrue(allclose(x.transpose([1, 0]), gt))
 
@@ -751,12 +795,12 @@ class TestTransformOps(unittest.TestCase):
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
 
         for shape in TestTransformOps._transpose_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             perm = np.arange(x_np.ndim)
             np.random.shuffle(perm)
             perm = list(perm)
             gt = np.transpose(x_np, perm)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.transpose(x, perm), gt))
             self.assertTrue(allclose(x.transpose(perm), gt))
 
@@ -787,19 +831,19 @@ class TestConv2dOps(unittest.TestCase):
 
     def test_conv2d_op(self):
         for shape in TestConv2dOps._data_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             for f_shape in TestConv2dOps._filter_shapes:
-                f_np = np.random.randn(*f_shape).astype(np.float32)
-                f = hetu.from_numpy(f_np).to(hetu.bfloat16)
+                f = hetu.randn(f_shape, dtype=hetu.bfloat16)
+                f_np = f.to(hetu.float32).numpy(force=True)
                 bias_np = np.random.randn()
                 gt = torch.conv2d(torch.from_numpy(x_np).cuda(), torch.from_numpy(f_np).cuda(), stride = 1, padding = 0).cpu().numpy()
                 bias_shape = [f_shape[0]]
                 self.assertTrue(allclose(hetu.conv2d(x, f, 0, 1), gt))
                 self.assertTrue(allclose(x.conv2d(f, 0, 1), gt))
                 # test conv2d add bias
-                bias_np = np.random.randn(*bias_shape).astype(np.float32)
-                bias = hetu.from_numpy(bias_np).to(hetu.bfloat16)
+                bias = hetu.randn(bias_shape, dtype=hetu.bfloat16)
+                bias_np = bias.to(hetu.float32).numpy(force=True)
                 gt = torch.conv2d(torch.from_numpy(x_np).cuda(), torch.from_numpy(f_np).cuda(), torch.from_numpy(bias_np).cuda(), stride = 1, padding = 0).cpu().numpy()
                 self.assertTrue(allclose(hetu.conv2d(x, f, bias, 0, 1), gt))
                 self.assertTrue(allclose(x.conv2d(f, bias, 0, 1), gt))
@@ -830,8 +874,8 @@ class TestPoolOps(unittest.TestCase):
 
     def test_maxpool_op(self):
         for shape in TestPoolOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             maxpool2d = torch.nn.MaxPool2d(2, 1, 0)
             gt = maxpool2d(torch.from_numpy(x_np).cuda()).cpu().numpy()
             self.assertTrue(allclose(hetu.maxpool(x, 2, 2, 0, 1), gt))
@@ -853,8 +897,8 @@ class TestPoolOps(unittest.TestCase):
 
     def test_avgpool_op(self):
         for shape in TestPoolOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             avgpool2d = torch.nn.AvgPool2d(2, 1, 0)
             gt = avgpool2d(torch.from_numpy(x_np).cuda()).cpu().numpy()
             self.assertTrue(allclose(hetu.avgpool(x, 2, 2, 0, 1), gt))
@@ -884,8 +928,8 @@ class TestNormOps(unittest.TestCase):
 
     def test_batchnorm_op(self):
         for shape in TestPoolOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             scale_np = np.ones(shape[1]).astype(np.float32)
             scale = hetu.from_numpy(scale_np)
             bias_np = np.zeros(shape[1]).astype(np.float32)
@@ -922,12 +966,12 @@ class TestNormOps(unittest.TestCase):
         for shape in TestPoolOps._test_shapes:
             for i in range(1, 4):
                 norm_shape = shape[i:]
-                x_np = np.random.randn(*shape).astype(np.float32)
-                x = hetu.from_numpy(x_np).to(hetu.bfloat16)
-                scale_np = np.ones(norm_shape).astype(np.float32)
-                scale = hetu.from_numpy(scale_np).to(hetu.bfloat16)
-                bias_np = np.zeros(norm_shape).astype(np.float32)
-                bias = hetu.from_numpy(bias_np).to(hetu.bfloat16)
+                x = hetu.randn(shape, dtype=hetu.bfloat16)
+                x_np = x.to(hetu.float32).numpy(force=True)
+                scale = hetu.ones(norm_shape, dtype=hetu.bfloat16)
+                scale_np = scale.to(hetu.float32).numpy(force=True)
+                bias = hetu.randn(norm_shape, dtype=hetu.bfloat16)
+                bias_np = bias.to(hetu.float32).numpy(force=True)
                 # gt = layernorm(torch.from_numpy(x_np).cuda()).cpu().numpy()
                 gt = torch.layer_norm(torch.from_numpy(x_np).cuda(), normalized_shape=tuple(norm_shape), weight = torch.from_numpy(scale_np).cuda(), 
                                        bias = torch.from_numpy(bias_np).cuda(), eps=1e-5).cpu().numpy()
@@ -952,8 +996,8 @@ class TestNormOps(unittest.TestCase):
     
     def test_instancenorm_op(self):
         for shape in TestPoolOps._test_shapes:
-            x_np = np.random.randn(*shape).astype(np.float32)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
+            x = hetu.randn(shape, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             temp_shape = list(shape)
             # temp_shape[-1] = 1
             # temp_shape[-2] = 1
@@ -994,9 +1038,9 @@ class TestReduceOps(unittest.TestCase):
     def test_reduce_sum_op(self):
         print(sys._getframe().f_code.co_name)
         for shape_x in TestReduceOps._test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = np.sum(x_np)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.reduce(x, "sum"), gt))
             self.assertTrue(allclose(x.reduce("sum"), gt))
             self.assertTrue(allclose(hetu.sum(x), gt))
@@ -1024,9 +1068,9 @@ class TestReduceOps(unittest.TestCase):
     def test_reduce_mean_op(self):
         print(sys._getframe().f_code.co_name)
         for shape_x in TestReduceOps._test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = np.average(x_np)
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.reduce(x, "mean"), gt))
             self.assertTrue(allclose(x.reduce("mean"), gt))
             self.assertTrue(allclose(hetu.mean(x), gt))
@@ -1068,15 +1112,17 @@ class TestLossOps(unittest.TestCase):
         MIN_VALUE = -100.0
         for shape in TestLossOps._test_binary_label_shapes:
             probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
+            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
+            probs_np = probs.to(hetu.float32).numpy(force=True)
             labels_np = np.random.choice([0, 1], size=shape).astype(np.float32)
+            labels = hetu.from_numpy(labels_np).to(hetu.bfloat16)
+            labels_np = labels.to(hetu.float32).numpy(force=True)
             # t1_np = np.maximum(np.log(probs_np), MIN_VALUE)
             # t2_np = np.maximum(np.log(1 - probs_np), MIN_VALUE)
             # gt = -(labels_np * t1_np + (1 - labels_np) * t2_np)
             bce = torch.nn.BCELoss(reduction="mean")
             # gt = torch.nn.functional.binary_cross_entropy(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
-            gt =bce(torch.from_numpy(probs_np).cuda(), torch.from_numpy(labels_np).cuda()).cpu().numpy()
-            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
-            labels = hetu.from_numpy(labels_np).to(hetu.bfloat16)
+            gt = bce(torch.from_numpy(probs_np).cuda(), torch.from_numpy(labels_np).cuda()).cpu().numpy()
             loss = hetu.binary_cross_entropy(probs, labels)
             print(probs_np.shape)
             self.assertTrue(allclose(loss, gt))
@@ -1100,13 +1146,14 @@ class TestLossOps(unittest.TestCase):
         print(sys._getframe().f_code.co_name)
         for shape, lshape in TestLossOps._test_nllloss_label_shapes:
             probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
+            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
+            probs_np = probs.to(hetu.float32).numpy(force=True)
             labels_np = np.random.choice(range(16), size=lshape).astype(np.int64)
             # t1_np = np.maximum(np.log(probs_np), MIN_VALUE)
             # t2_np = np.maximum(np.log(1 - probs_np), MIN_VALUE)
             # gt = -(labels_np * t1_np + (1 - labels_np) * t2_np)
             gt = torch.nn.functional.nll_loss(torch.from_numpy(probs_np).cuda(), torch.from_numpy(labels_np).cuda()).cpu().numpy()
             #gt = torch.nn.functional.nll_loss(torch.from_numpy(probs_np), torch.from_numpy(labels_np)).numpy()
-            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
             labels = hetu.from_numpy(labels_np)
             loss = hetu.nll_loss(probs, labels)
             self.assertTrue(allclose(loss, gt))
@@ -1130,13 +1177,15 @@ class TestLossOps(unittest.TestCase):
         print(sys._getframe().f_code.co_name)
         for shape in TestLossOps._test_binary_label_shapes:
             probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
+            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
+            probs_np = probs.to(hetu.float32).numpy(force=True)
             labels_np = np.random.choice([0, 1], size=shape).astype(np.float32)
+            labels = hetu.from_numpy(labels_np).to(hetu.bfloat16)
+            labels_np = labels.to(hetu.float32).numpy(force=True)
             # t1_np = np.maximum(np.log(probs_np), MIN_VALUE)
             # t2_np = np.maximum(np.log(1 - probs_np), MIN_VALUE)
             # gt = -(labels_np * t1_np + (1 - labels_np) * t2_np)
             gt = torch.nn.functional.kl_div(torch.from_numpy(probs_np).cuda(), torch.from_numpy(labels_np).cuda()).cpu().numpy()
-            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
-            labels = hetu.from_numpy(labels_np).to(hetu.bfloat16)
             loss = hetu.kl_div(probs, labels)
             self.assertTrue(allclose(loss, gt))
 
@@ -1160,13 +1209,15 @@ class TestLossOps(unittest.TestCase):
         MIN_VALUE = -100.0
         for shape in TestLossOps._test_binary_label_shapes:
             probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
+            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
+            probs_np = probs.to(hetu.float32).numpy(force=True)
             labels_np = np.random.choice([0, 1], size=shape).astype(np.float32)
+            labels = hetu.from_numpy(labels_np).to(hetu.bfloat16)
+            labels_np = labels.to(hetu.float32).numpy(force=True)
             # t1_np = np.maximum(np.log(probs_np), MIN_VALUE)
             # t2_np = np.maximum(np.log(1 - probs_np), MIN_VALUE)
             # gt = -(labels_np * t1_np + (1 - labels_np) * t2_np)
             gt = torch.nn.functional.mse_loss(torch.from_numpy(probs_np).cuda(), torch.from_numpy(labels_np).cuda()).cpu().numpy()
-            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
-            labels = hetu.from_numpy(labels_np).to(hetu.bfloat16)
             loss = hetu.mse_loss(probs, labels)
             self.assertTrue(allclose(loss, gt))
 
@@ -1190,7 +1241,8 @@ class TestLossOps(unittest.TestCase):
         MIN_VALUE = -100.0
         for shape in TestLossOps._test_cross_entropy_label_shapes:
             probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
-            #labels_np = np.random.uniform(0.25, 0.5, size=shape).astype(np.float32)
+            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
+            probs_np = probs.to(hetu.float32).numpy(force=True)
             labels_np = np.random.choice(range(16), size=(64,)).astype(np.int64)
             labels_onehot = torch.nn.functional.one_hot(torch.from_numpy(labels_np), 16).numpy().astype(np.float32)
             gt = torch.nn.functional.cross_entropy(torch.from_numpy(probs_np).cuda(), torch.from_numpy(labels_np).cuda()).cpu().numpy()
@@ -1224,11 +1276,12 @@ class TestLossOps(unittest.TestCase):
         MIN_VALUE = -100.0
         for shape in TestLossOps._test_cross_entropy_label_shapes:
             probs_np = np.random.uniform(1e-10, 1, size=shape).astype(np.float32)
+            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
+            probs_np = probs.to(hetu.float32).numpy(force=True)
             #labels_np = np.random.uniform(0.25, 0.5, size=shape).astype(np.float32)
             labels_np = np.random.choice(range(16), size=(64,)).astype(np.int64)
             # labels_onehot = torch.nn.functional.one_hot(torch.from_numpy(labels_np), 16).numpy().astype(np.float32)
             gt = torch.nn.functional.cross_entropy(torch.from_numpy(probs_np).cuda(), torch.from_numpy(labels_np).cuda()).cpu().numpy()
-            probs = hetu.from_numpy(probs_np).to(hetu.bfloat16)
             labels = hetu.from_numpy(labels_np)
             loss = hetu.softmax_cross_entropy_sparse(probs, labels)
             self.assertTrue(allclose(loss, gt))
@@ -1311,7 +1364,8 @@ class TestEinsumOps(unittest.TestCase):
             inputs_hetu = []
             for shape in nshapes:
                 input_np = np.random.randn(*shape).astype(np.float32)
-                input_hetu = hetu.from_numpy(input_np)
+                input_hetu = hetu.from_numpy(input_np).to(hetu.bfloat16)
+                input_np = input_hetu.to(hetu.float32).numpy(force=True)
                 inputs_np.append(torch.from_numpy(input_np))
                 inputs_hetu.append(input_hetu)
             gt = torch.einsum(equation, *inputs_np).numpy()
@@ -1397,9 +1451,9 @@ class TestOtherOps(unittest.TestCase):
     def test_asstridedop(self):
         print(sys._getframe().f_code.co_name)
         for shape_x, shape_y, stride in TestOtherOps._asstrided_test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = torch.as_strided(torch.from_numpy(x_np), shape_y, stride).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.as_strided(x, list(shape_y), list(stride)), gt))
             self.assertTrue(allclose(x.as_strided(list(shape_y), list(stride)), gt))
 
@@ -1421,10 +1475,10 @@ class TestOtherOps(unittest.TestCase):
     def test_gatherop(self):
         print(sys._getframe().f_code.co_name)
         for shape_x, shape_id, dim in TestOtherOps._gather_test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             id_np = np.random.randint(0, shape_x[dim], size=shape_id)
             gt = torch.gather(torch.from_numpy(x_np), dim, torch.from_numpy(id_np)).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             id = hetu.from_numpy(id_np)
             self.assertTrue(allclose(hetu.gather(x, dim, id), gt))
             self.assertTrue(allclose(x.gather(dim, id), gt))
@@ -1447,9 +1501,9 @@ class TestOtherOps(unittest.TestCase):
     def test_interpolateop(self):
         print(sys._getframe().f_code.co_name)
         for shape_x, shape_o in TestOtherOps._interpolate_test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = torch.nn.functional.interpolate(torch.from_numpy(x_np), shape_o, mode='bicubic').numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.interpolate(x, list(shape_o)), gt))
             self.assertTrue(allclose(x.interpolate(list(shape_o)), gt))
 
@@ -1472,11 +1526,11 @@ class TestOtherOps(unittest.TestCase):
         print(sys._getframe().f_code.co_name)
         for shape_x in TestOtherOps._maskedfill_test_shapes:
             shape_x = shape_x[0]
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             mask_np = np.random.choice([0, 1], size=shape_x).astype(np.int64)
             val = np.random.random()
             gt = torch.masked_fill(torch.from_numpy(x_np), torch.from_numpy(mask_np), val).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             mask = hetu.from_numpy(mask_np)
             self.assertTrue(allclose(hetu.masked_fill(x, mask, val), gt))
             self.assertTrue(allclose(x.masked_fill(mask, val), gt))
@@ -1499,9 +1553,9 @@ class TestOtherOps(unittest.TestCase):
     def test_normop(self):
         print(sys._getframe().f_code.co_name)
         for shape_x, dim0, p0 in TestOtherOps._norm_test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = torch.norm(torch.from_numpy(x_np), p=p0, dim=dim0).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.norm(x, p0, dim0), gt))
             self.assertTrue(allclose(x.norm(p0, dim0), gt))
 
@@ -1523,9 +1577,9 @@ class TestOtherOps(unittest.TestCase):
     def test_repeatop(self):
         print(sys._getframe().f_code.co_name)
         for shape_x, repeats in TestOtherOps._repeat_test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = torch.from_numpy(x_np).repeat(*repeats).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.repeat(x, list(repeats)), gt))
             self.assertTrue(allclose(x.repeat(list(repeats)), gt))
 
@@ -1547,9 +1601,9 @@ class TestOtherOps(unittest.TestCase):
     def test_rollop(self):
         print(sys._getframe().f_code.co_name)
         for shape_x, shifts, dims in TestOtherOps._roll_test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             gt = torch.roll(torch.from_numpy(x_np), shifts=shifts, dims=dims).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             # print(hetu.roll(x, list(shifts), list(dims)).numpy(force=True), "\n", gt)
             self.assertTrue(allclose(hetu.roll(x, list(shifts), list(dims)), gt))
             self.assertTrue(allclose(x.roll(list(shifts), list(dims)), gt))
@@ -1572,10 +1626,10 @@ class TestOtherOps(unittest.TestCase):
     def test_embedding_lookupop(self):
         print(sys._getframe().f_code.co_name)
         for shape_x, shape_id in TestOtherOps._embedding_test_shapes:
-            x_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
             id_np = np.random.randint(0, shape_x[0], size=shape_id)
             gt = torch.embedding(torch.from_numpy(x_np), torch.from_numpy(id_np)).numpy()
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
             id = hetu.from_numpy(id_np)
             self.assertTrue(allclose(hetu.embedding_lookup(x, id), gt))
             self.assertTrue(allclose(x.embedding_lookup(id), gt))
@@ -1609,12 +1663,12 @@ class TestOtherOps(unittest.TestCase):
         print(sys._getframe().f_code.co_name)
         for shape_x in TestOtherOps._onehot_test_shapes:
             cond_np = np.random.choice([0, 1], size=shape_x).astype(np.int64)
-            x_np = np.random.randn(*shape_x).astype(np.float32)
-            y_np = np.random.randn(*shape_x).astype(np.float32)
+            x = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            x_np = x.to(hetu.float32).numpy(force=True)
+            y = hetu.randn(shape_x, dtype=hetu.bfloat16)
+            y_np = y.to(hetu.float32).numpy(force=True)
             gt = np.where(cond_np, x_np, y_np)
             cond = hetu.from_numpy(cond_np) 
-            x = hetu.from_numpy(x_np).to(hetu.bfloat16)
-            y = hetu.from_numpy(y_np).to(hetu.bfloat16)
             self.assertTrue(allclose(hetu.where(cond, x, y), gt))
         print(sys._getframe().f_code.co_name)
 

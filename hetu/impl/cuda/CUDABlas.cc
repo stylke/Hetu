@@ -65,8 +65,7 @@ void cublas_gemv<float16>(cublasHandle_t cublas_handle, cublasOperation_t trans,
                           int32_t lda, const float16* x, int32_t incx,
                           const void* beta, float16* y, int32_t incy) {
   if (trans != CUBLAS_OP_N) {
-    std::swap(m, n);
-    cublas_gemm<float16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, 1, m, n, alpha,
+    cublas_gemm<float16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, 1, n, m, alpha,
                          x, incx, A, lda, beta, y, incy);
   } else {
     cublas_gemm<float16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_T, 1, m, n, alpha,
@@ -81,8 +80,7 @@ void cublas_gemv<bfloat16>(cublasHandle_t cublas_handle, cublasOperation_t trans
                           const void* beta, bfloat16* y, int32_t incy) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (trans != CUBLAS_OP_N) {
-    std::swap(m, n);
-    cublas_gemm<bfloat16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, 1, m, n, alpha,
+    cublas_gemm<bfloat16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_N, 1, n, m, alpha,
                          x, incx, A, lda, beta, y, incy);
   } else {
     cublas_gemm<bfloat16>(cublas_handle, CUBLAS_OP_N, CUBLAS_OP_T, 1, m, n, alpha,
