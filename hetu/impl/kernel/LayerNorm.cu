@@ -6,6 +6,7 @@
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/kernel/Binary.cuh"
 #include "hetu/impl/utils/cuda_math.h"
+#include <chrono>
 
 namespace hetu {
 namespace impl {
@@ -13,32 +14,6 @@ namespace impl {
 template <typename spec_a_t, typename spec_b_t, typename Operator>
 extern __global__ void binary_elewise_kernel(const spec_a_t* inputA, const spec_b_t* inputB,
                                              size_t size, Operator op, spec_a_t* output);
-
-// template <typename spec_t>
-// __forceinline__ __device__ spec_t WarpReduceSum(spec_t val) {
-//   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
-//   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-//     val += __shfl_down_sync(mask, val, k, warpSize);
-//   return val;
-// }
-
-// template <typename spec_t>
-// __forceinline__ __device__ void BlockReduceSum(spec_t& val, spec_t* shared) {
-//   int tid = threadIdx.x % warpSize;
-//   int wid = threadIdx.x / warpSize;
-
-//   val = WarpReduceSum(val);
-
-//   __syncthreads();
-//   if (tid == 0)
-//     shared[wid] = val;
-
-//   __syncthreads();
-//   val = (threadIdx.x < blockDim.x / warpSize) ? spec_t(shared[tid]) : spec_t(0);
-
-//   if (wid == 0)
-//     val = WarpReduceSum(val);
-// }
 
 template <typename spec_t>
 __global__ void layer_norm_kernel(const spec_t* x, const spec_t* scale,
@@ -103,6 +78,8 @@ void LayerNormCuda(const NDArray& in_arr, const NDArray& ln_scale,
   dim3 blocks, threads;
   threads.x = (last_dim >= 1024 ? 1024 : 64);
   blocks.x = base_dim;
+  // CudaStreamSynchronize(cuda_stream);
+  // std::chrono::system_clock::time_point t1 = std::chrono::system_clock::now();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "LayerNormCuda", [&]() {
       layer_norm_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
@@ -111,6 +88,11 @@ void LayerNormCuda(const NDArray& in_arr, const NDArray& ln_scale,
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(), eps,
         last_dim);
     });
+  // CudaStreamSynchronize(cuda_stream);
+  // std::chrono::system_clock::time_point t2 = std::chrono::system_clock::now();
+  // std::cout << in_arr->shape() << ":" <<
+  // float(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count()) / 1000.0
+  // << "ms" << std::endl;
   return;
 }
 
@@ -181,217 +163,6 @@ __global__ void calculate_grad_kernel_layer<float16>(const float16* out_grads,
   grad_arr[idx] = (out_grads[idx] + (tmp - db[mo_idx]) / (float16)lastdim) / 
     hetu::cuda::cuda_sqrt(var_arr[mo_idx] + eps);
 }
-
-// void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
-//                            const NDArray& ln_scale, NDArray& grad_arr,
-//                            NDArray& grad_scale, NDArray& grad_bias,
-//                            const NDArray& mean_arr, const NDArray& var_arr,
-//                            int64_t reduce_dims, float eps, const Stream& stream) {
-//   HT_ASSERT_CUDA_DEVICE(out_grads);
-//   HT_ASSERT_SAME_DEVICE(out_grads, ln_scale);
-//   HT_ASSERT_SAME_DEVICE(out_grads, in_arr);
-//   HT_ASSERT_SAME_DEVICE(out_grads, mean_arr); 
-//   HT_ASSERT_SAME_DEVICE(out_grads, var_arr); 
-//   HT_ASSERT_SAME_DEVICE(out_grads, grad_scale);
-//   HT_ASSERT_SAME_DEVICE(out_grads, grad_arr);
-//   HT_ASSERT_SAME_DEVICE(out_grads, grad_bias);
-
-//   CUDAStream cuda_stream(stream);
-//   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-//   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
-
-//   int ndim = out_grads->ndim();
-// //   HT_ASSERT(ndim == 4);
-//   size_t total_elements = 1;
-
-//   cudnnDataType_t datatype;
-//   cudnnIndicesType_t indicetype;
-//   if (in_arr->dtype() == DataType::FLOAT32) {
-//     datatype = CUDNN_DATA_FLOAT;
-//     indicetype = CUDNN_32BIT_INDICES;
-//   } else if (in_arr->dtype() == DataType::FLOAT64) {
-//     datatype = CUDNN_DATA_DOUBLE;
-//     indicetype = CUDNN_64BIT_INDICES;
-//   } else if (in_arr->dtype() == DataType::FLOAT16) {
-//     datatype = CUDNN_DATA_HALF;
-//     indicetype = CUDNN_32BIT_INDICES;
-//   }
-//   #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-//   else if (in_arr->dtype() == DataType::BFLOAT16) {
-//     datatype = CUDNN_DATA_BFLOAT16;
-//     indicetype = CUDNN_32BIT_INDICES;
-//   }
-//   #endif
-//   else {
-//     HT_LOG_INFO << "UNSUPPORTED TYPE:" << in_arr->dtype();
-//   }
-
-//   int last_2dim = in_arr->shape(ndim - 1) * in_arr->shape(ndim - 2);
-//   size_t cpu_mem = ndim * sizeof(int);
-//   int* dimA = (int*) malloc(cpu_mem);
-//   int* strideA = (int*) malloc(cpu_mem);
-//   int* dimB = (int*) malloc(cpu_mem);
-//   int* strideB = (int*) malloc(cpu_mem);
-//   int* dimC = (int*) malloc(cpu_mem);
-//   int* strideC = (int*) malloc(cpu_mem);
-
-//   int temp_strideA = 1;
-//   int temp_strideB = 1;
-//   int temp_strideC = 1;
-
-//   for (int i = ndim - 1; i >= 0; --i) {
-//     dimA[i] = (int) in_arr->shape(i);
-//     dimB[i] = i >= in_arr->ndim() - reduce_dims ? (int) in_arr->shape(i) : 1;
-//     dimC[i] = i < in_arr->ndim() - reduce_dims ? (int) in_arr->shape(i) : 1;
-//     strideA[i] = temp_strideA;
-//     strideB[i] = temp_strideB;
-//     strideC[i] = temp_strideC;
-//     temp_strideA *= dimA[i];
-//     temp_strideB *= dimB[i];
-//     temp_strideC *= dimC[i];
-//   }
-
-//   for (int i = 0; i < ndim; ++i)
-//     total_elements *= out_grads->shape(i);
-//   int lastdim = 1;
-//   for (size_t i = 0; i < reduce_dims; ++i) {
-//     lastdim *= out_grads->shape(ndim - 1 -i);
-//   }
-
-//   size_t size = total_elements;
-//   if (size == 0)
-//     return;
-//   dim3 blocks, threads;
-//   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-//   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-//   HT_DISPATCH_FLOATING_TYPES(
-//     in_arr->dtype(), spec_t, "CauculateGradCuda", [&]() {
-//       spec_t* ds = NULL;
-//       DataPtr ds_ptr = AllocFromMemoryPool(in_arr->device(), temp_strideC * sizeof(spec_t));
-//       ds = (spec_t*) ds_ptr.ptr;
-
-//       spec_t* db = NULL;
-//       DataPtr db_ptr = AllocFromMemoryPool(in_arr->device(), temp_strideC * sizeof(spec_t));
-//       db = (spec_t*) db_ptr.ptr;
-
-//       spec_t* dy_mul_x = NULL;
-//       DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), temp_strideA * sizeof(spec_t));
-//       dy_mul_x = (spec_t*) dy_mul_x_ptr.ptr;
-
-//       DataPtr gscale_ptr = AllocFromMemoryPool(out_grads->device(), temp_strideA * sizeof(spec_t));
-//       spec_t* gscale = (spec_t*) gscale_ptr.ptr;
-
-//       DataPtr workspace_ptr;
-//       workspace_ptr = in_arr->dtype() == DataType::FLOAT16 || in_arr->dtype() == DataType::BFLOAT16 
-//                                          ? AllocFromMemoryPool(out_grads->device(), temp_strideA * sizeof(float))
-//                                          : AllocFromMemoryPool(out_grads->device(), temp_strideA * sizeof(spec_t));
-//       spec_t* workspace = (spec_t*) workspace_ptr.ptr;
-
-//       spec_t one = 1.0f;
-//       spec_t zero = 0.0f;
-
-//       float one_f = 1.0f;
-//       float zero_f = 0.0f;
-
-//       cudnnReduceTensorDescriptor_t rtd;
-//       CUDNN_CALL(cudnnCreateReduceTensorDescriptor(&rtd));
-//       CUDNN_CALL(cudnnSetReduceTensorDescriptor(
-//         rtd, CUDNN_REDUCE_TENSOR_ADD, in_arr->dtype() == DataType::FLOAT16 || in_arr->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype, CUDNN_PROPAGATE_NAN,
-//         CUDNN_REDUCE_TENSOR_NO_INDICES, indicetype));
-
-//       cudnnTensorDescriptor_t adesc;
-//       cudnnTensorDescriptor_t bdesc;
-//       cudnnTensorDescriptor_t cdesc;
-//       CUDNN_CALL(cudnnCreateTensorDescriptor(&adesc));
-//       CUDNN_CALL(cudnnCreateTensorDescriptor(&bdesc));
-//       CUDNN_CALL(cudnnCreateTensorDescriptor(&cdesc));
-
-//       CUDNN_CALL(
-//         cudnnSetTensorNdDescriptor(adesc, datatype, ndim, dimA, strideA));
-//       CUDNN_CALL(
-//         cudnnSetTensorNdDescriptor(bdesc, datatype, ndim, dimB, strideB));
-//       CUDNN_CALL(
-//         cudnnSetTensorNdDescriptor(cdesc, datatype, ndim, dimC, strideC));
-
-      
-//       if (in_arr->dtype() == DataType::FLOAT16 || in_arr->dtype() == DataType::BFLOAT16) {
-//         CUDNN_CALL(cudnnReduceTensor(
-//           handle, rtd, NULL, 0, (void*) workspace, temp_strideA * sizeof(float), &one_f,
-//           adesc, (const void*) out_grads->data_ptr<void>(), &zero_f, bdesc,
-//           (void*) grad_bias->data_ptr<void>()));
-//       }
-//       else {
-//         CUDNN_CALL(cudnnReduceTensor(
-//           handle, rtd, NULL, 0, (void*) workspace, temp_strideA * sizeof(spec_t), &one,
-//           adesc, (const void*) out_grads->data_ptr<void>(), &zero, bdesc,
-//           (void*) grad_bias->data_ptr<void>()));
-//       }
-
-//       calculate_gscale<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-//         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
-//         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
-//         gscale, eps, lastdim, (size_t) temp_strideA);
-      
-
-//       if (in_arr->dtype() == DataType::FLOAT16 || in_arr->dtype() == DataType::BFLOAT16) {  
-//         CUDNN_CALL(cudnnReduceTensor(
-//           handle, rtd, NULL, 0, (void*) workspace, temp_strideA * sizeof(float), &one_f,
-//           adesc, (const void*) gscale, &zero_f, bdesc,
-//           (void*) grad_scale->data_ptr<void>())); 
-//         CUDNN_CALL(cudnnReduceTensor(
-//           handle, rtd, NULL, 0, (void*) workspace, temp_strideA * sizeof(float), &one_f,
-//           adesc, (const void*) out_grads->data_ptr<void>(), &zero_f, cdesc,
-//           (void*) db));  
-//       }   
-//       else {
-//         CUDNN_CALL(cudnnReduceTensor(
-//           handle, rtd, NULL, 0, (void*) workspace, temp_strideA * sizeof(spec_t), &one,
-//           adesc, (const void*) gscale, &zero, bdesc,
-//           (void*) grad_scale->data_ptr<void>())); 
-//         CUDNN_CALL(cudnnReduceTensor(
-//           handle, rtd, NULL, 0, (void*) workspace, temp_strideA * sizeof(spec_t), &one,
-//           adesc, (const void*) out_grads->data_ptr<void>(), &zero, cdesc,
-//           (void*) db));  
-//       } 
-
-//       auto op = kmultiplies<spec_t, spec_t>();
-
-//       binary_elewise_kernel<spec_t, spec_t><<<blocks, threads, 0, cuda_stream>>>(
-//         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
-//         size, op, dy_mul_x);
-      
-//       if (in_arr->dtype() == DataType::FLOAT16 || in_arr->dtype() == DataType::BFLOAT16) {
-//         CUDNN_CALL(cudnnReduceTensor(
-//           handle, rtd, NULL, 0, (void*) workspace, temp_strideA * sizeof(float), &one_f,
-//           adesc, (const void*) dy_mul_x, &zero_f, cdesc,
-//           (void*) ds));  
-//       }
-//       else {
-//         CUDNN_CALL(cudnnReduceTensor(
-//           handle, rtd, NULL, 0, (void*) workspace, temp_strideA * sizeof(spec_t), &one,
-//           adesc, (const void*) dy_mul_x, &zero, cdesc,
-//           (void*) ds));  
-//       }
-        
-
-//       calculate_grad_kernel_layer<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-//         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
-//         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
-//         ds, db,
-//         grad_arr->data_ptr<spec_t>(), lastdim, eps, size);
-//       FreeToMemoryPool(ds_ptr);
-//       FreeToMemoryPool(db_ptr);
-//       FreeToMemoryPool(dy_mul_x_ptr);
-//       FreeToMemoryPool(gscale_ptr);
-//       FreeToMemoryPool(workspace_ptr);
-//     });
-//     free(dimA);
-//     free(strideA);
-//     free(dimB);
-//     free(strideB);
-//     free(dimC);
-//     free(strideC);
-// }
 
 void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
                            const NDArray& ln_scale, NDArray& grad_arr,

@@ -540,6 +540,57 @@ __forceinline__ __device__ void BlockReduceSum(spec_t& val, spec_t* shared) {
 
   if (wid == 0)
     val = WarpReduceSum(val);
+  __syncthreads();
+}
+
+template <typename spec_t>
+__forceinline__ __device__ void WarpReduceArgmax(spec_t& val) {
+  spec_t tmp_val;
+  unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
+  for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
+    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    if (tmp_val > val) {
+      val = tmp_val;
+    }
+  }
+}
+
+template <>
+__forceinline__ __device__ void WarpReduceArgmax(bfloat16& val) {
+  bfloat16 tmp_val;
+  #if defined(__CUDACC__) && (__CUDA_ARCH__ >= 800)
+  unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
+  for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
+    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    if (tmp_val > val) {
+      val = tmp_val;
+    }
+  }
+  #endif
+}
+
+template <typename spec_t>
+__forceinline__ __device__ void BlockReduceArgmax(spec_t& val,
+                                                  spec_t* shared_value,
+                                                  spec_t* wrap_max) {
+  int tid = threadIdx.x % warpSize;
+  int wid = threadIdx.x / warpSize;
+
+  WarpReduceArgmax(val);
+
+  __syncthreads();
+  if (tid == 0) {
+    shared_value[wid] = val;
+  }
+
+  __syncthreads();
+  val = (threadIdx.x < blockDim.x / warpSize) ? shared_value[tid] : -SIZE_MAX;
+
+  if (wid == 0)
+    WarpReduceArgmax(val);
+    if (threadIdx.x == 0)
+      wrap_max[0] = val;
+  __syncthreads();
 }
 
 } // namespace cuda

@@ -32,5 +32,5 @@ __all__ = [
     #sparse
     'Embedding',
     #parallel
-    'ColumnParallelLinear', 'RowParallelLinear',
+    'ParallelLayerNorm', 'ParallelEmbedding', 'ColumnParallelLinear', 'RowParallelLinear',
 ]

@@ -60,7 +60,9 @@ void SliceCuda(const NDArray& input, NDArray& output, int64_t* begin_pos,
     << "Devices: (input) " << input->device() << " vs. (output) "
     << output->device();
   HT_ASSERT(input->ndim() == output->ndim())
-    << "input and output has different dims. ";
+    << "input and output has different dims. "
+    << "input shape: " << input->shape()
+    << ", output shape: " << output->shape();
   size_t ndim = input->ndim();
   size_t o_size = 1;
   for (int i = 0; i < ndim; ++i) {

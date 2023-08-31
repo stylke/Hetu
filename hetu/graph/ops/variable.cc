@@ -33,6 +33,10 @@ NDArrayList VariableOpImpl::DoAllocOutputs(Operator& op,
 bool ParallelVariableOpImpl::DoInstantiate(Operator& op, 
                                            const Device& placement,
                                            StreamIndex stream_id) const {
+  HT_ASSERT(_init == nullptr || _local_idx != -1)
+    << "ParallelVariableOp: when use initializer, local_idx "
+    << "must be assigned when local_device is in pipeline device_group!";
+                                              
   if (!OpInterface::DoInstantiate(op, placement, stream_id))
     return false;
 
@@ -55,7 +59,14 @@ bool ParallelVariableOpImpl::DoInstantiate(Operator& op,
     // TODO: reset variable data also need parallel version
     Graph::AllocVariableData(op->output(0), *_init, seed, _global_shape);
   } else {
-    HT_LOG_ERROR << "ParallelVariableOpImpl: init shouldn't be nullptr!";
+    if (_copy_provided_data || dtype() != _provided_data->dtype() ||
+        placement != _provided_data->device()) {
+      Graph::AllocVariableData(op->output(0),
+                               ProvidedInitializer(_provided_data));
+      // TODO: free the provided data in order to save memory
+    } else {
+      Graph::RegisterVariableData(op->output(0), _provided_data);
+    }
   }
   return true;
 }
@@ -131,13 +142,38 @@ Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape,
   return out;
 }
 
+Tensor MakeParallelVariableOp(NDArray provided_data, const DistributedStates& ds, 
+                              bool copy_provided_data, DataType dtype, 
+                              bool requires_grad, OpMeta op_meta) {
+  auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
+                           provided_data, copy_provided_data, 
+                           ds, dtype, requires_grad),
+                           TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
+  HT_ASSERT(ds.is_valid() && ds.get_dim(-2) == 1)
+    << "DistributedStates for ParallelVariableOp must be valid! got: " 
+    << ds.ds_info();
+  out->set_distributed_states(ds);
+  return out;  
+}
+
 Tensor MakeParallelParameterOp(const Initializer& init, HTShape global_shape, 
                                const DistributedStates& ds, int64_t local_idx,
                                DataType dtype, bool requires_grad, OpMeta op_meta) {
   auto out = MakeParallelVariableOp(init, std::move(global_shape), ds, local_idx, 
                                     dtype, requires_grad, std::move(op_meta));
+  // HT_LOG_INFO << out->producer() << ": device group = " << op_meta.device_group;                                    
   Graph::MarkAsParameter(out);
   return out;                                    
+}
+
+Tensor MakeParallelParameterOp(NDArray provided_data, const DistributedStates& ds, 
+                               bool copy_provided_data, DataType dtype, 
+                               bool requires_grad, OpMeta op_meta) {
+  auto out = MakeParallelVariableOp(std::move(provided_data), ds, copy_provided_data, 
+                                    dtype, requires_grad, std::move(op_meta));
+  // HT_LOG_INFO << out->producer() << ": device group = " << op_meta.device_group;                                    
+  Graph::MarkAsParameter(out);
+  return out;
 }
 
 } // namespace graph

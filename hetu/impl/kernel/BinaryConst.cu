@@ -36,21 +36,33 @@ __global__ void binary_const_kernel(const spec_t* input, spec_t value,
 
 void AddConstCuda(const NDArray& input, double value,
                     NDArray& output, const Stream& stream) {
+  if (value == 0) {    
+    return;        
+  }
   BINARYCONST(input, value, output, kplus, stream)
 }
 
 void SubConstCuda(const NDArray& input, double value,
                     NDArray& output, const Stream& stream) {
+  if (value == 0) { 
+    return;        
+  }
   BINARYCONST(input, value, output, kminus, stream)
 }
 
 void MulConstCuda(const NDArray& input, double value,
                     NDArray& output, const Stream& stream) {
+  if (value == 0) {    
+    return;        
+  }
   BINARYCONST(input, value, output, kmultiplies, stream)
 }
 
 void DivConstCuda(const NDArray& input, double value,
                     NDArray& output, const Stream& stream) {
+  if (value == 0) {    
+    return;        
+  }
   BINARYCONST(input, value, output, kdivides, stream)
 }
 

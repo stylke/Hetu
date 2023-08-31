@@ -5,6 +5,20 @@
 namespace hetu {
 namespace graph {
 
+NDArrayList ArrayReshapeOpImpl::DoCompute(Operator& op,
+                                     const NDArrayList& inputs,
+                                     RuntimeContext& ctx) const {
+  if (inplace()) {
+    NDArrayList outputs = {NDArray::reshape(inputs.at(0), get_output_shape(), op->instantiation_ctx().stream_index)};
+    return outputs;
+  }
+  else {
+    NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
+    DoCompute(op, inputs, outputs, ctx);
+    return outputs;
+  }
+}
+
 void ArrayReshapeOpImpl::DoCompute(Operator& op,
                                    const NDArrayList& inputs,
                                    NDArrayList& outputs, 
@@ -17,8 +31,12 @@ void ArrayReshapeOpImpl::DoCompute(Operator& op,
 TensorList ArrayReshapeOpImpl::DoGradient(Operator& op, 
                                           const TensorList& grad_outputs) const {
   if (grad_outputs.at(0).is_defined() && grad_outputs.at(0))
-    return {MakeArrayReshapeGradientOp(grad_outputs.at(0), op->input(0),
-                                  op->grad_op_meta().set_name(op->grad_name()))};
+    if (inplace()) {
+      return {MakeViewGradientOp(grad_outputs.at(0), op->input(0), op->input(0)->shape(), op->grad_op_meta().set_name(op->grad_name()))};
+    }
+    else
+      return {MakeArrayReshapeGradientOp(grad_outputs.at(0), op->input(0),
+                                         op->grad_op_meta().set_name(op->grad_name()))};
   else 
     return { Tensor() };
 }
@@ -37,6 +55,10 @@ HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op,
   size_t cnt = 0;
   int64_t output_size = 1;
   HTShape output_shape = get_output_shape();
+  if (op->input(0)->has_distributed_states()) {
+    output_shape = get_local_output_shape(op->input(0)->global_shape(), 
+                                          op->input(0)->get_distributed_states());
+  }  
   int64_t output_len = output_shape.size();
   for (size_t i = 0; i < input_len; ++i) {
     if (input_shape[i] == -1) {
@@ -72,9 +94,23 @@ void ArrayReshapeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& ou
     << "ArrayReshapeOpDef: distributed states for input must be valid!";
   HT_ASSERT(ds_input.get_dim(-2) == 1)
     << "Input tensor shouldn't be partial!";
-  HT_ASSERT(ds_input.check_pure_duplicate())
-    << "Input tensor cannot be splited in any dimension!";
-  outputs.at(0)->set_distributed_states(ds_input);    
+  HTShape global_output_shape = get_output_shape(inputs[0]->global_shape());
+  DistributedStates ds_output = get_output_ds(inputs[0]->global_shape(), ds_input, global_output_shape);
+  outputs.at(0)->set_distributed_states(ds_output);
+}
+
+NDArrayList ArrayReshapeGradientOpImpl::DoCompute(Operator& op,
+                                                  const NDArrayList& inputs,
+                                                  RuntimeContext& ctx) const {
+  if (inplace()) {
+    NDArrayList outputs = {NDArray::reshape(inputs.at(0), input_shape(), op->instantiation_ctx().stream_index)};
+    return outputs;
+  }
+  else {
+    NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
+    DoCompute(op, inputs, outputs, ctx);
+    return outputs;
+  }
 }
 
 void ArrayReshapeGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
@@ -107,6 +143,22 @@ Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input,
                                   OpMeta op_meta) {
   return Graph::MakeOp(
       std::make_shared<ArrayReshapeGradientOpImpl>(),
+      {std::move(grad_output), std::move(ori_input)},
+      std::move(op_meta))->output(0);
+}
+
+Tensor MakeViewOp(Tensor input, const HTShape& output_shape,
+                  OpMeta op_meta) {
+  return Graph::MakeOp(
+      std::make_shared<ArrayReshapeOpImpl>(output_shape, true),
+      {std::move(input)},
+      std::move(op_meta))->output(0);
+}
+
+Tensor MakeViewGradientOp(Tensor grad_output, Tensor ori_input, const HTShape& in_shape,
+                          OpMeta op_meta) {
+  return Graph::MakeOp(
+      std::make_shared<ArrayReshapeGradientOpImpl>(true, in_shape),
       {std::move(grad_output), std::move(ori_input)},
       std::move(op_meta))->output(0);
 }

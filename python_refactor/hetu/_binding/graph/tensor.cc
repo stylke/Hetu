@@ -139,6 +139,12 @@ PyObject* PyTensor_shape(PyTensor* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_global_shape(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLongList_FromIntegerList(self->tensor->global_shape());
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_size(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -283,6 +289,33 @@ PyObject* PyTensor_data_transfer(PyTensor* self, PyObject* args, PyObject* kwarg
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  auto* unsafe_self = PyTensor_Type->tp_alloc(PyTensor_Type, 0);
+  HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyTensor";
+  auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
+  
+  static PyArgParser parser({
+    "from_numpy_parallel(numpy.array data, DistributedStates ds, bool requires_grad=false, " OP_META_ARGS ")", 
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+
+  if (parsed_args.signature_index() == 0) {
+    auto* array_obj = parsed_args.get_numpy_array(0);
+    DistributedStates ds = parsed_args.get_distributed_states(1);
+    bool requires_grad = parsed_args.get_bool_or_default(2);
+    new(&self->tensor) Tensor();
+    self->tensor = MakeParallelParameterOp(NDArrayFromNumpy(array_obj), ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
+  } else {
+    Py_TYPE(self)->tp_free(self);
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+
+  return reinterpret_cast<PyObject*>(self);
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_to_numpy(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -307,6 +340,7 @@ PyGetSetDef PyTensor_properties[] = {
   {PY_GET_SET_DEF_NAME("shape"), (getter) PyTensor_shape, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("device"), (getter) PyTensor_device, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("dtype"), (getter) PyTensor_dtype, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("global_shape"), (getter) PyTensor_global_shape, nullptr, nullptr, nullptr},  
   {PY_GET_SET_DEF_NAME("is_variable"), (getter) PyTensor_is_variable, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("is_parameter"), (getter) PyTensor_is_parameter, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("requires_grad"), (getter) PyTensor_requires_grad, nullptr, nullptr, nullptr},
@@ -378,6 +412,7 @@ std::vector<PyMethodDef> InitTensorPyClassMethodDefs() {
   std::vector<PyMethodDef> ret = {{nullptr}};
   AddPyMethodDefs(ret, {
     {"from_numpy", (PyCFunction) PyTensor_from_numpy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"from_numpy_parallel", (PyCFunction) PyTensor_from_numpy_parallel, METH_VARARGS | METH_KEYWORDS, nullptr },     
     {nullptr}
   });
   AddPyMethodDefs(ret, hetu::graph::get_registered_tensor_class_methods());

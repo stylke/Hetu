@@ -3,6 +3,7 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
+#include <chrono>
 
 namespace hetu {
 namespace impl {
@@ -14,13 +15,11 @@ __global__ void embedding_lookup_kernel(const spec_t* input, const int64_t* ids,
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  int64_t id = ids[idx];
+  int64_t id = ids[idx / length]; 
   if (id < 0 || id >= input_row) {
-    for (int i = 0; i < length; i++)
-      output[length * idx + i] = 0;
+    output[idx] = 0;
   } else {
-    for (int i = 0; i < length; i++)
-      output[length * idx + i] = input[length * id + i];
+    output[idx] = input[length * id + (idx % length)];
   }
 }
 
@@ -38,12 +37,10 @@ __global__ void embedding_lookup_gradient_kernel(const spec_t* output_grad,
                                                  size_t length,
                                                  spec_t* input_grad) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size / length)
+  if (idx >= size)
     return;
-  int id = int(ids[idx]);
-  for (int i = 0; i < length; i++) {
-    hetu::cuda::AtomicAdd((input_grad + length * id + i), (output_grad[length * idx + i]));
-  }
+  int id = int(ids[idx / length]);
+  hetu::cuda::AtomicAdd((input_grad + length * id + (idx % length)), (output_grad[idx]));
 }
 
 void EmbeddingLookupCuda(const NDArray& input, const NDArray& id,
@@ -63,7 +60,7 @@ void EmbeddingLookupCuda(const NDArray& input, const NDArray& id,
   }
   size_t input_row = input->shape(0);
   size_t length = input->shape(1);
-  size_t size = id->numel();
+  size_t size = id->numel() * input->shape(1);
   if (size == 0 || input_row == 0 || length == 0)
     return;
   dim3 blocks, threads;
@@ -77,7 +74,6 @@ void EmbeddingLookupCuda(const NDArray& input, const NDArray& id,
         input->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size, length,
         input_row, output->data_ptr<spec_t>());
     });
-    CudaStreamSynchronize(cuda_stream);
 }
 
 void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,

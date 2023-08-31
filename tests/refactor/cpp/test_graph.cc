@@ -314,25 +314,33 @@ void static_run_tp_pp_ds(Graph& graph) {
 
   int num_micro_batches = 4;
 
-  NDArray data, labels;
-  if (device_group1.contains(local_device)) {
-    data = NDArray::randn({local_n * num_micro_batches, dim}, local_device, kFloat32, 0.0, 1.0, (666 + device_group1.get_index(local_device)), kBlockingStream);
-  }
-  if (device_group4.contains(local_device)) {
-    labels = NDArray::zeros({local_n * 2 * num_micro_batches, dim}, local_device, kFloat32, kBlockingStream);
-  }
+  for (int i = 0; i < 10; i++) {
+    NDArray data, labels;
+    if (device_group1.contains(local_device)) {
+      data = NDArray::randn({local_n * num_micro_batches, dim}, local_device, kFloat32, 0.0, 1.0, (666 + device_group1.get_index(local_device)), kBlockingStream);
+    }
+    if (device_group4.contains(local_device)) {
+      labels = NDArray::zeros({local_n * 2 * num_micro_batches, dim}, local_device, kFloat32, kBlockingStream);
+    }
 
-  auto ret = graph.Run(loss, {loss, w, w2, train_op},
-                       {{x->id(), data}, {y->id(), labels}}, 
-                       num_micro_batches);
+    auto ret = graph.Run(loss, {loss, w, w2, train_op},
+                        {{x->id(), data}, {y->id(), labels}}, 
+                        num_micro_batches);
 
-  if (device_group1.contains(local_device)) {
-    HT_LOG_INFO << local_device << "\nw_init: " << w_data << ", w_init(sum) = " << NDArray::sum(w_data, {0,1}, false, kBlockingStream) 
-                                << "\nw_updated: " << ret[1] << ", w_updated(sum) = " << NDArray::sum(ret[1], {0,1}, false, kBlockingStream);
-  }
-  if (device_group2.contains(local_device)) {
-    HT_LOG_INFO << local_device << "\nw2_init: " << w2_data << ", w2_init(sum) = " << NDArray::sum(w2_data, {0,1}, false, kBlockingStream) 
-                                << "\nw2_updated: " << ret[2] << ", w2_updated(sum) = " << NDArray::sum(ret[2], {0,1}, false, kBlockingStream); 
+    if (device_group1.contains(local_device)) {
+      HT_LOG_INFO << local_device << ": iteration " << i << ", w_updated(sum) = " << NDArray::sum(ret[1], {0,1}, false, kBlockingStream);
+    }
+    if (device_group2.contains(local_device)) {
+      HT_LOG_INFO << local_device << ": iteration " << i << ", w2_updated(sum) = " << NDArray::sum(ret[2], {0,1}, false, kBlockingStream);
+    }
+    // if (device_group1.contains(local_device)) {
+    //   HT_LOG_INFO << local_device << "\nw_init: " << w_data << ", w_init(sum) = " << NDArray::sum(w_data, {0,1}, false, kBlockingStream) 
+    //                               << "\nw_updated: " << ret[1] << ", w_updated(sum) = " << NDArray::sum(ret[1], {0,1}, false, kBlockingStream);
+    // }
+    // if (device_group2.contains(local_device)) {
+    //   HT_LOG_INFO << local_device << "\nw2_init: " << w2_data << ", w2_init(sum) = " << NDArray::sum(w2_data, {0,1}, false, kBlockingStream) 
+    //                               << "\nw2_updated: " << ret[2] << ", w2_updated(sum) = " << NDArray::sum(ret[2], {0,1}, false, kBlockingStream); 
+    // }
   }
 }
 
@@ -370,7 +378,7 @@ void static_run_tp_pp_ds2(Graph& graph) {
   auto x5 = MakeSigmoidOp(x4, OpMeta().set_name("sigmoid").set_device_group(device_group2));
   auto pred = MakeCommOp(x5, ds_split0_dup, OpMeta().set_name("comm_op2"));
   auto y = MakePlaceholderOp(NDArrayMeta().set_shape({local_n*2, dim}).set_dtype(kFloat32), ds_split0_dup, OpMeta().set_device_group(device_group2).set_name("y"));
-  // y->set_distributed_states(ds_split0_dup);    
+  // y->set_distributed_states(ds_split0_dup);
   auto loss = MakeBinaryCrossEntropyOp(pred, y, hetu::ReductionType::MEAN);
   SGDOptimizer optimizer(0.1, 0.0);
   auto train_op = optimizer.Minimize(loss);
@@ -402,11 +410,11 @@ int main()
   hetu::impl::comm::SetUpDeviceMappingAndAssignLocalDeviceOnce();
 
   // static_run_dp_ds(Graph::get_default_define_and_run_graph());
-  static_run_tp_ds_parallel_w(Graph::get_default_define_and_run_graph());
+  // static_run_tp_ds_parallel_w(Graph::get_default_define_and_run_graph());
   // static_run_tp_ds(Graph::get_default_define_and_run_graph());
   // static_run_tp_ds2(Graph::get_default_define_and_run_graph());
 
-  // static_run_tp_pp_ds(Graph::get_default_define_and_run_graph());
+  static_run_tp_pp_ds(Graph::get_default_define_and_run_graph());
   // static_run_tp_pp_ds2(Graph::get_default_define_and_run_graph());
   return 0;
 }

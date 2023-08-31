@@ -21,7 +21,7 @@ void NDArrayMeta::view(const HTShape& view_shape) {
     view_numel *= -1;
     HT_ASSERT(cur_numel % view_numel == 0)
       << "Cannot reshape " << shape << " to " << view_shape;
-    HTShape shape = view_shape;
+    shape = view_shape;
     shape[infer_dim] = cur_numel / view_numel;
   } else {
     HT_ASSERT(view_numel == cur_numel)

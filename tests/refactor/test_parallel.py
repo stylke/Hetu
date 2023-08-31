@@ -84,18 +84,18 @@ def test_row_parallel():
   with g:
     n = 4
     dim = 4
-    x = hetu.parallel_placeholder(hetu.float32, (n, dim), ds=ds_dup, device_group=all_device_group, name='x')
-    y = hetu.parallel_placeholder(hetu.float32, (n, dim * 2), ds=ds_dup, device_group=all_device_group, name='y')    
+    x = hetu.parallel_placeholder(hetu.float32, (n, dim), ds=ds_split0_dup, device_group=all_device_group, name='x')
+    y = hetu.parallel_placeholder(hetu.float32, (n, dim * 2), ds=ds_split0_dup, device_group=all_device_group, name='y')    
 
-    row_parallel = hetu.nn.RowParallelLinear(dim, dim * 2, all_device_group)
+    row_parallel = hetu.nn.RowParallelLinear(dim, dim * 2, all_device_group, dp=2, bias=True)
     pred = row_parallel(x)
     pred = hetu.sigmoid(pred)
     loss = hetu.binary_cross_entropy(pred, y, 'mean', name='bce_loss')
     optimizer = hetu.SGDOptimizer(0.1, 0.0)
     train_op = optimizer.minimize(loss)
 
-    data = parallel_data_provider(np.random.normal(size=(n, dim)), ds_dup, local_device_index)
-    labels = parallel_data_provider(np.zeros((n, dim * 2)), ds_dup, local_device_index)
+    data = parallel_data_provider(np.random.normal(size=(n, dim)), ds_split0_dup, local_device_index)
+    labels = parallel_data_provider(np.zeros((n, dim * 2)), ds_split0_dup, local_device_index)
 
     ret = g.graph.run(loss, [loss, row_parallel.weight, row_parallel.bias, train_op], feed_dict={x: data, y: labels})
     print(f'{local_device}: w_updated: {ret[1]}, bias_updated: {ret[2]}')
@@ -110,18 +110,18 @@ def test_column_parallel():
   with g:
     n = 4
     dim = 4
-    x = hetu.parallel_placeholder(hetu.float32, (n, dim), ds=ds_dup, device_group=all_device_group, name='x')
-    y = hetu.parallel_placeholder(hetu.float32, (n, dim * 2), ds=ds_dup, device_group=all_device_group, name='y')      
+    x = hetu.parallel_placeholder(hetu.float32, (n, dim), ds=ds_split0_dup, device_group=all_device_group, name='x')
+    y = hetu.parallel_placeholder(hetu.float32, (n, dim * 2), ds=ds_split0_dup, device_group=all_device_group, name='y')      
 
-    column_parallel = hetu.nn.ColumnParallelLinear(dim, dim * 2, all_device_group)
+    column_parallel = hetu.nn.ColumnParallelLinear(dim, dim * 2, all_device_group, dp=2, bias=True, gather_output=True)
     pred = column_parallel(x)
     pred = hetu.sigmoid(pred)
     loss = hetu.binary_cross_entropy(pred, y, 'mean', name='bce_loss')
     optimizer = hetu.SGDOptimizer(0.1, 0.0)
     train_op = optimizer.minimize(loss)
 
-    data = parallel_data_provider(np.random.normal(size=(n, dim)), ds_dup, local_device_index)
-    labels = parallel_data_provider(np.zeros((n, dim * 2)), ds_dup, local_device_index)
+    data = parallel_data_provider(np.random.normal(size=(n, dim)), ds_split0_dup, local_device_index)
+    labels = parallel_data_provider(np.zeros((n, dim * 2)), ds_split0_dup, local_device_index)
 
     ret = g.graph.run(loss, [loss, column_parallel.weight, column_parallel.bias, train_op], feed_dict={x: data, y: labels})
     print(f'{local_device}: w_updated: {ret[1]}, bias_updated: {ret[2]}')    
@@ -130,5 +130,5 @@ def test_column_parallel():
 if __name__ == '__main__':
   hetu.init_comm_group()
   # static_run_tp_ds_refactor()
-  test_row_parallel()
-  # test_column_parallel()
+  # test_row_parallel()
+  test_column_parallel()

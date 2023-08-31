@@ -1,12 +1,12 @@
 import hetu
 from .module import Module
-import numpy as np
-
-from typing import Any
+import numbers
 
 __all__ = [
     'ColumnParallelLinear', 
     'RowParallelLinear', 
+    'ParallelEmbedding',
+    'ParallelLayerNorm',
 ]
 
 def parallel_data_provider(global_data, ds, device_index):
@@ -23,6 +23,59 @@ def parallel_data_provider(global_data, ds, device_index):
         local_data = local_data.take(range(start, stop), axis=dim)
     return local_data
 
+def get_device_index(device_group):
+    local_device = hetu.local_device()
+    if device_group.contains(local_device):
+        device_index = device_group.get_index(local_device)
+    else: # for pipeline parallel other stages
+        device_index = -1 # only map placement group, will not map placement and do instantiate
+    return device_index
+
+
+class ParallelLayerNorm(Module):
+    def __init__(self, normalized_shape, device_group, eps=1e-5, name='ln'):
+        super(ParallelLayerNorm, self).__init__()
+        if isinstance(normalized_shape, numbers.Integral):
+            # mypy error: incompatible types in assignment
+            normalized_shape = [normalized_shape]  # type: ignore[assignment]
+        self.normalized_shape = list(normalized_shape)  # type: ignore[arg-type]
+        self.eps = eps
+        self.name = name
+        self.device_group = device_group
+        num_devices = device_group.num_devices
+        ds_dup = hetu.DistributedStates(num_devices, {-1: num_devices}, [-1])
+        device_index = get_device_index(device_group)
+        self.weight = hetu.parallel_parameter(eval(f'hetu.ones_initializer()'), 
+                                              self.normalized_shape, ds_dup, device_index, 
+                                              dtype=hetu.float32, requires_grad=True, 
+                                              device_group=device_group, name=f'{name}_weight')
+        self.bias = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
+                                              self.normalized_shape, ds_dup, device_index, 
+                                              dtype=hetu.float32, requires_grad=True, device_group=device_group, name=f'{name}_bias')
+
+    def forward(self, input_p):
+        return hetu.layer_norm(input_p, self.weight, self.bias, self.normalized_shape, self.eps, device_group=self.device_group, name=self.name)[0]
+
+class ParallelEmbedding(Module):
+    def __init__(self, num_embeddings, embedding_dim, device_group, init_method='xavier_normal_', name='embedding'):
+        super(ParallelEmbedding, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.device_group = device_group
+        self.name = name
+        num_devices = device_group.num_devices
+        ds_dup = hetu.DistributedStates(num_devices, {-1: num_devices}, [-1])
+        device_index = get_device_index(device_group)
+        # embedding_table should not be splited in any dimension!
+        self.embedding_table = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
+                                                       [num_embeddings, embedding_dim], ds_dup, device_index, 
+                                                       dtype=hetu.float32, requires_grad=True, 
+                                                       device_group=device_group, name=f'{name}_table')
+    
+    def forward(self, input_p):
+        return hetu.embedding_lookup(self.embedding_table, input_p, device_group=self.device_group, name=self.name)
+
+# todo: modify column and row parallel linear
 # process: x->dup, w->split1 => y->split1 => y->dup
 class ColumnParallelLinear(Module):
     """Linear layer with column parallelism.
@@ -30,47 +83,50 @@ class ColumnParallelLinear(Module):
     The linear layer is defined as Y = XA + b. A is parallelized along
     its second dimension as A = [A_1, ..., A_p].
     """
-    def __init__(self, in_features, out_features, device_group, local_device_index=None, 
-                 bias=True, gather_output=True, init_method='xavier_normal_'):
+    def __init__(self, in_features, out_features, device_group, dp=1,
+                 bias=True, gather_output=True, init_method='xavier_normal_', name='colp'):
         super(ColumnParallelLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.device_group = device_group
+        self.dp = dp
         self.gather_output = gather_output
+        self.name = name
 
+        device_index = get_device_index(device_group)
         num_devices = device_group.num_devices
-        local_device = hetu.local_device()
-        if device_group.contains(local_device):
-            device_index = device_group.get_index(local_device)
-        else: # for pipeline parallel
-            assert local_device_index is not None, "local_device_index should be assigned when device_group doesn't contain local_device!"
-            device_index = local_device_index 
-        ds_dup = hetu.DistributedStates(num_devices, {-1: num_devices}, [-1])
-        ds_split0 = hetu.DistributedStates(num_devices, {0: num_devices}, [0])
-        self.ds_map = {'dup': ds_dup, 'split0': ds_split0}
-        # dup [4,8] -> [2,8] + [2,8]
-        # local init: if dup, extra comm
-        self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), [out_features, in_features], ds_split0, device_index, 
-                                              dtype=hetu.float32, requires_grad=True, device_group=device_group, name='w_colparallel')
+        
+        ds_dup_split0 = hetu.DistributedStates(num_devices, {-1: dp, 0: num_devices//dp}, [-1, 0]) # for weights
+        ds_split0_dup = hetu.DistributedStates(num_devices, {-1: num_devices//dp, 0: dp}, [0, -1]) # for data
+        self.ds_map = {'dup_split0': ds_dup_split0, 'split0_dup': ds_split0_dup}
+        self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
+                                              [out_features, in_features], 
+                                              ds_dup_split0, device_index, 
+                                              dtype=hetu.float32, requires_grad=True, 
+                                              device_group=device_group, name=f'{name}_weight')
         if bias:
-            self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], ds_split0, device_index,
-                                                dtype=hetu.float32, requires_grad=True, device_group=device_group, name='bias_colparallel')
+            self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], 
+                                                ds_dup_split0, device_index,
+                                                dtype=hetu.float32, requires_grad=True, 
+                                                device_group=device_group, name=f'{name}_bias')
         else:
             self.bias = None
       
-    def forward(self, input):
-        ds_input = input.distributed_states
-        if ds_input.check_equal(self.ds_map['dup']):
-            input_dup = input
+    def forward(self, input_p):
+        if input_p.distributed_states.check_equal(self.ds_map['split0_dup']):
+            tensor_split0_dup = input_p
         else:
-            input_dup = hetu.comm(input, self.ds_map['dup'], name='comm_for_gather_input_colparallel')
-        output_split1 = hetu.linear(input_dup, self.weight, self.bias, trans_b=True, name='linear_for_colparallel')
+            tensor_split0_dup = hetu.comm(input_p, self.ds_map['split0_dup'])
+            print(f'input_p.distributed_states={input_p.distributed_states}, split0_dup={self.ds_map["split0_dup"]}')
+            print('warning: need extra communication for adapt input tensor distributed_states into split0_dup!')
+        
+        tensor_split01 = hetu.linear(tensor_split0_dup, self.weight, self.bias, trans_b=True, device_group=self.device_group, name=self.name)
         if not self.gather_output:
-            output = output_split1
-            bias = self.bias
+            output = tensor_split01
+            # bias = self.bias # for fusion
         else:
-            output = hetu.comm(output_split1, self.ds_map['dup'], name='comm_for_gather_output_colparallel')
-            bias = hetu.comm(self.bias, self.ds_map['dup'], name='comm_for_gather_bias_colparallel')
+            output = hetu.comm(tensor_split01, self.ds_map['split0_dup'])
+            # bias = hetu.comm(self.bias, self.ds_map['split0_dup']) # for fusion
         return output
     
 # process: x->split1, w->split0 => y->partial => y->dup    
@@ -87,41 +143,47 @@ class RowParallelLinear(Module):
               | A_p |
                -   -
     """
-    def __init__(self, in_features, out_features, device_group, 
-                 local_device_index=None, bias=True, init_method='xavier_normal_'):
+    def __init__(self, in_features, out_features, device_group, dp=1,
+                 bias=True, init_method='xavier_normal_', name='rowp'):
         super(RowParallelLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.device_group = device_group
+        self.dp = dp
+        self.name = name
 
+        device_index = get_device_index(device_group)
         num_devices = device_group.num_devices
-        local_device = hetu.local_device()
-        if device_group.contains(local_device):
-            device_index = device_group.get_index(local_device)
-        else: # for pipeline parallel
-            assert local_device_index is not None, "local_device_index should be assigned when device_group doesn't contain local_device!"
-            device_index = local_device_index 
-        ds_dup = hetu.DistributedStates(num_devices, {-1: num_devices}, [-1])
-        ds_split1 = hetu.DistributedStates(num_devices, {1: num_devices}, [1])
-        self.ds_map = {'dup': ds_dup, 'split1': ds_split1}
-        self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), [out_features, in_features], ds_split1, device_index, 
-                                              dtype=hetu.float32, requires_grad=True, device_group=device_group, name='w_rowparallel')        
+
+        self.partial = num_devices // dp
+        ds_dup_split1 = hetu.DistributedStates(num_devices, {-1: dp, 1: num_devices//dp}, [-1, 1]) # for weight
+        ds_dup = hetu.DistributedStates(num_devices, {-1: num_devices}, [-1]) # for bias
+        ds_split01 = hetu.DistributedStates(num_devices, {0: dp, 1: num_devices//dp}, [0, 1]) # for data split in dimension 1
+        ds_split0_dup = hetu.DistributedStates(num_devices, {-1: num_devices//dp, 0: dp}, [0, -1]) # for data reduce partial to dup
+        self.ds_map = {'dup_split1': ds_dup_split1, 'dup': ds_dup, 'split01': ds_split01, 'split0_dup': ds_split0_dup}
+
+        self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
+                                              [out_features, in_features], 
+                                              ds_dup_split1, device_index, 
+                                              dtype=hetu.float32, requires_grad=True, 
+                                              device_group=device_group, name=f'{name}_weight')        
         if bias:
-            self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], ds_dup, device_index,
-                                                dtype=hetu.float32, requires_grad=True, device_group=device_group, name='bias_rowparallel')            
+            self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], 
+                                                ds_dup, device_index,
+                                                dtype=hetu.float32, requires_grad=True, 
+                                                device_group=device_group, name=f'{name}_bias')
         else:
             self.bias = None
 
-    def forward(self, input):
-        ds_input = input.distributed_states
-        if ds_input.check_equal(self.ds_map['split1']):
-            input_split1 = input
+    def forward(self, input_p):
+        if input_p.distributed_states.check_equal(self.ds_map['split01']):
+            tensor_split01 = input_p
         else:
-            input_split1 = hetu.comm(input, self.ds_map['split1'], name='comm_for_split_input_rowparallel')
+            tensor_split01 = hetu.comm(input_p, self.ds_map['split01'])
 
-        output_partial = hetu.linear(input_split1, self.weight, trans_b=True, name='linear_for_rowparallel')
-        output_dup = hetu.comm(output_partial, self.ds_map['dup'], name='comm_for_reduce_output_rowparallel')
-        # make allreduce for x*w^T first, then add bias, to ensure that bias will 
-        # be updated the same among devices, correspond to ds_dup for bias
-        output = output_dup + self.bias if self.bias is not None else output_dup
+        tensor_split0_partial = hetu.linear(tensor_split01, self.weight, trans_b=True, device_group=self.device_group, name=self.name)
+        tensor_split0_dup = hetu.comm(tensor_split0_partial, self.ds_map['split0_dup'])
+        output = tensor_split0_dup + self.bias if self.bias is not None else tensor_split0_dup
+        
+        output = tensor_split0_dup
         return output

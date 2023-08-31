@@ -106,6 +106,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
     for (const auto& y : ys) {
       // TODO: check whether requires grad
       filled_grads.emplace_back(MakeOnesLikeOp(y));
+      filled_grads.back()->set_is_grad(true);
     }
   } else {
     HT_VALUE_ERROR_IF(ys.size() != grad_ys.size())
@@ -117,6 +118,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       } else {
         filled_grads.push_back(grad_ys[i]);
       }
+      filled_grads.back()->set_is_grad(true);
     }
   }
 
@@ -142,7 +144,9 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       return filtered.front();
     } else {
       // Question: How to set op_meta properly?
-      return MakeSumOp(filtered);
+      auto grad_sum = MakeSumOp(filtered);
+      grad_sum->set_is_grad(true);
+      return grad_sum;
     }
   };
 
@@ -166,6 +170,8 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         if (!grad_inputs[i].is_defined())
           continue;
         
+        grad_inputs[i]->set_is_grad(true);
+        
         // states deduce
         const auto& grad_op = grad_inputs[i]->producer();
         const auto& ds_grad = grad_inputs[i]->get_distributed_states();
@@ -180,6 +186,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
             DistributedStates ds_dst({device_num, res_states, res_order});
             HT_LOG_DEBUG << local_device << ": " << "backward: partial to duplicate: " << grad_inputs[i] << ", dst states: " << ds_dst.ds_info();
             final_grad = MakeCommOp(grad_inputs[i], ds_dst, OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
+            final_grad->set_is_grad(true);
           }
         } 
 

@@ -1,0 +1,15 @@
+mpirun --allow-run-as-root -np 4 python train_hetu_gpt_parallel.py \
+--global_batch_size 8 \
+--num_micro_batches 1 \
+--dp 2 \
+--dataset wikicorpus_en \
+--vocab_size 30522 \
+--hidden_size 768 \
+--num_hidden_layers 2 \
+--num_attention_heads 12 \
+--seq_length 128 \
+--epochs 20 \
+--lr 1e-5 \
+--adam_weight_decay 0.01 \
+--hidden_act relu \
+--dropout_prob 0.1
