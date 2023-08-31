@@ -9,40 +9,60 @@ namespace impl {
 cublasHandle_t GetCublasHandle(int32_t device_id);
 
 template <typename T>
-inline void cublas_dot(cublasHandle_t cublas_handle, int n, const T* x,
-                       int incx, const T* y, int incy, T* result) {
+inline void cublas_dot(cublasHandle_t cublas_handle, int32_t n, const T* x,
+                       int32_t incx, const T* y, int32_t incy, T* result) {
   HT_NOT_IMPLEMENTED << "cublas_dot is not implemented for type "
                      << typeid(T).name();
 }
 
 template <>
-void cublas_dot<float>(cublasHandle_t cublas_handle, int n, const float* x,
-                       int incx, const float* y, int incy, float* result);
+void cublas_dot<float16>(cublasHandle_t cublas_handle, int32_t n, const float16* x,
+                         int32_t incx, const float16* y, int32_t incy, float16* result);
 
 template <>
-void cublas_dot<double>(cublasHandle_t cublas_handle, int n, const double* x,
-                       int incx, const double* y, int incy, double* result);
+void cublas_dot<bfloat16>(cublasHandle_t cublas_handle, int32_t n, const bfloat16* x,
+                          int32_t incx, const bfloat16* y, int32_t incy, bfloat16* result);
+
+template <>
+void cublas_dot<float>(cublasHandle_t cublas_handle, int32_t n, const float* x,
+                       int32_t incx, const float* y, int32_t incy, float* result);
+
+template <>
+void cublas_dot<double>(cublasHandle_t cublas_handle, int32_t n, const double* x,
+                       int32_t incx, const double* y, int32_t incy, double* result);
 
 template <typename T>
 inline void cublas_gemv(cublasHandle_t cublas_handle, cublasOperation_t trans,
-                        int32_t m, int32_t n, const T* alpha, const T* A,
-                        int32_t lda, const T* x, int32_t incx, const T* beta,
+                        int32_t m, int32_t n, const void* alpha, const T* A,
+                        int32_t lda, const T* x, int32_t incx, const void* beta,
                         T* y, int32_t incy) {
   HT_NOT_IMPLEMENTED << "cublas_gemv is not implemented for type "
                      << typeid(T).name();
 }
 
 template <>
+void cublas_gemv<float16>(cublasHandle_t cublas_handle, cublasOperation_t trans,
+                          int32_t m, int32_t n, const void* alpha, const float16* A,
+                          int32_t lda, const float16* x, int32_t incx,
+                          const void* beta, float16* y, int32_t incy);
+
+template <>
+void cublas_gemv<bfloat16>(cublasHandle_t cublas_handle, cublasOperation_t trans,
+                          int32_t m, int32_t n, const void* alpha, const bfloat16* A,
+                          int32_t lda, const bfloat16* x, int32_t incx,
+                          const void* beta, bfloat16* y, int32_t incy);
+
+template <>
 void cublas_gemv<float>(cublasHandle_t cublas_handle, cublasOperation_t trans,
-                        int32_t m, int32_t n, const float* alpha, const float* A,
+                        int32_t m, int32_t n, const void* alpha, const float* A,
                         int32_t lda, const float* x, int32_t incx,
-                        const float* beta, float* y, int32_t incy);
+                        const void* beta, float* y, int32_t incy);
 
 template <>
 void cublas_gemv<double>(cublasHandle_t cublas_handle, cublasOperation_t trans,
-                        int32_t m, int32_t n, const double* alpha, const double* A,
+                        int32_t m, int32_t n, const void* alpha, const double* A,
                         int32_t lda, const double* x, int32_t incx,
-                        const double* beta, double* y, int32_t incy);
+                        const void* beta, double* y, int32_t incy);
 
 
 template <typename T>

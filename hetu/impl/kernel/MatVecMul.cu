@@ -25,11 +25,21 @@ void MatVecMulCuda(const NDArray& a, bool trans, const NDArray& x,
 
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "MatVecMul", [&]() {
     spec_t alpha = 1, beta = 0;
-    cublas_gemv<spec_t>(cublas_handle, !trans ? CUBLAS_OP_T : CUBLAS_OP_N,
-                        m, n, &alpha,
-                        a->data_ptr<spec_t>(), m,
-                        x->data_ptr<spec_t>(), 1, &beta,
-                        output->data_ptr<spec_t>(), 1);
+    float alpha_f = 1, beta_f = 0;
+    if (output->dtype() == DataType::FLOAT16 || output->dtype() == DataType::BFLOAT16) {
+      cublas_gemv<spec_t>(cublas_handle, !trans ? CUBLAS_OP_T : CUBLAS_OP_N,
+                          m, n, static_cast<const void*>(&alpha_f),
+                          a->data_ptr<spec_t>(), m,
+                          x->data_ptr<spec_t>(), 1, static_cast<const void*>(&beta_f),
+                          output->data_ptr<spec_t>(), 1);
+    }
+    else {
+      cublas_gemv<spec_t>(cublas_handle, !trans ? CUBLAS_OP_T : CUBLAS_OP_N,
+                          m, n, static_cast<const void*>(&alpha),
+                          a->data_ptr<spec_t>(), m,
+                          x->data_ptr<spec_t>(), 1, static_cast<const void*>(&beta),
+                          output->data_ptr<spec_t>(), 1);
+    }
   });
     //   HT_LOG_INFO << "_____________up____________\n"
     // << a << "\n"

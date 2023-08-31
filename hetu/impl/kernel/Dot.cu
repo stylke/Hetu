@@ -19,9 +19,9 @@ void DotCuda(const NDArray& x, const NDArray& y, NDArray& output, const Stream& 
   cublasHandle_t cublas_handle = GetCublasHandle(output->device().index());
   hetu::cuda::CUDADeviceGuard guard(output->device().index());
 
-  int32_t n = x->shape(0);
-  int32_t incx = 1;
-  int32_t incy = 1;
+  int32_t n = x->numel();
+  int32_t incx = x->stride()[0];
+  int32_t incy = y->stride()[0];
 
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "Dot", [&]() {
     cublas_dot<spec_t>(cublas_handle, n, x->data_ptr<spec_t>(), incx,

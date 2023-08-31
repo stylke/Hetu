@@ -8,6 +8,8 @@ from test_utils import allclose
 import os
 import sys
 
+# Warning: Remember to set rtol = 1e-03, atol = 1e-03 in `test_utils.py`
+
 GRAD_TEST = True
 
 class TestArithmeticOps(unittest.TestCase):
@@ -65,11 +67,11 @@ class TestArithmeticOps(unittest.TestCase):
               torch_in = torch.tensor(y_np, requires_grad=True)
               torch_out = torch.add(torch_in, torch.from_numpy(x_np))
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(y_np, requires_grad=True)
               hetu_out = hetu.add(hetu_in, x)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -120,11 +122,11 @@ class TestArithmeticOps(unittest.TestCase):
               torch_in = torch.tensor(y_np, requires_grad=True)
               torch_out = torch.sub(torch_in, torch.from_numpy(x_np))
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(y_np, requires_grad=True)
               hetu_out = hetu.sub(hetu_in, x)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -177,11 +179,11 @@ class TestArithmeticOps(unittest.TestCase):
               torch_in = torch.tensor(y_np, requires_grad=True)
               torch_out = torch.mul(torch_in, torch.from_numpy(x_np))
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(y_np, requires_grad=True)
               hetu_out = hetu.mul(hetu_in, x)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -232,11 +234,11 @@ class TestArithmeticOps(unittest.TestCase):
               torch_in = torch.tensor(y_np, requires_grad=True)
               torch_out = torch.div(torch_in, torch.from_numpy(x_np))
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(y_np, requires_grad=True)
               hetu_out = hetu.div(hetu_in, x)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -245,11 +247,11 @@ class TestArithmeticOps(unittest.TestCase):
               torch_in = torch.tensor(y_np, requires_grad=True)
               torch_out = torch.div(torch.from_numpy(x_np), torch_in)
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(y_np, requires_grad=True)
               hetu_out = hetu.div(x, hetu_in)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -293,8 +295,60 @@ class TestArithmeticOps(unittest.TestCase):
 class TestMatMulOps(unittest.TestCase):
 
     _test_shapes = [
+        # 1D x 1D
+        ((64,), (64,)),
+        ((128,), (128,)),
+        ((256,), (256,)),
+        ((512,), (512,)),
+        ((1024,), (1024,)),
+        # 2D x 1D
+        ((64, 128), (128,)),
+        ((64, 256), (256,)),
+        ((64, 512), (512,)),
+        ((256, 512), (512,)),
+        ((1024, 256), (256,)),
+        # 1D x 2D
+        ((128,), (128, 64)),
+        ((256,), (256, 64)),
+        ((512,), (512, 64)),
+        ((512,), (512, 1024)),
+        ((256,), (256, 1024)),
+        # 2D x 2D
+        ((64, 128), (128, 512)),
         ((64, 256), (256, 128)),
-        # ((8, 64, 256), (256, 128))
+        ((64, 256), (256, 1024)),
+        ((128, 256), (256, 256)),
+        ((1024, 256), (256, 512)),
+        # ND x 1D
+        ((8, 64, 128), (128,)),
+        ((8, 64, 256), (256,)),
+        ((8, 64, 512), (512,)),
+        ((8, 256, 128), (128,)),
+        ((8, 256, 512), (512,)),
+        # 1D x ND
+        ((128,), (8, 128, 64)),
+        ((256,), (8, 256, 64)),
+        ((512,), (8, 512, 64)),
+        ((128,), (8, 128, 256)),
+        ((1024,), (4, 1024, 32)),
+        # ND x 2D
+        ((2, 64, 128), (128, 512)),
+        ((2, 64, 256), (256, 512)),
+        ((8, 64, 256), (256, 128)),
+        ((8, 64, 128), (128, 128)),
+        ((8, 64, 256), (256, 256)),
+        # 2D x ND
+        ((512, 128), (2, 128, 64)),
+        ((512, 256), (2, 256, 64)),
+        ((128, 256), (8, 256, 64)),
+        ((128, 128), (8, 128, 64)),
+        ((256, 256), (16, 256, 64)),
+        # ND x ND
+        ((8, 64, 256), (8, 256, 8)),
+        ((8, 64, 256), (8, 8, 256, 64)),
+        ((8, 16, 8, 64), (8, 16, 64, 256)),
+        ((8, 1, 64, 256), (8, 1, 256, 16)),
+        ((8, 1, 256, 512), (8, 1, 512, 1024)),
     ]
     
     def test_matmul_op(self):
@@ -308,18 +362,18 @@ class TestMatMulOps(unittest.TestCase):
             self.assertTrue(allclose(x.matmul(y), gt))
 
             if GRAD_TEST:
-              torch_in = torch.tensor(x_np, requires_grad=True)
-              torch_out = torch.matmul(torch_in, torch.from_numpy(y_np))
+              torch_in = torch.tensor(x_np, requires_grad=True, device="cuda:0")
+              torch_out = torch.matmul(torch_in, torch.from_numpy(y_np).to("cuda:0"))
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.matmul(hetu_in, y)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
-              self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+              self.assertTrue(allclose(hetu_in, torch_in.to(torch.float32).cpu().detach().numpy()))
     
     # def test_linear_op(self):
     #     for shape_x, shape_y in TestMatMulOps._test_shapes:
@@ -354,25 +408,26 @@ class TestBatchMatMulOps(unittest.TestCase):
         for shape_x, shape_y in TestBatchMatMulOps._test_shapes:
             x_np = np.random.randn(*shape_x).astype(np.float16)
             y_np = np.random.randn(*shape_y).astype(np.float16)
-            gt = torch.bmm(torch.from_numpy(x_np), torch.from_numpy(y_np)).numpy()
+            gt = torch.bmm(torch.from_numpy(x_np).to("cuda:0"), 
+                           torch.from_numpy(y_np).to("cuda:0")).cpu().numpy()
             x = hetu.from_numpy(x_np)
             y = hetu.from_numpy(y_np)
             self.assertTrue(allclose(hetu.bmm(x, y), gt))
             self.assertTrue(allclose(x.bmm(y), gt))
 
             if GRAD_TEST:
-              torch_in = torch.tensor(x_np, requires_grad=True)
-              torch_out = torch.bmm(torch_in, torch.from_numpy(y_np))
+              torch_in = torch.tensor(x_np, requires_grad=True, device="cuda:0")
+              torch_out = torch.bmm(torch_in, torch.from_numpy(y_np).to("cuda:0"))
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.bmm(hetu_in, y)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
-              self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+              self.assertTrue(allclose(hetu_in, torch_in.cpu().detach().numpy()))
 
 # class TestMatDotOps(unittest.TestCase):
 
@@ -420,11 +475,11 @@ class TestActivationOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.sigmoid(torch_in.cuda())
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.sigmoid(hetu_in)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -442,11 +497,11 @@ class TestActivationOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.sin(torch_in.cuda())
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.sin(hetu_in)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -489,11 +544,11 @@ class TestActivationOps(unittest.TestCase):
                     torch_in = torch.tensor(x_np, requires_grad=True)
                     torch_out = torch.nn.functional.leaky_relu(torch_in.cuda(), alpha)
                     torch_loss = torch_out.sum()
-                    torch_optimizer = optim.SGD([torch_in], lr = 1)
+                    torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                     hetu_in = hetu.Tensor(x_np, requires_grad=True)
                     hetu_out = hetu.leakyrelu(hetu_in, alpha)
                     hetu_loss = hetu_out.sum()
-                    hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                    hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                     torch_loss.backward()
                     torch_optimizer.step()
                     hetu_optimizer.minimize(hetu_loss)
@@ -511,11 +566,11 @@ class TestActivationOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.tanh(torch_in.cuda())
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.tanh(hetu_in)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -533,11 +588,11 @@ class TestActivationOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.triu(torch_in, 0)
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.triu(hetu_in, False, 0)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -555,11 +610,11 @@ class TestActivationOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.tril(torch_in, 0)
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.triu(hetu_in, True, 0)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -580,11 +635,11 @@ class TestActivationOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.softmax(torch_in.cuda(), 0)
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.softmax(hetu_in, 0)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -623,11 +678,11 @@ class TestTransformOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.reshape(torch_in, tuple(shape_to)).contiguous()
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.reshape(hetu_in, shape_to)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -647,11 +702,11 @@ class TestTransformOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.broadcast_to(torch_in, tuple(shape_to))
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.broadcast(hetu_in, shape_to, [])
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -684,11 +739,11 @@ class TestTransformOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.nn.functional.pad(torch_in, (0,0,0,0,1,1,2,2), "constant", 0.1)
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.pad(hetu_in, [1,1,2,2], "constant", 0.1)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -725,11 +780,11 @@ class TestTransformOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch.transpose(torch_in, 1, 0)
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.transpose(hetu_in, [1, 0])
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -749,11 +804,11 @@ class TestTransformOps(unittest.TestCase):
               torch_in = torch.tensor(x_np, requires_grad=True)
               torch_out = torch_in.permute(perm).contiguous()
               torch_loss = torch_out.sum()
-              torch_optimizer = optim.SGD([torch_in], lr = 1)
+              torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(x_np, requires_grad=True)
               hetu_out = hetu.transpose(hetu_in, perm)
               hetu_loss = hetu_out.sum()
-              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+              hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
@@ -793,11 +848,11 @@ class TestConv2dOps(unittest.TestCase):
                     torch_in = torch.tensor(x_np, requires_grad=True)
                     torch_out = torch.conv2d(torch_in.cuda(), torch.from_numpy(f_np).cuda(), stride = 1, padding = 0)
                     torch_loss = torch_out.sum()
-                    torch_optimizer = optim.SGD([torch_in], lr = 1)
+                    torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                     hetu_in = hetu.Tensor(x_np, requires_grad=True)
                     hetu_out = hetu.conv2d(hetu_in, f, bias, 0, 1)
                     hetu_loss = hetu_out.sum()
-                    hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                    hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                     torch_loss.backward()
                     torch_optimizer.step()
                     hetu_optimizer.minimize(hetu_loss)
@@ -826,11 +881,11 @@ class TestPoolOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = maxpool2d(torch_in.cuda())
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.maxpool(hetu_in, 2, 2, 0, 1)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -849,11 +904,11 @@ class TestPoolOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = avgpool2d(torch_in.cuda())
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.avgpool(hetu_in, 2, 2, 0, 1)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -893,11 +948,11 @@ class TestNormOps(unittest.TestCase):
                 torch_out = torch.batch_norm(torch_in.cuda(), weight = torch.from_numpy(scale_np).cuda(), bias = torch.from_numpy(bias_np).cuda(),
                             running_mean=None, running_var=None, training=True, momentum=0.1, eps=1e-5, cudnn_enabled=True)
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.batch_norm(hetu_in, scale, bias, running_mean, running_var, 0.1 ,1e-5)[0]
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -925,11 +980,11 @@ class TestNormOps(unittest.TestCase):
                     torch_out = torch.layer_norm(torch_in.cuda(), normalized_shape=tuple(norm_shape), weight = torch.from_numpy(scale_np).cuda(), 
                                                  bias = torch.from_numpy(bias_np).cuda(), eps=1e-5)
                     torch_loss = torch_out.sum()
-                    torch_optimizer = optim.SGD([torch_in], lr = 1)
+                    torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                     hetu_in = hetu.Tensor(x_np, requires_grad=True)
                     hetu_out = hetu.layer_norm(hetu_in, scale, bias, list(norm_shape), 1e-5)[0]
                     hetu_loss = hetu_out.sum()
-                    hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                    hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                     torch_loss.backward()
                     torch_optimizer.step()
                     hetu_optimizer.minimize(hetu_loss)
@@ -957,11 +1012,11 @@ class TestNormOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = instancenorm(torch_in.cuda())
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.instance_norm(hetu_in, 1e-5)[0]
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1070,11 +1125,11 @@ class TestLossOps(unittest.TestCase):
                 torch_in = torch.tensor(probs_np, requires_grad=True)
                 torch_out = bce(torch_in.cuda(), torch.from_numpy(labels_np).cuda())
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(probs_np, requires_grad=True)
                 hetu_out = hetu.binary_cross_entropy(hetu_in, labels)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1100,11 +1155,11 @@ class TestLossOps(unittest.TestCase):
                 torch_in = torch.tensor(probs_np, requires_grad=True)
                 torch_out = torch.nn.functional.nll_loss(torch_in.cuda(), torch.from_numpy(labels_np).cuda())
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(probs_np, requires_grad=True)
                 hetu_out = hetu.nll_loss(hetu_in, labels)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1129,11 +1184,11 @@ class TestLossOps(unittest.TestCase):
                 torch_in = torch.tensor(probs_np, requires_grad=True)
                 torch_out = torch.nn.functional.kl_div(torch_in.cuda(), torch.from_numpy(labels_np).cuda())
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(probs_np, requires_grad=True)
                 hetu_out = hetu.kl_div(hetu_in, labels)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1159,11 +1214,11 @@ class TestLossOps(unittest.TestCase):
                 torch_in = torch.tensor(probs_np, requires_grad=True)
                 torch_out = torch.nn.functional.mse_loss(torch_in.cuda(), torch.from_numpy(labels_np).cuda())
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(probs_np, requires_grad=True)
                 hetu_out = hetu.mse_loss(hetu_in, labels)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1188,11 +1243,11 @@ class TestLossOps(unittest.TestCase):
                 torch_in = torch.tensor(probs_np, requires_grad=True)
                 torch_out = torch.nn.functional.cross_entropy(torch_in.cuda(), torch.from_numpy(labels_np).cuda())
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(probs_np, requires_grad=True)
                 hetu_out = hetu.softmax_cross_entropy(hetu_in, labels)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1218,11 +1273,11 @@ class TestLossOps(unittest.TestCase):
                 torch_in = torch.tensor(probs_np, requires_grad=True)
                 torch_out = torch.nn.functional.cross_entropy(torch_in.cuda(), torch.from_numpy(labels_np).cuda())
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(probs_np, requires_grad=True)
                 hetu_out = hetu.softmax_cross_entropy_sparse(hetu_in, labels)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1308,14 +1363,14 @@ class TestLossOps(unittest.TestCase):
 #                     inputs_hetu.append(hetu.Tensor(input_np, requires_grad=True))
 #                 torch_out = torch.einsum(equation, *inputs_tensor)
 #                 torch_loss = torch_out.sum()
-#                 torch_optimizer = optim.SGD(inputs_tensor, lr = 1)
+#                 torch_optimizer = optim.SGD(inputs_tensor, lr = 0.5)
 #                 torch_loss.backward()
 #                 torch_optimizer.step()
 
 
 #                 hetu_out = hetu.einsum(equation, inputs_hetu)
 #                 hetu_loss = hetu_out.sum()
-#                 hetu_optimizer = hetu.SGDOptimizer(inputs_hetu, lr = 1)
+#                 hetu_optimizer = hetu.SGDOptimizer(inputs_hetu, lr = 0.5)
 #                 hetu_optimizer.minimize(hetu_loss)
 #                 for i in range(len(inputs_tensor)):
 #                     self.assertTrue(allclose(inputs_hetu[i], inputs_tensor[i].detach().numpy()))
@@ -1388,11 +1443,11 @@ class TestOtherOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = torch.as_strided(torch_in, shape_y, stride)
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.as_strided(hetu_in, list(shape_y), list(stride))
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1414,11 +1469,11 @@ class TestOtherOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = torch.gather(torch_in, dim, torch.from_numpy(id_np))
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.gather(hetu_in, dim, id)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1429,24 +1484,24 @@ class TestOtherOps(unittest.TestCase):
         print(sys._getframe().f_code.co_name)
         for shape_x, shape_o in TestOtherOps._interpolate_test_shapes:
             x_np = np.random.randn(*shape_x).astype(np.float16)
-            gt = torch.nn.functional.interpolate(torch.from_numpy(x_np), shape_o, mode='bicubic').numpy()
+            gt = torch.nn.functional.interpolate(torch.from_numpy(x_np).to("cuda:0"), shape_o, mode='bicubic').cpu().numpy()
             x = hetu.from_numpy(x_np)
             self.assertTrue(allclose(hetu.interpolate(x, list(shape_o)), gt))
             self.assertTrue(allclose(x.interpolate(list(shape_o)), gt))
 
             if GRAD_TEST:
-                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_in = torch.tensor(x_np, requires_grad=True, device="cuda:0")
                 torch_out = torch.nn.functional.interpolate(torch_in, shape_o, mode='bicubic')
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.interpolate(hetu_in, list(shape_o))
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
-                self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+                self.assertTrue(allclose(hetu_in, torch_in.cpu().detach().numpy()))
         print(sys._getframe().f_code.co_name)
     
     def test_maskedfillop(self):
@@ -1466,11 +1521,11 @@ class TestOtherOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = torch.masked_fill(torch_in, torch.from_numpy(mask_np), val)
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.masked_fill(hetu_in, mask)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1490,11 +1545,11 @@ class TestOtherOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = torch.norm(torch_in, p=p0, dim=dim0)
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.norm(hetu_in, p0, dim0)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1514,11 +1569,11 @@ class TestOtherOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = torch_in.repeat(*repeats)
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.repeat(hetu_in, list(repeats))
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1539,11 +1594,11 @@ class TestOtherOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = torch.roll(torch_in, shifts, dims)
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.roll(hetu_in, list(shifts), list(dims))
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
@@ -1565,11 +1620,11 @@ class TestOtherOps(unittest.TestCase):
                 torch_in = torch.tensor(x_np, requires_grad=True)
                 torch_out = torch.embedding(torch_in, torch.from_numpy(id_np))
                 torch_loss = torch_out.sum()
-                torch_optimizer = optim.SGD([torch_in], lr = 1)
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
                 hetu_in = hetu.Tensor(x_np, requires_grad=True)
                 hetu_out = hetu.embedding_lookup(hetu_in, id)
                 hetu_loss = hetu_out.sum()
-                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 1)
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
                 torch_loss.backward()
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)

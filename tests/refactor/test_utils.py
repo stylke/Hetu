@@ -1,7 +1,7 @@
 import hetu
 import numpy as np
 
-def allclose(a, b, rtol=1e-01, atol=2e-01, equal_nan=False):
+def allclose(a, b, rtol=1e-05, atol=3e-05, equal_nan=False):
     if isinstance(a, hetu.Tensor) or isinstance(a, hetu.NDArray):
         a = a.numpy(force=True)
     if isinstance(b, hetu.Tensor) or isinstance(b, hetu.NDArray):

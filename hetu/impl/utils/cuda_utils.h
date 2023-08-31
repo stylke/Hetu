@@ -3,6 +3,7 @@
 
 #include "hetu/common/macros.h"
 #include "hetu/core/device.h"
+#include <cuda.h>
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <curand_kernel.h>
