@@ -236,7 +236,8 @@ class GPTModel(ht.nn.Module):
         self.dtype = ht.float32
 
         self.embed_dim = config.hidden_size
-        self.wte = ht.nn.ParallelEmbedding(config.vocab_size, self.embed_dim, device_group)
+        # self.wte = ht.nn.ParallelEmbedding(config.vocab_size, self.embed_dim, device_group)
+        self.wte = ht.nn.VocabParallelEmbedding(config.vocab_size, self.embed_dim, device_group, dp=config.dp)
         self.wpe = ht.nn.ParallelEmbedding(config.max_position_embeddings, self.embed_dim, device_group)
 
         self.drop = ht.nn.Dropout(config.embd_pdrop)

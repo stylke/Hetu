@@ -1,4 +1,4 @@
-mpirun --allow-run-as-root -np 4 python train_hetu_gpt_parallel.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 mpirun --allow-run-as-root -np 4 python train_hetu_gpt_parallel.py \
 --global_batch_size 8 \
 --num_micro_batches 1 \
 --dp 2 \

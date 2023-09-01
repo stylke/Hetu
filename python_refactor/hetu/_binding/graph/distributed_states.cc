@@ -122,6 +122,19 @@ PyObject* PyDistributedStates_map_to_local_data(PyDistributedStates* self, PyObj
   HT_PY_FUNC_END
 }
 
+PyObject* PyDistributedStates_get_dup_group_index(PyDistributedStates* self, PyObject* args) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({"get_dup_group_index(int device_index)"});
+  auto parsed_args = parser.parse(args, nullptr);
+  if (parsed_args.signature_index() == 0) {
+    return PyLong_FromInteger(self->distributed_states.get_dup_group_index(parsed_args.get_int64(0)));
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }  
+  HT_PY_FUNC_END
+}
+
 // NOLINTNEXTLINE
 PyGetSetDef PyDistributedStates_properties[] = {
   {PY_GET_SET_DEF_NAME("states"), (getter) PyDistributedStates_states, nullptr, nullptr, nullptr},
@@ -134,6 +147,7 @@ PyGetSetDef PyDistributedStates_properties[] = {
 PyMethodDef PyDistributedStates_methods[] = {
   {"check_equal", (PyCFunction) PyDistributedStates_check_equal, METH_VARARGS, nullptr },
   {"get_dim", (PyCFunction) PyDistributedStates_get_dim, METH_VARARGS, nullptr },
+  {"get_dup_group_index", (PyCFunction) PyDistributedStates_get_dim, METH_VARARGS, nullptr },
   {nullptr}
 };
 

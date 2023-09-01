@@ -72,7 +72,11 @@ class DistributedStates {
   }
 
   std::unordered_map<int32_t, int32_t> combine_states(const std::pair<std::vector<int32_t>, int32_t>& src2dst) const;
+  static std::unordered_map<int32_t, int32_t> combine_states(const std::pair<std::vector<int32_t>, int32_t>& src2dst, 
+                                                             const std::unordered_map<int32_t, int32_t>& ori_states);
   std::vector<int32_t> combine_order(const std::pair<std::vector<int32_t>, int32_t>& src2dst) const;
+  static std::vector<int32_t> combine_order(const std::pair<std::vector<int32_t>, int32_t>& src2dst, 
+                                            const std::vector<int32_t>& ori_order);
   bool equal_states_and_order(const std::unordered_map<int32_t, int32_t>& states1, const std::vector<int32_t>& order1,
                               const std::unordered_map<int32_t, int32_t>& states2, const std::vector<int32_t>& order2) const;
   bool check_equal(const DistributedStates& dst_distributed_states) const;
@@ -93,6 +97,7 @@ class DistributedStates {
   int32_t get_dim(int32_t index) const;
   std::vector<int32_t> get_loop_sizes() const;
   std::unordered_map<int32_t, int32_t> map_device_to_state_index(int32_t device_index) const;
+  int32_t get_dup_group_index(int32_t device_index) const;
   std::string ds_info() const;
 
  protected:

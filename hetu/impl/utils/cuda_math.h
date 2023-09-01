@@ -6,6 +6,12 @@ namespace hetu {
 namespace cuda {
 
 template <typename T>
+__forceinline__ __device__ T cuda_max(T x, T y) {
+  // HT_NOT_IMPLEMENTED << "cuda_log is not implemented for type ";
+  return x;
+}
+
+template <typename T>
 __forceinline__ __device__ T cuda_log(T x) {
   HT_NOT_IMPLEMENTED << "cuda_log is not implemented for type "
                      << typeid(T).name();
@@ -180,6 +186,42 @@ __forceinline__ __device__ void BlockReduceSum(spec_t& val, spec_t* shared) {
 
   if (wid == 0)
     val = WarpReduceSum(val);
+}
+
+template <typename spec_t>
+__forceinline__ __device__ void WarpReduceArgmax(spec_t& val) {
+  spec_t tmp_val;
+  unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
+  for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
+    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    if (tmp_val > val) {
+      val = tmp_val;
+    }
+  }
+}
+
+template <typename spec_t>
+__forceinline__ __device__ void BlockReduceArgmax(spec_t& val,
+                                                  spec_t* shared_value,
+                                                  spec_t* wrap_max) {
+  int tid = threadIdx.x % warpSize;
+  int wid = threadIdx.x / warpSize;
+
+  WarpReduceArgmax(val);
+
+  __syncthreads();
+  if (tid == 0) {
+    shared_value[wid] = val;
+  }
+
+  __syncthreads();
+  val = (threadIdx.x < blockDim.x / warpSize) ? shared_value[tid] : -SIZE_MAX;
+
+  if (wid == 0)
+    WarpReduceArgmax(val);
+    if (threadIdx.x == 0)
+      wrap_max[0] = val;
+  __syncthreads();
 }
 
 } // namespace cuda

@@ -447,7 +447,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             OpMeta().set_is_deduce_states(false).set_name("BatchedISendIRecvOp_for_" + comm_op->name()));
           auto& batched_isend_irecv_op = batched_isend_irecv_output->producer();
           batched_isend_irecv_op->MapToParallelDevices(src_group);
-          batched_isend_irecv_op->Instantiate(local_device, kCollectiveStream);
+          batched_isend_irecv_op->Instantiate(local_device, kP2PStream);
           TensorList recv_datas_local = batched_isend_irecv_op->outputs();
 
           HT_LOG_DEBUG << local_device << ": cross receive begin!";
@@ -938,6 +938,16 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   local_topo.insert(local_topo.end(), local_bw_topo.begin(), local_bw_topo.end());
   HT_LOG_DEBUG << local_device << ": local fw topo: " << local_fw_topo << "\nlocal bw topo: " << local_bw_topo;
 
+  // // calculate params
+  // int64_t params_size = 0;
+  // for (auto& op : local_topo) {
+  //   if (is_variable_op(op)) {
+  //     params_size += op.get()->output(0)->numel();
+  //     HT_LOG_INFO << local_device << ": variable op " << op << ", shape = " << op.get()->output(0)->shape();
+  //   }
+  // }
+  // HT_LOG_INFO << local_device << ": params_size = " << params_size;
+
   HT_LOG_DEBUG << local_device << ": 1. pipeline init[begin]";
   // pipeline compute
   // runtimectx for m micro batches
@@ -1113,6 +1123,72 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   }
   // HT_LOG_DEBUG << local_device << ": sync ops = " << sync_ops;
   HT_LOG_DEBUG << local_device << ": 3. get results[end]";
+
+  // get op execute time, sort and analysis
+  if (local_device.index() == 0) {
+    std::vector<std::pair<OpId, int64_t>> op_execute_time;
+    // HT_LOG_INFO << local_device << ": local_topo = " << local_topo;
+    for (auto& op_ref : local_topo) {
+      auto& op = op_ref.get();
+      if (is_placeholder_op(op) || is_variable_op(op)) {
+        continue;
+      }
+      op_execute_time.push_back({op->id(), op->TimeCost()});
+    }
+    std::sort(op_execute_time.begin(), op_execute_time.end(), [](
+      std::pair<OpId, int64_t>& op_t1, std::pair<OpId, int64_t>& op_t2) {
+        return op_t1.second > op_t2.second;
+      });
+    double compute_time = 0;
+    double p2p_time = 0;
+    double collective_time = 0;
+    double blocking_time = 0;
+    double other_time = 0;
+    std::ostringstream out;
+    out << "Op Execute Time: ";
+    for (auto& op_time : op_execute_time) {
+      auto op = _op_indexing[op_time.first];
+      if (is_all_reduce_op(op)) {
+        auto allreduce_op = op;
+        auto& allreduce_impl = reinterpret_cast<AllReduceOpImpl&>(allreduce_op->body());
+        out << std::endl << local_device << ": " 
+            << allreduce_op->input(0) << ", shape = "
+            << allreduce_op->input(0)->shape() << ", type = "
+            << allreduce_op->input(0)->dtype() << ", comm group = [";
+        auto comm_group = allreduce_impl.comm_group();
+        for (auto device : comm_group.devices()) {
+          out << comm_group.get_index(device) << ", ";
+        }
+        out << "]";
+      } else {
+        if (op->num_inputs() > 0)
+        out << std::endl << local_device << ": " 
+            << op->input(0) << ", shape = "
+            << op->input(0)->shape() << ", type = "
+            << op->input(0)->dtype();        
+      }
+      out << std::endl << local_device << ": " << op << ": " << op_time.second * 1.0 / 1e6 << " ms";
+
+      if (op->stream_index() == kComputingStream) {
+        compute_time += op_time.second * 1.0 / 1e6;
+      } else if (op->stream_index() == kP2PStream) {
+        p2p_time += op_time.second * 1.0 / 1e6;
+      } else if (op->stream_index() == kCollectiveStream) {
+        collective_time += op_time.second * 1.0 / 1e6;
+      } else if (op->stream_index() == kBlockingStream) {
+        blocking_time += op_time.second * 1.0 / 1e6;
+      } else {
+        other_time += op_time.second * 1.0 / 1e6;
+      }
+    }
+    HT_LOG_INFO << local_device << ": " 
+                << "compute time: " << compute_time << " ms, "
+                << "p2p time: " << p2p_time << " ms, "
+                << "collective time: " << collective_time << " ms, "
+                << "blocking time: " << blocking_time << " ms, "
+                << "other time: " << other_time << " ms" << std::endl
+                << out.str();
+  }
   return results;
 }
 

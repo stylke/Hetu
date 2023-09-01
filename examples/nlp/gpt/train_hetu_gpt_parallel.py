@@ -51,7 +51,7 @@ def pretrain(args):
     # file_dir = '../bert/data/hdf5_lower_case_1_seq_len_128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/%s/'%dataset
     file_dir = './data/'    
     file_name_format = dataset + '_training_%d.hdf5'
-    train_file_num = 16
+    train_file_num = 1
     train_files = [file_dir + file_name_format%file_id for file_id in range(train_file_num)]
 
     # Hetu model definition
@@ -106,8 +106,8 @@ def pretrain(args):
                     # loss_position_sum: np.array([np.where(batch_data['masked_lm_labels'].reshape(-1, 1)!=-1)[0].shape[0]]).astype(np.float32), # shape=[1,]
                 }
                 results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict)
-                loss_out = results[0].numpy(force=True)
                 end_time = time.time()
+                loss_out = results[0].numpy(force=True)                
                 print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.3f'%(local_device, ep, step_num, loss_out, end_time-start_time))
                 step_num += 1
                 global_step_num += 1

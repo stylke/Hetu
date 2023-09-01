@@ -48,9 +48,13 @@ PyTypeObject PyCommGroup_Type_obj = {
 };
 PyTypeObject* PyCommGroup_Type = &PyCommGroup_Type_obj;
 
+// TODO: update init params
 PyObject* CommGroup_Init(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
-  return PyDevice_New(hetu::impl::comm::SetUpDeviceMappingAndAssignLocalDeviceOnce());
+  static PyArgParser parser({"init_comm_group(int device_num=8)"});
+  auto parsed_args = parser.parse(args, nullptr);
+  int device_num = parsed_args.get_int64_or_default(0);
+  return PyDevice_New(hetu::impl::comm::SetUpDeviceMappingAndAssignLocalDeviceOnce({{kCUDA, device_num}}));
   HT_PY_FUNC_END
 }
 

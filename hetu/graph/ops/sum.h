@@ -25,6 +25,25 @@ class SumOpImpl final : public OpInterface {
     return {output_meta};
   }
 
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                        const OpMeta& op_meta) const override {
+    // TODO: care about broadcase case
+    // allow partial sum
+    DistributedStates default_ds;
+    for (auto& input : inputs) {
+      const auto& input_ds = input->get_distributed_states(); 
+      HT_ASSERT(input_ds.is_valid()) << op_meta.name << ": input states must be valid!";    
+      if (!default_ds.is_valid()) {
+        default_ds.set_distributed_states(input_ds);
+      } else {
+        HT_ASSERT(default_ds.check_equal(input_ds))
+          << op_meta.name << ": in SumOp DoDeduceStates: distributed states of all input tensor must be same!"
+          << ", " << default_ds.ds_info() << " vs " << input_ds.ds_info();
+      }
+    }
+    outputs.at(0)->set_distributed_states(default_ds);
+  }
+
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override {
     TensorList grad_inputs;

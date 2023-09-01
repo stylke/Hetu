@@ -39,9 +39,24 @@ void EmbeddingLookupOpImpl::DoDeduceStates(const TensorList& inputs, TensorList&
     << "EmbeddingLookupOpDef: distributed states for input and id must be valid!";
   HT_ASSERT(ds_input.get_dim(-2) == 1 && ds_id.get_dim(-2) == 1) 
     << "Tensor input and id shouldn't be partial";
-  HT_ASSERT(ds_input.check_pure_duplicate())
-    << "Tensor input(embedding table) cannot be splited!";
-  outputs.at(0)->set_distributed_states(ds_id);
+  HT_ASSERT(ds_input.get_dim(1) == 1)
+    << "Tensor input(embedding table) should not be splited in dimension 1!";
+  DistributedStates ds_output(ds_id);
+  // embedding table is pure duplicate
+  if (ds_input.get_dim(0) == 1) {
+    ; // ds_output = ds_id
+  }
+  else if (ds_input.get_dim(0) > 1) {
+    HT_ASSERT(ds_input.get_dim(0) == ds_id.get_dim(-1)
+              && ds_input.get_dim(-1) == ds_id.get_dim(0))
+      << "Embedding: now only support id split in dimension 0 & table split in dimension 0";
+    std::pair<std::vector<int32_t>, int32_t> src2dst({{-1}, -2});
+    auto res_states = ds_output.combine_states(src2dst);
+    auto res_order = ds_output.combine_order(src2dst);
+    auto device_num = ds_output.get_device_num();
+    ds_output.set_distributed_states({device_num, res_states, res_order});
+  }
+  outputs.at(0)->set_distributed_states(ds_output);
 }
 
 void EmbeddingLookupGradientOpImpl::DoCompute(Operator& op,
@@ -64,16 +79,26 @@ void EmbeddingLookupGradientOpImpl::DoDeduceStates(const TensorList& inputs, Ten
                                                    const OpMeta& op_meta) const {
   const DistributedStates& ds_grad_output = inputs.at(0)->get_distributed_states();
   const DistributedStates& ds_id = inputs.at(1)->get_distributed_states();
-  const DistributedStates& ds_ori_output = inputs.at(1)->get_distributed_states();
-  int32_t device_num = ds_grad_output.get_device_num();
-  HT_ASSERT(ds_grad_output.is_valid() && ds_id.is_valid() && ds_ori_output.is_valid()) 
-    << "EmbeddingLookupGradientOpDef: distributed states for grad_output and id and ori_output must be valid!";
-  HT_ASSERT(ds_grad_output.get_dim(-2) == 1 && ds_id.get_dim(-2) == 1 && ds_ori_output.get_dim(-2) == 1) 
-    << "Tensor grad_output and id and ori_output shouldn't be partial";
-  HT_ASSERT(ds_grad_output.check_equal(ds_id) && ds_id.check_equal(ds_ori_output))
-    << "Distributed states for tensor grad_output and id and ori_output must be equal!";
-  
-  outputs.at(0)->set_distributed_states({device_num, {{-2, device_num}, {-1, 1}}, {-2}}); // pure partial
+  const DistributedStates& ds_tb = inputs.at(3)->get_distributed_states();
+
+  DistributedStates ds_tb_grad(ds_grad_output);
+  if (ds_tb.check_pure_duplicate()) {
+    std::pair<std::vector<int32_t>, int32_t> src2dst({{0}, -2});
+    auto res_states = ds_tb_grad.combine_states(src2dst);
+    auto res_order = ds_tb_grad.combine_order(src2dst);
+    auto device_num = ds_tb_grad.get_device_num();
+    ds_tb_grad.set_distributed_states({device_num, res_states, res_order});    
+  } else {
+    std::pair<std::vector<int32_t>, int32_t> src2dst1({{0}, -2});
+    std::pair<std::vector<int32_t>, int32_t> src2dst2({{-1}, 0});
+    auto res_states = DistributedStates::combine_states(src2dst1, ds_tb_grad.get_states());
+    res_states = DistributedStates::combine_states(src2dst2, res_states);
+    auto res_order = DistributedStates::combine_order(src2dst1, ds_tb_grad.get_order());
+    res_order = DistributedStates::combine_order(src2dst2, res_order);
+    auto device_num = ds_tb_grad.get_device_num();
+    ds_tb_grad.set_distributed_states({device_num, res_states, res_order});
+  }
+  outputs.at(0)->set_distributed_states(ds_tb_grad);
 }
 
 Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, OpMeta op_meta) {

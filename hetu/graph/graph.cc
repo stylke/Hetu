@@ -144,7 +144,36 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       return filtered.front();
     } else {
       // Question: How to set op_meta properly?
-      auto grad_sum = MakeSumOp(filtered);
+      // if grad in filtered are all allreduce
+      bool is_all_allreduce = true;
+      for (const auto& grad : filtered) {
+        if (is_comm_op(grad->producer())) {
+          auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(grad->producer()->body());
+          uint64_t comm_type = comm_op_impl.get_comm_type(grad->producer());
+          if (comm_type != ALL_REDUCE_OP) {
+            is_all_allreduce = false;
+            break;
+          }
+        } else {
+          is_all_allreduce = false;
+          break;
+        }
+      }
+      Tensor grad_sum;
+      if (is_all_allreduce) {
+        TensorList partial_grad_list;
+        for (const auto& grad : filtered) {
+          Tensor partial_grad = grad->producer()->input(0);
+          partial_grad_list.push_back(partial_grad);
+        }
+        // if allreduce group is different between input grads,
+        // then assert error in state deduce process.
+        Tensor partial_grad_sum = MakeSumOp(partial_grad_list, OpMeta().set_name("sum_op_for_partial_grad"));
+        DistributedStates ds_dst = filtered[0]->get_distributed_states();
+        grad_sum = MakeCommOp(partial_grad_sum, ds_dst, OpMeta().set_name("comm_op_after_partial_grad_sum"));
+      } else {
+        grad_sum = MakeSumOp(filtered);
+      }
       grad_sum->set_is_grad(true);
       return grad_sum;
     }

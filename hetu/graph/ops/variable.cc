@@ -41,18 +41,7 @@ bool ParallelVariableOpImpl::DoInstantiate(Operator& op,
     return false;
 
   if (_init != nullptr) {
-    auto cur_state_index = _ds.map_device_to_state_index(_local_idx);
-    auto order = _ds.get_order();
-    std::sort(order.begin(), order.end());
-    int32_t dup_group_idx = 0;
-    int32_t interval = 1;
-    for (auto it = order.rbegin(); it != order.rend(); it++) {
-      int32_t dim = *it;
-      if (dim < 0)
-        break;
-      dup_group_idx += cur_state_index[dim] * interval;
-      interval *= _ds.get_dim(dim);
-    }
+    int32_t dup_group_idx = _ds.get_dup_group_index(_local_idx);
     // support 100 different duplicate group to set different seed
     uint64_t seed = 2023 + op->id() * 100 + dup_group_idx;
     // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": " << op << " seed = " << seed;

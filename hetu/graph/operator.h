@@ -344,6 +344,11 @@ class OpDef : public shared_ptr_target {
     instantiation_ctx().stop[micro_batch_id]->Sync();
   }
 
+  inline int64_t TimeCost(size_t micro_batch_id = 0) {
+    return instantiation_ctx().stop[micro_batch_id]->TimeSince(
+      *instantiation_ctx().start[micro_batch_id]);
+  }
+
   OpId id() const noexcept {
     return _ids.op_id;
   }

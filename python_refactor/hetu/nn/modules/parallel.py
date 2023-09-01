@@ -6,6 +6,7 @@ __all__ = [
     'ColumnParallelLinear', 
     'RowParallelLinear', 
     'ParallelEmbedding',
+    'VocabParallelEmbedding',
     'ParallelLayerNorm',
 ]
 
@@ -74,6 +75,42 @@ class ParallelEmbedding(Module):
     
     def forward(self, input_p):
         return hetu.embedding_lookup(self.embedding_table, input_p, device_group=self.device_group, name=self.name)
+    
+class VocabParallelEmbedding(Module):
+    def __init__(self, num_embeddings, embedding_dim, device_group, dp=1, init_method='xavier_normal_', name='vocab_embedding'):
+        super(VocabParallelEmbedding, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.device_group = device_group
+        self.dp = dp
+        self.name = name
+        num_devices = device_group.num_devices
+
+        ds_split0_dup = hetu.DistributedStates(num_devices, {-1: num_devices//dp, 0: dp}, [0, -1]) # for data
+        ds_dup_split0 = hetu.DistributedStates(num_devices, {-1: dp, 0: num_devices//dp}, [-1, 0]) # for embedding table
+        self.ds_map = {'split0_dup': ds_split0_dup, 'dup_split0': ds_dup_split0}
+        device_index = get_device_index(device_group)
+        dup_group_idx = ds_dup_split0.get_dup_group_index(device_index)
+        self.vocab_start_index = num_embeddings // (num_devices//dp) * dup_group_idx 
+
+        # embedding_table was splited in vocab dimension
+        self.embedding_table = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
+                                                       [num_embeddings, embedding_dim], ds_dup_split0, device_index, 
+                                                       dtype=hetu.float32, requires_grad=True, 
+                                                       device_group=device_group, name=f'{name}_table')
+    
+    def forward(self, input_p):
+        if input_p.distributed_states.check_equal(self.ds_map['split0_dup']):
+            tensor_split0_dup = input_p
+        else:
+            tensor_split0_dup = hetu.comm(input_p, self.ds_map['split0_dup'])
+            print('warning: vocab parallel embedding need extra communication for \
+                  adapt input tensor distributed_states into split0_dup!')
+
+        input_offset = tensor_split0_dup - self.vocab_start_index
+        lookup_split0_partial = hetu.embedding_lookup(self.embedding_table, input_offset, device_group=self.device_group, name=self.name)
+        output = hetu.comm(lookup_split0_partial, self.ds_map['split0_dup'])
+        return output
 
 # todo: modify column and row parallel linear
 # process: x->dup, w->split1 => y->split1 => y->dup

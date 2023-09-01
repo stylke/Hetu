@@ -94,8 +94,9 @@ void DistributedStates::set_order(const std::vector<int32_t>& order) {
 }
 
 std::unordered_map<int32_t, int32_t> 
-DistributedStates::combine_states(const std::pair<std::vector<int32_t>, int32_t>& src2dst) const {
-  auto states = std::unordered_map<int32_t, int32_t>(_states);
+DistributedStates::combine_states(const std::pair<std::vector<int32_t>, int32_t>& src2dst, 
+                                  const std::unordered_map<int32_t, int32_t>& ori_states) {
+  auto states = std::unordered_map<int32_t, int32_t>(ori_states);
   auto src = src2dst.first;
   auto dst = src2dst.second;
   int32_t value = 1;
@@ -148,10 +149,16 @@ DistributedStates::combine_states(const std::pair<std::vector<int32_t>, int32_t>
   return std::move(states);
 }
 
+std::unordered_map<int32_t, int32_t> 
+DistributedStates::combine_states(const std::pair<std::vector<int32_t>, int32_t>& src2dst) const {
+  return combine_states(src2dst, _states);
+}
+
 // 合并必须保证[src]+dst的dimension是连续的
-std::vector<int32_t>
-DistributedStates::combine_order(const std::pair<std::vector<int32_t>, int32_t>& src2dst) const {
-  auto order = std::vector<int32_t>(_order);
+std::vector<int32_t> 
+DistributedStates::combine_order(const std::pair<std::vector<int32_t>, int32_t>& src2dst, 
+                                 const std::vector<int32_t>& ori_order) {
+  auto order = std::vector<int32_t>(ori_order);
   auto src = src2dst.first;
   auto dst = src2dst.second;
   std::vector<int32_t> inds;
@@ -193,6 +200,11 @@ DistributedStates::combine_order(const std::pair<std::vector<int32_t>, int32_t>&
   }
 
   return std::move(order);
+}
+
+std::vector<int32_t>
+DistributedStates::combine_order(const std::pair<std::vector<int32_t>, int32_t>& src2dst) const {
+  return combine_order(src2dst, _order);
 }
   
 bool DistributedStates::equal_states_and_order(const std::unordered_map<int32_t, int32_t>& states1, 
@@ -329,6 +341,22 @@ DistributedStates::map_device_to_state_index(int32_t device_index) const {
     device_index /= cur_state;
   }
   return std::move(state_index);
+}
+
+int32_t DistributedStates::get_dup_group_index(int32_t device_index) const {
+  std::unordered_map<int32_t, int32_t> cur_state_index = map_device_to_state_index(device_index);
+  std::vector<int32_t> order = get_order();
+  std::sort(order.begin(), order.end());
+  int32_t dup_group_idx = 0;
+  int32_t interval = 1;
+  for (auto it = order.rbegin(); it != order.rend(); it++) {
+    int32_t dim = *it;
+    if (dim < 0)
+      break;
+    dup_group_idx += cur_state_index[dim] * interval;
+    interval *= get_dim(dim);
+  }
+  return dup_group_idx;
 }
 
 std::string DistributedStates::ds_info() const {

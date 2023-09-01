@@ -35,12 +35,14 @@ __global__ void array_zero_set_kernel(spec_t* input, size_t size) {
 template <typename spec_t>
 __global__ void embedding_lookup_gradient_kernel(const spec_t* output_grad,
                                                  const int64_t* ids, size_t size,
-                                                 size_t length,
+                                                 size_t length, size_t input_row,
                                                  spec_t* input_grad) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size / length)
     return;
   int id = int(ids[idx]);
+  if (id < 0 || id >= input_row) 
+    return;
   for (int i = 0; i < length; i++) {
     hetu::cuda::AtomicAdd((input_grad + length * id + i), (output_grad[length * idx + i]));
   }
@@ -77,7 +79,7 @@ void EmbeddingLookupCuda(const NDArray& input, const NDArray& id,
         input->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size, length,
         input_row, output->data_ptr<spec_t>());
     });
-    CudaStreamSynchronize(cuda_stream);
+  // CudaStreamSynchronize(cuda_stream);
 }
 
 void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
@@ -95,9 +97,10 @@ void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
       HT_ASSERT(input_grad->shape(1) == output_grad->shape(i));
     }
   }
+  size_t input_row = input_grad->shape(0);  
   size_t length = input_grad->shape(1);
   size_t size = input_grad->numel();
-  if (size == 0 || length == 0)
+  if (size == 0 || length == 0 || input_row == 0)
     return;
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
@@ -116,8 +119,8 @@ void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
     input_grad->dtype(), spec_t, "EmbeddingLookupGradientCuda", [&]() {
       embedding_lookup_gradient_kernel<spec_t>
         <<<blocks, threads, 0, cuda_stream>>>(
-          output_grad->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size2, length,
-          input_grad->data_ptr<spec_t>());
+          output_grad->data_ptr<spec_t>(), id->data_ptr<int64_t>(), 
+          size2, length, input_row, input_grad->data_ptr<spec_t>());
     });
 }
 
