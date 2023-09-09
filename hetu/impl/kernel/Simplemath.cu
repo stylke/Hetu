@@ -2,6 +2,7 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/cuda_math.h"
 
 namespace hetu {
 namespace impl {
@@ -10,7 +11,7 @@ template <typename spec_t>
 __global__ void floor_kernel(const spec_t* input, size_t size, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < size)
-    output[idx] = floor(input[idx]);
+    output[idx] = hetu::cuda::cuda_floor(input[idx]);
 }
 
 void FloorCuda(const NDArray& input, NDArray& output, const Stream& stream) {
@@ -36,7 +37,7 @@ template <typename spec_t>
 __global__ void ceil_kernel(const spec_t* input, size_t size, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < size)
-    output[idx] = ceil(input[idx]);
+    output[idx] = hetu::cuda::cuda_ceil(input[idx]);
 }
 
 void CeilCuda(const NDArray& input, NDArray& output, const Stream& stream) {
@@ -62,7 +63,7 @@ template <typename spec_t>
 __global__ void round_kernel(const spec_t* input, size_t size, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < size)
-    output[idx] = round(input[idx]);
+    output[idx] = hetu::cuda::cuda_round(input[idx]);
 }
 
 void RoundCuda(const NDArray& input, NDArray& output, const Stream& stream) {

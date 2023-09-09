@@ -38,8 +38,8 @@ TensorList BatchNormOpImpl::DoGradient(Operator& op,
   auto g_op_meta = op->grad_op_meta();
   TensorList empty = {Tensor(), Tensor(), Tensor()};
   auto grad = op->requires_grad(0) ? MakeBatchNormGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
-                                    op->output(1), op->output(2), get_eps(), g_op_meta)
-                                  : empty;                         
+                                     op->output(1), op->output(2), get_eps(), g_op_meta)
+                                   : empty;                         
   return {grad.at(0), grad.at(1), grad.at(2), Tensor(), Tensor()};
 }
 

@@ -15,7 +15,7 @@ void kldivloss_cpu(const spec_t* pred,
   for (size_t idx = 0; idx < n_rows; ++idx) {
     spec_t lglabel = std::log(label[idx]);
     // clip to -100 following PyTorch
-    constexpr spec_t min_value = -100;
+    spec_t min_value = -100;
     loss[idx] = label[idx] * (MAX(lglabel, min_value) - pred[idx]); 
   }
 }

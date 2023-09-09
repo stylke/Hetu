@@ -13,15 +13,17 @@ __all__ = [
 
 class DropoutNd(Module):
     def __init__(self, p: float = 0.5, inplace: bool = False) -> None:
-        super(DropoutNd, self).__init__()
-        if p < 0 or p > 1:
-            raise ValueError("dropout probability has to be between 0 and 1, "
-                             "but got {}".format(p))
-        self.p = p
-        self.inplace = inplace
+        with hetu.graph("define_and_run"):
+            super(DropoutNd, self).__init__()
+            if p < 0 or p > 1:
+                raise ValueError("dropout probability has to be between 0 and 1, "
+                                "but got {}".format(p))
+            self.p = 1 - p
+            self.inplace = inplace
 
 class Dropout(DropoutNd):
     def forward(self, input: Tensor) -> Tensor:
+        # return input
         return hetu.dropout(input, self.p, False, self.inplace)
 
 class Dropout2d(DropoutNd):

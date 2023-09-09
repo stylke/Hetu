@@ -46,6 +46,18 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
   } else if (input->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
     indicetype = CUDNN_64BIT_INDICES;
+  } else if (input->dtype() == DataType::FLOAT16) {
+    datatype = CUDNN_DATA_HALF;
+    indicetype = CUDNN_32BIT_INDICES;
+  }
+  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
+  else if (input->dtype() == DataType::BFLOAT16) {
+    datatype = CUDNN_DATA_BFLOAT16;
+    indicetype = CUDNN_32BIT_INDICES;
+  }
+  #endif
+  else {
+    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input->dtype();
   }
 
   dim3 blocks, threads;
@@ -55,40 +67,32 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
     input->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
+
+      float alpha_f = 1.0f;
+      float beta_f = 0.0f;
+
       cudnnTensorDescriptor_t desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(desc, CUDNN_TENSOR_NCHW, datatype,
                                             n_, c_, 1, 1));
-      DataPtr temp_data_ptr =
-        AllocFromMemoryPool(input->device(), size * sizeof(spec_t));
-      void* temp_data = temp_data_ptr.ptr;
+      NDArray temp_ = NDArray::empty_like(input);
 
+      if (input->dtype() == DataType::FLOAT16 || input->dtype() == DataType::BFLOAT16) {
       CUDNN_CALL(cudnnSoftmaxForward(
-        handle, CUDNN_SOFTMAX_LOG, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha, desc,
-        (const void*) input->data_ptr<spec_t>(), &beta, desc, temp_data));
+          handle, CUDNN_SOFTMAX_LOG, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha_f, desc,
+          (const void*) input->data_ptr<spec_t>(), &beta_f, desc, (void*)temp_->data_ptr<spec_t>()));     
+      }
+      else {
+      CUDNN_CALL(cudnnSoftmaxForward(
+          handle, CUDNN_SOFTMAX_LOG, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha, desc,
+          (const void*) input->data_ptr<spec_t>(), &beta, desc, (void*)temp_->data_ptr<spec_t>()));             
+      }   
+
 
       softmax_cross_entropy_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        (const spec_t*) temp_data, label->data_ptr<spec_t>(),
-        (spec_t*) temp_data, size);
-
-      cudnnReduceTensorDescriptor_t rtd;
-      CUDNN_CALL(cudnnCreateReduceTensorDescriptor(&rtd));
-      CUDNN_CALL(cudnnSetReduceTensorDescriptor(
-        rtd, CUDNN_REDUCE_TENSOR_ADD, datatype, CUDNN_PROPAGATE_NAN,
-        CUDNN_REDUCE_TENSOR_NO_INDICES, indicetype));
-
-      cudnnTensorDescriptor_t new_desc;
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&new_desc));
-      CUDNN_CALL(cudnnSetTensor4dDescriptor(new_desc, CUDNN_TENSOR_NCHW,
-                                            datatype, n_, 1, 1, 1));
-      CUDNN_CALL(cudnnReduceTensor(
-        handle, rtd, NULL, 0, temp_data, size * sizeof(spec_t), &alpha, desc,
-        (const void*) temp_data, &beta, new_desc, output->data_ptr<spec_t>()));
-
-      CUDNN_CALL(cudnnDestroyReduceTensorDescriptor(rtd));
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(new_desc));
-      CUDNN_CALL(cudnnDestroyTensorDescriptor(desc));
-      FreeToMemoryPool(temp_data_ptr);
+        temp_->data_ptr<spec_t>(), label->data_ptr<spec_t>(),
+        temp_->data_ptr<spec_t>(), size);
+      NDArray::sum(temp_, {1}, false, stream.stream_index(), output);
     });
 }
 
@@ -125,6 +129,16 @@ void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
     datatype = CUDNN_DATA_FLOAT;
   } else if (input_y->dtype() == DataType::FLOAT64) {
     datatype = CUDNN_DATA_DOUBLE;
+  } else if (input_y->dtype() == DataType::FLOAT16) {
+    datatype = CUDNN_DATA_HALF;
+  }
+  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
+  else if (input_y->dtype() == DataType::BFLOAT16) {
+    datatype = CUDNN_DATA_BFLOAT16;
+  }
+  #endif
+  else {
+    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_y->dtype();
   }
 
   dim3 blocks, threads;
@@ -135,19 +149,31 @@ void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
     input_y->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
       int dev_id = cuda_stream.device_id();
 
-      DataPtr temp_data_ptr =
+      DataPtr temp_data_ptr = (input_y->dtype() == DataType::FLOAT16 || input_y->dtype() == DataType::BFLOAT16) ?
+        AllocFromMemoryPool(grad->device(), size * sizeof(float)) :
         AllocFromMemoryPool(grad->device(), size * sizeof(spec_t));
       void* temp_data = temp_data_ptr.ptr;
 
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
+
+      float alpha_f = 1.0f;
+      float beta_f = 0.0f;
+
       cudnnTensorDescriptor_t desc;
       CUDNN_CALL(cudnnCreateTensorDescriptor(&desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(desc, CUDNN_TENSOR_NCHW, datatype,
                                             n_, c_, 1, 1));
+      if (input_y->dtype() == DataType::FLOAT16 || input_y->dtype() == DataType::BFLOAT16) {
+      CUDNN_CALL(cudnnSoftmaxForward(
+        handle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha_f,
+        desc, input_y->data_ptr<spec_t>(), &beta_f, desc, temp_data));
+      }
+      else {
       CUDNN_CALL(cudnnSoftmaxForward(
         handle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
-        desc, input_y->data_ptr<spec_t>(), &beta, desc, temp_data));
+        desc, input_y->data_ptr<spec_t>(), &beta, desc, temp_data));        
+      }
 
       softmax_cross_entropy_gradient_kernel<spec_t>
         <<<blocks, threads, 0, cuda_stream>>>(

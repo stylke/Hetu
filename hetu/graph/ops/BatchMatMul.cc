@@ -171,9 +171,12 @@ void BatchMatMulOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& out
 
 Tensor MakeBatchMatMulOp(Tensor a, Tensor b, bool trans_a, bool trans_b,
                          OpMeta op_meta) {
+  TensorList inputs = {std::move(a), std::move(b)};
+  DataType input_type = DataType::FLOAT32;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<BatchMatMulOpImpl>(trans_a, trans_b),
-          {std::move(a), std::move(b)},
+          std::move(inputs),
           std::move(op_meta))->output(0);
 }
 

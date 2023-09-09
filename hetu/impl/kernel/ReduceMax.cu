@@ -4,6 +4,7 @@
 #include "hetu/impl/cuda/CUDADnn.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/cuda_math.h"
 
 namespace hetu {
 namespace impl {
@@ -18,6 +19,20 @@ __forceinline__ __device__ void WarpReduceArgmax(spec_t& val) {
       val = tmp_val;
     }
   }
+}
+
+template <>
+__forceinline__ __device__ void WarpReduceArgmax(bfloat16& val) {
+  bfloat16 tmp_val;
+  #if defined(__CUDACC__) && (__CUDA_ARCH__ >= 800)
+  unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
+  for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
+    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    if (tmp_val > val) {
+      val = tmp_val;
+    }
+  }
+  #endif
 }
 
 template <typename spec_t>
@@ -70,7 +85,7 @@ reduce_max_kernel(const spec_t* input, spec_t* output, int ndim_input,
       ptr += k * strides[reduce_dims[j]];
       tmp -= k * strides_reduce[j];
     }
-    sum_thread = max(sum_thread, input[ptr]);
+    sum_thread = hetu::cuda::cuda_max(sum_thread, input[ptr]);
   }
   BlockReduceArgmax(sum_thread, shared_sum);
   if (threadIdx.x == 0)
@@ -108,7 +123,7 @@ __global__ void reduce_max_single_kernel(const spec_t* input, spec_t* output,
 
   spec_t sum_thread = -SIZE_MAX;
   for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride)
-    sum_thread = max(sum_thread, input[ptr]);
+    sum_thread = hetu::cuda::cuda_max(sum_thread, input[ptr]);
 
   BlockReduceArgmax(sum_thread, shared_sum);
   if (threadIdx.x == 0)

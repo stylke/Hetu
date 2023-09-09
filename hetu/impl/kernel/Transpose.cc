@@ -34,7 +34,7 @@ void TransposeCpu(const NDArray& input, NDArray& output, int64_t* perm,
   HT_ASSERT_SAME_DEVICE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   uint ndim = uint(input->ndim());
   uint ndim_ = uint(output->ndim());

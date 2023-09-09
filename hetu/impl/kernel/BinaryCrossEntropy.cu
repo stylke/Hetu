@@ -17,9 +17,9 @@ __global__ void binary_cross_entropy_kernel(const spec_t* pred,
   spec_t v1 = hetu::cuda::cuda_log(pred[idx]);
   spec_t v2 = hetu::cuda::cuda_log(1 - pred[idx]);
   // clip to -100 following PyTorch
-  constexpr spec_t min_value = -100;
+  spec_t min_value = -100;
   loss[idx] =
-    -label[idx] * MAX(v1, min_value) - (1 - label[idx]) * MAX(v2, min_value);
+    -label[idx] * hetu::cuda::cuda_max(v1, min_value) - (1 - label[idx]) * hetu::cuda::cuda_max(v2, min_value);
 }
 
 template <typename spec_t>
@@ -31,7 +31,19 @@ binary_cross_entropy_gradient_kernel(const spec_t* pred, const spec_t* label,
   if (idx >= n_rows)
     return;
   spec_t denominator = pred[idx] * (1 - pred[idx]);
-  output[idx] = grad_loss[idx] * (pred[idx] - label[idx]) / MAX(denominator, 1e-12);
+  output[idx] = grad_loss[idx] * (pred[idx] - label[idx]) / MAX(denominator, spec_t(1e-12));
+}
+
+template <>
+__global__ void
+binary_cross_entropy_gradient_kernel<bfloat16>(const bfloat16* pred, const bfloat16* label,
+                                               const bfloat16* grad_loss, size_t n_rows,
+                                               bfloat16* output) {
+  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= n_rows)
+    return;
+  bfloat16 denominator = pred[idx] * (1 - pred[idx]);
+  output[idx] = grad_loss[idx] * (pred[idx] - label[idx]) / denominator;
 }
 
 void BinaryCrossEntropyCuda(const NDArray& pred, const NDArray& label,

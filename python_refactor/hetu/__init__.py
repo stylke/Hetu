@@ -6,7 +6,8 @@ from typing import Union, Tuple, List, Dict, Set, Any, Callable, Iterator, Optio
 _tensor_type_t = TypeVar('T', bound='Tensor')
 
 from hetu import nn as nn
-from hetu import optim as optim
+from hetu import utils as utils
+# from hetu import optim as optim
 
 import builtins # bool is resovled as hetu.bool
 
@@ -80,3 +81,17 @@ class _GraphContext(object):
 
 def graph(g):
     return _GraphContext(g)
+
+class _AutocastContext(object):
+    def __init__(self):
+        self.autocast = _hetu_core._internal_context.get_default_autocast()
+
+    def __enter__(self):
+        _hetu_core._internal_context.push_autocast_ctx(self.autocast.id)
+        return self
+    
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_autocast_ctx()
+
+def autocast():
+    return _AutocastContext()

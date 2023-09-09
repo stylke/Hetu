@@ -63,9 +63,12 @@ void InstanceNormGradientOpImpl::DoDeduceStates(const TensorList& inputs, Tensor
 
 TensorList MakeInstanceNormOp(Tensor input, double eps,
                               OpMeta op_meta) {
+  TensorList inputs = {std::move(input)};
+  DataType input_type = DataType::FLOAT32;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   auto ss = Graph::MakeOp(
           std::make_shared<InstanceNormOpImpl>(eps),
-          {std::move(input)},
+          std::move(inputs),
           std::move(op_meta));   
   return ss->outputs();                             
 }

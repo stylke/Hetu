@@ -50,7 +50,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
   dim = NDArrayMeta::ParseAxis(dim, input->ndim());
   int64_t chunk_sum = 0;
   chunk_sum = 0;
-  int64_t chunk_size = input->shape(dim) / num_chunks;
+  int64_t chunk_size = DIVUP(input->shape(dim), num_chunks);
   HTShape begin_pos(input->ndim());
   HTShape output_shape = input->shape();
   TensorList outputs = {};

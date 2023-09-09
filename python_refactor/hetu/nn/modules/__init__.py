@@ -9,6 +9,8 @@ from .pooling import *
 from .container import *
 from .loss import *
 from .dropout import *
+from .sparse import *
+
 from .parallel import *
 
 __all__ = [
@@ -27,6 +29,8 @@ __all__ = [
     'NLLLoss', 'KLDivLoss', 'MSELoss', 'BCELoss',
     #dropout
     'Dropout', 'Dropout2d',
+    #sparse
+    'Embedding',
     #parallel
     'ParallelLayerNorm', 'ParallelEmbedding', 'VocabParallelEmbedding', 'ColumnParallelLinear', 'RowParallelLinear',
 ]

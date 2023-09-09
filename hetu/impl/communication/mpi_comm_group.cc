@@ -756,6 +756,8 @@ const DeviceGroup& GetGlobalDeviceGroup() {
 }
 
 const Device& GetLocalDevice() {
+  if (rank_to_device_mapping.empty())
+    return Device();
   HT_ASSERT(!rank_to_device_mapping.empty())
     << "Please set up the device mapping in advance.";
   return rank_to_device_mapping.at(GetWorldRank());

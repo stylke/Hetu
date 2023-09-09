@@ -39,7 +39,7 @@ class AddElewiseOpImpl final: public OpInterface {
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
     HTShape shape = Broadcast(inputs[0]->shape(), inputs[1]->shape());
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(shape)
                                            .set_device(inputs[0]->device());
@@ -111,7 +111,7 @@ class SubElewiseOpImpl : public OpInterface {
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
     HTShape shape = Broadcast(inputs[0]->shape(), inputs[1]->shape());
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(shape)
                                            .set_device(inputs[0]->device());
@@ -250,7 +250,7 @@ public:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
     HTShape shape = Broadcast(inputs[0]->shape(), inputs[1]->shape());
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(shape)
                                            .set_device(inputs[0]->device());
@@ -322,7 +322,7 @@ class DivElewiseOpImpl : public OpInterface {
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
     HTShape shape = Broadcast(inputs[0]->shape(), inputs[1]->shape());
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(shape)
                                            .set_device(inputs[0]->device());
@@ -483,7 +483,7 @@ class AddElewiseGradientOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = inputs[2]->meta();
     return {output_meta};
   }
@@ -546,7 +546,7 @@ class SubElewiseGradientOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = inputs[2]->meta();
     return {output_meta};
   }
@@ -609,7 +609,7 @@ class MulElewiseGradientOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = inputs[2]->meta();
     return {output_meta};
   }
@@ -672,7 +672,7 @@ class DivElewiseGradientOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = inputs[2]->meta();
     return {output_meta};
   }

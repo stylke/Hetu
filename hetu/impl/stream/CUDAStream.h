@@ -76,11 +76,15 @@ class CUDAEvent final : public Event {
 
   inline int64_t TimeSince(const Event& event) const {
     const auto& e = reinterpret_cast<const CUDAEvent&>(event);
-    HT_ASSERT(e._recorded) << "Start event has not been recorded";
-    HT_ASSERT(_recorded) << "Stop event has not been recorded";
-    float ms;
-    CudaEventElapsedTime(&ms, e._event, _event);
-    return static_cast<int64_t>(ms * 1000000);
+    HT_ASSERT(e._recorded && _recorded || !e._recorded && !_recorded)
+      << "Only one of Start/Stop event has been recorded!";
+    if (!e._recorded && !_recorded) {
+      return 0;
+    } else {
+      float ms;
+      CudaEventElapsedTime(&ms, e._event, _event);
+      return static_cast<int64_t>(ms * 1000000);
+    }
   }
 
  private:

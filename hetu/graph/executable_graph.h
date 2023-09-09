@@ -26,7 +26,7 @@ class ExecutableGraph : public Graph {
   bool Instantiate(const TensorList& fetches, const Device& placement);
 
   NDArrayList Run(const TensorList& fetches, 
-                  const FeedDict& feed_dict = {}) {}
+                  const FeedDict& feed_dict = {});
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                   const FeedDict& feed_dict = {}, const int num_micro_batches = 1);

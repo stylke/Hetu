@@ -98,7 +98,6 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       << y->producer()->type();
   }
 
-  const auto& local_device = hetu::impl::comm::GetLocalDevice();
   // Fill gradients
   TensorList filled_grads;
   filled_grads.reserve(ys.size());
@@ -169,6 +168,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         // if allreduce group is different between input grads,
         // then assert error in state deduce process.
         Tensor partial_grad_sum = MakeSumOp(partial_grad_list, OpMeta().set_name("sum_op_for_partial_grad"));
+        partial_grad_sum->set_is_grad(true);
         DistributedStates ds_dst = filtered[0]->get_distributed_states();
         grad_sum = MakeCommOp(partial_grad_sum, ds_dst, OpMeta().set_name("comm_op_after_partial_grad_sum"));
       } else {
@@ -213,8 +213,11 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
             std::unordered_map<int32_t, int32_t> res_states = ds_grad.combine_states(src2dst);
             std::vector<int32_t> res_order = ds_grad.combine_order(src2dst);
             DistributedStates ds_dst({device_num, res_states, res_order});
-            HT_LOG_DEBUG << local_device << ": " << "backward: partial to duplicate: " << grad_inputs[i] << ", dst states: " << ds_dst.ds_info();
-            final_grad = MakeCommOp(grad_inputs[i], ds_dst, OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
+            HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " 
+              << "backward: partial to duplicate: " << grad_inputs[i] 
+              << ", dst states: " << ds_dst.ds_info();
+            final_grad = MakeCommOp(grad_inputs[i], ds_dst, 
+              OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
             final_grad->set_is_grad(true);
           }
         } 

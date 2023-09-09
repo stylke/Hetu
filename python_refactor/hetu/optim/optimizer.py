@@ -10,7 +10,8 @@ class Optimizer(object):
             self.params = list(self.params)
             assert len(self.params) > 0, "No variables are provided"
             for p in self.params:
-                assert p.trainable, f"Parameter {p} is not trainable"
+                print(type(p), p.requires_grad)
+                assert p.requires_grad, f"Parameter {p} is not requires_grad"
         
         self.defaults = defaults
     
@@ -40,7 +41,7 @@ class Optimizer(object):
         hetu.group(update_ops).get_or_compute()
     
     def minimize(self, loss, var_list=None, name=None, grad_loss=None):
-        self._assert_dar_mode('minimize')
+        # self._assert_dar_mode('minimize')
         update_ops = []
         grads_and_vars = self.compute_gradients(
             loss, 
@@ -55,12 +56,12 @@ class Optimizer(object):
     
     def compute_gradients(self, loss, var_list=None, grad_loss=None):
         if var_list is None:
-            var_list = hetu.trainable_variables(loss)
+            var_list = hetu.requires_grad_variables(loss)
         else:
             for v in var_list:
-                assert v.trainable, f"Variable {v} is not trainable"
+                assert v.requires_grad, f"Variable {v} is not requires_grad"
         # for v in var_list:
-        #     print(v, " ", v.trainable)
+        #     print(v, " ", v.requires_grad)
         grad_list = hetu.gradients(loss, var_list, grad_loss)
         assert len(grad_list) == len(var_list), \
             f"Only {len(grad_list)} gradients are returned for " + \

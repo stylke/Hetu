@@ -11,7 +11,7 @@ __global__ void bool_kernel(const spec_t* input, size_t size, bool* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  if (input[idx] > 0)
+  if (float(input[idx]) > 0)
     output[idx] = 1;
   else
     output[idx] = 0;

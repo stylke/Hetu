@@ -13,7 +13,7 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
   HT_ASSERT_SAME_DEVICE(inputA, output);
   HT_ASSERT_SAME_DEVICE(inputB, output);
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   dnnl::memory::dims A_dims(output->ndim());
   dnnl::memory::dims A_stride(output->ndim());
@@ -57,6 +57,8 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
           dnnl::memory::data_type mtype;
           if (inputA->dtype() == DataType::FLOAT32)
             mtype = dnnl::memory::data_type::f32;
+          else if (inputA->dtype() == DataType::FLOAT16) 
+            mtype = dnnl::memory::data_type::f16;
           else
             mtype = dnnl::memory::data_type::f64;
           auto src_A_md = dnnl::memory::desc(A_dims, mtype, A_stride);
@@ -79,14 +81,11 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
           binary_args.insert({DNNL_ARG_SRC_0, src_A_mem});
           binary_args.insert({DNNL_ARG_SRC_1, src_B_mem});
           binary_args.insert({DNNL_ARG_DST, dst_mem});
-        // dnnl::stream engine_stream(eng);
-        // binary_prim.execute(engine_stream, binary_args);
           dnnl::stream engine_stream(eng);
           binary_prim.execute(engine_stream, binary_args);
           engine_stream.wait();
         },
         "BinaryEleWise");
-        // cpu_stream.Sync();
     });
 }
 

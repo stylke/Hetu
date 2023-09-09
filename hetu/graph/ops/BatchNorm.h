@@ -35,10 +35,15 @@ protected:
   DoInferMeta(const TensorList& inputs) const override {
     int64_t channels = inputs[0]->shape(1);
     HTShape shape = {channels};
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    if (inputs[0]->dtype() == DataType::FLOAT16 || inputs[0]->dtype() == DataType::BFLOAT16) {
+      HT_ASSERT_TENSORS_SAME_DTYPE(TensorList(inputs.begin() + 1, inputs.end()));
+    }
+    else {
+      HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    }
     HT_ASSERT_HAS_DIMS(inputs[0], 4);
     HT_ASSERT_TENSORS_SAME_SHAPE(inputs[1], inputs[2]);
-    NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
+    NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[1]->dtype())
                                            .set_shape(shape)
                                            .set_device(inputs[0]->device());
     return {inputs[0]->meta(), output_meta, output_meta};

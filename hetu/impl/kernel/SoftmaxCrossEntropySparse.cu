@@ -81,6 +81,21 @@ __forceinline__ __device__ spec_t WarpReduceSum(spec_t val) {
   return val;
 }
 
+template <>
+__forceinline__ __device__ bfloat16 WarpReduceSum<bfloat16>(bfloat16 val) {
+  unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
+  #if(__CUDA_ARCH__ >= 800)
+  for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
+    val += __shfl_down_sync(mask, val, k, warpSize);
+  #else
+  float val_f = float(val);
+  for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
+    val_f += __shfl_down_sync(mask, val_f, k, warpSize); 
+  val = bfloat16(val_f); 
+  #endif
+  return val;
+}
+
 template <typename spec_t>
 __forceinline__ __device__ void BlockReduceSum(spec_t& val, spec_t* shared, spec_t* warp_sum) {
   int tid = threadIdx.x % warpSize;

@@ -348,6 +348,7 @@ class TestBatchMatMulOps(unittest.TestCase):
 class TestActivationOps(unittest.TestCase):
 
     _test_shapes = [
+        (2, 2),
         (64, 256),
         (1024, 16)
     ]
@@ -365,6 +366,22 @@ class TestActivationOps(unittest.TestCase):
             torch_out.sum().backward()
             hetu_in = hetu.Tensor(x_np, trainable=True)
             hetu_out = hetu.sigmoid(hetu_in)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+    
+    def test_sin_op(self):
+        for shape in TestActivationOps._test_shapes:
+            x_np = np.random.randn(*shape)
+            gt = np.sin(x_np)
+            x = hetu.from_numpy(x_np)
+            self.assertTrue(allclose(hetu.sin(x), gt))
+            self.assertTrue(allclose(x.sin(), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.sin(torch_in)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.sin(hetu_in)
             hetu_out.sum().backward()
             self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
@@ -419,6 +436,37 @@ class TestActivationOps(unittest.TestCase):
             hetu_out.sum().backward()
             self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
 
+    def test_triu_op(self):
+        for shape in TestActivationOps._test_shapes:
+            x_np = np.random.randn(*shape)
+            gt = torch.triu(torch.from_numpy(x_np), 0).numpy()
+            x = hetu.from_numpy(x_np)
+            self.assertTrue(allclose(hetu.triu(x, False, 0), gt))
+            self.assertTrue(allclose(x.triu(False, 0), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.triu(torch_in, 0)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.triu(hetu_in, False, 0)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+    def test_tril_op(self):
+        for shape in TestActivationOps._test_shapes:
+            x_np = np.random.randn(*shape)
+            gt = torch.tril(torch.from_numpy(x_np), 0).numpy()
+            x = hetu.from_numpy(x_np)
+            self.assertTrue(allclose(hetu.triu(x, True, 0), gt))
+            self.assertTrue(allclose(x.triu(True, 0), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.tril(torch_in, 0)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.triu(hetu_in, True, 0)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
             
     
     def test_softmax_op(self):
@@ -1028,15 +1076,174 @@ class TestEinsumOps(unittest.TestCase):
 
 class TestOtherOps(unittest.TestCase):
 
+    _asstrided_test_shapes = [
+        ((8, 8), (4, 4), (1, 2)),
+        ((6, 4, 6, 8), (2, 3, 4, 5), (1, 2, 1, 1))
+    ]
+
     _embedding_test_shapes = [
         ((4, 4), (5)),
         ((16, 32), (16))
+    ]
+
+    _interpolate_test_shapes = [
+        ((1, 1, 2, 2), (4, 4)),
+        ((3, 4, 5, 5), (20, 20))
+    ]
+
+    _maskedfill_test_shapes = [
+        ((3, 4, 5, 6),),
+        ((1, 9, 1, 10),)
+    ]
+
+    _norm_test_shapes = [
+        ((4, 5, 2, 3), 2, 2),
+        ((3, 4, 5, 5), 0, 1)
+    ]
+
+    _repeat_test_shapes = [
+        ((3, 5, 7), (2, 2, 3, 4)),
+        ((2, 4, 6, 8), (2, 3, 4, 5) )
+    ]
+
+    _roll_test_shapes = [
+        ((2, 2), (1,), (0,)),
+        ((3, 6, 7, 9), (2, 4, 6), (0, 1, 3)),
+        ((2, 4, 6, 8), (1, 7), (2, 3) )
+    ]
+
+    _gather_test_shapes = [
+        ((2, 2), (2, 1), 1),
+        ((5, 16, 32), (1, 16, 32), 0)
     ]
 
     _onehot_test_shapes = [
         (32, 4),
         (64,)
     ]
+
+    def test_arangeop(self):
+        gt = torch.arange(0, 100, 4).numpy()
+        self.assertTrue(allclose(hetu.arange(0, 100, 4), gt))
+    
+    def test_asstridedop(self):
+        for shape_x, shape_y, stride in TestOtherOps._asstrided_test_shapes:
+            x_np = np.random.randn(*shape_x)
+            gt = torch.as_strided(torch.from_numpy(x_np), shape_y, stride).numpy()
+            x = hetu.from_numpy(x_np)
+            self.assertTrue(allclose(hetu.as_strided(x, list(shape_y), list(stride)), gt))
+            self.assertTrue(allclose(x.as_strided(list(shape_y), list(stride)), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.as_strided(torch_in, shape_y, stride)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.as_strided(hetu_in, list(shape_y), list(stride))
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+    def test_gatherop(self):
+        for shape_x, shape_id, dim in TestOtherOps._gather_test_shapes:
+            x_np = np.random.randn(*shape_x)
+            id_np = np.random.randint(0, shape_x[dim], size=shape_id)
+            gt = torch.gather(torch.from_numpy(x_np), dim, torch.from_numpy(id_np)).numpy()
+            x = hetu.from_numpy(x_np)
+            id = hetu.from_numpy(id_np)
+            self.assertTrue(allclose(hetu.gather(x, dim, id), gt))
+            self.assertTrue(allclose(x.gather(dim, id), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.gather(torch_in, dim, torch.from_numpy(id_np))
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.gather(hetu_in, dim, id)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+    def test_interpolateop(self):
+        for shape_x, shape_o in TestOtherOps._interpolate_test_shapes:
+            x_np = np.random.randn(*shape_x)
+            gt = torch.nn.functional.interpolate(torch.from_numpy(x_np), shape_o, mode='bicubic').numpy()
+            x = hetu.from_numpy(x_np)
+            self.assertTrue(allclose(hetu.interpolate(x, list(shape_o)), gt))
+            self.assertTrue(allclose(x.interpolate(list(shape_o)), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.nn.functional.interpolate(torch_in, shape_o, mode='bicubic')
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.interpolate(hetu_in, list(shape_o))
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+    
+    def test_maskedfillop(self):
+        for shape_x in TestOtherOps._maskedfill_test_shapes:
+            shape_x = shape_x[0]
+            x_np = np.random.randn(*shape_x)
+            mask_np = np.random.choice([0, 1], size=shape_x).astype(np.int64)
+            val = np.random.random()
+            gt = torch.masked_fill(torch.from_numpy(x_np), torch.from_numpy(mask_np), val).numpy()
+            x = hetu.from_numpy(x_np)
+            mask = hetu.from_numpy(mask_np)
+            self.assertTrue(allclose(hetu.masked_fill(x, mask, val), gt))
+            self.assertTrue(allclose(x.masked_fill(mask, val), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.masked_fill(torch_in, torch.from_numpy(mask_np), val)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.masked_fill(hetu_in, mask)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+    def test_normop(self):
+        for shape_x, dim0, p0 in TestOtherOps._norm_test_shapes:
+            x_np = np.random.randn(*shape_x)
+            gt = torch.norm(torch.from_numpy(x_np), p=p0, dim=dim0).numpy()
+            x = hetu.from_numpy(x_np)
+            self.assertTrue(allclose(hetu.norm(x, p0, dim0), gt))
+            self.assertTrue(allclose(x.norm(p0, dim0), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.norm(torch_in, p=p0, dim=dim0)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.norm(hetu_in, p0, dim0)
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+    
+    def test_repeatop(self):
+        for shape_x, repeats in TestOtherOps._repeat_test_shapes:
+            x_np = np.random.randn(*shape_x)
+            gt = torch.from_numpy(x_np).repeat(*repeats).numpy()
+            x = hetu.from_numpy(x_np)
+            self.assertTrue(allclose(hetu.repeat(x, list(repeats)), gt))
+            self.assertTrue(allclose(x.repeat(list(repeats)), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch_in.repeat(*repeats)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.repeat(hetu_in, list(repeats))
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
+
+    def test_rollop(self):
+        for shape_x, shifts, dims in TestOtherOps._roll_test_shapes:
+            x_np = np.random.randn(*shape_x)
+            gt = torch.roll(torch.from_numpy(x_np), shifts=shifts, dims=dims).numpy()
+            x = hetu.from_numpy(x_np)
+            # print(hetu.roll(x, list(shifts), list(dims)).numpy(force=True), "\n", gt)
+            self.assertTrue(allclose(hetu.roll(x, list(shifts), list(dims)), gt))
+            self.assertTrue(allclose(x.roll(list(shifts), list(dims)), gt))
+
+            torch_in = torch.tensor(x_np, requires_grad=True)
+            torch_out = torch.roll(torch_in, shifts, dims)
+            torch_out.sum().backward()
+            hetu_in = hetu.Tensor(x_np, trainable=True)
+            hetu_out = hetu.roll(hetu_in, list(shifts), list(dims))
+            hetu_out.sum().backward()
+            self.assertTrue(allclose(hetu_in.grad, torch_in.grad.numpy()))
     
     def test_embedding_lookupop(self):
         for shape_x, shape_id in TestOtherOps._embedding_test_shapes:

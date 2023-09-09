@@ -4,34 +4,42 @@
 #include "hetu/impl/cuda/CUDADnn.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/cuda_math.h"
 
 namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-__forceinline__ __device__ float WarpReduceSum(spec_t val) {
-  unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
-  for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val += __shfl_down_sync(mask, val, k, warpSize);
-  return val;
-}
+__global__ void reduce_mean_naive_kernel(const spec_t* input, spec_t* output,
+                                        size_t befor_dim_size,
+                                        size_t reduce_dim_size,
+                                        size_t after_dim_size) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t x = idx / after_dim_size;
+  size_t y = idx % after_dim_size;
+  size_t start_ptr, end_ptr, stride;
+  if (after_dim_size > 1) {
+    stride = after_dim_size;
+    start_ptr =
+      x * reduce_dim_size * after_dim_size + y;
+    end_ptr = x * reduce_dim_size * after_dim_size + y +
+      reduce_dim_size * after_dim_size;
+  } else {
+    size_t cols_per_thread = reduce_dim_size;
+    size_t block_end_ptr = x * reduce_dim_size * after_dim_size + y +
+      reduce_dim_size * after_dim_size;
+    start_ptr = x * reduce_dim_size * after_dim_size + y;
+    end_ptr = min(start_ptr + cols_per_thread * after_dim_size, block_end_ptr);
+    stride = after_dim_size;
+  }
+  size_t output_ptr = x * after_dim_size + y;
+  if (start_ptr >= end_ptr)
+    return;
 
-template <typename spec_t>
-__forceinline__ __device__ void BlockReduceSum(spec_t& val, spec_t* shared) {
-  int tid = threadIdx.x % warpSize;
-  int wid = threadIdx.x / warpSize;
-
-  val = WarpReduceSum(val);
-
-  __syncthreads();
-  if (tid == 0)
-    shared[wid] = val;
-
-  __syncthreads();
-  val = (threadIdx.x < blockDim.x / warpSize) ? shared[tid] : 0;
-
-  if (wid == 0)
-    val = WarpReduceSum(val);
+  spec_t sum_thread = 0;
+  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride)
+    sum_thread += input[ptr];
+  output[output_ptr] = sum_thread / reduce_dim_size;
 }
 
 template <typename spec_t>
@@ -67,7 +75,7 @@ reduce_mean_kernel(const spec_t* input, spec_t* output, int ndim_input,
     sum_thread += input[ptr];
   }
 
-  BlockReduceSum(sum_thread, shared_sum);
+  hetu::cuda::BlockReduceSum(sum_thread, shared_sum);
   if (threadIdx.x == 0)
     output[output_ptr] = sum_thread / reduce_num;
 }
@@ -105,7 +113,7 @@ __global__ void reduce_mean_single_kernel(const spec_t* input, spec_t* output,
   for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride)
     sum_thread += input[ptr];
 
-  BlockReduceSum(sum_thread, shared_sum);
+  hetu::cuda::BlockReduceSum(sum_thread, shared_sum);
   if (threadIdx.x == 0)
     output[output_ptr] = sum_thread / reduce_dim_size;
 }
@@ -152,6 +160,9 @@ void ReduceMeanCuda(const NDArray& in_arr, NDArray& out_arr,
     }
   }
 
+  CUDAStream cuda_stream(stream);
+  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+
   if (ndim_reduce == 1) {
     size_t befor_dim_size, reduce_dim_size, after_dim_size;
     befor_dim_size = reduce_dim_size = after_dim_size = 1;
@@ -164,17 +175,26 @@ void ReduceMeanCuda(const NDArray& in_arr, NDArray& out_arr,
         after_dim_size *= shape_in[i];
     }
 
-    int blocks = befor_dim_size * after_dim_size;
-    int threads = hetu::impl::GetThreadNum(reduce_dim_size);
-    CUDAStream cuda_stream(stream);
-    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-      in_arr->dtype(), spec_t, "ReduceMeanCuda", [&]() {
-        reduce_mean_single_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-          in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
-          befor_dim_size, reduce_dim_size, after_dim_size);
-      });
-      // CudaStreamSynchronize(cuda_stream);
+    if (reduce_num <= 256 && reduce_dims[0] != in_arr->ndim() - 1) {
+      int blocks = DIVUP(befor_dim_size * after_dim_size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);                
+      int threads = MIN(befor_dim_size * after_dim_size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);        
+      HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+        in_arr->dtype(), spec_t, "ReduceCuda", [&]() {
+          reduce_mean_naive_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
+            in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
+            befor_dim_size, reduce_dim_size, after_dim_size);
+        });        
+    }    
+    else {
+      int blocks = befor_dim_size * after_dim_size;
+      int threads = hetu::impl::GetThreadNum(reduce_dim_size);
+      HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+        in_arr->dtype(), spec_t, "ReduceMeanCuda", [&]() {
+          reduce_mean_single_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
+            in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
+            befor_dim_size, reduce_dim_size, after_dim_size);
+        });
+    }
   } else {
     size_t* strides = (size_t*) malloc(ndim_input * sizeof(size_t));
     size_t* strides_rest = (size_t*) malloc(ndim_rest * sizeof(size_t));
@@ -188,9 +208,6 @@ void ReduceMeanCuda(const NDArray& in_arr, NDArray& out_arr,
       strides_reduce[i] = strides_reduce[i + 1] * shape_reduce[i + 1];
     for (int i = ndim_rest - 2; i >= 0; --i)
       strides_rest[i] = strides_rest[i + 1] * shape_rest[i + 1];
-
-    CUDAStream cuda_stream(stream);
-    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
 
     DataPtr reduce_dims_cu_ptr =
       AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(int));
@@ -251,7 +268,6 @@ void ReduceMeanCuda(const NDArray& in_arr, NDArray& out_arr,
           strides_rest_cu, shape_in_cu, shape_rest_cu, shape_reduce_cu,
           reduce_dims_cu, rest_dims_cu, reduce_num);
       });
-    // CudaStreamSynchronize(cuda_stream);
     FreeToMemoryPool(rest_dims_cu_ptr);
     FreeToMemoryPool(reduce_dims_cu_ptr);
     FreeToMemoryPool(shape_in_cu_ptr);
@@ -263,6 +279,7 @@ void ReduceMeanCuda(const NDArray& in_arr, NDArray& out_arr,
     free(strides);
     free(strides_rest);
     free(strides_reduce);
+    // CudaStreamSynchronize(cuda_stream);
   }
   free(rest_dims);
   free(reduce_dims);
@@ -270,6 +287,7 @@ void ReduceMeanCuda(const NDArray& in_arr, NDArray& out_arr,
   free(shape_rest);
   free(shape_reduce);
   free(reduce_axes);
+  // CudaStreamSynchronize(cuda_stream);
   return;
 }
 

@@ -46,7 +46,7 @@ void InstanceNormCpu(const NDArray& in_arr, NDArray& mean_arr, NDArray& var_arr,
     in_arr->dtype(), spec_t, "InstanceNormCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
       [stream, in_arr, mean_arr, var_arr, out_arr, eps, last_2dim, ndim]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng); 
       auto src_md = dnnl::memory::desc(in_arr->shape(), dnnl::memory::data_type::f32, in_arr->stride());
       auto dst_md = dnnl::memory::desc(mean_arr->shape(), dnnl::memory::data_type::f32, mean_arr->stride());
@@ -167,7 +167,7 @@ void InstanceNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       spec_t* dy_mul_x = NULL;
       DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), in_arr->numel() * sizeof(spec_t));
       dy_mul_x = (spec_t*) dy_mul_x_ptr.ptr;
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng); 
       auto src_md = dnnl::memory::desc(in_arr->shape(), dnnl::memory::data_type::f32, in_arr->stride());
       auto dst_md = dnnl::memory::desc(mean_arr->shape(), dnnl::memory::data_type::f32, mean_arr->stride());

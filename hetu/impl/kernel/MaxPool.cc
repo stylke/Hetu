@@ -88,7 +88,7 @@ void MaxPoolCpu(const NDArray& input, const size_t kernel_H,
   size_t output_size = input_N * input_C * output_H * output_W;
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   dnnl::stream engine_stream(eng);
   if (output_size == 0)
     return;
@@ -148,7 +148,7 @@ void MaxPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
   HT_ASSERT_SAME_DEVICE(output_Y, gradient_X);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   dnnl::stream engine_stream(eng);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_X->dtype(), spec_t, "MaxPoolGradientCpu", [&]() {

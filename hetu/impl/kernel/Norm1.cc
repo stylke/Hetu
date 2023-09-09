@@ -17,7 +17,7 @@ void NormCpu(const NDArray& input, NDArray& output, int64_t dim, int64_t p, cons
   input->dtype(), spec_t, "NormCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
     [stream, input, output, dim, p]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::memory::dims in_shape = input->shape();
       dnnl::memory::dims in_stride = input->stride();
       dnnl::memory::dims out_shape = input->shape();

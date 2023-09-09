@@ -14,7 +14,7 @@ void Conv2dCpu(const NDArray& input_x, const NDArray& input_f, NDArray& output,
   HT_ASSERT_SAME_DEVICE(input_x, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dCpu", [&]() {
@@ -72,7 +72,7 @@ void Conv2dGradientofFilterCpu(const NDArray& input_x,
   HT_ASSERT_SAME_DEVICE(input_x, gradient_f);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id()); 
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0); 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dGradientofFilterCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
@@ -132,7 +132,7 @@ void Conv2dGradientofDataCpu(const NDArray& input_f, const NDArray& gradient_y,
   HT_ASSERT_SAME_DEVICE(input_f, gradient_x);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_f->dtype(), spec_t, "Conv2dGradientofDataCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
@@ -193,7 +193,7 @@ void Conv2dAddBiasCpu(const NDArray& input_x, const NDArray& input_f,
   HT_ASSERT_SAME_DEVICE(input_x, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dAddBiasCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(

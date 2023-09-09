@@ -660,6 +660,10 @@ class NDArrayDef : public shared_ptr_target {
     return _storage_offset;
   }
 
+  void set_meta(const NDArrayMeta& meta) {
+    _meta = meta;
+  }
+
  protected:
   friend class NDArray;
   void Serialize(std::ostream& os, size_t n_print = 10) const;

@@ -10,17 +10,19 @@ namespace graph {
 void ReduceOpImpl::DoCompute(Operator& op,
                              const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) const {
-  // if (reduction() == ReductionType::MEAN) {
-  //   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
-  //     op->instantiation_ctx().placement.type(), type(), hetu::impl::ReduceMean, inputs.at(0),
-  //     outputs.at(0), get_axes().data(), get_axes().size(), op->instantiation_ctx().stream());
-  // } else if (reduction() == ReductionType::SUM) {
-  //   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
-  //     op->instantiation_ctx().placement.type(), type(), hetu::impl::ReduceSum, inputs.at(0),
-  //     outputs.at(0), get_axes().data(), get_axes().size(), op->instantiation_ctx().stream());
-  // }
-  NDArray::reduce(inputs.at(0), reduction(), get_axes(), false,
-                  op->instantiation_ctx().stream_index, outputs.at(0));
+  HTAxes reduce_axes = get_axes();
+  if (reduce_axes.size() <= 1)
+    NDArray::reduce(inputs.at(0), reduction(), get_axes(), false,
+                    op->instantiation_ctx().stream_index, outputs.at(0));
+  else {
+    NDArray tmp = NDArray::reduce(inputs.at(0), reduction(), {reduce_axes[reduce_axes.size() - 1]}, false,
+                                  op->instantiation_ctx().stream_index);
+    for (int i = 1; i < reduce_axes.size() - 1; ++i)
+      tmp = NDArray::reduce(tmp, reduction(), {reduce_axes[reduce_axes.size() - 1 - i]}, false,
+                            op->instantiation_ctx().stream_index);
+    NDArray::reduce(tmp, reduction(), {reduce_axes[0]}, false,
+                    op->instantiation_ctx().stream_index, outputs.at(0));
+  }
 }
 
 TensorList ReduceOpImpl::DoGradient(Operator& op,

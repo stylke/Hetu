@@ -7,33 +7,33 @@ namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-__global__ void clamp_kernel(const spec_t* input, spec_t min_val, spec_t max_val, 
+__global__ void clamp_kernel(const spec_t* input, const spec_t min_val, const spec_t max_val, 
                              size_t size, spec_t* output) {
-  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
-    return;
-  if (input[idx] < min_val)
-    output[idx] = min_val;
-  else if (input[idx] > max_val) {
-    output[idx] = max_val;
-  }
-  else 
-    output[idx] = input[idx];
+  // auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  // if (idx >= size)
+  //   return;
+  // if (input[idx] < min_val)
+  //   output[idx] = min_val;
+  // else if (input[idx] > max_val) {
+  //   output[idx] = max_val;
+  // }
+  // else 
+  //   output[idx] = input[idx];
 }
 
 template <typename spec_t>
 __global__ void clamp_elewise_kernel(const spec_t* input, const spec_t* min_val, const spec_t* max_val, 
                                      size_t size, spec_t* output) {
-  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
-    return;
-  if (input[idx] < min_val[idx])
-    output[idx] = min_val[idx];
-  else if (input[idx] > max_val[idx]) {
-    output[idx] = max_val[idx];
-  }
-  else 
-    output[idx] = input[idx];
+  // auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  // if (idx >= size)
+  //   return;
+  // if (input[idx] < min_val[idx])
+  //   output[idx] = min_val[idx];
+  // else if (input[idx] > max_val[idx]) {
+  //   output[idx] = max_val[idx];
+  // }
+  // else 
+  //   output[idx] = input[idx];
 }
 
 void ClampCuda(const NDArray& input, double min_val, double max_val, NDArray& output, const Stream& stream) {

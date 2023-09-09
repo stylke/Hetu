@@ -43,6 +43,7 @@ void DefineAndRunGraph::Instantiate() {
       Graph::ResetVariableData(exec_tensor, *it->second);
       _add_on_inits.erase(tensor->id());
     }
+    // exec_tensor->set_is_grad(tensor->is_grad());
   };
 
   OpRefList topo = topo_order();
@@ -67,12 +68,35 @@ void DefineAndRunGraph::Instantiate() {
 
     Operator::for_each_output_tensor_pair(op, exec_op, put_exec_output);
     if (is_placeholder_op(op) || is_variable_op(op)) {
-      exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
+      if (op->output(0)->has_distributed_states())
+        exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
     }
     _op_to_exec_op_mapping[op->id()] = exec_op;
   }
 
   Graph::pop_graph_ctx();
+}
+
+// TODO: merge two `Run` func
+NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
+                                   const FeedDict& feed_dict) {
+  bool has_uninstantiated_ops =
+    std::any_of(fetches.begin(), fetches.end(), [&](const Tensor& fetch) {
+      return _op_to_exec_op_mapping.find(fetch->producer_id()) ==
+        _op_to_exec_op_mapping.end();
+    });
+  if (has_uninstantiated_ops)
+    Instantiate();
+  TensorList exec_fetches;
+  exec_fetches.reserve(fetches.size());
+  for (const auto& fetch : fetches) {
+    exec_fetches.push_back(_tensor_to_exec_tensor_mapping[fetch->id()]);
+  }
+  FeedDict exec_feed_dict;
+  exec_feed_dict.reserve(feed_dict.size());
+  for (const auto& kv : feed_dict)
+    exec_feed_dict[_tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;
+  return _exec_graph->Run(exec_fetches, exec_feed_dict);
 }
 
 NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches,

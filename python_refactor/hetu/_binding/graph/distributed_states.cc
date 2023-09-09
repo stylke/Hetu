@@ -147,7 +147,7 @@ PyGetSetDef PyDistributedStates_properties[] = {
 PyMethodDef PyDistributedStates_methods[] = {
   {"check_equal", (PyCFunction) PyDistributedStates_check_equal, METH_VARARGS, nullptr },
   {"get_dim", (PyCFunction) PyDistributedStates_get_dim, METH_VARARGS, nullptr },
-  {"get_dup_group_index", (PyCFunction) PyDistributedStates_get_dim, METH_VARARGS, nullptr },
+  {"get_dup_group_index", (PyCFunction) PyDistributedStates_get_dup_group_index, METH_VARARGS, nullptr },
   {nullptr}
 };
 

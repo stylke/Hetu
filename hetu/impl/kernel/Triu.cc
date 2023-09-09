@@ -13,7 +13,7 @@ void triutril_cpu(const spec_t* input, spec_t* output, bool lower,
     int row = (idx / W) % H;
     int col = idx % W;
     bool mask = lower ? (col - row > diagonal) : (col - row < diagonal);
-    output[idx] = mask ? 0 : input[idx];
+    output[idx] = mask ? spec_t(0) : input[idx];
   }
 }
 
@@ -24,7 +24,7 @@ void TriuTrilCpu(const NDArray& input, NDArray& output, bool lower,
   HT_ASSERT_EXCHANGABLE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   int64_t ndim = input->ndim();

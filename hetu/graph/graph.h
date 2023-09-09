@@ -344,8 +344,11 @@ class Graph {
     return Graph::TopoSort(ops, num_ops_hint, stop_at);
   }
 
-  static std::tuple<OpRefList, OpRefList> disentangle_forward_and_backward_ops(
+  static std::tuple<OpRefList, OpRefList> disentangle_forward_and_backward_ops_by_loss(
     const OpRefList& topo, const TensorList& losses);  
+
+  static std::tuple<OpRefList, OpRefList> disentangle_forward_and_backward_ops(
+    const OpRefList& topo);    
 
   // static TensorRefList DependentVariables(const TensorList& tensors,
   //                                         int32_t num_ops_hint = -1) {
@@ -563,6 +566,28 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
 }
 
 inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_ops(
+  const OpRefList& topo) {
+  OpRefList fw_ops;
+  OpRefList bw_ops;
+  bool is_bw = false;
+  for (auto& op_ref : topo) {
+    if (is_bw) {
+      bw_ops.push_back(op_ref);
+    } else {
+      bool is_grad = Operator::all_output_tensors_of(op_ref.get(), 
+        [&](const Tensor& tensor) { return tensor->is_grad();});
+      if (!is_grad) {
+        fw_ops.push_back(op_ref);
+      } else {
+        is_bw = true;
+        bw_ops.push_back(op_ref);
+      }
+    }
+  }
+  return {fw_ops, bw_ops};
+}
+
+inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_ops_by_loss(
   const OpRefList& topo, const TensorList& losses) {
   // traverse forward nodes (including losses)
   OpCRefDeque traverse_queue;

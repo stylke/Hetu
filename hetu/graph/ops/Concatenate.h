@@ -103,7 +103,7 @@ class ConcatenateOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeConcatenateOp(const TensorList& inputs, size_t axis = 0,
+Tensor MakeConcatenateOp(TensorList inputs, size_t axis = 0,
                          OpMeta op_meta = OpMeta());
 
 class ConcatenateGradientOpImpl : public OpInterface {

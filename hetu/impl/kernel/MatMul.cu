@@ -26,11 +26,21 @@ void MatMulCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
 
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "MatMul", [&]() {
     spec_t alpha = 1, beta = 0;
-    cublas_gemm<spec_t>(cublas_handle, trans_b ? CUBLAS_OP_T : CUBLAS_OP_N,
-                        trans_a ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, &alpha,
-                        b->data_ptr<spec_t>(), trans_b ? k : m,
-                        a->data_ptr<spec_t>(), trans_a ? n : k, &beta,
-                        output->data_ptr<spec_t>(), m);
+    float alpha_f = 1, beta_f = 0;
+    if (output->dtype() == DataType::FLOAT16 || output->dtype() == DataType::BFLOAT16) {
+      cublas_gemm<spec_t>(cublas_handle, trans_b ? CUBLAS_OP_T : CUBLAS_OP_N,
+                          trans_a ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, static_cast<const void*>(&alpha_f),
+                          b->data_ptr<spec_t>(), trans_b ? k : m,
+                          a->data_ptr<spec_t>(), trans_a ? n : k, static_cast<const void*>(&beta_f),
+                          output->data_ptr<spec_t>(), m);
+    }
+    else {
+      cublas_gemm<spec_t>(cublas_handle, trans_b ? CUBLAS_OP_T : CUBLAS_OP_N,
+                          trans_a ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, static_cast<const void*>(&alpha),
+                          b->data_ptr<spec_t>(), trans_b ? k : m,
+                          a->data_ptr<spec_t>(), trans_a ? n : k, static_cast<const void*>(&beta),
+                          output->data_ptr<spec_t>(), m);
+    }
   });
     //   HT_LOG_INFO << "_____________up____________\n" << a << 
     // "\n" << b << "\n" << output

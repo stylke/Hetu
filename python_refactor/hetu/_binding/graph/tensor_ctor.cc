@@ -410,7 +410,6 @@ PyObject* PyTensor_rand(PyObject*, PyObject* args, PyObject* kwargs) {
     "rand(HTShape size, double lb, double ub, " _PY_TENSOR_CTOR_COMMON_ARGS ")"
   });
   auto parsed_args = parser.parse(args, kwargs);
-  HT_LOG_INFO << parsed_args.signature_index();
   if (parsed_args.signature_index() == 0) {
     return _from_shape_ctor_helper(parsed_args, UniformInitializer());
   }

@@ -21,6 +21,7 @@ namespace {
 static std::once_flag import_np_flag;
 static void ImportNumpyOnce() {
   std::call_once(import_np_flag, []() {
+    // import_array();
     HT_RUNTIME_ERROR_IF(_import_array() < 0) << "Failed to import NumPy";
   });
 }
@@ -160,13 +161,17 @@ PyObject* NDArrayToNumpy(NDArray ndarray, bool force) {
     ndarray = NDArray::cpu(ndarray, kBlockingStream);
   }
   
+  if (ndarray->dtype() == DataType::FLOAT16 || ndarray->dtype() == DataType::BFLOAT16) {
+    ndarray = NDArray::to(ndarray, ndarray->device(), DataType::FLOAT32, kBlockingStream);
+  }
+
   auto element_size = DataType2Size(ndarray->dtype());
   HTStride numpy_stride = ndarray->stride();
   for (auto& v : numpy_stride)
     v *= element_size;
 
   PyObject* ret = nullptr;
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES_EXCEPT_FLOAT16(
     ndarray->dtype(), spec_t, "ToNumpy", [&]() {
       auto* watcher = new StorageWathcer(ndarray->storage());
       py::capsule deref(watcher, [](void* watcher) {

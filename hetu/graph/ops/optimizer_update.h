@@ -75,6 +75,16 @@ class SGDUpdateOpImpl : public OptimizerUpdateOpInterface {
                  RuntimeContext& runtime_ctx) const override;
 };
 
+class SGDUpdateWithGradScalerOpImpl : public OptimizerUpdateOpInterface {
+ public:
+  SGDUpdateWithGradScalerOpImpl(float learning_rate)
+  : OptimizerUpdateOpInterface(quote(SGDUpdateWithGradScalerOp), learning_rate) {}
+
+ protected:
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& runtime_ctx) const override;
+};
+
 class MomentumUpdateOpImpl : public OptimizerUpdateOpInterface {
  public:
   MomentumUpdateOpImpl(float learning_rate, float momentum, bool nesterov)
@@ -113,6 +123,9 @@ class MomentumUpdateOpImpl : public OptimizerUpdateOpInterface {
 
 Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, float learning_rate,
                        OpMeta op_meta = OpMeta());
+
+Tensor MakeSGDUpdateWithGradScalerOp(Tensor param, Tensor grad, Tensor infinite_count, float learning_rate,
+                                     OpMeta op_meta = OpMeta());
 
 Tensor MakeMomentumUpdateOp(Tensor param, Tensor grad, Tensor velocity,
                             float learning_rate, float momentum, bool nesterov,

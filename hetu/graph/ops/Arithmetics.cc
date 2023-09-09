@@ -503,30 +503,43 @@ void DivElewiseGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorLi
 }
 
 Tensor MakeAddElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
+
+  TensorList inputs = {std::move(a), std::move(b)};
+  DataType input_type = DataType::UNDETERMINED;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<AddElewiseOpImpl>(),
-           {std::move(a), std::move(b)},
+           std::move(inputs),
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeSubElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
+  TensorList inputs = {std::move(a), std::move(b)};
+  DataType input_type = DataType::UNDETERMINED;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<SubElewiseOpImpl>(),
-           {std::move(a), std::move(b)},
+           std::move(inputs),
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeMulElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
+  TensorList inputs = {std::move(a), std::move(b)};
+  DataType input_type = DataType::UNDETERMINED;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<MulElewiseOpImpl>(),
-           {std::move(a), std::move(b)},
+           std::move(inputs),
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeDivElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
+  TensorList inputs = {std::move(a), std::move(b)};
+  DataType input_type = DataType::UNDETERMINED;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<DivElewiseOpImpl>(),
-           {std::move(a), std::move(b)},
+           std::move(inputs),
            std::move(op_meta))->output(0);
 }
 

@@ -26,7 +26,7 @@ void Conv2dBroadcastCpu(const NDArray& input, NDArray& output,
   HT_ASSERT(input->shape(0) == output->shape(1));
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   
   size_t batch_size = output->shape(0);
   size_t input_size = input->shape(0);

@@ -57,7 +57,7 @@ void ConcatCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
   HT_ASSERT_SAME_DEVICE(inputA, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   size_t offset1 = inputA->shape(axis);
@@ -106,7 +106,7 @@ void ConcatGradientCpu(const NDArray& output_grad, NDArray& input_grad,
   HT_ASSERT_SAME_DEVICE(output_grad, input_grad);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = input_grad->numel();
   size_t big_offset = output_grad->shape(axis);

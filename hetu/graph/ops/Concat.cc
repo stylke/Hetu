@@ -71,9 +71,12 @@ void ConcatGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& 
 
 Tensor MakeConcatOp(Tensor inputA, Tensor inputB, size_t axis,
                     OpMeta op_meta) {
+  TensorList inputs = {std::move(inputA), std::move(inputB)};
+  DataType input_type = DataType::UNDETERMINED;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<ConcatOpImpl>(axis),
-          {std::move(inputA), std::move(inputB)},
+          std::move(inputs),
           std::move(op_meta))->output(0);
 }
 

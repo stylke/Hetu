@@ -29,7 +29,7 @@ void ReduceCpu(const NDArray& input, NDArray& output, const HTAxes& axes,
     }
     auto _future = cpu_stream.EnqueueTask(
       [stream, input, output, in_shape, in_stride, out_shape, out_stride, red_type]() {
-        dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+        dnnl::engine eng(dnnl::engine::kind::cpu, 0);
         auto src_md = dnnl::memory::desc(in_shape, dnnl::memory::data_type::f32, in_stride);
         auto dst_md = dnnl::memory::desc(out_shape, dnnl::memory::data_type::f32, out_stride);
 
@@ -49,7 +49,7 @@ void ReduceCpu(const NDArray& input, NDArray& output, const HTAxes& axes,
         }
         else {
           // Create primitive descriptor.
-          dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+          dnnl::engine eng(dnnl::engine::kind::cpu, 0);
           auto reduction_pd = dnnl::reduction::primitive_desc(
                   eng, algo, src_md, dst_md, float(0.f), float(0.f));
 

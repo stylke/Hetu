@@ -39,9 +39,12 @@ HTShapeList ReluGradientOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeReluOp(Tensor input, OpMeta op_meta) {
+  TensorList inputs = {std::move(input)};
+  DataType input_type = DataType::FLOAT16;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<ReluOpImpl>(),
-        {std::move(input)},
+        std::move(inputs),
         std::move(op_meta))->output(0);
 }
 

@@ -17,13 +17,17 @@ class ArrayReshapeOpImpl : public OpInterface {
   struct constrcutor_access_key {};
 
  public:
-  ArrayReshapeOpImpl(const HTShape& output_shape)
+  ArrayReshapeOpImpl(const HTShape& output_shape, bool is_inplace = false)
   : OpInterface(quote(ArrayReshapeOp)),
-    _global_output_shape(output_shape) { // default is global output shape, if distributed, then turn into local output shape
+     _global_output_shape(output_shape), _inplace(is_inplace) { // default is global output shape, if distributed, then turn into local output shape
   }
 
   HTShape get_output_shape() const {
     return _global_output_shape;
+  }
+
+  bool inplace() const {
+    return _inplace;
   }
 
   HTShape get_output_shape(const HTShape& input_shape) const {
@@ -143,6 +147,9 @@ class ArrayReshapeOpImpl : public OpInterface {
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
+  NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
+                        RuntimeContext& runtime_ctx) const override;
+
   TensorList DoGradient(Operator& op, const TensorList& grad_outputs) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
@@ -150,11 +157,14 @@ class ArrayReshapeOpImpl : public OpInterface {
   HTShape _global_output_shape;
   // HTShape _local_output_shape;
 
+  bool _inplace;
+
  public:
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ArrayReshapeOpImpl&>(rhs);
-      return (get_output_shape() == rhs_.get_output_shape());
+      return (get_output_shape() == rhs_.get_output_shape()
+              && inplace() == rhs_.inplace());
     }
     return false;
   }
@@ -163,11 +173,22 @@ class ArrayReshapeOpImpl : public OpInterface {
 Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
                           OpMeta op_meta = OpMeta());
 
+Tensor MakeViewOp(Tensor input, const HTShape& output_shape,
+                  OpMeta op_meta = OpMeta());
+
 class ArrayReshapeGradientOpImpl : public OpInterface {
 
  public:
-  ArrayReshapeGradientOpImpl()
-  : OpInterface(quote(ArrayReshapeGradientOp)) {
+  ArrayReshapeGradientOpImpl(bool is_inplace = false, const HTShape& in_shape = {})
+  : OpInterface(quote(ArrayReshapeGradientOp)), _inplace(is_inplace), _input_shape(in_shape) {
+  }
+
+  bool inplace() const {
+    return _inplace;
+  }
+
+  HTShape input_shape() const {
+    return _input_shape;
   }
 
  protected:
@@ -182,17 +203,31 @@ class ArrayReshapeGradientOpImpl : public OpInterface {
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
+  NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
+                        RuntimeContext& runtime_ctx) const override;
+
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
+
+  bool _inplace;
+
+  HTShape _input_shape;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const ArrayReshapeGradientOpImpl&>(rhs);
+      return (inplace() == rhs_.inplace()
+              && input_shape() == rhs_.input_shape());
+    }
   }
 
 };
 
 Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input,
                                   OpMeta op_meta = OpMeta());
+
+Tensor MakeViewGradientOp(Tensor grad_output, Tensor ori_input, const HTShape& in_shape,
+                          OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

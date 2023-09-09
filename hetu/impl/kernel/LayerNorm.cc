@@ -71,7 +71,7 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
       auto _future = cpu_stream.EnqueueTask(
       [stream, in_arr, ln_scale, ln_bias, mean_arr, var_arr, out_arr, temp_strideA, temp_strideC,
       dimA, strideA, dimC, strideC, eps, last_dims, ndim]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng);
       auto src_md = dnnl::memory::desc(in_arr->shape(), dnnl::memory::data_type::f32, in_arr->stride());
       auto dst_md = dnnl::memory::desc(mean_arr->shape(), dnnl::memory::data_type::f32, mean_arr->stride());
@@ -205,7 +205,7 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       auto _future = cpu_stream.EnqueueTask(
       [stream, out_grads, in_arr, ln_scale, grad_scale, grad_bias, grad_arr, mean_arr, var_arr, 
       reduce_dims, eps, ndim, lastdims, total_elements, size]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       spec_t* ds = NULL;
       DataPtr ds_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
       ds = (spec_t*) ds_ptr.ptr;

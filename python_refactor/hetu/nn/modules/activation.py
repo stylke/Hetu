@@ -16,8 +16,9 @@ __all__ = [
 class ReLU(Module):
 
     def __init__(self, inplace: bool = False):
-        super(ReLU, self).__init__()
-        self.inplace = inplace
+        with hetu.graph("define_and_run"):
+            super(ReLU, self).__init__()
+            self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
         return hetu.relu(input)
@@ -26,28 +27,34 @@ class ReLU(Module):
 class Sigmoid(Module):
 
     def __init__(self, inplace: bool = False):
-        super(Sigmoid, self).__init__()
-        self.inplace = inplace
+        with hetu.graph("define_and_run"):
+            super(Sigmoid, self).__init__()
+            self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return hetu.sigmoid(input)
+        with hetu.graph("define_and_run"):
+            return hetu.sigmoid(input)
 
 class Tanh(Module):
 
     def __init__(self, inplace: bool = False):
-        super(Tanh, self).__init__()
-        self.inplace = inplace
+        with hetu.graph("define_and_run"):
+            super(Tanh, self).__init__()
+            self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return hetu.tanh(input)
+        with hetu.graph("define_and_run"):
+            return hetu.tanh(input)
 
 
 class LeakyReLU(Module):
 
     def __init__(self, negative_slope: float = 0.1, inplace: bool = False):
-        super(LeakyReLU, self).__init__()
-        self.negative_slope = negative_slope
-        self.inplace = inplace
+        with hetu.graph("define_and_run"):
+            super(LeakyReLU, self).__init__()
+            self.negative_slope = negative_slope
+            self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return hetu.leakyrelu(input, self.negative_slope)
+        with hetu.graph("define_and_run"):
+            return hetu.leakyrelu(input, self.negative_slope)

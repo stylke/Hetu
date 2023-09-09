@@ -15,6 +15,7 @@ size_t DataType2Size(const DataType& t) {
     __HT_DATA_TYPE_CASE_RETURN_SIZE(DataType::FLOAT16);
     __HT_DATA_TYPE_CASE_RETURN_SIZE(DataType::FLOAT32);
     __HT_DATA_TYPE_CASE_RETURN_SIZE(DataType::FLOAT64);
+    __HT_DATA_TYPE_CASE_RETURN_SIZE(DataType::BFLOAT16);
     __HT_DATA_TYPE_CASE_RETURN_SIZE(DataType::BOOL); // TODO: handle boolean
     case kUndeterminedDataType:
       HT_RUNTIME_ERROR << "Cannot get size when data type is undetermined";
@@ -37,6 +38,7 @@ std::string DataType2Str(const DataType& t) {
     __HT_DATA_TYPE_CASE_RETURN_STR(DataType::FLOAT16);
     __HT_DATA_TYPE_CASE_RETURN_STR(DataType::FLOAT32);
     __HT_DATA_TYPE_CASE_RETURN_STR(DataType::FLOAT64);
+    __HT_DATA_TYPE_CASE_RETURN_STR(DataType::BFLOAT16);
     __HT_DATA_TYPE_CASE_RETURN_STR(DataType::BOOL);
     case kUndeterminedDataType: return "undertermined";
     default:

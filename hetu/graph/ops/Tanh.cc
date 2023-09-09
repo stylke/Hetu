@@ -39,9 +39,12 @@ HTShapeList TanhGradientOpImpl::DoInferShape(Operator& op,
 }
 
 Tensor MakeTanhOp(Tensor input, OpMeta op_meta) {
+  TensorList inputs = {std::move(input)};
+  DataType input_type = DataType::FLOAT32;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
     std::make_shared<TanhOpImpl>(),
-    {std::move(input)},
+    std::move(inputs),
     std::move(op_meta))->output(0);
 }
 

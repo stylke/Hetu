@@ -35,7 +35,7 @@ void SoftmaxCrossEntropyCpu(const NDArray& input, const NDArray& label,
     input->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [input, label, output, stream, size]() {
-        dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+        dnnl::engine eng(dnnl::engine::kind::cpu, 0);
         DataPtr temp_data_ptr = AllocFromMemoryPool(input->device(), size * sizeof(spec_t));
         void* temp_data = temp_data_ptr.ptr;
         dnnl::stream engine_stream(eng);
@@ -127,7 +127,7 @@ void SoftmaxCrossEntropyGradientCpu(const NDArray& input_y,
     input_y->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [input_y, label, grad, output, stream, c_, size]() {
-        dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+        dnnl::engine eng(dnnl::engine::kind::cpu, 0);
         DataPtr temp_data_ptr =
           AllocFromMemoryPool(grad->device(), size * sizeof(spec_t));
         void* temp_data = temp_data_ptr.ptr;

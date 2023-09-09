@@ -11,7 +11,7 @@ __global__ void relu_kernel(const spec_t* input, size_t size, spec_t* output) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  output[idx] = (double(input[idx]) < 0) ? 0 : input[idx];
+  output[idx] = (double(input[idx]) < 0) ? spec_t(0) : input[idx];
 }
 
 template <typename spec_t>

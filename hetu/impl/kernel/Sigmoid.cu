@@ -13,7 +13,7 @@ __global__ void sigmoid_kernel(const spec_t* input, size_t size,
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  output[idx] = 1.0 / (1.0 + 1.0 / hetu::cuda::cuda_exp(input[idx]));
+  output[idx] = 1.0 / (1.0 + hetu::cuda::cuda_exp(-input[idx]));
 }
 
 void SigmoidCuda(const NDArray& input, NDArray& output, const Stream& stream) {

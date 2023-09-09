@@ -34,7 +34,7 @@ void RollCpu(const NDArray& input, const HTShape& shift, const HTAxes& axis,
   HT_ASSERT_SAME_DEVICE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t len = input->numel();
   int64_t nums = shift.size();

@@ -38,9 +38,12 @@ LeakyReluGradientOpImpl::DoInferShape(Operator& op,const HTShapeList& input_shap
 }
 
 Tensor MakeLeakyReluOp(Tensor input, double alpha, OpMeta op_meta) {
+  TensorList inputs = {std::move(input)};
+  DataType input_type = DataType::FLOAT16;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<LeakyReluOpImpl>(alpha),
-        {std::move(input)},
+        std::move(inputs),
         std::move(op_meta))->output(0);   
 }
 

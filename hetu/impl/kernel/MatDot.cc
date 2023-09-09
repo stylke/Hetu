@@ -25,7 +25,7 @@ void MatDotCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
   HT_ASSERT_EXCHANGABLE(inputA, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, cpu_stream.stream_id());
+  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = inputA->numel();
   size_t size2 = inputB->numel();

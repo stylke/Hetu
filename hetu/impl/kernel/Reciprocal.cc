@@ -30,7 +30,7 @@ void ReciprocalCpu(const NDArray& input, NDArray& output,
     input->dtype(), spec_t, "ReciprocalCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output]() {
-        dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index());
+        dnnl::engine eng(dnnl::engine::kind::cpu, 0);
         auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
         auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
         auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());

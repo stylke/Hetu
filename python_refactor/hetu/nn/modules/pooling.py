@@ -16,21 +16,23 @@ __all__ = [
 class MaxPoolNd(Module):
 
     def __init__(self, kernel_size: Tuple[int, ...], stride: Tuple[int, ...], padding: Tuple[int, ...]) -> None:
-        super(MaxPoolNd, self).__init__()
-        self.kernel_size = list(kernel_size)
-        self.stride = list(stride)
-        self.padding = list(padding)
+        with hetu.graph("define_and_run"):
+            super(MaxPoolNd, self).__init__()
+            self.kernel_size = list(kernel_size)
+            self.stride = list(stride)
+            self.padding = list(padding)
 
 
 class MaxPool2d(MaxPoolNd):
 
     def __init__(self, kernel_size: Union[int, Tuple[int, int]], 
                  stride: Union[int, Tuple[int, int]] = 1, padding: Union[int, Tuple[int, int]] = 0) -> None:
-        kernel_size_ = _pair(kernel_size)
-        stride_ = _pair(stride)
-        padding_ = _pair(padding)
-        super(MaxPool2d, self).__init__(
-            kernel_size_, stride_, padding_)
+        with hetu.graph("define_and_run"):
+            kernel_size_ = _pair(kernel_size)
+            stride_ = _pair(stride)
+            padding_ = _pair(padding)
+            super(MaxPool2d, self).__init__(
+                kernel_size_, stride_, padding_)
 
     def forward(self, input: Tensor) -> Tensor:
         return hetu.maxpool(input, self.kernel_size[0], self.kernel_size[1], self.padding[0], self.stride[0])
@@ -39,21 +41,23 @@ class MaxPool2d(MaxPoolNd):
 class AvgPoolNd(Module):
 
     def __init__(self, kernel_size: Tuple[int, ...], stride: Tuple[int, ...], padding: Tuple[int, ...]) -> None:
-        super(AvgPoolNd, self).__init__()
-        self.kernel_size = list(kernel_size)
-        self.stride = list(stride)
-        self.padding = list(padding)
+        with hetu.graph("define_and_run"):
+            super(AvgPoolNd, self).__init__()
+            self.kernel_size = list(kernel_size)
+            self.stride = list(stride)
+            self.padding = list(padding)
 
 
 class AvgPool2d(AvgPoolNd):
 
     def __init__(self, kernel_size: Union[int, Tuple[int, int]], 
                  stride: Union[int, Tuple[int, int]] = 1, padding: Union[int, Tuple[int, int]] = 0) -> None:
-        kernel_size_ = _pair(kernel_size)
-        stride_ = _pair(stride)
-        padding_ = _pair(padding)
-        super(AvgPool2d, self).__init__(
-            kernel_size_, stride_, padding_)
+        with hetu.graph("define_and_run"):
+            kernel_size_ = _pair(kernel_size)
+            stride_ = _pair(stride)
+            padding_ = _pair(padding)
+            super(AvgPool2d, self).__init__(
+                kernel_size_, stride_, padding_)
 
     def forward(self, input: Tensor) -> Tensor:
         return hetu.avgpool(input, self.kernel_size[0], self.kernel_size[1], self.padding[0], self.stride[0])

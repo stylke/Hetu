@@ -85,18 +85,24 @@ void NLLGradOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs
 Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
                      ReductionType reduction,
                      OpMeta op_meta) {
+  TensorList inputs = {preds, labels};
+  DataType input_type = DataType::FLOAT32;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<NLLLossOpImpl>(reduction),
-        {std::move(preds), std::move(labels)},
+        std::move(inputs),
         std::move(op_meta))->output(0);
 }
 
 Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
                      const std::string& reduction ,
                      OpMeta op_meta) {
+  TensorList inputs = {preds, labels};
+  DataType input_type = DataType::FLOAT32;
+  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<NLLLossOpImpl>(Str2ReductionType(reduction)),
-        {std::move(preds), std::move(labels)},
+        std::move(inputs),
         std::move(op_meta))->output(0);
 }
 

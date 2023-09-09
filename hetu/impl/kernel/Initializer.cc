@@ -13,18 +13,18 @@ template <typename spec_t>
 void init_normal_cpu(spec_t* arr, size_t size, spec_t mean, spec_t stddev,
                      uint64_t seed) {
   std::mt19937 engine(seed);
-  std::normal_distribution<spec_t> dist(mean, stddev);
+  std::normal_distribution<double> dist(mean, stddev);
   for (size_t i = 0; i < size; i++)
-    arr[i] = dist(engine);
+    arr[i] = spec_t(dist(engine));
 }
 
 template <typename spec_t>
 void init_uniform_cpu(spec_t* arr, size_t size, spec_t lb, spec_t ub,
                       uint64_t seed) {
   std::mt19937 engine(seed);
-  std::uniform_real_distribution<spec_t> dist(lb, ub);
+  std::uniform_real_distribution<double> dist(lb, ub);
   for (size_t i = 0; i < size; i++)
-    arr[i] = dist(engine);
+    arr[i] = spec_t(dist(engine));
 }
 
 template <typename spec_t>
@@ -32,10 +32,10 @@ void init_truncated_normal_cpu(spec_t* arr, size_t size, spec_t mean,
                                spec_t stddev, spec_t lb, spec_t ub,
                                uint64_t seed) {
   std::mt19937 engine(seed);
-  std::normal_distribution<spec_t> dist(mean, stddev);
+  std::normal_distribution<double> dist(mean, stddev);
   for (size_t i = 0; i < size; i++) {
     do {
-      arr[i] = dist(engine);
+      arr[i] = spec_t(dist(engine));
     } while (arr[i] < lb || arr[i] > ub);
   }
 }

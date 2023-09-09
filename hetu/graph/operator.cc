@@ -89,7 +89,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     for (size_t i = 0; i < output_shapes.size(); i++) {
       outputs.push_back(NDArray::empty(output_shapes[i],
                                        op->instantiation_ctx().placement,
-                                       op->output(0)->dtype()));
+                                       op->output(i)->dtype()));
     }
   }
   return outputs;
@@ -134,7 +134,8 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
   // Deduce requires grad
   bool requires_grad = false;
   if (is_variable_op(*_body)) {
-    requires_grad = reinterpret_cast<VariableOpImpl&>(*_body).requires_grad();
+    requires_grad = reinterpret_cast<VariableOpImpl&>(*_body).requires_grad() | 
+                    reinterpret_cast<ParallelVariableOpImpl&>(*_body).requires_grad();
   } else {
     requires_grad =
       std::any_of(_inputs.begin(), _inputs.end(),

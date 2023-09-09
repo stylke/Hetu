@@ -50,6 +50,8 @@ std::string ArgType2Str(ArgType type) {
       return "List[hetu.Operator]";
     case ArgType::FEED_DICT:
       return "FeedDict";
+    case ArgType::SGDOPTIMIZER:
+      return "SGDOptimizer";
     case ArgType::DISTRIBUTED_STATES:
       return "hetu.DistributedStates";
     case ArgType::INITIALIZER:
@@ -122,6 +124,8 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::OPERATOR_LIST;
   if (type == "FeedDict" || type == "feed_dict")
     return ArgType::FEED_DICT;
+  if (type == "Optimizer" || type == "SGDOptimizer")
+    return ArgType::SGDOPTIMIZER;
   if (type == "hetu.DistributedStates" || type == "DistributedStates")
     return ArgType::DISTRIBUTED_STATES;
   if (type == "hetu.Initializer" || type == "Initializer")
@@ -307,6 +311,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyOperatorList(obj);
     case ArgType::FEED_DICT:
       return CheckPyFeedDict(obj);
+    case ArgType::SGDOPTIMIZER:
+      return CheckPySGDOptimizer(obj);
     case ArgType::DISTRIBUTED_STATES:
       return CheckPyDistributedStates(obj);
     case ArgType::INITIALIZER:

@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.17)
+add_compile_options(-w)
 
 project(Hetu CXX)
 
@@ -33,7 +34,7 @@ if(${HETU_COMPILE_CUDA})
   include_directories(SYSTEM ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
   if (${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL "11")
-    set(HETU_CUDA_ARCH 52 60 61 70 75 80 86)
+    set(HETU_CUDA_ARCH 60 61 70 75 80 86)
   else()
     set(HETU_CUDA_ARCH 50 52 60 61 70 75)
   endif()

@@ -66,14 +66,14 @@ __global__ void interpolate_kernel(const spec_t *input, int64_t n, int64_t c,
       int64_t out_h_id = hw_id / out_w;
       int64_t out_w_id = hw_id % out_w;
 
-      spec_t in_h_id_ = align_corners ? (ratio_h * out_h_id) :
-                                        (ratio_h * (out_h_id + 0.5) - 0.5);
-      int64_t in_h_id = floor(in_h_id_);
+      spec_t in_h_id_ = align_corners ? spec_t(ratio_h * out_h_id) :
+                                        spec_t(ratio_h * (out_h_id + 0.5) - 0.5);
+      int64_t in_h_id = int64_t(hetu::cuda::cuda_floor(in_h_id_));
       spec_t in_h_delta = in_h_id_ - in_h_id;
 
-      spec_t in_w_id_ = align_corners ? (ratio_w * out_w_id) :
-                                        (ratio_w * (out_w_id + 0.5) - 0.5);
-      int64_t in_w_id = floor(in_w_id_);
+      spec_t in_w_id_ = align_corners ? spec_t(ratio_w * out_w_id) :
+                                        spec_t(ratio_w * (out_w_id + 0.5) - 0.5);
+      int64_t in_w_id = int64_t(hetu::cuda::cuda_floor(in_w_id_));
       spec_t in_w_delta = in_w_id_ - in_w_id;
 
       spec_t coefficients[4];
@@ -126,14 +126,14 @@ __global__ void interpolate_gradient_kernel(const spec_t *output, int64_t n, int
     int64_t out_h_id = hw_id / out_w;
     int64_t out_w_id = hw_id % out_w;
 
-    spec_t in_h_id_ = align_corners ? (ratio_h * out_h_id) :
-                                      (ratio_h * (out_h_id + 0.5) - 0.5);
-    int64_t in_h_id = floor(in_h_id_);
+    spec_t in_h_id_ = align_corners ? spec_t(ratio_h * out_h_id) :
+                                      spec_t(ratio_h * (out_h_id + 0.5) - 0.5);
+    int64_t in_h_id = int64_t(hetu::cuda::cuda_floor(in_h_id_));
     spec_t in_h_delta = in_h_id_ - in_h_id;
 
-    spec_t in_w_id_ = align_corners ? (ratio_w * out_w_id) :
-                                      (ratio_w * (out_w_id + 0.5) - 0.5);
-    int64_t in_w_id = floor(in_w_id_);
+    spec_t in_w_id_ = align_corners ? spec_t(ratio_w * out_w_id) :
+                                      spec_t(ratio_w * (out_w_id + 0.5) - 0.5);
+    int64_t in_w_id = int64_t(hetu::cuda::cuda_floor(in_w_id_));
     spec_t in_w_delta = in_w_id_ - in_w_id;
 
     spec_t coeffs_h[4];

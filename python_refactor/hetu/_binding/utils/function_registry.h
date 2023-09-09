@@ -78,10 +78,6 @@ int RegisterOptimizerClassMethod(const char* name, PyCFunction func, int flags,
   static auto __optimizer_class_method_##name##_registry =                        \
     hetu::graph::RegisterOptimizerClassMethod(quote(name), func, flags, doc)
 
-std::vector<PyMethodDef>& get_registered_initializer_methods();
-
-std::vector<PyMethodDef>& get_registered_initializer_class_methods();
-
 int RegisterInitializerMethod(const char* name, PyCFunction func, int flags,
                               const char* doc);
 
@@ -95,6 +91,33 @@ int RegisterInitializerClassMethod(const char* name, PyCFunction func, int flags
 #define REGISTER_INITIALIZER_CLASS_METHOD(name, func, flags, doc)                   \
   static auto __initializer_class_method_##name##_registry =                        \
     hetu::graph::RegisterInitializerClassMethod(quote(name), func, flags, doc)    
+
+PyNumberMethods& get_registered_dataloader_number_methods();
+
+std::vector<PyMethodDef>& get_registered_dataloader_methods();
+
+std::vector<PyMethodDef>& get_registered_dataloader_class_methods();
+
+int RegisterDataloaderMethod(const char* name, PyCFunction func, int flags,
+                            const char* doc);
+
+int RegisterDataloaderClassMethod(const char* name, PyCFunction func, int flags,
+                                 const char* doc);
+
+#define REGISTER_DATALOADER_NUMBER_METHOD(slot, func)                              \
+  static auto __dataloader_number_method_##slot##_registry =                       \
+    ((hetu::graph::get_registered_dataloader_number_methods().slot) = (func))
+
+#define REGISTER_DATALOADER_METHOD(name, func, flags, doc)                         \
+  static auto __dataloader_method_##name##_registry =                              \
+    hetu::graph::RegisterDataloaderMethod(quote(name), func, flags, doc)
+
+#define REGISTER_DATALOADER_CLASS_METHOD(name, func, flags, doc)                   \
+  static auto __dataloader_class_method_##name##_registry =                        \
+    hetu::graph::RegisterDataloaderClassMethod(quote(name), func, flags, doc)
+std::vector<PyMethodDef>& get_registered_initializer_methods();
+
+std::vector<PyMethodDef>& get_registered_initializer_class_methods();
 
 } // namespace graph
 

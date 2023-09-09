@@ -133,7 +133,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     }
 
     // loss & grad should div by num_micro_batches when reduction type = MEAN!!! 
-    if (is_loss_gradient_op(op)) {
+    if (is_loss_gradient_op(op) && op->input(0)->has_distributed_states()) {
       int dp = op->input(0)->get_distributed_states().get_dim(0);
       auto& loss_grad_op_impl = reinterpret_cast<LossGradientOpImpl&>(op->body());
       if ((_num_micro_batches > 1 || dp > 1) && loss_grad_op_impl.reduction() == kMEAN) {
@@ -924,7 +924,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   // split into fw_topo and bw_topo
   OpRefList fw_topo, bw_topo;
-  std::tie(fw_topo, bw_topo) = disentangle_forward_and_backward_ops(updated_topo, {loss});
+  std::tie(fw_topo, bw_topo) = disentangle_forward_and_backward_ops_by_loss(updated_topo, {loss});
+  // OpRefList fw_topo, bw_topo;
+  // std::tie(fw_topo, bw_topo) = disentangle_forward_and_backward_ops(updated_topo);
 
   // get local_fw_topo and local_bw_topo
   // ops to substitute comm_op is in the same placement_group, but in the different placement
@@ -1125,7 +1127,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   HT_LOG_DEBUG << local_device << ": 3. get results[end]";
 
   // get op execute time, sort and analysis
-  if (local_device.index() == 0) {
+  bool is_analysis_perf = false;
+  if (local_device.index() == 0 && is_analysis_perf) {
     std::vector<std::pair<OpId, int64_t>> op_execute_time;
     // HT_LOG_INFO << local_device << ": local_topo = " << local_topo;
     for (auto& op_ref : local_topo) {
@@ -1133,7 +1136,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       if (is_placeholder_op(op) || is_variable_op(op)) {
         continue;
       }
-      op_execute_time.push_back({op->id(), op->TimeCost()});
+      // get time cost for all micro batches
+      int64_t time_cost = 0;
+      for (int i = 0; i < num_micro_batches; i++) {
+        time_cost += op->TimeCost(i);
+      }
+      op_execute_time.push_back({op->id(), time_cost});
     }
     std::sort(op_execute_time.begin(), op_execute_time.end(), [](
       std::pair<OpId, int64_t>& op_t1, std::pair<OpId, int64_t>& op_t2) {
@@ -1188,6 +1196,77 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                 << "blocking time: " << blocking_time << " ms, "
                 << "other time: " << other_time << " ms" << std::endl
                 << out.str();
+  }
+  return results;
+}
+
+// TODO: merge two `Run` func
+NDArrayList ExecutableGraph::Run(const TensorList& fetches,
+                                 const FeedDict& feed_dict) {
+  // TODO: For each pair of `fetches` and `feed_dict`,
+  // deduce the optimal execution plan, and cache it.
+  for (auto& fetch : fetches) {
+    if (fetch->placement().is_undetermined()) {
+      Instantiate(fetches, kCUDA);
+      break;
+    }
+  }
+
+  auto is_op_computed = [&](const Operator& op) -> bool {
+    return Operator::all_output_tensors_of(op, [&](const Tensor& tensor) {
+      return feed_dict.find(tensor->id()) != feed_dict.end();
+    });
+  };
+  OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+
+  RuntimeContext runtime_ctx(topo.size());
+  Tensor2NDArrayMap tensor2data;
+  tensor2data.reserve(topo.size());
+  tensor2data.insert(feed_dict.begin(), feed_dict.end());
+  NDArrayList results(fetches.size());
+  std::unordered_map<TensorId, size_t> fetch_indices;
+  for (size_t i = 0; i < fetches.size(); i++)
+    fetch_indices[fetches.at(i)->id()] = i;
+  std::unordered_set<OpId> to_sync_op_ids;
+  to_sync_op_ids.reserve(fetches.size());
+
+  for (auto& op_ref : topo) {
+    auto& op = op_ref.get();
+    // Question: Is it possible that some outputs are fed in
+    // while the rest are not?
+    bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
+      return feed_dict.find(tensor->id()) != feed_dict.end();
+    });
+    if (computed)
+      continue;
+
+    NDArrayList inputs;
+    inputs.reserve(op->num_inputs());
+    for (size_t i = 0; i < op->num_inputs(); i++) {
+      // TODO: Support async transfer. And this could be checked for once.
+      auto& data = tensor2data[op->input(i)->id()];
+      if (data->device() != op->input(i)->placement() ||
+          data->dtype() != op->input(i)->dtype()) {
+        tensor2data[op->input(i)->id()] =
+          NDArray::to(data, op->input(i)->placement(), op->input(i)->dtype(),
+                      op->stream_index());
+      }
+      inputs.push_back(tensor2data[op->input(i)->id()]);
+    }
+    auto outputs = op->Compute(inputs, runtime_ctx);
+
+    for (size_t i = 0; i < outputs.size(); i++) {
+      tensor2data.insert({op->output(i)->id(), outputs[i]});
+      auto it = fetch_indices.find(op->output(i)->id());
+      if (it != fetch_indices.end()) {
+        results[it->second] = outputs[i];
+        to_sync_op_ids.insert(op->id());
+      }
+    }
+    // TODO: remove inputs that are no longer used
+  }
+  for (auto op_id : to_sync_op_ids) {
+    _op_indexing[op_id]->Sync();
   }
   return results;
 }
