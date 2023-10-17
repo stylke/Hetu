@@ -108,7 +108,7 @@ def pretrain(args):
                 results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict)
                 end_time = time.time()
                 loss_out = results[0].numpy(force=True)                
-                print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.3f'%(local_device, ep, step_num, loss_out, end_time-start_time))
+                print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
                 step_num += 1
                 global_step_num += 1
 

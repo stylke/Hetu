@@ -39,6 +39,7 @@ def pretrain(args):
                        n_embd=args.hidden_size,
                        n_layer=args.num_hidden_layers, 
                        n_head=args.num_attention_heads, 
+                       seq_len=args.seq_length,
                        # n_inner=4*args.hidden_size,
                        resid_pdrop=args.dropout_prob,
                        embd_pdrop=args.dropout_prob,
@@ -49,8 +50,10 @@ def pretrain(args):
                        dp=args.dp
                        )
     # Input data file names definition
-    dict_seqlen2predlen = {128:20, 512:80}
-    pred_len = dict_seqlen2predlen[config.max_position_embeddings]
+    # dict_seqlen2predlen = {128:20, 512:80}
+    # assert config.seq_len == 128 or config.seq_len == 512, "seq_len must be 128 or 512, got " + config.seq_len
+    # pred_len = dict_seqlen2predlen[config.max_position_embeddings]
+    pred_len = config.seq_len
     dataset = args.dataset
     if dataset not in ['wikicorpus_en', 'wiki_books']:
         raise(NotImplementedError)
@@ -65,12 +68,14 @@ def pretrain(args):
 
     micro_batch_size = config.global_batch_size // config.num_micro_batches
     dp_size = config.global_batch_size // config.dp
-    print(f'{local_device}: 3d parallel config: global_batch_size={config.global_batch_size}, num_micro_batches={config.num_micro_batches}, micro_batch_size={micro_batch_size}, dp={config.dp}')
+    print(f'''{local_device}: 3d parallel config: 
+          global_batch_size={config.global_batch_size}, num_micro_batches={config.num_micro_batches}, micro_batch_size={micro_batch_size}, 
+          dp={config.dp}, num_layers={config.num_hidden_layers}, hidden_size={config.hidden_size}, num_heads={config.num_attention_heads}, seq_length={config.n_positions}''')
     # return
-    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, 128], ds=ds_split0_dup, device_group=device_groups[0], name='input_ids')
-    token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, 128], ds=ds_split0_dup, device_group=device_groups[0], name='token_type_ids')
-    attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[micro_batch_size, 128], ds=ds_split0_dup, device_group=device_groups[0], name='attention_mask')
-    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, 128], ds=ds_split0_dup, device_group=device_groups[1], name='masked_lm_labels')
+    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=ds_split0_dup, device_group=device_groups[0], name='input_ids')
+    token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=ds_split0_dup, device_group=device_groups[0], name='token_type_ids')
+    attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[micro_batch_size, config.seq_len], ds=ds_split0_dup, device_group=device_groups[0], name='attention_mask')
+    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=ds_split0_dup, device_group=device_groups[1], name='masked_lm_labels')
 
     print(f'{local_device}: build model begin...')
     loss, lm_logits = model(input_ids=input_ids,
@@ -91,7 +96,10 @@ def pretrain(args):
     for ep in range(num_epochs):
         step_num = 0
         for train_file in train_files:
-            dataloader = DataLoaderForGPT(train_file, dp_size, pred_len)
+            # walkaround: dataloader读取来的seq_len必定是128的, 这里暂时手动处理下
+            # dataloader = DataLoaderForGPT(train_file, dp_size, pred_len)
+            required_batch_size = dp_size * config.seq_len // 128
+            dataloader = DataLoaderForGPT(train_file, required_batch_size, pred_len)
             # todo: 保证dataloader.batch_num是dp的倍数
             for i in range(dataloader.batch_num):
                 # device 0, 1 读取第偶数个batch; device 2, 3 读取第奇数个batch
@@ -102,17 +110,17 @@ def pretrain(args):
                 start_time = time.time()
                 batch_data = dataloader.get_batch(i)
                 feed_dict = {
-                    input_ids: batch_data['input_ids'].astype(np.int64).reshape([dp_size, 128]),
-                    token_type_ids: batch_data['token_type_ids'].astype(np.int64).reshape([dp_size, 128]),
-                    attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([dp_size, 128]),
-                    masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([dp_size, 128]),
+                    input_ids: batch_data['input_ids'].astype(np.int64).reshape([dp_size, config.seq_len]),
+                    token_type_ids: batch_data['token_type_ids'].astype(np.int64).reshape([dp_size, config.seq_len]),
+                    attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([dp_size, config.seq_len]),
+                    masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([dp_size, config.seq_len]),
                     # loss_position_sum: np.array([np.where(batch_data['masked_lm_labels'].reshape(-1, 1)!=-1)[0].shape[0]]).astype(np.float32), # shape=[1,]
-                }
+                }                                                                                                            
                 results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
                 end_time = time.time()
                 if device_groups[1].contains(local_device):
                     loss_out = results[0].numpy(force=True).mean()
-                    print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.3f'%(local_device, ep, step_num, loss_out, end_time-start_time))
+                    print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
                 step_num += 1
                 global_step_num += 1
                 # return

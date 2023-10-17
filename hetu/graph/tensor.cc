@@ -50,7 +50,7 @@ void TensorDef::AddConsumer(Operator& op) {
 void TensorDef::DelConsumer(const Operator& op) {
   _consumers.erase(
     std::remove_if(_consumers.begin(), _consumers.end(),
-                   [&](const OpRef& x) { return x.get()->id() == op->id(); }));
+                   [&](const OpRef& x) { return x.get()->id() == op->id(); }), _consumers.end());
 }
 
 const Graph& TensorDef::graph() const {

@@ -15,6 +15,8 @@ __global__ void reduce_sum_naive_kernel(const spec_t* input, spec_t* output,
                                         size_t reduce_dim_size,
                                         size_t after_dim_size) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= befor_dim_size * after_dim_size)
+    return;  
   size_t x = idx / after_dim_size;
   size_t y = idx % after_dim_size;
   size_t start_ptr, end_ptr, stride;

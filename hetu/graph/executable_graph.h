@@ -47,7 +47,8 @@ class ExecutableGraph : public Graph {
                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                   const TensorIdSet& accumulated_tensor, const OpIdSet& accumulated_ops,
                   const FeedDict& feed_dict, const TensorList& fetches,
-                  const std::unordered_map<TensorId, size_t>& fetch_indices);
+                  const std::unordered_map<TensorId, size_t>& fetch_indices, 
+                  bool& is_continuous_p2p);
 
   void SubstituteCommOp(const OpRefList& topo_order);
 

@@ -113,6 +113,9 @@ class AllReduceOpImpl final : public OpInterface {
   bool DoMapToParallelDevices(Operator& op,
                               const DeviceGroup& pg) const override;
 
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;
+
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override;
 
@@ -156,6 +159,9 @@ class P2PSendOpImpl final : public OpInterface {
  protected:
   bool DoMapToParallelDevices(Operator& op,
                               const DeviceGroup& pg) const override;
+
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;
 
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override;
@@ -210,6 +216,9 @@ class P2PRecvOpImpl final : public OpInterface {
  protected:
   bool DoMapToParallelDevices(Operator& op,
                               const DeviceGroup& pg) const override;
+
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;
 
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override;
@@ -287,6 +296,9 @@ class BatchedISendIRecvOpImpl final : public OpInterface {
   }
 
  protected:
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;
+                    
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override;
 
@@ -333,7 +345,10 @@ class AllGatherOpImpl final : public OpInterface {
  protected:
   bool DoMapToParallelDevices(Operator& op,
                               const DeviceGroup& pg) const override;
-                               
+
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;
+
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override;
 
@@ -372,7 +387,10 @@ class ReduceScatterOpImpl final : public OpInterface {
  protected:
   bool DoMapToParallelDevices(Operator& op,
                               const DeviceGroup& pg) const override;
-                               
+
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;
+                                                    
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override;
 

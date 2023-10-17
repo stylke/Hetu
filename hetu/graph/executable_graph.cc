@@ -8,6 +8,7 @@
 #include "hetu/graph/ops/Arithmetics.h"
 #include "hetu/graph/ops/Loss.h"
 #include "hetu/impl/communication/comm_group.h"
+#include "nccl.h"
 
 namespace hetu {
 namespace graph {
@@ -105,20 +106,14 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         HT_ASSERT(op->num_inputs() > 0)
           << "Currently we cannot infer the devices "
           << "for operators with zero in-degree. : " << op;
-        // TODO: Tensor add is_grad attribute, and firstly infer non-grad input tensor's placement group
-        // if all input tensor are grad tensor, then infer the first input's placement group
-        // inferred = op->input(0)->placement_group();
-        for (auto input : op->inputs()) {
-          if (!input->is_grad()) {
-            inferred = input->placement_group();
-            break;
-          }
-        }
-        if (inferred.empty())
+        if (op->fw_op_id() != -1) {
+          inferred = _op_indexing[op->fw_op_id()]->placement_group();
+        } else {
           inferred = op->input(0)->placement_group();
+        }
       }
       op->MapToParallelDevices(inferred);
-      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op " << op << " inferred placement group = " << inferred;
+      // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": op " << op << " inferred placement group = " << inferred;
     }
     // udpate stages
     DeviceGroup stage_group;
@@ -831,7 +826,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
                                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                                   const TensorIdSet& accumulated_tensor, const OpIdSet& accumulated_ops,
                                   const FeedDict& feed_dict, const TensorList& fetches,
-                                  const std::unordered_map<TensorId, size_t>& fetch_indices) {
+                                  const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p) {
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
     bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
@@ -842,6 +837,21 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     
     if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
       continue;
+    }
+
+    // batched p2p send & recv
+    if (is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) {
+      if (!is_continuous_p2p) {
+        is_continuous_p2p = true;
+        CudaStreamSynchronize(hetu::impl::CUDAStream(Stream(hetu::impl::comm::GetLocalDevice(), kComputingStream)));
+        ncclGroupStart();
+        // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group start";
+      }
+    } else if (is_continuous_p2p) {
+      is_continuous_p2p = false;
+      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group end";
+      ncclGroupEnd();
+      CudaStreamSynchronize(hetu::impl::CUDAStream(Stream(hetu::impl::comm::GetLocalDevice(), kP2PStream)));
     }
 
     NDArrayList input_vals;
@@ -857,7 +867,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
           data->dtype() != input->dtype()) {
         tensor2data[input->id()] =
           NDArray::to(data, input->placement(), input->dtype(),
-                      kBlockingStream);
+                      op->instantiation_ctx().stream_index);
       }
       input_vals.push_back(tensor2data[input->id()]);
       // should free memory until op aync compute complete!!!
@@ -906,7 +916,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       Instantiate(fetches, local_device);
       // init topo contains comm_op
       OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
-      HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo;
+      // HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo;
 
       // substitute comm_op
       HT_LOG_DEBUG << local_device << ": substitute comm_op begin...";
@@ -920,7 +930,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   // update topo
   OpRefList updated_topo = Graph::TopoSort(fetches, -1, is_op_computed);
-  HT_LOG_DEBUG << local_device << ": updated global topo after substitute comm_op: " << updated_topo;
+  // HT_LOG_DEBUG << local_device << ": updated global topo after substitute comm_op: " << updated_topo;
 
   // split into fw_topo and bw_topo
   OpRefList fw_topo, bw_topo;
@@ -931,10 +941,29 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // get local_fw_topo and local_bw_topo
   // ops to substitute comm_op is in the same placement_group, but in the different placement
   OpRefList local_fw_topo, local_bw_topo, local_topo;
-  std::copy_if(fw_topo.begin(), fw_topo.end(), std::back_inserter(local_fw_topo),
-  [&](OpRef& op_ref) { return op_ref.get()->placement() == local_device; });
-  std::copy_if(bw_topo.begin(), bw_topo.end(), std::back_inserter(local_bw_topo),
-  [&](OpRef& op_ref) { return op_ref.get()->placement() == local_device; });
+  auto get_local_topo = [&](OpRefList& _topo, OpRefList& _local_topo) {
+    // move p2p send op to topo tail
+    OpRefList send_op_list;
+    OpRefList recv_op_list;
+    OpRefList compute_op_list;
+    for (auto& op_ref : _topo) {
+      if (op_ref.get()->placement() == local_device) {
+        if (is_peer_to_peer_send_op(op_ref)) {
+          send_op_list.push_back(op_ref);
+        } else if (is_peer_to_peer_recv_op(op_ref)) {
+          recv_op_list.push_back(op_ref);
+        } else {
+          compute_op_list.push_back(op_ref);
+        }
+      }
+    }
+    _local_topo.insert(_local_topo.end(), recv_op_list.begin(), recv_op_list.end());
+    _local_topo.insert(_local_topo.end(), compute_op_list.begin(), compute_op_list.end());
+    _local_topo.insert(_local_topo.end(), send_op_list.begin(), send_op_list.end());
+  };
+  get_local_topo(fw_topo, local_fw_topo);
+  get_local_topo(bw_topo, local_bw_topo);  
+
   local_topo.reserve(local_fw_topo.size() + local_bw_topo.size());
   local_topo.insert(local_topo.end(), local_fw_topo.begin(), local_fw_topo.end());
   local_topo.insert(local_topo.end(), local_bw_topo.begin(), local_bw_topo.end());
@@ -1063,6 +1092,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // HT_LOG_DEBUG << local_device << ": stages = " << _stages << "; stage id = " << stage_id;
   auto& tasks = schedule[stage_id];
   HT_LOG_DEBUG << local_device << ": stage id = " << stage_id;
+  bool is_continuous_p2p = false;
   for (size_t i = 0; i < tasks.size(); i++) {
     auto& task = tasks[i];
     bool is_forward = task.first;
@@ -1072,18 +1102,22 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
     if (is_forward) {
       ComputeFunc(micro_batch_id, local_fw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
-                  false, accumulated_tensor, accumulated_ops, feed_dict, fetches, fetch_indices);
+                  false, accumulated_tensor, accumulated_ops, feed_dict, fetches, fetch_indices, is_continuous_p2p);
     } else {
       bool grad_accumulation_finished = (i == tasks.size() - 1);
       ComputeFunc(micro_batch_id, local_bw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
                   grad_accumulation_finished, accumulated_tensor, accumulated_ops, feed_dict, 
-                  fetches, fetch_indices);
+                  fetches, fetch_indices, is_continuous_p2p);
     }
     if (is_forward) {
       HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward]";
     } else {
       HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward]";
     }
+  }
+  if (is_continuous_p2p) {
+    ncclGroupEnd(); // sometimes p2p will exists in the tail of pipeline topo, need add group end here
+    CudaStreamSynchronize(hetu::impl::CUDAStream(Stream(hetu::impl::comm::GetLocalDevice(), kP2PStream)));
   }
   HT_LOG_DEBUG << local_device << ": 2. compute[end]";
 

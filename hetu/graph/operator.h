@@ -421,6 +421,14 @@ class OpDef : public shared_ptr_target {
       .set_device_group(device_group());
   }
 
+  void set_fw_op_id(OpId id) {
+    _fw_op_id = id;
+  }
+
+  OpId fw_op_id() const {
+    return _fw_op_id;
+  }
+
   bool inplace_at(size_t input_position) const {
     return _body->inplace_at(input_position);
   }
@@ -553,6 +561,7 @@ class OpDef : public shared_ptr_target {
   TensorList _extra_in_dep_linkers;
   TensorList _extra_out_dep_linkers;
 
+  OpId _fw_op_id{-1}; // only used for bw op
   OpMeta _op_meta;
   OpInstantiationContext _inst_ctx;
 };

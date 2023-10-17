@@ -43,7 +43,7 @@ void DefineAndRunGraph::Instantiate() {
       Graph::ResetVariableData(exec_tensor, *it->second);
       _add_on_inits.erase(tensor->id());
     }
-    // exec_tensor->set_is_grad(tensor->is_grad());
+    exec_tensor->set_is_grad(tensor->is_grad());
   };
 
   OpRefList topo = topo_order();
@@ -72,6 +72,15 @@ void DefineAndRunGraph::Instantiate() {
         exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
     }
     _op_to_exec_op_mapping[op->id()] = exec_op;
+  }
+
+  // assign fw_op_id map
+  for (auto& op_ref : topo) {
+    auto& op = op_ref.get();
+    auto& exec_op = _op_to_exec_op_mapping[op->id()];
+    if (op->fw_op_id() != -1) {
+      exec_op->set_fw_op_id(_op_to_exec_op_mapping[op->fw_op_id()]->id());
+    } 
   }
 
   Graph::pop_graph_ctx();

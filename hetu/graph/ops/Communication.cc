@@ -1,9 +1,13 @@
 #include "hetu/graph/ops/Communication.h"
 #include "hetu/graph/headers.h"
 #include "hetu/graph/ops/kernel_links.h"
+#include "hetu/impl/communication/nccl_comm_group.h"
+#include "hetu/impl/communication/comm_group.h"
 
 namespace hetu {
 namespace graph {
+
+using namespace hetu::impl::comm;
 
 uint64_t CommOpImpl::get_comm_type(Operator& op) {
   // input may be inplaced, so comm_type should be updated for each call
@@ -203,6 +207,14 @@ bool AllReduceOpImpl::DoMapToParallelDevices(Operator& op,
   return OpInterface::DoMapToParallelDevices(op, pg);
 }
 
+bool AllReduceOpImpl::DoInstantiate(Operator& op, const Device& placement,
+                                    StreamIndex stream_index) const {
+  bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
+  auto ranks = DeviceGroupToWorldRanks(_comm_group);
+  NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  return ret;
+}
+
 std::vector<NDArrayMeta> 
 AllReduceOpImpl::DoInferMeta(const TensorList& inputs) const {
   return {inputs[0]->meta()};
@@ -228,6 +240,21 @@ bool P2PSendOpImpl::DoMapToParallelDevices(Operator& op,
     << "Currently we require equal tensor parallelism degree across "
     << "P2P communication. Got " << pg << " vs. " << _dst_group;
   return OpInterface::DoMapToParallelDevices(op, pg);                                          
+}
+
+
+bool P2PSendOpImpl::DoInstantiate(Operator& op, const Device& placement,
+                                    StreamIndex stream_index) const {
+  bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
+  size_t dst_device_index = _dst_device_index == -1 ? 
+         op->placement_group().get_index(op->placement()) : _dst_device_index;  
+  auto src_rank = GetWorldRank();
+  auto dst_rank = DeviceToWorldRank(_dst_group.get(dst_device_index));
+  std::vector<int> ranks(2);
+  ranks[0] = std::min(src_rank, dst_rank);
+  ranks[1] = std::max(src_rank, dst_rank);
+  NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  return ret;
 }
 
 std::vector<NDArrayMeta> 
@@ -266,6 +293,20 @@ bool P2PRecvOpImpl::DoMapToParallelDevices(Operator& op,
   return OpInterface::DoMapToParallelDevices(op, pg);                                          
 }
 
+bool P2PRecvOpImpl::DoInstantiate(Operator& op, const Device& placement,
+                                  StreamIndex stream_index) const {
+  bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
+  size_t src_device_index = _src_device_index == -1 ?
+         op->placement_group().get_index(op->placement()) : _src_device_index;
+  auto src_rank = DeviceToWorldRank(_src_group.get(src_device_index));
+  auto dst_rank = GetWorldRank();
+  std::vector<int> ranks(2);
+  ranks[0] = std::min(src_rank, dst_rank);
+  ranks[1] = std::max(src_rank, dst_rank);
+  NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  return ret;
+}
+
 std::vector<NDArrayMeta> 
 P2PRecvOpImpl::DoInferMeta(const TensorList& inputs) const {
   return {NDArrayMeta().set_dtype(_dtype).set_shape(_shape)};
@@ -288,6 +329,16 @@ void P2PRecvOpImpl::DoCompute(Operator& op,
                                   type(), hetu::impl::P2PRecv, outputs.at(0),
                                   _src_group.get(src_device_index),
                                   op->instantiation_ctx().stream());
+}
+
+bool BatchedISendIRecvOpImpl::DoInstantiate(Operator& op, const Device& placement,
+                                            StreamIndex stream_index) const {
+  bool ret = OpInterface::DoInstantiate(op, placement, stream_index);                                      
+  std::vector<int> ranks(_comm_devices.size());
+  std::transform(_comm_devices.begin(), _comm_devices.end(), ranks.begin(), [&](const Device& device) { return DeviceToWorldRank(device); });
+  std::sort(ranks.begin(), ranks.end());
+  NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  return ret;
 }
 
 std::vector<NDArrayMeta> 
@@ -336,6 +387,14 @@ bool AllGatherOpImpl::DoMapToParallelDevices(Operator& op,
   return OpInterface::DoMapToParallelDevices(op, pg);  
 }
 
+bool AllGatherOpImpl::DoInstantiate(Operator& op, const Device& placement,
+                                    StreamIndex stream_index) const {
+  bool ret = OpInterface::DoInstantiate(op, placement, stream_index);                                      
+  auto ranks = DeviceGroupToWorldRanks(_comm_group);
+  NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  return ret;
+}
+
 std::vector<NDArrayMeta> 
 AllGatherOpImpl::DoInferMeta(const TensorList& inputs) const {
   const Tensor& input = inputs.at(0);
@@ -374,6 +433,14 @@ bool ReduceScatterOpImpl::DoMapToParallelDevices(Operator& op,
       << " must in device group: " << pg;
   }
   return OpInterface::DoMapToParallelDevices(op, pg);  
+}
+
+bool ReduceScatterOpImpl::DoInstantiate(Operator& op, const Device& placement,
+                                        StreamIndex stream_index) const {
+  bool ret = OpInterface::DoInstantiate(op, placement, stream_index);                                      
+  auto ranks = DeviceGroupToWorldRanks(_comm_group);
+  NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  return ret;
 }
 
 std::vector<NDArrayMeta> 

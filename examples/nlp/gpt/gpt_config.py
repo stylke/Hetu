@@ -8,6 +8,7 @@ class GPTConfig(object):
         n_layer=12,
         n_head=12,
         n_inner=None,
+        seq_len=128,
         activation_function="relu",
         resid_pdrop=0.1,
         embd_pdrop=0.1,
@@ -36,6 +37,7 @@ class GPTConfig(object):
         self.n_layer = n_layer
         self.n_head = n_head
         self.n_inner = n_inner
+        self.seq_len = seq_len
         self.activation_function = activation_function
         self.resid_pdrop = resid_pdrop
         self.embd_pdrop = embd_pdrop

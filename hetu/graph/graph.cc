@@ -106,6 +106,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       // TODO: check whether requires grad
       filled_grads.emplace_back(MakeOnesLikeOp(y));
       filled_grads.back()->set_is_grad(true);
+      filled_grads.back()->producer()->set_fw_op_id(y->producer()->id());
     }
   } else {
     HT_VALUE_ERROR_IF(ys.size() != grad_ys.size())
@@ -118,6 +119,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         filled_grads.push_back(grad_ys[i]);
       }
       filled_grads.back()->set_is_grad(true);
+      filled_grads.back()->producer()->set_fw_op_id(ys[i]->producer()->id());      
     }
   }
 
@@ -200,7 +202,8 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
           continue;
         
         grad_inputs[i]->set_is_grad(true);
-        
+        grad_inputs[i]->producer()->set_fw_op_id(op->id());
+
         // states deduce
         const auto& grad_op = grad_inputs[i]->producer();
         const auto& ds_grad = grad_inputs[i]->get_distributed_states();
