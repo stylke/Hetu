@@ -44,12 +44,14 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
   Graph::InitOnce();
   if (inputs.empty() && op_meta.extra_deps.empty()) {
     if (is_placeholder_op(*body)) {
+      HT_LOG_TRACE << "Make placeholder op (use default_define_and_run_graph)";
       return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
                   Graph::get_default_define_and_run_graph());
     } else {
       HT_VALUE_ERROR_IF(Graph::_cur_graph_ctx.empty())
         << "The target graph must be explicitly passed or enqueued to ctx "
         << "when making a new op with zero inputs";
+      HT_LOG_TRACE << "Make variable op on a " << Graph::GetGraph(Graph::_cur_graph_ctx.top()).type() << " graph";
       return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
                     Graph::GetGraph(Graph::_cur_graph_ctx.top()));
     }

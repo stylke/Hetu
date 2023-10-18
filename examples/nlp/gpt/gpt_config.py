@@ -21,7 +21,7 @@ class GPTConfig(object):
         summary_proj_to_labels=True,
         summary_first_dropout=0.1,
         scale_attn_weights=True,
-        use_cache=True,
+        use_cache=False,
         bos_token_id=50256,
         eos_token_id=50256,
         scale_attn_by_inverse_layer_idx=False,

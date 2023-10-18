@@ -29,6 +29,21 @@ HTShapeList SliceOpImpl::DoInferShape(Operator& op,
   return {output_shape};
 }
 
+HTShapeList SliceOpImpl::DoInferDynamicShape(Operator& op, 
+                                      const HTShapeList& input_shapes, 
+                                      RuntimeContext& ctx) const {
+  HTShape output_shape = get_output_shape();
+  int64_t ndim = output_shape.size();
+  // TODO: a more scalable approach to infer the dynamic shape
+  // HTShape begin_pos = get_begin_pos();
+  // int64_t padding_axis = get_padding_axis();
+  for (int64_t i; i < ndim; i++)
+    output_shape[i] = output_shape[i] < input_shapes[0][i] ? output_shape[i] : input_shapes[0][i];
+  HT_LOG_TRACE << "SliceOpImpl::DoInferDynamicShape, input_shape: " << input_shapes[0]
+   << " output_shape: " << output_shape;
+  return {output_shape};
+}
+
 void SliceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                  const OpMeta& op_meta) const {
   const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();

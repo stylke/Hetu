@@ -161,7 +161,8 @@ PyObject* PyNDArray_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
   auto* self = reinterpret_cast<PyNDArray*>(unsafe_self);
   
   static PyArgParser parser({
-    "from_numpy(numpy.array data)"
+    "numpy_to_NDArray(numpy.array data)",
+    "numpy_to_NDArray(numpy.array data, HTShape dynamic_shape)"
   });
   auto parsed_args = parser.parse(args, kwargs);
 
@@ -169,6 +170,11 @@ PyObject* PyNDArray_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
     auto* array_obj = parsed_args.get_numpy_array(0);
     new(&self->ndarray) NDArray();
     self->ndarray = NDArrayFromNumpy(array_obj);
+  } else if (parsed_args.signature_index() == 1) {
+    auto* array_obj1 = parsed_args.get_numpy_array(0);
+    HTShape dynamic_shape = parsed_args.get_int64_list(1);
+    new(&self->ndarray) NDArray();
+    self->ndarray = NDArrayFromNumpy(array_obj1, dynamic_shape);
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -318,7 +324,7 @@ std::vector<PyMethodDef> InitNDArrayPyClassMethodDefs() {
   std::vector<PyMethodDef> ret = {{nullptr}};
   AddPyMethodDefs(ret, {
     // TODO: wrap from_numpy of NDArray in a capsule
-    // {"from_numpy", (PyCFunction) PyNDArray_from_numpy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"numpy_to_NDArray", (PyCFunction) PyNDArray_from_numpy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {nullptr}
   });
   AddPyMethodDefs(ret, hetu::impl::get_registered_ndarray_class_methods());

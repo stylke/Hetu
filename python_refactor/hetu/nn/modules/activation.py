@@ -11,7 +11,9 @@ __all__ = [
     'Sigmoid', 
     'Tanh', 
     'LeakyReLU',
+    'NewGeLU'
 ]
+
 
 class ReLU(Module):
 
@@ -34,6 +36,7 @@ class Sigmoid(Module):
     def forward(self, input: Tensor) -> Tensor:
         with hetu.graph("define_and_run"):
             return hetu.sigmoid(input)
+
 
 class Tanh(Module):
 
@@ -58,3 +61,19 @@ class LeakyReLU(Module):
     def forward(self, input: Tensor) -> Tensor:
         with hetu.graph("define_and_run"):
             return hetu.leakyrelu(input, self.negative_slope)
+      
+        
+class NewGeLU(Module):
+    """
+    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
+    the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
+    """
+    def __init__(self, inplace: bool = False):
+        with hetu.graph("define_and_run"):
+            super(NewGeLU, self).__init__()
+            self.inplace = inplace
+
+    def forward(self, input: Tensor) -> Tensor:
+        with hetu.graph("define_and_run"):
+            # TODO: implement hetu.pow(input, 3.0) to replace input * input * input
+            return 0.5 * input * (1.0 + hetu.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * input * input * input)))

@@ -18,19 +18,19 @@ __all__ = [
     # linear
     'Identity', 'Linear', 
     # activation
-    'ReLU', 'Sigmoid', 'Tanh', 'LeakyReLU',
-    #normalization
+    'ReLU', 'Sigmoid', 'Tanh', 'LeakyReLU', 'NewGeLU',
+    # normalization
     'BatchNorm', 'InstanceNorm', 'LayerNorm',
-    #CNN related
+    # CNN related
     'Conv2d', 'MaxPool2d', 'AvgPool2d', 
-    #containers
+    # containers
     'Sequential', 'ModuleList', 'ModuleDict',
-    #loss
+    # loss
     'NLLLoss', 'KLDivLoss', 'MSELoss', 'BCELoss',
-    #dropout
+    # dropout
     'Dropout', 'Dropout2d',
-    #sparse
+    # sparse
     'Embedding',
-    #parallel
+    # parallel
     'ParallelLayerNorm', 'ParallelEmbedding', 'VocabParallelEmbedding', 'ColumnParallelLinear', 'RowParallelLinear',
 ]

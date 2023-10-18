@@ -32,6 +32,10 @@ DECLARE_HT_EXCEPTION(cuda_error);
 #define CudaSetDevice(device) CUDA_CALL(cudaSetDevice(device))
 #define CudaGetDevice(ptr) CUDA_CALL(cudaGetDevice(ptr))
 #define CudaGetDeviceCount(ptr) CUDA_CALL(cudaGetDeviceCount(ptr))
+#define CudaDeviceGetAttribute(ptr, attr, stream)                              \
+  CUDA_CALL(cudaDeviceGetAttribute(ptr, attr, stream))
+#define CudaGetDeviceProperties(ptr, device)                                   \
+  CUDA_CALL(cudaGetDeviceProperties(ptr, device))
 // memory
 #define CudaMalloc(ptr, size) CUDA_CALL(cudaMalloc(ptr, size))
 #define CudaFree(ptr) CUDA_CALL(cudaFree(ptr))
@@ -42,6 +46,8 @@ DECLARE_HT_EXCEPTION(cuda_error);
 #define CudaMemcpyPeerAsync(dst_ptr, dst_dev, src_ptr, src_dev, size, stream)  \
   CUDA_CALL(                                                                   \
     cudaMemcpyPeerAsync(dst_ptr, dst_dev, src_ptr, src_dev, size, stream))
+#define CudaMemsetAsync(dst_ptr, val, size, stream)                            \
+  CUDA_CALL(cudaMemsetAsync(dst_ptr, val, size, stream))
 // stream
 #define CudaStreamCreate(ptr) CUDA_CALL(cudaStreamCreate(ptr))
 #define CudaStreamCreateWithFlags(ptr, flags)                                  \

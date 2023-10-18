@@ -14,6 +14,9 @@ class SplitGradientOp;
 TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
                        OpMeta op_meta = OpMeta());
 
+TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
+                       int64_t padding_axis, OpMeta op_meta = OpMeta());
+
 TensorList MakeSplitOp(Tensor input, const HTShape& chunks, int64_t dim,
                        OpMeta op_meta = OpMeta());
 

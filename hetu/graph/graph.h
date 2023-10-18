@@ -162,6 +162,12 @@ class Graph {
     __builtin_unreachable();
   }
 
+  virtual NDArray GetDetachedVariableDataInner(const Tensor& tensor) {
+    HT_RUNTIME_ERROR << "Cannot get detached variable data from graph " << name()
+                     << " with type " << type();
+    __builtin_unreachable();
+  }
+
   virtual NDArray&
   AllocVariableDataInner(const Tensor& tensor,
                          const Initializer& init = VoidifiedInitializer(),
@@ -402,6 +408,12 @@ class Graph {
     return Graph::GetGraph(tensor).GetVariableDataInner(tensor);
   }
 
+  static NDArray GetDetachedVariableData(const Tensor& tensor) {
+    HT_VALUE_ERROR_IF(!tensor->is_variable())
+      << "'GetDetachedVariableData' does not support non-variable tensor: " << tensor;
+    return Graph::GetGraph(tensor).GetDetachedVariableDataInner(tensor);
+  }
+
   static NDArray&
   AllocVariableData(const Tensor& tensor,
                     const Initializer& init = VoidifiedInitializer(),
@@ -622,6 +634,16 @@ inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_
                });
 
   return {fw_ops, bw_ops};
+}
+
+// variable related APIs that need to used in python
+
+inline void ResetVariableData(const Tensor& tensor, const NDArray& provided_data) {
+  Graph::ResetVariableData(tensor, ProvidedInitializer(provided_data));
+}
+
+inline NDArray GetDetachedVariableData(const Tensor& tensor) {
+  return Graph::GetDetachedVariableData(tensor);
 }
 
 } // namespace graph

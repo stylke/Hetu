@@ -11,6 +11,8 @@ from hetu import utils as utils
 
 import builtins # bool is resovled as hetu.bool
 
+cur_graph_contexts = []
+
 class _OpContext(object):
     def __init__(self, eager_device=None, devices=None, stream_index=None, extra_deps=None):
         self.eager_device = eager_device
@@ -73,11 +75,19 @@ class _GraphContext(object):
             raise ValueError(f"Cannot parse type '{type(g).__name__}' as hetu.Graph")
 
     def __enter__(self):
+        if len(cur_graph_contexts) > 0:
+            self.wrapped_context = True
+            return cur_graph_contexts[0]
+        self.wrapped_context = False
         _hetu_core._internal_context.push_graph_ctx(self.graph.id)
+        cur_graph_contexts.append(self)
         return self
     
     def __exit__(self, e_type, e_value, e_trace):
+        if self.wrapped_context:
+            return
         _hetu_core._internal_context.pop_graph_ctx()
+        cur_graph_contexts.remove(self)
 
 def graph(g):
     return _GraphContext(g)

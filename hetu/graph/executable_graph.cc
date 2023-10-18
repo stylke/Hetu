@@ -91,7 +91,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     // op->placement_group + tensor->placement_group
     if (!op->device_group().empty()) {
       op->MapToParallelDevices(op->device_group());
-      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op " << op << " assigned placement group = " << op->placement_group();
+      HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": op " << op << " assigned placement group = " << op->placement_group();
     } else {
       DeviceGroup inferred;
       if (is_group_op(op)) {
@@ -928,6 +928,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
   }
 
+  // TODO: replace the fetches to the new substitued results after SubstituteCommOp
+  for (auto& fetch : fetches) {
+    auto& fetch_op = fetch->producer();
+    HT_ASSERT(!is_comm_op(fetch_op)) << fetch << ": is substitued already, don't try to fetch it.";
+  }
+
   // update topo
   OpRefList updated_topo = Graph::TopoSort(fetches, -1, is_op_computed);
   // HT_LOG_DEBUG << local_device << ": updated global topo after substitute comm_op: " << updated_topo;
@@ -1145,6 +1151,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             for (auto& tensor2data : tensor2data_list) {
               result.push_back(tensor2data[output->id()]);
             }
+            HT_LOG_TRACE << "result:" << result;
             results[it->second] = NDArray::cat(result);
           }
         }

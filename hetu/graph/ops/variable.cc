@@ -44,15 +44,17 @@ bool ParallelVariableOpImpl::DoInstantiate(Operator& op,
     int32_t dup_group_idx = _ds.get_dup_group_index(_local_idx);
     // support 100 different duplicate group to set different seed
     uint64_t seed = 2023 + op->id() * 100 + dup_group_idx;
-    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": " << op << " seed = " << seed;
+    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " << op << " inits by initializer.";
     // TODO: reset variable data also need parallel version
     Graph::AllocVariableData(op->output(0), *_init, seed, _global_shape);
   } else {
     if (_copy_provided_data || dtype() != _provided_data->dtype() ||
         placement != _provided_data->device()) {
+      HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " << op << " inits by provided data.";
       Graph::AllocVariableData(op->output(0),
                                ProvidedInitializer(_provided_data));
-      // TODO: free the provided data in order to save memory
+      // free the provided data in order to save memory, may still have some problem?
+      _provided_data = hetu::NDArray();
     } else {
       Graph::RegisterVariableData(op->output(0), _provided_data);
     }
@@ -157,7 +159,7 @@ Tensor MakeParallelParameterOp(const Initializer& init, HTShape global_shape,
 
 Tensor MakeParallelParameterOp(NDArray provided_data, const DistributedStates& ds, 
                                bool copy_provided_data, DataType dtype, 
-                               bool requires_grad, OpMeta op_meta) {
+                               bool requires_grad, OpMeta op_meta) {    
   auto out = MakeParallelVariableOp(std::move(provided_data), ds, copy_provided_data, 
                                     dtype, requires_grad, std::move(op_meta));
   // HT_LOG_INFO << out->producer() << ": device group = " << op_meta.device_group;                                    

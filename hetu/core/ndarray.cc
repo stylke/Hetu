@@ -33,8 +33,8 @@ void NDArrayDef::Serialize(std::ostream& os, size_t n_print) const {
         }
       });
   }
-  os << "], dtype=" << dtype() << ", shape=" << shape()
-     << ", device=" << device() << ")";
+  os << "], dtype=" << dtype() << ", shape=" << shape() << ", dynamic_shape=" 
+     << dynamic_shape() << ", device=" << device() << ")";
 }
 
 std::ostream& operator<<(std::ostream& os, const NDArray& data) {
@@ -56,7 +56,7 @@ NDArray NDArray::to(const NDArray& input, const Device& device, DataType dtype,
     const auto& target_dtype = same_dtype ? input->dtype() : dtype;
     NDArray out = output.is_defined()
       ? output
-      : NDArray::empty(input->shape(), target_device, target_dtype);
+      : NDArray::empty(input->shape(), target_device, target_dtype, input->dynamic_shape());
     if (output.is_defined()) {
       // Unlike many other kernels, the DataTransfer kernel cannot check
       // whether the devices and dtypes are valid. Hence we check them here.
@@ -84,12 +84,19 @@ NDArray NDArray::abs(const NDArray& input, StreamIndex stream_id,
 NDArray NDArray::add(const NDArray& x, const NDArray& y, StreamIndex stream_id,
                      NDArray& output) {
   auto output_shape = NDArrayMeta::Broadcast(x->shape(), y->shape());
+  auto output_dynamic_shape = HTShape();
+  if(!output.is_defined() && (x->is_dynamic() || y->is_dynamic())) {
+    output_dynamic_shape = NDArrayMeta::Broadcast(x->dynamic_shape(), y->dynamic_shape());
+    HT_ASSERT(!output_dynamic_shape.empty())
+      << "Dynamic shapes cannot be broadcast together: " << x->dynamic_shape() << " vs. "
+      << y->dynamic_shape();
+  }
   HT_ASSERT(!output_shape.empty())
     << "Shapes cannot be broadcast together: " << x->shape() << " vs. "
     << y->shape();
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, x->device(), x->dtype());
+    : NDArray::empty(output_shape, x->device(), x->dtype(), output_dynamic_shape);
   Stream stream(x->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                   hetu::impl::AddElewise, x, y, out, stream);
@@ -109,12 +116,19 @@ NDArray NDArray::add(const NDArray& input, double scalar, StreamIndex stream_id,
 NDArray NDArray::sub(const NDArray& x, const NDArray& y, StreamIndex stream_id,
                      NDArray& output) {
   auto output_shape = NDArrayMeta::Broadcast(x->shape(), y->shape());
+  auto output_dynamic_shape = HTShape();
+  if(!output.is_defined() && (x->is_dynamic() || y->is_dynamic())) {
+    output_dynamic_shape = NDArrayMeta::Broadcast(x->dynamic_shape(), y->dynamic_shape());
+    HT_ASSERT(!output_dynamic_shape.empty())
+      << "Dynamic shapes cannot be broadcast together: " << x->dynamic_shape() << " vs. "
+      << y->dynamic_shape();
+  }
   HT_ASSERT(!output_shape.empty())
     << "Shapes cannot be broadcast together: " << x->shape() << " vs. "
     << y->shape();
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, x->device(), x->dtype());
+    : NDArray::empty(output_shape, x->device(), x->dtype(), output_dynamic_shape);
   Stream stream(x->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                   hetu::impl::SubElewise, x, y, out, stream);
@@ -148,12 +162,19 @@ NDArray NDArray::neg(const NDArray& input, StreamIndex stream_id,
 NDArray NDArray::mul(const NDArray& x, const NDArray& y, StreamIndex stream_id,
                      NDArray& output) {
   auto output_shape = NDArrayMeta::Broadcast(x->shape(), y->shape());
+  auto output_dynamic_shape = HTShape();
+  if(!output.is_defined() && (x->is_dynamic() || y->is_dynamic())) {
+    output_dynamic_shape = NDArrayMeta::Broadcast(x->dynamic_shape(), y->dynamic_shape());
+    HT_ASSERT(!output_dynamic_shape.empty())
+      << "Dynamic shapes cannot be broadcast together: " << x->dynamic_shape() << " vs. "
+      << y->dynamic_shape();
+  }
   HT_ASSERT(!output_shape.empty())
     << "Shapes cannot be broadcast together: " << x->shape() << " vs. "
     << y->shape();
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, x->device(), x->dtype());
+    : NDArray::empty(output_shape, x->device(), x->dtype(), output_dynamic_shape);
   Stream stream(x->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                   hetu::impl::MulElewise, x, y, out, stream);
@@ -173,12 +194,19 @@ NDArray NDArray::mul(const NDArray& input, double scalar, StreamIndex stream_id,
 NDArray NDArray::div(const NDArray& x, const NDArray& y, StreamIndex stream_id,
                      NDArray& output) {
   auto output_shape = NDArrayMeta::Broadcast(x->shape(), y->shape());
+  auto output_dynamic_shape = HTShape();
+  if(!output.is_defined() && (x->is_dynamic() || y->is_dynamic())) {
+    output_dynamic_shape = NDArrayMeta::Broadcast(x->dynamic_shape(), y->dynamic_shape());
+    HT_ASSERT(!output_dynamic_shape.empty())
+      << "Dynamic shapes cannot be broadcast together: " << x->dynamic_shape() << " vs. "
+      << y->dynamic_shape();
+  }
   HT_ASSERT(!output_shape.empty())
     << "Shapes cannot be broadcast together: " << x->shape() << " vs. "
     << y->shape();
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, x->device(), x->dtype());
+    : NDArray::empty(output_shape, x->device(), x->dtype(), output_dynamic_shape);
   Stream stream(x->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                   hetu::impl::DivElewise, x, y, out, stream);
@@ -304,9 +332,12 @@ NDArray NDArray::reduce(const NDArray& input, ReductionType red_type,
                         const HTAxes& axes, bool keepdims,
                         StreamIndex stream_id, NDArray& output) {
   auto output_shape = NDArrayMeta::Reduce(input->shape(), axes, keepdims);
+  auto output_dynamic_shape = HTShape();
+  if(!output.is_defined() && input->is_dynamic())
+    output_dynamic_shape = NDArrayMeta::Reduce(input->dynamic_shape(), axes, keepdims);
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, input->device(), input->dtype());
+    : NDArray::empty(output_shape, input->device(), input->dtype(), output_dynamic_shape);
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
                                   hetu::impl::Reduce, input, out, axes, red_type,
@@ -346,7 +377,7 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
   if (dim_x == 1 && dim_y == 1) {
     out = output.is_defined()
       ? output
-      : NDArray::empty({}, x->device(), x->dtype());
+      : NDArray::empty({}, x->device(), x->dtype(), {});
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                     hetu::impl::Dot, x, y, out, stream);
   } else if (dim_x == 2 && dim_y == 2) {
@@ -354,16 +385,20 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
       << "Invalid shapes for matrix multiplication: " << x->shape()
       << " (transpose = " << trans_left << ") vs. " << y->shape()
       << " (transpose = " << trans_right << "). ";
+    HT_ASSERT(x->dynamic_shape(trans_left ? 0 : 1) == y->dynamic_shape(trans_right ? 1 : 0))
+      << "Invalid dynamic shapes for matrix multiplication: " << x->dynamic_shape()
+      << " (transpose = " << trans_left << ") vs. " << y->dynamic_shape()
+      << " (transpose = " << trans_right << "). ";
     out = output.is_defined()
       ? output
       : NDArray::empty(
         {x->shape(trans_left ? 1 : 0), y->shape(trans_right ? 0 : 1)},
-        x->device(), x->dtype());
+        x->device(), x->dtype(), {x->dynamic_shape(trans_left ? 1 : 0), y->dynamic_shape(trans_right ? 0 : 1)});
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                     hetu::impl::MatMul, x, trans_left, y,
                                     trans_right, out, stream);
   } else if (dim_x == 1 && dim_y == 2) {
-    auto out_ = NDArray::empty({1, y->shape(trans_right ? 0 : 1)}, x->device(), x->dtype());
+    auto out_ = NDArray::empty({1, y->shape(trans_right ? 0 : 1)}, x->device(), x->dtype(), {1, y->dynamic_shape(trans_right ? 0 : 1)});
     out_ = NDArray::matmul(NDArray::unsqueeze(x, 0), y, false, trans_right, stream_id, out_);
     out = NDArray::squeeze(out_, 0);
     if (output.is_defined()) {
@@ -375,9 +410,13 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
       << "Invalid shapes for matrix multiplication: " << x->shape()
       << " (transpose = " << trans_left << ") vs. " << y->shape()
       << " (transpose = " << trans_right << "). ";
+    HT_ASSERT(x->dynamic_shape(trans_left ? 0 : 1) == y->dynamic_shape(0))
+      << "Invalid dynamic shapes for matrix multiplication: " << x->dynamic_shape()
+      << " (transpose = " << trans_left << ") vs. " << y->dynamic_shape()
+      << " (transpose = " << trans_right << "). ";
     out = output.is_defined()
       ? output
-      : NDArray::empty({x->shape(trans_left ? 1 : 0)}, x->device(), x->dtype());
+      : NDArray::empty({x->shape(trans_left ? 1 : 0)}, x->device(), x->dtype(), {x->dynamic_shape(trans_left ? 1 : 0)});
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                     hetu::impl::MatVecMul, x, trans_left, y, 
                                     out, stream);
@@ -396,38 +435,46 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
     }
     
     auto x_shape = x_->shape();
+    auto x_dynamic_shape = x_->dynamic_shape();
     NDArray x_trans = x_;
     if (trans_left) {
       std::iter_swap(x_shape.end() - 2, x_shape.end() - 1);
+      std::iter_swap(x_dynamic_shape.end() - 2, x_dynamic_shape.end() - 1);
       const auto dim_x_ = transpose ? dim_y : dim_x;
       auto ndims_x_ = HTAxes(dim_x_);
       std::iota(ndims_x_.begin(), ndims_x_.end(), 0);
       std::iter_swap(ndims_x_.end() - 2, ndims_x_.end() - 1);
-      x_trans = NDArray::empty(x_shape, x->device(), x->dtype());
+      x_trans = NDArray::empty(x_shape, x->device(), x->dtype(), x_dynamic_shape);
       x_trans = NDArray::permute(x_, ndims_x_, stream_id, x_trans);
     }
     
     auto output_shape = HTShape(x_shape.begin(), x_shape.end() - 1);
+    auto output_dynamic_shape = HTShape(x_dynamic_shape.begin(), x_dynamic_shape.end() - 1);
     auto folded_dim = std::accumulate(output_shape.begin(), output_shape.end(), 1,
+                                      [](int64_t x, int64_t y) { return x * y; });
+    auto folded_dynamic_dim = std::accumulate(output_dynamic_shape.begin(), output_dynamic_shape.end(), 1,
                                       [](int64_t x, int64_t y) { return x * y; });
     if (dim_y_ == 2) {
       output_shape.emplace_back(y_->shape(trans_right ? 0 : 1));
+      output_dynamic_shape.emplace_back(y_->dynamic_shape(trans_right ? 0 : 1));
     }
     const auto x_folded = NDArray::reshape(x_trans, {folded_dim, x_shape.back()}, stream_id);
     auto folded_shape = HTShape({folded_dim});
+    auto folded_dynamic_shape = HTShape({folded_dynamic_dim});
     if (dim_y_ == 2) {
       folded_shape.emplace_back(y_->shape(trans_right ? 0 : 1));
+      folded_dynamic_shape.emplace_back(y_->dynamic_shape(trans_right ? 0 : 1));
     }
-    auto out_folded = NDArray::empty(folded_shape, x->device(), x->dtype());
+    auto out_folded = NDArray::empty(folded_shape, x->device(), x->dtype(), folded_dynamic_shape);
 
     if (output_transpose) {
-      auto out_trans = NDArray::empty(output_shape, x->device(), x->dtype());
+      auto out_trans = NDArray::empty(output_shape, x->device(), x->dtype(), output_dynamic_shape);
       out_folded = NDArray::matmul(x_folded, y_, false, trans_right, stream_id, out_folded);
       out_trans = NDArray::reshape(out_folded, output_shape, stream_id);
       std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
       out = output.is_defined()
         ? output
-        : NDArray::empty(output_shape, x->device(), x->dtype());
+        : NDArray::empty(output_shape, x->device(), x->dtype(), output_dynamic_shape);
       const auto dim_out = out->ndim();
       auto ndims_out = HTAxes(dim_out);
       std::iota(ndims_out.begin(), ndims_out.end(), 0);
@@ -446,16 +493,27 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
   } else {
     const auto x_shape = x->shape();
     const auto y_shape = y->shape();
+    const auto x_dynamic_shape = x->dynamic_shape();
+    const auto y_dynamic_shape = y->dynamic_shape();
 
     const auto n = x_shape.cend()[-2];
     const auto m_x = x_shape.back();
     const auto m_y = y_shape.cend()[-2];
     const auto p = y_shape.back();
+    const auto dynamic_n = x_dynamic_shape.cend()[-2];
+    const auto dynamic_m_x = x_dynamic_shape.back();
+    const auto dynamic_m_y = y_dynamic_shape.cend()[-2];
+    const auto dynamic_p = y_dynamic_shape.back();
 
     const auto batch_shape_x = HTShape(x_shape.begin(), x_shape.end() - 2);
     const auto batch_shape_y = HTShape(y_shape.begin(), y_shape.end() - 2);
     auto output_shape = NDArrayMeta::Broadcast(batch_shape_x, batch_shape_y);
     const auto batch_size = std::accumulate(output_shape.begin(), output_shape.end(), 1,
+                                            [](int64_t x, int64_t y) { return x * y; });
+    const auto dynamic_batch_shape_x = HTShape(x_dynamic_shape.begin(), x_dynamic_shape.end() - 2);
+    const auto dynamic_batch_shape_y = HTShape(y_dynamic_shape.begin(), y_dynamic_shape.end() - 2);
+    auto output_dynamic_shape = NDArrayMeta::Broadcast(dynamic_batch_shape_x, dynamic_batch_shape_y);
+    const auto dynamic_batch_size = std::accumulate(output_dynamic_shape.begin(), output_dynamic_shape.end(), 1,
                                             [](int64_t x, int64_t y) { return x * y; });
 
     const auto broadcast_shape_x = [&output_shape, n, m_x] {
@@ -468,12 +526,23 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
                                       ret.emplace_back(m_y);
                                       ret.emplace_back(p);
                                       return ret; }();
-    auto broadcast_x = (x_shape == broadcast_shape_x) ? x : NDArray::empty(broadcast_shape_x, x->device(), x->dtype());
+    const auto dynamic_broadcast_shape_x = [&output_dynamic_shape, dynamic_n, dynamic_m_x] {
+                                      HTShape ret(output_dynamic_shape);
+                                      ret.emplace_back(dynamic_n);
+                                      ret.emplace_back(dynamic_m_x);
+                                      return ret; }();
+    const auto dynamic_broadcast_shape_y = [&output_dynamic_shape, dynamic_m_y, dynamic_p] {
+                                      HTShape ret(output_dynamic_shape);
+                                      ret.emplace_back(dynamic_m_y);
+                                      ret.emplace_back(dynamic_p);
+                                      return ret; }();
+
+    auto broadcast_x = (x_shape == broadcast_shape_x) ? x : NDArray::empty(broadcast_shape_x, x->device(), x->dtype(), dynamic_broadcast_shape_x);
     broadcast_x = NDArray::reshape(x_shape != broadcast_shape_x
                                       ? NDArray::broadcast(x, broadcast_shape_x, stream_id, broadcast_x)
                                       : x,
                                     {batch_size, n, m_x}, stream_id);
-    auto broadcast_y = (y_shape == broadcast_shape_y) ? y : NDArray::empty(broadcast_shape_y, y->device(), y->dtype());
+    auto broadcast_y = (y_shape == broadcast_shape_y) ? y : NDArray::empty(broadcast_shape_y, y->device(), y->dtype(), dynamic_broadcast_shape_y);
     broadcast_y = NDArray::reshape(y_shape != broadcast_shape_y
                                       ? NDArray::broadcast(y, broadcast_shape_y, stream_id, broadcast_y)
                                       : y,
@@ -481,8 +550,11 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
 
     output_shape.emplace_back(trans_left ? m_x : n);
     output_shape.emplace_back(trans_right ? m_y : p);
+    output_dynamic_shape.emplace_back(trans_left ? dynamic_m_x : dynamic_n);
+    output_dynamic_shape.emplace_back(trans_right ? dynamic_m_y : dynamic_p);
 
-    out = NDArray::empty({batch_size, output_shape.cend()[-2], output_shape.back()}, x->device(), x->dtype());
+    out = NDArray::empty({batch_size, output_shape.cend()[-2], output_shape.back()}, x->device(), x->dtype(),
+                            {dynamic_batch_size, output_dynamic_shape.cend()[-2], output_dynamic_shape.back()});
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                   hetu::impl::BatchMatMul, broadcast_x, trans_left,
                                   broadcast_y, trans_right, out, stream);
@@ -502,6 +574,8 @@ NDArray NDArray::bmm(const NDArray& x, const NDArray& y,
                      StreamIndex stream_id, NDArray& output) {
   const HTShape& a = x->shape();
   const HTShape& b = y->shape();
+  const HTShape& dynamic_a = x->dynamic_shape();
+  const HTShape& dynamic_b = y->dynamic_shape();
   int ndims = a.size() - 2;
   HT_ASSERT(a.size() >= 2 && b.size() >= 2 && a.size() == b.size() &&
             a.at(trans_left ? ndims : ndims + 1) ==
@@ -509,16 +583,26 @@ NDArray NDArray::bmm(const NDArray& x, const NDArray& y,
     << "Invalid input shapes for:"
     << " (shape_left) " << a << " (shape_right) " << b << " (transpose_left) "
     << trans_left << " (transpose_right) " << trans_right;
+  HT_ASSERT(dynamic_a.at(trans_left ? ndims : ndims + 1) ==
+              dynamic_b.at(trans_right ? ndims + 1 : ndims))
+    << "Invalid input dynamic shapes for:"
+    << " (shape_left) " << dynamic_a << " (shape_right) " << dynamic_b << " (transpose_left) "
+    << trans_left << " (transpose_right) " << trans_right;
   HTShape shape = {};
+  HTShape dynamic_shape = {};
   for (int i = 0; i < ndims; ++i) {
     HT_ASSERT(a[i] == b[i]);
     shape.emplace_back(a[i]);
+    HT_ASSERT(dynamic_a[i] == dynamic_b[i]);
+    dynamic_shape.emplace_back(dynamic_a[i]);
   }
   shape.emplace_back(a.at(trans_left ? ndims + 1 : ndims));
   shape.emplace_back(b.at(trans_right ? ndims : ndims + 1));
+  dynamic_shape.emplace_back(dynamic_a.at(trans_left ? ndims + 1 : ndims));
+  dynamic_shape.emplace_back(dynamic_b.at(trans_right ? ndims : ndims + 1));
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(shape, x->device(), x->dtype());
+    : NDArray::empty(shape, x->device(), x->dtype(), dynamic_shape);
   Stream stream(x->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                   hetu::impl::BatchMatMul, x, trans_left, y,
@@ -529,12 +613,19 @@ NDArray NDArray::bmm(const NDArray& x, const NDArray& y,
 NDArray NDArray::dot(const NDArray& x, const NDArray& y, StreamIndex stream_id,
                      NDArray& output) {
   auto output_shape = NDArrayMeta::Broadcast(x->shape(), y->shape());
+  auto output_dynamic_shape = HTShape();
+  if(!output.is_defined() && (x->is_dynamic() || y->is_dynamic())) {
+    output_dynamic_shape = NDArrayMeta::Broadcast(x->dynamic_shape(), y->dynamic_shape());
+    HT_ASSERT(!output_dynamic_shape.empty())
+      << "Dynamic shapes cannot be broadcast together: " << x->dynamic_shape() << " vs. "
+      << y->dynamic_shape();
+  }
   HT_ASSERT(!output_shape.empty())
     << "Shapes cannot be broadcast together: " << x->shape() << " vs. "
     << y->shape();
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, x->device(), x->dtype());
+    : NDArray::empty(output_shape, x->device(), x->dtype(), output_dynamic_shape);
   Stream stream(x->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                   hetu::impl::MatDot, x, y, out, stream);
@@ -544,10 +635,10 @@ NDArray NDArray::dot(const NDArray& x, const NDArray& y, StreamIndex stream_id,
 NDArray NDArray::index_add(const NDArray& x, const NDArray& ids,
                            const NDArray& y, int64_t dim, StreamIndex stream_id,
                            NDArray& output) {
-  NDArray tmp = NDArray::empty(x->shape(), x->device(), x->dtype());
+  NDArray tmp = NDArray::empty(x->shape(), x->device(), x->dtype(), x->dynamic_shape());
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(x->shape(), x->device(), x->dtype());
+    : NDArray::empty(x->shape(), x->device(), x->dtype(), x->dynamic_shape());
   Stream stream(x->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
                                   hetu::impl::IndexAdd, y, ids, tmp, dim,
@@ -599,9 +690,12 @@ NDArray NDArray::flatten(const NDArray& input, int64_t start_dim,
 NDArray NDArray::permute(const NDArray& input, HTAxes& dims,
                          StreamIndex stream_id, NDArray& output) {
   HTShape output_shape = NDArrayMeta::Permute(input->shape(), dims);
+  HTShape output_dynamic_shape = {};
+  if(!output.is_defined() && input->is_dynamic())
+    output_dynamic_shape = NDArrayMeta::Permute(input->dynamic_shape(), dims);
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, input->device(), input->dtype());
+    : NDArray::empty(output_shape, input->device(), input->dtype(), output_dynamic_shape);
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
                                   hetu::impl::Transpose, input, out,
@@ -652,16 +746,20 @@ NDArray NDArray::adddim(const NDArray& input, int64_t dim, int64_t size,
   HT_ASSERT(size > 0);
   HTAxes dims(len);
   HTShape output_shape = {};
+  HTShape output_dynamic_shape = {};
   for (int i = 0; i < dim; ++i) {
     output_shape.emplace_back(input->shape(i));
+    output_dynamic_shape.emplace_back(input->dynamic_shape(i));
   }
   output_shape.emplace_back(size);
+  output_dynamic_shape.emplace_back(size);
   for (int i = dim + 1; i < len; ++i) {
-    output_shape.emplace_back(input->shape(i));
+    output_dynamic_shape.emplace_back(input->dynamic_shape(i));
+    output_dynamic_shape.emplace_back(input->dynamic_shape(i));
   }
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, input->device(), input->dtype());
+    : NDArray::empty(output_shape, input->device(), input->dtype(), output_dynamic_shape);
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
                                   hetu::impl::BroadcastShape, input, out,
@@ -673,19 +771,23 @@ NDArray NDArray::diagonal(const NDArray& input, int64_t dim1, int64_t dim2,
                           int64_t offset, StreamIndex stream_id,
                           NDArray& output) {
   HTShape output_shape = {};
+  HTShape output_dynamic_shape = {};
   int64_t len = input->ndim();
   dim1 = NDArrayMeta::ParseAxis(dim1, len);
   dim2 = NDArrayMeta::ParseAxis(dim2, len);
   for (int i = 0; i < len; ++i) {
     if (i != dim1 && i != dim2) {
       output_shape.emplace_back(input->shape(i));
+      output_dynamic_shape.emplace_back(input->dynamic_shape(i));
     }
   }
   output_shape.emplace_back(
     std::min(input->shape(dim1), input->shape(dim2) - offset));
+  output_dynamic_shape.emplace_back(
+    std::min(input->dynamic_shape(dim1), input->dynamic_shape(dim2) - offset));
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, input->device(), input->dtype());
+    : NDArray::empty(output_shape, input->device(), input->dtype(), output_dynamic_shape);
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
                                   hetu::impl::Diagonal, input, out, dim1, dim2,
@@ -696,20 +798,24 @@ NDArray NDArray::diagonal(const NDArray& input, int64_t dim1, int64_t dim2,
 NDArray NDArray::diagonal_grad(const NDArray& input, int64_t dim1, int64_t dim2,
                                StreamIndex stream_id, NDArray& output) {
   HTShape output_shape = {};
+  HTShape output_dynamic_shape = {};
   int64_t len = input->ndim();
   dim1 = NDArrayMeta::ParseAxis(dim1, len + 1);
   dim2 = NDArrayMeta::ParseAxis(dim2, len + 1);
   HT_ASSERT(dim1 < dim2);
   for (int i = 0; i < dim2; ++i) {
     output_shape.emplace_back(input->shape(i));
+    output_dynamic_shape.emplace_back(input->dynamic_shape(i));
   }
   output_shape.emplace_back(input->shape(dim1));
+  output_dynamic_shape.emplace_back(input->dynamic_shape(dim1));
   for (int i = dim2; i < len; ++i) {
     output_shape.emplace_back(input->shape(i));
+    output_dynamic_shape.emplace_back(input->dynamic_shape(i));
   }
   NDArray out = output.is_defined()
     ? output
-    : NDArray::empty(output_shape, input->device(), input->dtype());
+    : NDArray::empty(output_shape, input->device(), input->dtype(), output_dynamic_shape);
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), input->dtype(),
                                   hetu::impl::DiagonalGradient, input, out,
@@ -770,7 +876,14 @@ NDArray NDArray::avgpool(const NDArray& input, const size_t kernel_H,
     int64_t W = input->shape(3);
     int64_t p_H = (H + 2 * padding - kernel_H) / stride + 1;
     int64_t p_W = (W + 2 * padding - kernel_W) / stride + 1;
-    out = NDArray::empty({N, C, p_H, p_W}, input->device(), input->dtype());
+    int64_t dynamic_N = input->dynamic_shape(0);
+    int64_t dynamic_C = input->dynamic_shape(1);
+    int64_t dynamic_H = input->dynamic_shape(2);
+    int64_t dynamic_W = input->dynamic_shape(3);
+    int64_t dynamic_p_H = (dynamic_H + 2 * padding - kernel_H) / stride + 1;
+    int64_t dynamic_p_W = (dynamic_W + 2 * padding - kernel_W) / stride + 1;
+    out = NDArray::empty({N, C, p_H, p_W}, input->device(), input->dtype(), 
+                          {dynamic_N, dynamic_C, dynamic_p_H, dynamic_p_W});
   }
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__, hetu::impl::AvgPool,
@@ -797,8 +910,8 @@ NDArrayList NDArray::batchnorm(const NDArray& input, const NDArray& bn_scale, co
                                NDArray& save_mean,
                                NDArray& save_var) {
   NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
-  NDArray savemean = save_mean.is_defined() ? save_mean : NDArray::empty({input->shape(1)}, input->device(), input->dtype());
-  NDArray savevar = save_var.is_defined() ? save_var : NDArray::empty({input->shape(1)}, input->device(), input->dtype());
+  NDArray savemean = save_mean.is_defined() ? save_mean : NDArray::empty({input->shape(1)}, input->device(), input->dtype(), {input->dynamic_shape(1)});
+  NDArray savevar = save_var.is_defined() ? save_var : NDArray::empty({input->shape(1)}, input->device(), input->dtype(), {input->dynamic_shape(1)});
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     input->device().type(), __FUNCTION__, hetu::impl::BatchNorm, input,
@@ -808,9 +921,12 @@ NDArrayList NDArray::batchnorm(const NDArray& input, const NDArray& bn_scale, co
   return {out, savemean, savevar};
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::broadcast(const NDArray& input, const HTShape& shape,
                            StreamIndex stream_id,
                            NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::broadcast.";
   NDArray out = output.is_defined() ? output : NDArray::empty(shape, input->device(), input->dtype());
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
@@ -819,10 +935,13 @@ NDArray NDArray::broadcast(const NDArray& input, const HTShape& shape,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::broadcast(const NDArray& input, const HTShape& shape,
                            const HTAxes& add_axes,
                            StreamIndex stream_id,
                            NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::broadcast.";
   NDArray out = output.is_defined() ? output : NDArray::empty(shape, input->device(), input->dtype());
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
@@ -831,10 +950,13 @@ NDArray NDArray::broadcast(const NDArray& input, const HTShape& shape,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::conv2d(const NDArray& input, const NDArray& filter, 
                         const HTShape& padding, const HTShape& stride,
                         StreamIndex stream_id,
                         NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::conv2d.";
   NDArray out;
   if (output.is_defined()) 
     out = output;
@@ -857,9 +979,12 @@ NDArray NDArray::conv2d(const NDArray& input, const NDArray& filter,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::embedding(const NDArray& input, const NDArray& id,
                            StreamIndex stream_id,
                            NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::embedding.";
   NDArray out;
   if (output.is_defined()) 
     out = output;
@@ -875,9 +1000,12 @@ NDArray NDArray::embedding(const NDArray& input, const NDArray& id,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::gather(const NDArray& input, const NDArray& id, int64_t dim,
                         StreamIndex stream_id,
                         NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::gather.";                        
   NDArray out = output.is_defined() ? output : NDArray::empty(id->shape(), input->device(), input->dtype());
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
@@ -886,11 +1014,14 @@ NDArray NDArray::gather(const NDArray& input, const NDArray& id, int64_t dim,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArrayList NDArray::instancenorm(const NDArray& input, double eps,
                                   StreamIndex stream_id,
                                   NDArray& output,
                                   NDArray& save_mean,
                                   NDArray& save_var) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::instancenorm.";                        
   NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
   HTShape local_shape = input->shape();
   local_shape[3] = 1;
@@ -904,10 +1035,13 @@ NDArrayList NDArray::instancenorm(const NDArray& input, double eps,
   return {out, savemean, savevar};  
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::kldiv(const NDArray& preds, const NDArray& labels,
                        ReductionType reduction,
                        StreamIndex stream_id,
                        NDArray& output) {
+  HT_ASSERT((!preds->is_dynamic() && !labels->is_dynamic()) || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::kldiv.";                        
   NDArray out;
   if (output.is_defined()) 
     out = output;
@@ -929,12 +1063,15 @@ NDArray NDArray::kldiv(const NDArray& preds, const NDArray& labels,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArrayList NDArray::layernorm(const NDArray& input, const NDArray& bn_scale, const NDArray& bn_bias, 
                                const HTShape& normalized_shape, double eps,
                                StreamIndex stream_id,
                                NDArray& output,
                                NDArray& save_mean,
                                NDArray& save_var) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::layernorm.";
   NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
   HTShape local_shape = input->shape();
   int ndim = local_shape.size();
@@ -949,9 +1086,12 @@ NDArrayList NDArray::layernorm(const NDArray& input, const NDArray& bn_scale, co
   return {out, savemean, savevar};
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::leakyrelu(const NDArray& input, double alpha,
                            StreamIndex stream_id,
                            NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::leakyrelu.";
   NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
@@ -960,10 +1100,13 @@ NDArray NDArray::leakyrelu(const NDArray& input, double alpha,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::linear(const NDArray& a, const NDArray& b, const NDArray& bias, 
                         bool trans_a, bool trans_b,
                         StreamIndex stream_id,
                         NDArray& output) {
+  HT_ASSERT((!a->is_dynamic() && !b->is_dynamic()) || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::linear.";
   HT_ASSERT(a->ndim() == 2 && b->ndim() == 2 &&
             a->shape(trans_a ? 0 : 1) == b->shape(trans_b ? 1 : 0))
     << "Invalid shapes for matrix multiplication: " << a->shape()
@@ -981,10 +1124,13 @@ NDArray NDArray::linear(const NDArray& a, const NDArray& b, const NDArray& bias,
   return out; 
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::mseloss(const NDArray& preds, const NDArray& labels,
                          ReductionType reduction,
                          StreamIndex stream_id,
                          NDArray& output) {
+  HT_ASSERT((!preds->is_dynamic() && !labels->is_dynamic()) || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::mseloss.";                        
   NDArray out;
   if (output.is_defined()) 
     out = output;
@@ -1006,10 +1152,13 @@ NDArray NDArray::mseloss(const NDArray& preds, const NDArray& labels,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::nllloss(const NDArray& preds, const NDArray& labels,
                          ReductionType reduction,
                          StreamIndex stream_id,
                          NDArray& output) {
+  HT_ASSERT((!preds->is_dynamic() && !labels->is_dynamic()) || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::nllloss.";                        
   NDArray out;
   if (output.is_defined()) 
     out = output;
@@ -1031,10 +1180,13 @@ NDArray NDArray::nllloss(const NDArray& preds, const NDArray& labels,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::norm(const NDArray& input, int64_t p, int64_t dim, 
                       bool keepdim,
                       StreamIndex stream_id,
                       NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::norm.";
   NDArray out;
   if (output.is_defined())
     out = output;
@@ -1053,9 +1205,12 @@ NDArray NDArray::norm(const NDArray& input, int64_t p, int64_t dim,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::onehot(const NDArray& input, size_t num_classes,
                         StreamIndex stream_id,
                         NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::onehot.";
   HTShape out_shape = input->shape();
   out_shape.emplace_back(num_classes);
   NDArray out = output.is_defined() ? output : NDArray::empty(out_shape, input->device(), input->dtype());
@@ -1066,10 +1221,13 @@ NDArray NDArray::onehot(const NDArray& input, size_t num_classes,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::pad(const NDArray& input, const HTShape& paddings, 
                      std::string mode, double constant,
                      StreamIndex stream_id,
                      NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::pad.";
   HTShape Infer = input->shape();
   size_t len = paddings.size();
   for (size_t i = 0; i < 4; ++i) {
@@ -1086,9 +1244,12 @@ NDArray NDArray::pad(const NDArray& input, const HTShape& paddings,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::repeat(const NDArray& input, HTShape repeats,
                         StreamIndex stream_id,
                         NDArray& output) {
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::repeat.";
   NDArray out;
   if (output.is_defined()) 
     out = output;
@@ -1130,10 +1291,13 @@ NDArray NDArray::sin(const NDArray& input,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::slice(const NDArray& input, 
                        const HTShape& begin_pos, const HTShape& output_shape,
                        StreamIndex stream_id,
                        NDArray& output) {
+   HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::slice.";
   NDArray out = output.is_defined() ? output : NDArray::empty(output_shape, input->device(), input->dtype());
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__, hetu::impl::Slice,
@@ -1154,10 +1318,13 @@ NDArray NDArray::softmax(const NDArray& input,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::sceloss(const NDArray& preds, const NDArray& labels,
                          ReductionType reduction,
                          StreamIndex stream_id,
                          NDArray& output) {
+  HT_ASSERT((!preds->is_dynamic() && !labels->is_dynamic()) || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::sceloss.";
   NDArray out;
   HTShape output_shape = HTShape(preds->shape().begin(), preds->shape().end() - 1);
   if (output.is_defined()) 
@@ -1180,10 +1347,13 @@ NDArray NDArray::sceloss(const NDArray& preds, const NDArray& labels,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::sceloss(const NDArray& preds, const NDArray& labels, const int64_t ignored_index, 
                          ReductionType reduction,
                          StreamIndex stream_id,
                          NDArray& output) {
+  HT_ASSERT((!preds->is_dynamic() && !labels->is_dynamic()) || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::sceloss.";
   NDArray out;
   HTShape output_shape = HTShape(preds->shape().begin(), preds->shape().end() - 1);
   if (output.is_defined()) 
@@ -1226,11 +1396,14 @@ NDArray NDArray::where(const NDArray& cond, const NDArray& x, const NDArray& y,
   return out;
 }
 
+// TODO: support dynamic if output is not defined
 NDArray NDArray::maxpool(const NDArray& input, const size_t kernel_H,
                          const size_t kernel_W, const size_t padding,
                          const size_t stride,
                          StreamIndex stream_id,
-                         NDArray& output) {  
+                         NDArray& output) { 
+  HT_ASSERT(!input->is_dynamic() || output.is_defined())
+    << "Output definition doesn't support dynamic input in NDArray::maxpool."; 
   NDArray out;
   if (output.is_defined())
     out = output;
@@ -1253,6 +1426,7 @@ NDArray NDArray::maxpool(const NDArray& input, const size_t kernel_H,
 
 //_____________________________________________________________________________________
 
+// TODO: support cat dynamic shape
 NDArray NDArray::cat(const NDArrayList& inputs, int axis,
                      StreamIndex stream_id,
                      NDArray& output) {
@@ -1283,26 +1457,27 @@ NDArray NDArray::cat(const NDArrayList& inputs, int axis,
 }
 
 NDArray NDArray::empty(const HTShape& shape, const Device& device,
-                       DataType dtype) {
+                       DataType dtype, const HTShape& dynamic_shape) {
   return NDArray(
-    NDArrayMeta().set_device(device).set_dtype(dtype).set_shape(shape));
+    NDArrayMeta().set_device(device).set_dtype(dtype).set_shape(shape).set_dynamic_shape(dynamic_shape));
 }
 
 NDArray NDArray::empty_like(const NDArray& other) {
-  return NDArray::empty(other->shape(), other->device(), other->dtype());
+  return NDArray::empty(other->shape(), other->device(), other->dtype(), other->dynamic_shape());
 }
 
 NDArray NDArray::full(const HTShape& shape, double fill_value,
                       const Device& device, DataType dtype,
-                      StreamIndex stream_id) {
-  NDArray out = NDArray::empty(shape, device, dtype);
+                      StreamIndex stream_id,
+                      const HTShape& dynamic_shape) {
+  NDArray out = NDArray::empty(shape, device, dtype, dynamic_shape);
   return NDArray::full_(out, fill_value, stream_id);
 }
 
 NDArray NDArray::full_like(const NDArray& other, double fill_value,
                            StreamIndex stream_id) {
   return NDArray::full(other->shape(), fill_value, other->device(),
-                       other->dtype(), stream_id);
+                       other->dtype(), stream_id, other->dynamic_shape());
 }
 
 NDArray NDArray::full_(NDArray& data, double fill_value,
@@ -1328,15 +1503,17 @@ NDArray NDArray::copy(const NDArray& input, StreamIndex stream_id,
 
 NDArray NDArray::rand(const HTShape& shape, const Device& device,
                       DataType dtype, double lb, double ub, uint64_t seed,
-                      StreamIndex stream_id) {
-  NDArray out = NDArray::empty(shape, device, dtype);
+                      StreamIndex stream_id,
+                      const HTShape& dynamic_shape) {
+  NDArray out = NDArray::empty(shape, device, dtype, dynamic_shape);
   return NDArray::uniform_(out, lb, ub, seed, stream_id);
 }
 
 NDArray NDArray::randn(const HTShape& shape, const Device& device,
                        DataType dtype, double mean, double stddev,
-                       uint64_t seed, StreamIndex stream_id) {
-  NDArray out = NDArray::empty(shape, device, dtype);
+                       uint64_t seed, StreamIndex stream_id,
+                       const HTShape& dynamic_shape) {
+  NDArray out = NDArray::empty(shape, device, dtype, dynamic_shape);
   return NDArray::normal_(out, mean, stddev, seed, stream_id);
 }
 

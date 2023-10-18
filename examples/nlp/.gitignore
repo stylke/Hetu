@@ -3,3 +3,9 @@ iwslt2016/
 logs/
 cached_data
 preprocessed_data
+gpt/core.*
+gpt/data/
+gpt/checkpoint
+gpt/megatron_lm_345m_v0.0.zip
+gpt/debug_*
+gpt/scripts/debug_*

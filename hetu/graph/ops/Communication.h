@@ -303,7 +303,10 @@ class BatchedISendIRecvOpImpl final : public OpInterface {
   DoInferMeta(const TensorList& inputs) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
-                           RuntimeContext& runtime_ctx) const override;  
+                           RuntimeContext& runtime_ctx) const override; 
+
+  HTShapeList DoInferDynamicShape(Operator& op, const HTShapeList& input_shapes,
+                           RuntimeContext& runtime_ctx) const override;   
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;

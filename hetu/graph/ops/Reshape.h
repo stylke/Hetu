@@ -17,13 +17,19 @@ class ArrayReshapeOpImpl : public OpInterface {
   struct constrcutor_access_key {};
 
  public:
-  ArrayReshapeOpImpl(const HTShape& output_shape, bool is_inplace = false)
+  ArrayReshapeOpImpl(const HTShape& output_shape, int64_t padding_axis = -1, bool is_inplace = false)
   : OpInterface(quote(ArrayReshapeOp)),
-     _global_output_shape(output_shape), _inplace(is_inplace) { // default is global output shape, if distributed, then turn into local output shape
+     _global_output_shape(output_shape), 
+     _padding_axis(padding_axis), 
+     _inplace(is_inplace) { // default is global output shape, if distributed, then turn into local output shape
   }
 
   HTShape get_output_shape() const {
     return _global_output_shape;
+  }
+
+  int64_t padding_axis() const {
+    return _padding_axis;
   }
 
   bool inplace() const {
@@ -154,9 +160,11 @@ class ArrayReshapeOpImpl : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
+  HTShapeList DoInferDynamicShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
+
   HTShape _global_output_shape;
   // HTShape _local_output_shape;
-
+  int64_t _padding_axis;
   bool _inplace;
 
  public:
@@ -172,6 +180,9 @@ class ArrayReshapeOpImpl : public OpInterface {
 
 Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
                           OpMeta op_meta = OpMeta());
+
+Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
+                          int64_t padding_axis, OpMeta op_meta = OpMeta());
 
 Tensor MakeViewOp(Tensor input, const HTShape& output_shape,
                   OpMeta op_meta = OpMeta());

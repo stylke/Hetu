@@ -62,7 +62,9 @@ inline FeedDict FeedDict_FromPyObject(PyObject* obj) {
   PyObject* key;
   PyObject* value;
   Py_ssize_t pos = 0;
+  int64_t cnt = 0;
   while (PyDict_Next(obj, &pos, &key, &value)) {
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": processing element " << cnt++ << " in FeedDict...";
     TensorId k = Tensor_FromPyObject(key)->id();
     NDArray v = CheckPyNDArray(value) ? NDArray_FromPyObject(value)
                                       : NDArrayFromNumpy(value);

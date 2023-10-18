@@ -13,10 +13,11 @@ class SliceGradientOp;
 
 class SliceOpImpl : public OpInterface {
  public:
-  SliceOpImpl(const HTShape& begin_pos, const HTShape& output_shape)
+  SliceOpImpl(const HTShape& begin_pos, const HTShape& output_shape, const int64_t& padding_axis = -1)
   : OpInterface(quote(SliceOp)),
     _begin_pos(begin_pos),
-    _output_shape(output_shape) {
+    _output_shape(output_shape),
+    _padding_axis(padding_axis) {
   }
   
   uint64_t op_indicator() const noexcept override {
@@ -29,6 +30,10 @@ class SliceOpImpl : public OpInterface {
 
   HTShape get_output_shape() const {
     return _output_shape;
+  }
+
+  int64_t get_padding_axis() const {
+    return _padding_axis;
   }
 
  protected:
@@ -57,9 +62,13 @@ class SliceOpImpl : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
+  HTShapeList DoInferDynamicShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
+
   HTShape _begin_pos;
 
   HTShape _output_shape;
+
+  int64_t _padding_axis;
 
  public:
   bool operator==(const OpInterface& rhs) const override {

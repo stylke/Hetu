@@ -21,7 +21,6 @@ namespace {
 static std::once_flag import_np_flag;
 static void ImportNumpyOnce() {
   std::call_once(import_np_flag, []() {
-    // import_array();
     HT_RUNTIME_ERROR_IF(_import_array() < 0) << "Failed to import NumPy";
   });
 }
@@ -32,6 +31,15 @@ inline HTShape FromNumpyShape(npy_intp* numpy_shape, size_t ndim) {
     shape[i] = static_cast<HTShape::value_type>(numpy_shape[i]);
   return shape;
 }
+
+/*
+inline HTShape FromNumpyDynamicShape(void* numpy_shape, size_t ndim, size_t numpy_dsize) {
+  HTShape shape(ndim);
+  for (size_t i = 0; i < ndim; i++)
+    shape[i] = *static_cast<HTShape::value_type *>(numpy_shape + i * numpy_dsize);
+  return shape;
+}
+*/
 
 inline HTStride FromNumpyStride(npy_intp* numpy_stride, size_t ndim, 
                                size_t item_size) {
@@ -119,7 +127,7 @@ DataType GetNumpyArrayDataType(PyObject* obj) {
   return FromNumpyDataType(PyArray_TYPE(numpy_array), element_size);
 }
 
-NDArray NDArrayFromNumpy(PyObject* obj) {
+NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape) {
   auto* numpy_array = reinterpret_cast<PyArrayObject*>(obj);
   HT_VALUE_ERROR_IF(!PyArray_EquivByteorders(
       PyArray_DESCR(numpy_array)->byteorder, NPY_NATIVE))
@@ -138,6 +146,9 @@ NDArray NDArrayFromNumpy(PyObject* obj) {
     << "Strided arrays are not supported yet.";
   auto dtype = FromNumpyDataType(PyArray_TYPE(numpy_array), element_size);
   auto meta = NDArrayMeta().set_dtype(dtype).set_shape(shape).set_device(kCPU);
+
+  if (!dynamic_shape.empty())
+    meta.set_dynamic_shape(dynamic_shape);
 
   void* ptr = PyArray_DATA(numpy_array);
   Py_INCREF(obj);
@@ -161,10 +172,6 @@ PyObject* NDArrayToNumpy(NDArray ndarray, bool force) {
     ndarray = NDArray::cpu(ndarray, kBlockingStream);
   }
   
-  if (ndarray->dtype() == DataType::FLOAT16 || ndarray->dtype() == DataType::BFLOAT16) {
-    ndarray = NDArray::to(ndarray, ndarray->device(), DataType::FLOAT32, kBlockingStream);
-  }
-
   auto element_size = DataType2Size(ndarray->dtype());
   HTStride numpy_stride = ndarray->stride();
   for (auto& v : numpy_stride)

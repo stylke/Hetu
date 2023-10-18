@@ -229,7 +229,7 @@ class ParallelVariableOpImpl : public OpInterface {
   }
 
   std::shared_ptr<Initializer> _init;
-  NDArray _provided_data; // local_data
+  mutable NDArray _provided_data; // local_data
   bool _copy_provided_data;  
   HTShape _global_shape;
   HTShape _local_shape;

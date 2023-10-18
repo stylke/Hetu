@@ -221,5 +221,4 @@ class RowParallelLinear(Module):
         tensor_split0_partial = hetu.linear(tensor_split01, self.weight, trans_b=True, device_group=self.device_group, name=self.name)
         tensor_split0_dup = hetu.comm(tensor_split0_partial, self.ds_map['split0_dup'])
         output = tensor_split0_dup + self.bias if self.bias is not None else tensor_split0_dup
-        
         return output

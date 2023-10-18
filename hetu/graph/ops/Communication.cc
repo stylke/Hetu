@@ -361,6 +361,13 @@ HTShapeList BatchedISendIRecvOpImpl::DoInferShape(Operator& op,
   return std::move(outputs_shape);
 }  
 
+HTShapeList BatchedISendIRecvOpImpl::DoInferDynamicShape(Operator& op, 
+                                                  const HTShapeList& input_shapes,
+                                                  RuntimeContext& runtime_ctx) const {                                             
+  HTShapeList outputs_shape(input_shapes);                                                    
+  return std::move(outputs_shape);
+}  
+
 void BatchedISendIRecvOpImpl::DoCompute(Operator& op, 
                                         const NDArrayList& inputs,
                                         NDArrayList& outputs, 

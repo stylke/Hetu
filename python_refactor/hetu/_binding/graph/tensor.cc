@@ -289,6 +289,42 @@ PyObject* PyTensor_data_transfer(PyTensor* self, PyObject* args, PyObject* kwarg
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_reset_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "reset_data(numpy.array provided_data)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    auto* array_obj = parsed_args.get_numpy_array(0);
+    ResetVariableData(self->tensor, NDArrayFromNumpy(array_obj));
+    HT_LOG_TRACE << "ResetVariableData successfully.";
+    Py_RETURN_BOOLEAN_COND(true);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  Py_RETURN_BOOLEAN_COND(false);
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_get_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "get_data()"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    auto ret = GetDetachedVariableData(self->tensor);
+    HT_LOG_TRACE << "GetDetachedVariableData successfully.";
+    return NDArrayToNumpy(ret, false);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   auto* unsafe_self = PyTensor_Type->tp_alloc(PyTensor_Type, 0);
@@ -400,6 +436,8 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"stride", (PyCFunction) PyTensor_stride, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"numpy", (PyCFunction) PyTensor_to_numpy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"to", (PyCFunction) PyTensor_data_transfer, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"reset_data", (PyCFunction) PyTensor_reset_data, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"get_data", (PyCFunction) PyTensor_get_data, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {nullptr}

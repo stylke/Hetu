@@ -21,7 +21,7 @@ bool CheckNumpyArray(PyObject* obj);
 
 DataType GetNumpyArrayDataType(PyObject* obj);
 
-NDArray NDArrayFromNumpy(PyObject* obj);
+NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape  = {});
 
 PyObject* NDArrayToNumpy(NDArray ndarray, bool force);
 

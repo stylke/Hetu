@@ -42,6 +42,8 @@ class DefineAndRunGraph : public Graph {
   void ResetVariableDataInner(const Tensor& tensor,
                               const Initializer& init) override;
 
+  NDArray GetDetachedVariableDataInner(const Tensor& tensor) override;
+
   void RemoveOp(Operator& op) override {
     _op_to_exec_op_mapping.erase(op->id());
     Operator::for_each_output_tensor(op, [&](Tensor& tensor) {

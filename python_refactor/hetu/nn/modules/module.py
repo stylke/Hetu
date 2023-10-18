@@ -1,4 +1,5 @@
 import hetu
+import itertools
 from hetu import Tensor
 from ..parameter import Parameter
 from collections import OrderedDict, namedtuple
@@ -10,6 +11,31 @@ from ..parameter import _param_type_t
 _module_type_t = TypeVar('T', bound='Module')
 _member_type_t = Union[_param_type_t, _module_type_t, _tensor_type_t]
 _member_t = Union[Optional[Parameter], Optional['Module'], Optional[Tensor]]
+
+
+def parallel_data_provider(global_data, ds, device_index):
+    order, states = ds.order, ds.states
+    local_map = hetu.map_to_local_data(ds, device_index)
+    local_data = global_data.copy()
+    for dim in order:
+        if dim < 0:
+            continue
+        splits = states[dim]
+        split_index = local_map[dim]
+        start = int(split_index * (global_data.shape[dim] / splits))
+        stop = min(int((split_index + 1) * (global_data.shape[dim] / splits)), global_data.shape[dim])
+        local_data = local_data.take(range(start, stop), axis=dim)
+    return local_data
+
+
+class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
+    def __repr__(self):
+        if not self.missing_keys and not self.unexpected_keys:
+            return '<All keys matched successfully>'
+        return super(_IncompatibleKeys, self).__repr__()
+
+    __str__ = __repr__
+
 
 class Module(object):
 
@@ -287,4 +313,166 @@ class Module(object):
             return
         def convert(t):
             return t.to(dtype, device)
-        return self._apply(convert)  
+        return self._apply(convert) 
+    
+    ############################################################################
+    # Save and Load
+    ############################################################################ 
+
+    def _save_to_state_dict(self, destination, prefix):
+        r"""Saves module state to `destination` dictionary, containing a state
+        of the module, but not its descendants. This is called on every
+        submodule in :meth:`~hetu.nn.Module.state_dict`.
+
+        In rare cases, subclasses can achieve class-specific behavior by
+        overriding this method with custom logic.
+
+        Args:
+            destination (dict): a dict where state will be stored
+            prefix (str): the prefix for parameters and buffers used in this
+                module
+        """
+        _parameters = self.__dict__.get('_parameters')
+        for name, param in _parameters.items():
+            if param is not None:
+                destination[prefix + name] = param.get_data()
+        _buffers = self.__dict__.get('_buffers')
+        for name, buf in _buffers.items():
+            if buf is not None and name not in self._non_persistent_buffers_set:
+                destination[prefix + name] = buf.get_data()
+                
+    def state_dict(self, destination=None, prefix=''):
+        r"""Returns a dictionary containing a whole state of the module.
+
+        Both parameters and persistent buffers (e.g. running averages) are
+        included. Keys are corresponding parameter and buffer names.
+
+        Returns:
+            dict:
+                a dictionary containing a whole state of the module
+
+        Example::
+
+            >>> module.state_dict().keys()
+            ['bias', 'weight']
+
+        """
+        if destination is None:
+            destination = OrderedDict()
+        self._save_to_state_dict(destination, prefix)
+        for name, module in self._modules.items():
+            if module is not None:
+                module.state_dict(destination, prefix + name + '.')
+        return destination
+    
+    def _load_from_state_dict(self, state_dict, device_index, prefix, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        r"""Copies parameters and buffers from :attr:`state_dict` into only
+        this module, but not its descendants. This is called on every submodule
+        in :meth:`~hetu.nn.Module.load_state_dict`.
+
+        .. note::
+            :attr:`state_dict` is not the same object as the input
+            :attr:`state_dict` to :meth:`~hetu.nn.Module.load_state_dict`. So
+            it can be modified.
+
+        Args:
+            state_dict (dict): a dict containing parameters and
+                persistent buffers.
+            prefix (str): the prefix for parameters and buffers used in this
+                module
+            strict (bool): whether to strictly enforce that the keys in
+                :attr:`state_dict` with :attr:`prefix` match the names of
+                parameters and buffers in this module
+            missing_keys (list of str): if ``strict=True``, add missing keys to
+                this list
+            unexpected_keys (list of str): if ``strict=True``, add unexpected
+                keys to this list
+            error_msgs (list of str): error messages should be added to this
+                list, and will be reported together in
+                :meth:`~torch.nn.Module.load_state_dict`
+        """
+
+        persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
+        local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
+        local_state = {k: v for k, v in local_name_params if v is not None}
+
+        for name, param in local_state.items():
+            key = prefix + name
+            if key in state_dict:
+                param_data = state_dict[key]
+                try:
+                    if device_index is None:
+                        # Tensor
+                        assert param.shape == list(param_data.shape), "shape mismatched!"
+                        param.reset_data(param_data)
+                    else:
+                        # Distributed Tensor
+                        assert param.global_shape == list(param_data.shape), "global shape mismatched!"
+                        param.reset_data(parallel_data_provider(param_data, param.distributed_states, device_index))
+                except Exception as ex:
+                    error_msgs.append('While resetting the parameter named "{}", '
+                                      'whose global dimensions in the model are {} and '
+                                      'whose global dimensions in the checkpoint are {}, '
+                                      'an exception occurred : {}.'
+                                      .format(key, param.global_shape, list(param_data.shape), ex.args))
+            elif strict:
+                missing_keys.append(key)
+
+        if strict:
+            for key in state_dict.keys():
+                if key.startswith(prefix):
+                    input_name = key[len(prefix):]
+                    input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
+                    if input_name not in self._modules and input_name not in local_state:
+                        unexpected_keys.append(key)
+                        
+    def load_state_dict(self, state_dict, device_index = None, strict = True):
+        r"""Copies parameters and buffers from :attr:`state_dict` into
+        this module and its descendants. If :attr:`strict` is ``True``, then
+        the keys of :attr:`state_dict` must exactly match the keys returned
+        by this module's :meth:`~hetu.nn.Module.state_dict` function.
+
+        Args:
+            state_dict (dict): a dict containing parameters and
+                persistent buffers.
+            strict (bool, optional): whether to strictly enforce that the keys
+                in :attr:`state_dict` match the keys returned by this module's
+                :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+
+        Returns:
+            ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
+                * **missing_keys** is a list of str containing the missing keys
+                * **unexpected_keys** is a list of str containing the unexpected keys
+        """
+        missing_keys: List[str] = []
+        unexpected_keys: List[str] = []
+        error_msgs: List[str] = []
+
+        # copy state_dict so _load_from_state_dict can modify it
+        state_dict = state_dict.copy()
+    
+        def load(module, prefix=''):
+            module._load_from_state_dict(
+                state_dict, device_index, prefix, True, missing_keys, unexpected_keys, error_msgs)
+            for name, child in module._modules.items():
+                if child is not None:
+                    load(child, prefix + name + '.')
+
+        load(self)
+        del load
+
+        if strict:
+            if len(unexpected_keys) > 0:
+                error_msgs.insert(
+                    0, 'Unexpected key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in unexpected_keys)))
+            if len(missing_keys) > 0:
+                error_msgs.insert(
+                    0, 'Missing key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in missing_keys)))
+
+        if len(error_msgs) > 0:
+            raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+                               self.__class__.__name__, "\n\t".join(error_msgs)))
+        return _IncompatibleKeys(missing_keys, unexpected_keys)

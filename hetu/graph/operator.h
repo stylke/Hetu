@@ -265,6 +265,12 @@ class OpInterface : public shared_ptr_target {
                                    const HTShapeList& input_shapes,
                                    RuntimeContext& runtime_ctx) const;
 
+  virtual HTShapeList DoInferDynamicShape(Operator& op,
+                                   const HTShapeList& input_shapes,
+                                   RuntimeContext& runtime_ctx) const {
+    return DoInferShape(op, input_shapes, runtime_ctx);
+  }
+
   virtual NDArrayList DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                                      RuntimeContext& runtime_ctx) const;
 

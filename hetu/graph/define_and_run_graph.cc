@@ -1,5 +1,6 @@
 #include "hetu/graph/define_and_run_graph.h"
 #include "hetu/graph/executable_graph.h"
+#include "hetu/graph/ops/variable.h"
 
 namespace hetu {
 namespace graph {
@@ -20,6 +21,32 @@ void DefineAndRunGraph::ResetVariableDataInner(const Tensor& tensor,
     // The op has been instantiated. Let the executable graph handle it.
     Graph::ResetVariableData(it->second, init);
   }
+}
+
+NDArray DefineAndRunGraph::GetDetachedVariableDataInner(const Tensor& tensor) {
+  auto it_1 = _tensor_to_exec_tensor_mapping.find(tensor->id());
+  if (it_1 == _tensor_to_exec_tensor_mapping.end()) {
+    // The op is not instantiated yet.
+    // TODO: store the data on different devices, for now, store all on CPU.
+    auto ret = NDArray::empty(tensor->shape(), Device(kCPU), tensor->dtype());
+    auto it_2 = _add_on_inits.find(tensor->id());
+    if (it_2 != _add_on_inits.end()) {
+      HT_LOG_TRACE << "The data is reset, but not instantiated yet, so getting the data of the variable from its initializer.";
+      it_2->second->Init(ret);
+    } else {
+      HT_LOG_TRACE << "Not instantiated yet, getting the data of the variable from its initializer.";
+      if (tensor->has_distributed_states())
+        dynamic_cast<ParallelVariableOpImpl&>(tensor->producer()->body()).initializer().Init(ret);
+      else
+        dynamic_cast<VariableOpImpl&>(tensor->producer()->body()).initializer().Init(ret);  
+    }
+    return ret;
+  } else {
+    // The op has been instantiated. Let the executable graph handle it.
+    HT_LOG_TRACE << "Fetch the data from the executable graph.";
+    auto tmp = Graph::GetVariableData(it_1->second);
+    return NDArray::to(tmp, Device(kCPU));
+  }  
 }
 
 void DefineAndRunGraph::Instantiate() {

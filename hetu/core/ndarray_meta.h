@@ -9,6 +9,7 @@ namespace hetu {
 
 using HTShape = std::vector<int64_t>;
 using HTStride = std::vector<int64_t>;
+using HTPadding = std::vector<int64_t>;
 using HTAxes = std::vector<int64_t>;
 using HTShapeList = std::vector<HTShape>;
 using HTStrideList = std::vector<HTStride>;
@@ -42,10 +43,11 @@ inline HTStride Shape2Stride(const HTShape& shape) {
 class NDArrayMeta {
  public:
   NDArrayMeta() = default;
-  NDArrayMeta(const HTShape& shape, DataType dtype, const Device& device) {
+  NDArrayMeta(const HTShape& shape, DataType dtype, const Device& device, const HTShape& dynamic_shape = {}) {
     set_shape(shape);
     set_dtype(dtype);
     set_device(device);
+    set_dynamic_shape(dynamic_shape);
   }
   NDArrayMeta(const NDArrayMeta&) = default;
   NDArrayMeta(NDArrayMeta&&) = default;
@@ -77,6 +79,10 @@ class NDArrayMeta {
     return NumEl(shape);
   }
 
+  inline size_t dynamic_numel() const {
+    return NumEl(dynamic_shape);
+  }
+
   inline NDArrayMeta& set_dtype(DataType t) {
     dtype = t;
     return *this;
@@ -94,7 +100,7 @@ class NDArrayMeta {
 
   inline NDArrayMeta& set_shape(const HTShape& s) {
     HT_ASSERT(s.size() <= HT_MAX_NDIM)
-      << "Currently we only support up to " << HT_MAX_NDIM
+      << "Currently we only support shape up to " << HT_MAX_NDIM
       << " dimensions. Got " << s.size() << ".";
     shape = s;
     stride = Shape2Stride(shape);
@@ -103,10 +109,52 @@ class NDArrayMeta {
 
   inline NDArrayMeta& set_shape(HTShape&& s) {
     HT_ASSERT(s.size() <= HT_MAX_NDIM)
-      << "Currently we only support up to " << HT_MAX_NDIM
+      << "Currently we only support shape up to " << HT_MAX_NDIM
       << " dimensions. Got " << s.size() << ".";
     shape = std::move(s);
     stride = Shape2Stride(shape);
+    return *this;
+  }
+
+  inline NDArrayMeta& set_dynamic_shape(const HTShape& dynamic_s) {
+    if(dynamic_s.empty() || dynamic_s == shape) {
+      dynamic_shape = {};
+      return *this;
+    }
+    HT_ASSERT(dynamic_s.size() <= HT_MAX_NDIM)
+      << "Currently we only support dynamic shape up to " << HT_MAX_NDIM
+      << " dimensions. Got " << dynamic_s.size() << ".";
+    int32_t len1 = shape.size();
+    int32_t len2 = dynamic_s.size();
+    HT_ASSERT(len1 == len2)
+      << "Dynamic shape is not empty, please ensure shape has equal dims with dynamic shape.";
+    for (int32_t i = 0; i < len1; ++i) {
+      HT_ASSERT(shape[i] >= dynamic_s[i])
+        << "Shape is smaller than dynamic shape at dim "
+        << i << ", which is not allowed.";
+    }
+    dynamic_shape = dynamic_s;
+    return *this;
+  }
+
+  inline NDArrayMeta& set_dynamic_shape(HTShape&& dynamic_s) {
+    if(dynamic_s.empty() || dynamic_s == shape) {
+      dynamic_shape = {};
+      return *this;
+    }
+    HT_ASSERT(dynamic_s.size() <= HT_MAX_NDIM)
+      << "Currently we only support dynamic shape up to " << HT_MAX_NDIM
+      << " dimensions. Got " << dynamic_s.size() << ".";
+    int32_t len1 = shape.size();
+    int32_t len2 = dynamic_s.size();
+    HT_ASSERT(len1 == len2)
+      << "Dynamic shape is not empty, please ensure shape has equal dims with dynamic shape.";
+    for (int32_t i = 0; i < len1; ++i) {
+      HT_ASSERT(shape[i] >= dynamic_s[i])
+        << "Shape is smaller than dynamic shape at dim "
+        << i << ", which is not allowed.";
+    }
+    dynamic_shape = std::move(dynamic_s);
     return *this;
   }
 
@@ -140,16 +188,20 @@ class NDArrayMeta {
   Device device{kUndeterminedDevice};
   HTShape shape;
   HTStride stride;
+  // dynamic_shape is used in LLM inference because of dynamic seq_len.
+  HTShape dynamic_shape; // dynamic_shape + padding = shape
 };
 
 std::ostream& operator<<(std::ostream&, const NDArrayMeta&);
 
 inline bool IsCopiable(const NDArrayMeta& meta1, const NDArrayMeta& meta2) {
   // TODO: support copying between different strides
+  // meta1.dynamic_shape == meta2.dynamic_shape is not required
   return meta1.shape == meta2.shape && meta1.stride == meta2.stride;
 }
 
 inline bool IsExchangable(const NDArrayMeta& meta1, const NDArrayMeta& meta2) {
+  // meta1.dynamic_shape == meta2.dynamic_shape is not required
   return meta1.dtype == meta2.dtype && meta1.shape == meta2.shape &&
     meta1.stride == meta2.stride;
 }

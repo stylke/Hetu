@@ -438,8 +438,9 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
   static inline NDArray zeros(const HTShape& shape,
                               const Device& device = Device(kCPU),
                               DataType dtype = kFloat32,
-                              StreamIndex stream_id = DEFAULT_STREAM) {
-    return NDArray::full(shape, 0, device, dtype, stream_id);
+                              StreamIndex stream_id = DEFAULT_STREAM,
+                              const HTShape& dynamic_shape = {}) {
+    return NDArray::full(shape, 0, device, dtype, stream_id, dynamic_shape);
   }
 
   static inline NDArray zeros_like(const NDArray& other,
@@ -455,8 +456,9 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
   static inline NDArray ones(const HTShape& shape,
                              const Device& device = Device(kCPU),
                              DataType dtype = kFloat32,
-                             StreamIndex stream_id = DEFAULT_STREAM) {
-    return NDArray::full(shape, 1, device, dtype, stream_id);
+                             StreamIndex stream_id = DEFAULT_STREAM,
+                             const HTShape& dynamic_shape = {}) {
+    return NDArray::full(shape, 1, device, dtype, stream_id, dynamic_shape);
   }
 
   static inline NDArray ones_like(const NDArray& other,
@@ -471,14 +473,16 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
 
   static NDArray empty(const HTShape& shape,
                        const Device& device = Device(kCPU),
-                       DataType dtype = kFloat32);
+                       DataType dtype = kFloat32,
+                       const HTShape& dynamic_shape = {});
 
   static NDArray empty_like(const NDArray& other);
 
   static NDArray full(const HTShape& shape, double fill_value,
                       const Device& device = Device(kCPU),
                       DataType dtype = kFloat32,
-                      StreamIndex stream_id = DEFAULT_STREAM);
+                      StreamIndex stream_id = DEFAULT_STREAM,
+                      const HTShape& dynamic_shape = {});
 
   static NDArray full_like(const NDArray& other, double fill_value,
                            StreamIndex stream_id = DEFAULT_STREAM);
@@ -493,13 +497,15 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
   static NDArray rand(const HTShape& shape, const Device& device = Device(kCPU),
                       DataType dtype = kFloat32, double lb = 0.0,
                       double ub = 1.0, uint64_t seed = 0,
-                      StreamIndex stream_id = DEFAULT_STREAM);
+                      StreamIndex stream_id = DEFAULT_STREAM,
+                      const HTShape& dynamic_shape = {});
 
   static NDArray randn(const HTShape& shape,
                        const Device& device = Device(kCPU),
                        DataType dtype = kFloat32, double mean = 0.0,
                        double stddev = 1.0, uint64_t seed = 0,
-                       StreamIndex stream_id = DEFAULT_STREAM);
+                       StreamIndex stream_id = DEFAULT_STREAM,
+                       const HTShape& dynamic_shape = {});
 
   static NDArray uniform_(NDArray& data, double lb = 0.0, double ub = 1.0,
                           uint64_t seed = 0,
@@ -624,6 +630,10 @@ class NDArrayDef : public shared_ptr_target {
     return _meta.numel();
   }
 
+  size_t dynamic_numel() const {
+    return _meta.dynamic_numel();
+  }
+
   DataType dtype() const {
     return _meta.dtype;
   }
@@ -650,6 +660,23 @@ class NDArrayDef : public shared_ptr_target {
 
   const HTStride& stride() const {
     return _meta.stride;
+  }
+
+  bool is_dynamic() const {
+    return !_meta.dynamic_shape.empty();
+  }
+
+  const HTShape& dynamic_shape() const {
+    // dynamic_shape is empty means shape = dynamic_shape
+    if (_meta.dynamic_shape.empty())
+      return _meta.shape;
+    return _meta.dynamic_shape;
+  }
+
+  int64_t dynamic_shape(size_t axis) const {
+    if (_meta.dynamic_shape.empty())
+      return _meta.shape[axis];
+    return _meta.dynamic_shape[axis];
   }
 
   std::shared_ptr<NDArrayStorage> storage() const {

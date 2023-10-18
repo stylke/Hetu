@@ -37,6 +37,17 @@ HTShapeList WhereOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(1)};
 }
 
+HTShapeList WhereOpImpl::DoInferDynamicShape(Operator& op, 
+                                      const HTShapeList& input_shapes, 
+                                      RuntimeContext& ctx) const {
+  // shape 1 should have the smallest dynamic shape
+  HT_ASSERT(input_shapes.at(0).size() >= input_shapes.at(1).size() &&
+            input_shapes.at(1).size() <= input_shapes.at(2).size())
+          << input_shapes.at(0) << " " << input_shapes.at(1) <<
+          " " << input_shapes.at(2);
+  return {input_shapes.at(1)};
+}
+
 Tensor MakeWhereOp(Tensor cond, Tensor inputA, Tensor inputB,
                    OpMeta op_meta) {
   return Graph::MakeOp(

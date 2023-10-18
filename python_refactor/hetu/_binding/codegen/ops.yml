@@ -111,6 +111,10 @@
   op: ConcatenateOp
   args: TensorList inputs, int64_t axis=0
 
+- name: dynamic_concat
+  op: DynamicConcatenateOp
+  args: TensorList inputs, int64_t axis=0
+
 - name: pad
   op: PadOp
   args: Tensor input, HTShape paddings, std::string mode, double constant
@@ -136,6 +140,11 @@
   args: Tensor input, HTShape output_shape
   self: input
 
+- name: reshape
+  op: ArrayReshapeOp
+  args: Tensor input, HTShape output_shape, int64_t padding_axis
+  self: input
+
 - name: view
   op: ViewOp
   args: Tensor input, HTShape output_shape
@@ -149,6 +158,11 @@
 - name: split
   op: SplitOp
   args: Tensor input, int64_t num_chunks, int64_t dim
+  self: input
+
+- name: split
+  op: SplitOp
+  args: Tensor input, int64_t num_chunks, int64_t dim, int64_t padding_axis
   self: input
 
 - name: split

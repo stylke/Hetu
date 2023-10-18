@@ -87,6 +87,34 @@ HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op,
   return {output_shape};
 }
 
+HTShapeList ArrayReshapeOpImpl::DoInferDynamicShape(Operator& op, 
+                                             const HTShapeList& input_shapes, 
+                                             RuntimeContext& ctx) const {
+  int64_t input_size = 1;
+  HTShape input_shape = input_shapes.at(0);
+  int64_t input_len = input_shape.size();
+  int64_t output_size = 1;
+  HTShape output_shape = get_output_shape();
+  if (op->input(0)->has_distributed_states()) {
+    output_shape = get_local_output_shape(op->input(0)->global_shape(), 
+                                          op->input(0)->get_distributed_states());
+  }  
+  int64_t output_len = output_shape.size();
+  for (size_t i = 0; i < input_len; ++i) {
+    HT_ASSERT(input_shape[i] != -1) << "The shape of input shouldn't consist of -1 when having paddings.";
+    input_size *= input_shape[i];
+  }
+  for (int64_t i = 0; i < output_len; ++i) {
+    HT_ASSERT(input_shape[i] != -1) << "The shape of output shouldn't consist of -1 when having paddings.";
+    output_size *= output_shape[i];
+  }
+  int64_t fixed_output_size = output_size / output_shape[padding_axis()];
+  HT_ASSERT(input_size % fixed_output_size == 0) << "The dynamic shape: " << input_shape << " can't support reshape.";
+  int64_t padding_output_size = input_size / fixed_output_size;
+  output_shape[padding_axis()] = padding_output_size;
+  return {output_shape};
+}
+
 void ArrayReshapeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                         const OpMeta& op_meta) const {
   const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
@@ -135,6 +163,18 @@ Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
                           OpMeta op_meta) {
   return Graph::MakeOp(
       std::make_shared<ArrayReshapeOpImpl>(output_shape),
+      {std::move(input)},
+      std::move(op_meta))->output(0);
+}
+
+Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
+                          int64_t padding_axis, OpMeta op_meta) {
+  padding_axis = NDArrayMeta::ParseAxis(padding_axis, output_shape.size());
+  for (auto& x : output_shape) {
+    HT_ASSERT(x != -1) << "The shape of output shouldn't consist of -1 when having paddings.";
+  }
+  return Graph::MakeOp(
+      std::make_shared<ArrayReshapeOpImpl>(output_shape, padding_axis),
       {std::move(input)},
       std::move(op_meta))->output(0);
 }

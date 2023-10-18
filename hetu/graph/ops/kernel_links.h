@@ -69,6 +69,8 @@ DECLARE_KERNEL_CUDA(Concatenate, const NDArray&, NDArray&, size_t,
                     size_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ConcatenateGradient, const NDArray&, NDArray&,
                             size_t, size_t, const Stream&);
+DECLARE_KERNEL_CUDA(DynamicConcatenate, const NDArray&, NDArray&, size_t,
+                    size_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Conv2d, const NDArray&, const NDArray&, NDArray&,
                             const int, const int, const int, const int,
                             const Stream&);

@@ -10,6 +10,7 @@
 #include "hetu/graph/ops/Communication.h"
 #include "hetu/graph/ops/Concat.h"
 #include "hetu/graph/ops/Concatenate.h"
+#include "hetu/graph/ops/dynamic_concatenate.h"
 #include "hetu/graph/ops/Conv2d.h"
 #include "hetu/graph/ops/data_transfer.h"
 #include "hetu/graph/ops/Dropout.h"

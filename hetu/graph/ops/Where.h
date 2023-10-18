@@ -32,6 +32,8 @@ class WhereOpImpl : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
+  HTShapeList DoInferDynamicShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
+
  public:
   bool operator==(const OpInterface& rhs) const override {
     return OpInterface::operator==(rhs);

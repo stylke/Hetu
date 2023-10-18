@@ -80,17 +80,32 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
   if (op->num_outputs() > 0) {
     outputs.reserve(op->num_outputs());
     HTShapeList input_shapes;
+    HTShapeList input_dynamic_shapes;
     input_shapes.reserve(op->num_inputs());
-    for (auto& input : inputs)
+    input_dynamic_shapes.reserve(op->num_inputs());
+    bool is_dynamic = false;
+    for (auto& input : inputs) {
       input_shapes.push_back(input->shape());
+      if (input->is_dynamic())
+        is_dynamic = true;
+      input_dynamic_shapes.push_back(input->dynamic_shape());
+    }
     // Although we have inferred the meta of tensors,
     // InferShape is still necessary in pipeline parallelism
     auto output_shapes = DoInferShape(op, input_shapes, runtime_ctx);
+    HTShapeList output_dynamic_shapes;
+    if (is_dynamic)
+      output_dynamic_shapes = DoInferDynamicShape(op, input_dynamic_shapes, runtime_ctx);
     for (size_t i = 0; i < output_shapes.size(); i++) {
       outputs.push_back(NDArray::empty(output_shapes[i],
                                        op->instantiation_ctx().placement,
-                                       op->output(i)->dtype()));
+                                       op->output(i)->dtype(),
+                                       is_dynamic ? output_dynamic_shapes[i] : HTShape()));
     }
+    if (is_dynamic)
+      HT_LOG_TRACE_IF(hetu::impl::comm::GetLocalDevice().index() == 0U) << "op: " << op << " input_shapes: " << input_shapes   
+        << " input_dynamic_shapes: " << input_dynamic_shapes << " output_shapes: " << output_shapes 
+        << " output_dynamic_shapes: " << output_dynamic_shapes;
   }
   return outputs;
 }
