@@ -36,5 +36,30 @@ class SigmoidOpImpl : public OpInterface {
 
 Tensor MakeSigmoidOp(Tensor input, OpMeta op_meta = OpMeta());
 
+class SigmoidGradientOpImpl : public OpInterface {
+ public:
+  SigmoidGradientOpImpl()
+  : OpInterface(quote(SigmoidGradientOp)) {
+  }
+
+ protected:
+  std::vector<NDArrayMeta> 
+  DoInferMeta(const TensorList& inputs) const override {
+    return {inputs[0]->meta()};
+  };
+
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) const override;
+
+  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
+
+ public:
+  bool operator==(const OpInterface& rhs) const override {
+    return OpInterface::operator==(rhs);
+  }
+};
+
+Tensor MakeSigmoidGradientOp(Tensor out_grad, Tensor output, OpMeta op_meta = OpMeta());
+
 } // namespace graph
 } // namespace hetu

@@ -1,6 +1,6 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
-#include "hetu/autograd/ops/kernel_links.h"
+#include "hetu/graph/ops/kernel_links.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/dispatch.h"
 #include "hetu/impl/utils/ndarray_utils.h"
@@ -271,6 +271,15 @@ NDArray NDArray::relu(const NDArray& input, StreamIndex stream_id,
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
                                   hetu::impl::Relu, input, out, stream);
+  return out;
+}
+
+NDArray NDArray::gelu(const NDArray& input, StreamIndex stream_id,
+                      NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Gelu, input, out, stream);
   return out;
 }
 

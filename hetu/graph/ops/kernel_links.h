@@ -127,11 +127,21 @@ DECLARE_KERNEL_CPU_AND_CUDA(EmbeddingLookupGradient, const NDArray&,
                             const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Exp, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Eye, NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(FlashAttn, const NDArray&, const NDArray&, const NDArray&,        
+                    NDArray&, NDArray&, NDArray&, NDArray&, NDArray&, NDArray&,     
+                    NDArray&, NDArray&, const float, const float,
+                    const bool, const bool, const Stream&);
+DECLARE_KERNEL_CUDA(FlashAttnGradient, const NDArray&, const NDArray&, const NDArray&,        
+                    const NDArray&, NDArray&, NDArray&, NDArray&, NDArray&, NDArray&,     
+                    NDArray&, const float, const float, const bool, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Floor, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Gather, const NDArray&, const NDArray&, NDArray&,
                             size_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(GatherGradient, const NDArray&, const NDArray&, 
                             NDArray&, size_t, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(Gelu, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(GeluGradient, const NDArray&, const NDArray&,
+                            NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(IndexAdd, const NDArray&, const NDArray&, NDArray&,
                             size_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(InstanceNorm, const NDArray&, NDArray&, NDArray&,
@@ -232,6 +242,7 @@ DECLARE_KERNEL_CPU_AND_CUDA(SGDUpdate, const NDArray&, NDArray&, NDArray&,
 DECLARE_KERNEL_CPU_AND_CUDA(SGDUpdateWithGradScaler, const NDArray&, const NDArray&, NDArray&, NDArray&,
                             float, float, bool, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Sigmoid, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(SigmoidGradient, const NDArray&, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Sin, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Cos, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Slice, const NDArray&, NDArray&, int64_t*,

@@ -7,6 +7,7 @@ if(${HETU_COMPILE_CUDA})
   list(APPEND HETU_SRC ${HETU_CU_SRC})
 endif()
 list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/test/*")
+# list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/csrc/*")
 add_library(hetu_C SHARED ${HETU_SRC})
 target_include_directories(hetu_C PUBLIC ${HETU_SRC_DIR})
 
@@ -44,3 +45,25 @@ if(${HETU_COMPILE_DNNL})
     target_include_directories(hetu_C PUBLIC ${DNNL_BUILD_INCLUDE_DIR})
   endif()
 endif()
+
+if(${USE_FLASH_ATTN})
+  find_package(CUTLASS)
+  if(NOT CUTLASS_FOUND)
+    message("cutlass not found, preparing...")
+    include(${CMAKE_SOURCE_DIR}/cmake/external/cutlass.cmake)
+    target_link_libraries(hetu_C PUBLIC ${CUTLASS_DLL_PATH})
+    target_include_directories(hetu_C PUBLIC ${CUTLASS_INCLUDE_DIR})
+    message("CU${CUTLASS_INCLUDE_DIR}")
+    add_dependencies(hetu_C project_cutlass)
+  else()
+    target_link_libraries(hetu_C PUBLIC ${CUTLASS_LIBRARY})
+    target_include_directories(hetu_C PUBLIC ${CUTLASS_INCLUDE_DIR})
+  endif()
+endif()
+
+target_compile_options(hetu_C PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                       -O3;
+                       -std=c++17;
+                       --use_fast_math;
+                       --threads 8
+                       >)

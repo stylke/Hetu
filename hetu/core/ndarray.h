@@ -167,6 +167,10 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                       StreamIndex stream_id = DEFAULT_STREAM,
                       NDArray& output = EMPTY);
 
+  static NDArray gelu(const NDArray& input,
+                      StreamIndex stream_id = DEFAULT_STREAM,
+                      NDArray& output = EMPTY);
+
   static NDArray tanh(const NDArray& input,
                       StreamIndex stream_id = DEFAULT_STREAM,
                       NDArray& output = EMPTY);
@@ -662,6 +666,19 @@ class NDArrayDef : public shared_ptr_target {
     return _meta.stride;
   }
 
+<<<<<<< HEAD
+=======
+  const int64_t stride(int64_t idx) const {
+    int64_t ndim_ = ndim();
+    HT_ASSERT(idx >= -ndim_ && idx < ndim_)
+    << "stride should in range [" << -ndim_ << ","
+    << ndim_ << "), but it's" << idx;
+    if (idx < 0)
+      idx += ndim_;
+    return _meta.stride[idx];
+  }
+
+>>>>>>> 2c2b41a04751c35a197d821a66142997e0d95613
   bool is_dynamic() const {
     return !_meta.dynamic_shape.empty();
   }

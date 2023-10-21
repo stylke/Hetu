@@ -113,7 +113,11 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         }
       }
       op->MapToParallelDevices(inferred);
+<<<<<<< HEAD
       // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": op " << op << " inferred placement group = " << inferred;
+=======
+      HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": op " << op << " inferred placement group = " << inferred;
+>>>>>>> 2c2b41a04751c35a197d821a66142997e0d95613
     }
     // udpate stages
     DeviceGroup stage_group;

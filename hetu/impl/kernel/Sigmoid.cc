@@ -53,5 +53,33 @@ void SigmoidCpu(const NDArray& input, NDArray& output, const Stream& stream) {
     });
 }
 
+template <typename spec_t>
+void sigmoid_grad_cpu(const spec_t* output_grad, const spec_t* output,
+                      size_t size, spec_t* input_grad) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; ++idx) 
+    input_grad[idx] = output_grad[idx] * output[idx] * (1 - output[idx]);
+}
+
+void SigmoidGradientCpu(const NDArray& out_grad, const NDArray& output, NDArray& in_grad, const Stream& stream) {
+  HT_ASSERT_CPU_DEVICE(out_grad);
+  HT_ASSERT_SAME_DEVICE(out_grad, output);
+  HT_ASSERT_SAME_DEVICE(out_grad, in_grad);
+  HT_ASSERT_EXCHANGABLE(out_grad, output);
+  HT_ASSERT_EXCHANGABLE(out_grad, in_grad);
+
+  size_t size = output->numel();
+  if (size == 0)
+    return;
+
+  HT_DISPATCH_FLOATING_TYPES(out_grad->dtype(), spec_t, "SigmoidCpu", [&]() {
+    sigmoid_grad_cpu<spec_t>(
+      out_grad->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
+      size, in_grad->data_ptr<spec_t>());
+  });
+}
+
 } // namespace impl
 } // namespace hetu

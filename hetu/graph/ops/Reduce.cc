@@ -15,13 +15,30 @@ void ReduceOpImpl::DoCompute(Operator& op,
     NDArray::reduce(inputs.at(0), reduction(), get_axes(), false,
                     op->instantiation_ctx().stream_index, outputs.at(0));
   else {
-    NDArray tmp = NDArray::reduce(inputs.at(0), reduction(), {reduce_axes[reduce_axes.size() - 1]}, false,
-                                  op->instantiation_ctx().stream_index);
-    for (int i = 1; i < reduce_axes.size() - 1; ++i)
-      tmp = NDArray::reduce(tmp, reduction(), {reduce_axes[reduce_axes.size() - 1 - i]}, false,
-                            op->instantiation_ctx().stream_index);
-    NDArray::reduce(tmp, reduction(), {reduce_axes[0]}, false,
-                    op->instantiation_ctx().stream_index, outputs.at(0));
+    NDArray tmp = inputs.at(0);
+    while(reduce_axes.size() > 0) {
+      int max_index, max_size = 0;
+      for (int i = 0; i < reduce_axes.size(); ++i) {
+        if (tmp->shape(reduce_axes[i]) > max_size) {
+          max_size = tmp->shape(reduce_axes[i]);
+          max_index = i;
+        }
+      }
+      if (reduce_axes.size() == 1)
+        NDArray::reduce(tmp, reduction(), {reduce_axes[max_index]}, false,
+                        op->instantiation_ctx().stream_index, outputs.at(0));
+      else 
+        tmp = NDArray::reduce(tmp, reduction(), {reduce_axes[max_index]}, false,
+                              op->instantiation_ctx().stream_index);
+      for (int i = max_index + 1; i < reduce_axes.size(); ++i) {
+        reduce_axes[i - 1] = reduce_axes[i];
+      }
+      reduce_axes.pop_back();
+      for (int i = 0; i < reduce_axes.size(); ++i) {
+        if (reduce_axes[i] > max_index)
+          reduce_axes[i] -= 1;
+      }
+    }
   }
 }
 
@@ -233,6 +250,12 @@ Tensor MakeReduceMinOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
                        OpMeta op_meta) {
   return MakeReduceOp(std::move(input), ReductionType::MIN, axes, keepdims, op_meta);          
+}
+
+Tensor MakeReduceProdOp(Tensor input, const HTAxes& axes,
+                        const HTKeepDims& keepdims,
+                        OpMeta op_meta) {
+  return MakeReduceOp(std::move(input), ReductionType::PROD, axes, keepdims, op_meta);
 }
 
 Tensor MakeReduceGradientOp(Tensor input, Tensor ori_output, Tensor ori_input, const HTShape& shape,

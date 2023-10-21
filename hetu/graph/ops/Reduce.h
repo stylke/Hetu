@@ -22,9 +22,9 @@ protected:
     _keepdims(keepdims),
     _reduction(reduction) {
     HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kMAX 
-              || _reduction == kMIN || _reduction == kNONE)
+              || _reduction == kMIN || _reduction == kPROD || _reduction == kNONE)
       << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'max\', \'min\', \'none\']";
+      << " operators. Expected: [\'sum\', \'mean\', \'max\', \'min\', \'prod\', \'none\']";
   }
 
  public:
@@ -139,6 +139,10 @@ Tensor MakeReduceMaxOp(Tensor input, const HTAxes& axes,
                        OpMeta op_meta);
 
 Tensor MakeReduceMinOp(Tensor input, const HTAxes& axes,
+                       const HTKeepDims& keepdims,
+                       OpMeta op_meta);
+
+Tensor MakeReduceProdOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
                        OpMeta op_meta);
 

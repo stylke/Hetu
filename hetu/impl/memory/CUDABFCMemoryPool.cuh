@@ -98,7 +98,7 @@ private:
                 allocator_(allocator) {
             }
             // Sort first by size and then use pointer address as a tie breaker.
-            bool operator()(const ChunkHandle ha, const ChunkHandle hb) {
+            bool operator()(const ChunkHandle ha, const ChunkHandle hb) const {
                 const Chunk *a = allocator_->ChunkFromHandle(ha);
                 const Chunk *b = allocator_->ChunkFromHandle(hb);
                 if (a->size != b->size) {

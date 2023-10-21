@@ -310,6 +310,11 @@
   args: Tensor input
   self: input
 
+- name: gelu
+  op: GeluOp
+  args: Tensor input
+  self: input
+
 - name: leakyrelu
   op: LeakyReluOp
   args: Tensor input, double alpha
@@ -424,3 +429,7 @@
 - name: where
   op: WhereOp
   args: Tensor cond, Tensor inputA, Tensor inputB
+
+- name: attention
+  op: AttentionOp
+  args: Tensor q, Tensor k, Tensor v, double p_dropout=0, float softmax_scale=-1, bool is_causal=False, bool return_softmax=False

@@ -2,8 +2,30 @@
 
 #include "hetu/common/macros.h"
 #include <tuple>
+#include <cuda_runtime.h>
 
 namespace hetu {
+
+struct DeviceProp {
+  int major;
+  int minor;
+  int multiProcessorCount;
+  int maxThreadsPerMultiProcessor;
+
+  DeviceProp() {
+    major = 0;
+    minor = 0;
+    multiProcessorCount = 0;
+    maxThreadsPerMultiProcessor = 0;
+  }
+
+  DeviceProp(cudaDeviceProp& dprop) {
+    major = dprop.major;
+    minor = dprop.minor;
+    multiProcessorCount = dprop.multiProcessorCount;
+    maxThreadsPerMultiProcessor = dprop.maxThreadsPerMultiProcessor;
+  }
+};
 
 enum class DeviceType : int8_t {
   CPU = 0,
@@ -99,6 +121,10 @@ class Device {
     return _multiplex;
   }
 
+  static DeviceProp dprop(int idx) {
+    return _dprops[idx].second;
+  }
+
   std::string compat_string() const;
 
   static inline std::string GetLocalHostname() {
@@ -114,6 +140,11 @@ class Device {
       return ret;
     }
   }
+
+ protected: 
+  static std::vector<std::pair<bool, DeviceProp>> _dprops;
+
+  static std::vector<std::pair<bool, DeviceProp>> CUDAInit();
 
  private:
   void _init(DeviceType type, DeviceIndex index, const std::string& hostname,
@@ -134,6 +165,12 @@ class Device {
       << "Multiplex " << multiplex << " exceeds maximum allowed value "
       << HT_MAX_HOSTNAME_LENGTH;
     _multiplex = multiplex;
+    if (_type == kCUDA && _dprops[_index].first == false) {
+      _dprops[_index].first = true;
+      cudaDeviceProp dprop;
+      cudaGetDeviceProperties(&dprop, _index);
+      _dprops[_index].second = DeviceProp(dprop);
+    }
   }
 
   DeviceType _type;

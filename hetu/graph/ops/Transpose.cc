@@ -8,6 +8,7 @@ namespace graph {
 void TransposeOpImpl::DoCompute(Operator& op, 
                                 const NDArrayList& inputs, NDArrayList& outputs,
                                 RuntimeContext& ctx) const {
+  // return;                                  
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::Transpose, inputs.at(0),
                                   outputs.at(0), get_perms().data(), op->instantiation_ctx().stream());

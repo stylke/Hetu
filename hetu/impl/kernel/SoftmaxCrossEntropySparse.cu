@@ -74,6 +74,43 @@ __global__ void softmax_cross_entropy_sparse_kernel2(const spec_t* pred,
 }
 
 template <typename spec_t>
+__global__ void
+softmax_cross_entropy_sparse_gradient_kernel(const spec_t* pred, const int64_t* label,
+                                             const spec_t* grad_loss, size_t n_rows, size_t n_cols,
+                                             const int64_t ignored_index,
+                                             spec_t* output) {
+  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= n_rows)
+    return;
+
+  if(int64_t(label[idx]) == ignored_index) {
+    for (size_t i = 0; i < n_cols; ++i) {
+        size_t curid = idx * n_cols + i;
+        output[curid] = 0;
+    }
+    return;        
+  }
+  
+  spec_t maxval = pred[idx * n_cols];
+
+  for (size_t i = 1; i < n_cols; ++i) {
+      maxval = MAX(maxval, pred[idx * n_cols + i]);
+  }
+
+  float sum = 0;
+  for (size_t i = 0; i < n_cols; ++i) {
+      sum += hetu::cuda::cuda_exp(float(pred[idx * n_cols + i] - maxval));
+  }
+  for (size_t i = 0; i < n_cols; ++i) {
+      size_t curid = idx * n_cols + i;
+      if(i == int64_t(label[idx]))
+        output[curid] = (hetu::cuda::cuda_exp(pred[curid] - maxval) / spec_t(sum) - 1.0) * grad_loss[idx];
+      else
+        output[curid] = (hetu::cuda::cuda_exp(pred[curid] - maxval) / spec_t(sum)) * grad_loss[idx];
+  }
+}
+
+template <typename spec_t>
 __forceinline__ __device__ spec_t WarpReduceSum(spec_t val) {
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
@@ -120,7 +157,7 @@ __forceinline__ __device__ void BlockReduceSum(spec_t& val, spec_t* shared, spec
 
 template <typename spec_t>
 __global__ void
-softmax_cross_entropy_sparse_gradient_kernel(const spec_t* pred, const int64_t* label,
+softmax_cross_entropy_sparse_gradient_kernel2(const spec_t* pred, const int64_t* label,
                                              const spec_t* grad_loss, size_t n_rows, size_t n_cols,
                                              const int64_t ignored_index,
                                              spec_t* output) {
@@ -200,7 +237,7 @@ void SoftmaxCrossEntropySparseGradientCuda(const NDArray& pred, const NDArray& l
   blocks.x = n_rows;
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "SoftmaxCrossEntropySparseGradientCuda", [&]() {
-      softmax_cross_entropy_sparse_gradient_kernel<<<blocks, threads, 0, cuda_stream>>>(
+      softmax_cross_entropy_sparse_gradient_kernel2<<<blocks, threads, 0, cuda_stream>>>(
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(),
         grad_loss->data_ptr<spec_t>(), n_rows, n_cols,
         ignored_index, output->data_ptr<spec_t>());
