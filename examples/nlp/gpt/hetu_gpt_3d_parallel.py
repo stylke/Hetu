@@ -231,7 +231,8 @@ class GPTBlock(ht.nn.Module):
         hidden_states = self.ln_2(hidden_states)
         feed_forward_hidden_states = self.mlp(hidden_states)
         # residual connection
-        hidden_states =  feed_forward_hidden_states + residual
+        # hidden_states =  feed_forward_hidden_states + residual
+        hidden_states =  residual + feed_forward_hidden_states
 
         return hidden_states
 
@@ -244,7 +245,8 @@ class GPTModel(ht.nn.Module):
         self.dtype = ht.float32
 
         self.embed_dim = config.hidden_size
-        self.wte = ht.nn.ParallelEmbedding(config.vocab_size, self.embed_dim, device_groups[0], name='wte')
+        # self.wte = ht.nn.ParallelEmbedding(config.vocab_size, self.embed_dim, device_groups[0], name='wte')
+        self.wte = ht.nn.VocabParallelEmbedding(config.vocab_size, self.embed_dim, device_groups[0], dp=config.dp, name='wte')
         self.wpe = ht.nn.ParallelEmbedding(config.max_position_embeddings, self.embed_dim, device_groups[0], name='wpe')
 
         self.drop = ht.nn.Dropout(config.embd_pdrop)
