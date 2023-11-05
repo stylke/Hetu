@@ -59,9 +59,11 @@ void SCEOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
 void SCEGradOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) const {
   HTShape output_shape = HTShape(inputs.at(0)->shape().begin(), inputs.at(0)->shape().end() - 1);
-  NDArray broadcasted =
-    reduction() == kNONE ? inputs.at(2) : NDArray::empty(output_shape, 
-                                           inputs.at(0)->device(), inputs.at(0)->dtype());
+  NDArray broadcasted = reduction() == kNONE
+    ? inputs.at(2)
+    : NDArray::empty(output_shape, inputs.at(0)->device(),
+                     inputs.at(0)->dtype(),
+                     op->instantiation_ctx().stream_index);
   if (reduction() == kMEAN) {
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       op->instantiation_ctx().placement.type(), type(), hetu::impl::BroadcastShapeMul, inputs.at(2),

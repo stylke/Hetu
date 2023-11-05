@@ -7,17 +7,16 @@
 
 namespace hetu {
 namespace graph {
-  
-struct ExecutePlan
-{
+
+struct ExecutePlan {
   OpRefList local_fw_topo;
   OpRefList local_bw_topo;
   OpRefList local_topo;
   TensorIdSet accumulated_tensor;
   OpIdSet accumulated_ops;
 
-  void update(OpRefList& _local_fw_topo, OpRefList& _local_bw_topo, 
-              OpRefList& _local_topo, TensorIdSet& _accumulated_tensor, 
+  void update(OpRefList& _local_fw_topo, OpRefList& _local_bw_topo,
+              OpRefList& _local_topo, TensorIdSet& _accumulated_tensor,
               OpIdSet& _accumulated_ops) {
     local_fw_topo = _local_fw_topo;
     local_bw_topo = _local_bw_topo;
@@ -26,7 +25,6 @@ struct ExecutePlan
     accumulated_ops = _accumulated_ops;
   }
 };
-
 
 class ExecutableGraph : public Graph {
  protected:
@@ -125,7 +123,7 @@ class ExecutableGraph : public Graph {
   std::vector<DeviceGroup> _stages;
   int _num_micro_batches;
   ExecutePlan _execute_plan;
-  std::vector<hetu::impl::CUDAEvent> _p2p_events;
+  std::vector<std::unique_ptr<Event>> _p2p_events;
 };
 
 } // namespace graph

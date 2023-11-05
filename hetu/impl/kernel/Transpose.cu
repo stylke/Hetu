@@ -151,7 +151,7 @@ void TransposeCuda(const NDArray& input, NDArray& output, int64_t* perm,
     int dev_id = cuda_stream.device_id();
 
     size_t buf_size = 3 * ndim * sizeof(uint);
-    DataPtr gpu_buf_ptr = AllocFromMemoryPool(input->device(), buf_size);
+    DataPtr gpu_buf_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
     gpu_buf = (uint*) gpu_buf_ptr.ptr;
 
     if (size == 0)

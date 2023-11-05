@@ -41,14 +41,16 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
                                                  const Initializer& init,
                                                  uint64_t seed,
                                                  const HTShape& global_shape) {
-  // TODO: check meta is valid
-  _preserved_data[tensor->id()] =
-    NDArray::empty(tensor->shape(), tensor->placement(), tensor->dtype());
+  // TODO: check meta is valid & maybe we can use non-blocking stream?
+  _preserved_data[tensor->id()] = NDArray::empty(
+    tensor->shape(), tensor->placement(), tensor->dtype(), kBlockingStream);
   auto it = _add_on_inits.find(tensor->id());
   if (it != _add_on_inits.end()) {
-    it->second->Init(_preserved_data[tensor->id()], seed, global_shape);
+    it->second->Init(_preserved_data[tensor->id()], seed, global_shape,
+                     kBlockingStream);
   } else if (!init.vodify()) {
-    init.Init(_preserved_data[tensor->id()], seed, global_shape);
+    init.Init(_preserved_data[tensor->id()], seed, global_shape,
+              kBlockingStream);
   }
   return _preserved_data[tensor->id()];
 }
@@ -841,14 +843,17 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       continue;
     }
 
+    HT_LOG_TRACE << "Running op " << op << " (type: " << op->type() << ")...";
+
     // batched p2p send & recv
-    if (is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) {
+    if ((is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) &&
+        op->instantiation_ctx().placement.is_cuda()) {
       if (!is_continuous_p2p) {
         is_continuous_p2p = true;
-        hetu::impl::CUDAEvent event(op->placement());
-        event.Record(Stream(op->placement(), kComputingStream));
-        event.Block(Stream(op->placement(), kP2PStream));
-        _p2p_events.push_back(event);
+        auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+        event->Record(Stream(op->placement(), kComputingStream));
+        event->Block(Stream(op->placement(), kP2PStream));
+        _p2p_events.emplace_back(std::move(event));
         ncclGroupStart();
         // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group start";
       }
@@ -856,10 +861,10 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       is_continuous_p2p = false;
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group end";
       ncclGroupEnd();
-      hetu::impl::CUDAEvent event(op->placement());
-      event.Record(Stream(op->placement(), kP2PStream));
-      event.Block(Stream(op->placement(), kComputingStream));
-      _p2p_events.push_back(event);
+      auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+      event->Record(Stream(op->placement(), kP2PStream));
+      event->Block(Stream(op->placement(), kComputingStream));
+      _p2p_events.emplace_back(std::move(event));
     }
 
     NDArrayList input_vals;
@@ -881,10 +886,14 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       // should free memory until op aync compute complete!!!
       // workaround: erase when the stream of input_op is the same as cur_op 
       if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end()) {
-      //   tensor2data.erase(input->id());
+        tensor2data.erase(input->id());
       }
     }
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
+    // Note: The usage should be marked inside kernels, 
+    // but we still mark here in case we forget to do so in some kernels. 
+    NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
+    NDArray::MarkUsedBy(output_vals, op->instantiation_ctx().stream());
     // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op;
     for (size_t i = 0; i < op->num_outputs(); i++) {
       const auto& output = op->output(i);
@@ -906,10 +915,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
 NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
                                  const FeedDict& feed_dict, const int num_micro_batches) {
-  auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
-  comm_group->Barrier(true);                                  
-  auto start_t = clock();
-
+  TIK(run);
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
 
@@ -1064,10 +1070,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get accumulated tensor & ops end...";
     // update & cached execute plan 
     _execute_plan.update(local_fw_topo, local_bw_topo, local_topo, accumulated_tensor, accumulated_ops);
+    // sync globally
+    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+    comm_group->Barrier(true);
   }
-  auto execute_plan_t = clock();
-  auto duration_execute_plan = 1.0 * (execute_plan_t - start_t) / 1e3;
-  HT_LOG_DEBUG << local_device << ": prepare execution plan cost time = " << duration_execute_plan << " ms."; 
+  TOK(run);
+  HT_LOG_DEBUG << local_device << ": prepare execution plan cost time = " << COST_MSEC(run) << " ms."; 
 
   // calculate params
   bool is_calculate_params = false;
@@ -1173,10 +1181,10 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   }
   if (is_continuous_p2p) {
     ncclGroupEnd();
-    hetu::impl::CUDAEvent event(local_device);
-    event.Record(Stream(local_device, kP2PStream));
-    event.Block(Stream(local_device, kComputingStream));
-    _p2p_events.push_back(event);    
+    auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
+    event->Record(Stream(local_device, kP2PStream));
+    event->Block(Stream(local_device, kComputingStream));
+    _p2p_events.emplace_back(std::move(event));
   }
   HT_LOG_DEBUG << local_device << ": 2. compute[end]";
 
@@ -1204,7 +1212,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             for (auto& tensor2data : tensor2data_list) {
               result.push_back(tensor2data[output->id()]);
             }
-            HT_LOG_TRACE << "result:" << result;
             results[it->second] = NDArray::cat(result);
           }
         }
@@ -1218,14 +1225,26 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     // sync_ops.push_back(_op_indexing[op_id]);
   }
   // HT_LOG_DEBUG << local_device << ": sync ops = " << sync_ops;
+  for (size_t i = 0; i < results.size(); i++)
+    HT_LOG_TRACE << "results[" << i << "]: " << results[i];
   HT_LOG_DEBUG << local_device << ": 3. get results[end]";
 
-  auto end_t = clock();
-  auto duration_run_time = 1.0 * (end_t - start_t) / 1e3;
-  HT_LOG_DEBUG << local_device << ": total run time = " << duration_run_time << " ms";
+  TOK(run);
+  HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)
+               << " ms";
+  
   // get op execute time, sort and analysis
   bool is_analysis_perf = false;
   if (is_analysis_perf) {
+    TIK(free);
+    runtime_ctx_list.clear();
+    tensor2data_list.clear();
+    grad_accumulation.clear();
+    TOK(free);
+    HT_LOG_DEBUG << local_device
+                 << ": free temporary memory time = " << COST_MSEC(free)
+                 << " ms";
+
     std::vector<std::pair<int64_t, int64_t>> op_execute_time;
     for (auto& op_ref : _execute_plan.local_topo) {
       auto& op = op_ref.get();
@@ -1246,7 +1265,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     for (int i = 0; i < _p2p_events.size() / 2; i++) {
       auto& start = _p2p_events[2 * i];
       auto& end = _p2p_events[2 * i + 1];
-      op_execute_time.push_back({-(i+1), end.TimeSince(start)}); // 分别记录每个pp batch p2p的时间
+      // record the time of p2p for each pipeline micro-batch
+      op_execute_time.push_back({-(i+1), end->TimeSince(*start)});
     }
     std::sort(op_execute_time.begin(), op_execute_time.end(), [](
       std::pair<int64_t, int64_t>& op_t1, std::pair<int64_t, int64_t>& op_t2) {
@@ -1300,7 +1320,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       }
     }
     HT_LOG_INFO << local_device << ": " 
-                << "\ntotal run time: " << duration_run_time << " ms, "
+                << "\ntotal run time: " << COST_MSEC(run) << " ms, "
                 << "compute time: " << compute_time << " ms, "
                 << "tp p2p time: " << tp_p2p_time << " ms, "
                 << "pp p2p time: " << pp_p2p_time << " ms, "

@@ -74,11 +74,11 @@ void SliceCuda(const NDArray& input, NDArray& output, int64_t* begin_pos,
   int dev_id = cuda_stream.device_id();
 
   size_t alloc_size = ndim * sizeof(int64_t);
-  DataPtr pos_ptr = AllocFromMemoryPool(input->device(), alloc_size);
+  DataPtr pos_ptr = AllocFromMemoryPool(input->device(), alloc_size, stream);
   void* pos = pos_ptr.ptr;
-  DataPtr i_shape_ptr = AllocFromMemoryPool(input->device(), alloc_size);
+  DataPtr i_shape_ptr = AllocFromMemoryPool(input->device(), alloc_size, stream);
   void* i_shape = i_shape_ptr.ptr;
-  DataPtr o_shape_ptr = AllocFromMemoryPool(input->device(), alloc_size);
+  DataPtr o_shape_ptr = AllocFromMemoryPool(input->device(), alloc_size, stream);
   void* o_shape = o_shape_ptr.ptr;
 
   size_t size = o_size;
@@ -127,11 +127,11 @@ void SliceGradientCuda(const NDArray& output_grad, NDArray& input_grad,
   int dev_id = cuda_stream.device_id();
 
   size_t alloc_size = ndim * sizeof(int64_t);
-  DataPtr pos_ptr = AllocFromMemoryPool(output_grad->device(), alloc_size);
+  DataPtr pos_ptr = AllocFromMemoryPool(output_grad->device(), alloc_size, stream);
   void* pos = pos_ptr.ptr;
-  DataPtr i_shape_ptr = AllocFromMemoryPool(output_grad->device(), alloc_size);
+  DataPtr i_shape_ptr = AllocFromMemoryPool(output_grad->device(), alloc_size, stream);
   void* i_shape = i_shape_ptr.ptr;
-  DataPtr o_shape_ptr = AllocFromMemoryPool(output_grad->device(), alloc_size);
+  DataPtr o_shape_ptr = AllocFromMemoryPool(output_grad->device(), alloc_size, stream);
   void* o_shape = o_shape_ptr.ptr;
 
   size_t size = input_grad->numel();

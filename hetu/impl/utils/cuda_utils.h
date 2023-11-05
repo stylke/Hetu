@@ -38,7 +38,13 @@ DECLARE_HT_EXCEPTION(cuda_error);
   CUDA_CALL(cudaGetDeviceProperties(ptr, device))
 // memory
 #define CudaMalloc(ptr, size) CUDA_CALL(cudaMalloc(ptr, size))
+#define CudaMallocAsync(ptr, size, stream)                                     \
+  CUDA_CALL(cudaMallocAsync(ptr, size, stream))
 #define CudaFree(ptr) CUDA_CALL(cudaFree(ptr))
+#define CudaFreeAsync(ptr, stream) CUDA_CALL(cudaFreeAsync(ptr, stream))
+#define CudaMemset(ptr, value, size) CUDA_CALL(cudaMemset(ptr, value, size))
+#define CudaMemsetAsync(ptr, value, size, stream)                              \
+  CUDA_CALL(cudaMemsetAsync(ptr, value, size, stream))
 #define CudaMemcpy(dst_ptr, src_ptr, size, direction)                          \
   CUDA_CALL(cudaMemcpy(dst_ptr, src_ptr, size, direction))
 #define CudaMemcpyAsync(dst_ptr, src_ptr, size, direction, stream)             \
@@ -59,7 +65,7 @@ DECLARE_HT_EXCEPTION(cuda_error);
 #define CudaStreamWaitEvent(stream, event, flags)                              \
   CUDA_CALL(cudaStreamWaitEvent(stream, event, flags))
 // event
-#define CudaEventCreate(ptr) CUDA_CALL(cudaEventCreate(ptr))
+#define CudaEventCreate(ptr, flags) CUDA_CALL(cudaEventCreate(ptr, flags))
 #define CudaEventDestroy(event) CUDA_CALL(cudaEventDestroy(event))
 #define CudaEventElapsedTime(ptr, start, end)                                  \
   CUDA_CALL(cudaEventElapsedTime(ptr, start, end))

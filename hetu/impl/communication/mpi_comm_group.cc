@@ -80,6 +80,15 @@ static std::vector<std::once_flag>
 static std::vector<MPICommunicationGroup>
   worldwide_mpi_comm_groups((HT_NUM_STREAMS_PER_DEVICE) + 1);
 
+} // namespace
+
+struct MPICallGuard {
+  // MPI_THREAD_SERIALIZED requires all MPI calls are sequential,
+  // so we need to lock on a global mutex here.
+  MPICallGuard() : lock(mpi_call_mutex) {}
+  std::lock_guard<std::mutex> lock;
+};
+
 static void MPI_Init_Once() {
   std::call_once(mpi_init_flag, []() {
     // init mpi
@@ -97,23 +106,16 @@ static void MPI_Init_Once() {
       << ".)";
     // register exit handler
     HT_ASSERT(std::atexit([]() {
-                std::lock_guard<std::mutex> lock(mpi_call_mutex);
+                MPICallGuard guard;
+                HT_LOG_DEBUG << "Destructing MPI comm groups...";
                 mpi_comm_groups.clear();
                 worldwide_mpi_comm_groups.clear();
                 MPI_CALL(MPI_Finalize());
+                HT_LOG_DEBUG << "Destructed MPI comm groups";
               }) == 0)
       << "Failed to register the exit function for MPI.";
   });
 }
-
-} // namespace
-
-struct MPICallGuard {
-  // MPI_THREAD_SERIALIZED requires all MPI calls are sequential,
-  // so we need to lock on a global mutex here.
-  MPICallGuard() : lock(mpi_call_mutex) {}
-  std::lock_guard<std::mutex> lock;
-};
 
 MPICommunicationGroupDef::MPICommunicationGroupDef(
   const std::vector<int>& world_ranks, const Stream& stream)
@@ -130,7 +132,7 @@ MPICommunicationGroupDef::MPICommunicationGroupDef(
     << ".";
 
   {
-    MPICallGuard();
+    MPICallGuard mpi_guard;
 
     if (_world_ranks.size() == static_cast<size_t>(mpi_world_size)) {
       // communication group for the world
@@ -203,10 +205,11 @@ void MPICommunicationGroupDef::Broadcast(NDArray& data, int broadcaster) {
   int root = world_to_group_rank(broadcaster);
   _latest_future = CPUStream(_stream).EnqueueTask(
     [buf, numel, mpi_dtype, root, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_CALL(MPI_Bcast(buf, numel, mpi_dtype, root, _comm));
     },
     "MPI_Broadcast(broadcaster=" + std::to_string(broadcaster) + ")");
+  NDArray::MarkUsedBy(data, _stream);
 }
 
 void MPICommunicationGroupDef::AllReduce(const NDArray& input, NDArray& output,
@@ -221,11 +224,12 @@ void MPICommunicationGroupDef::AllReduce(const NDArray& input, NDArray& output,
   auto mpi_red_op = to_MPI_Op(red_type);
   _latest_future = CPUStream(_stream).EnqueueTask(
     [send_buf, recv_buf, numel, mpi_dtype, mpi_red_op, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_CALL(MPI_Allreduce(send_buf == recv_buf ? MPI_IN_PLACE : send_buf,
                              recv_buf, numel, mpi_dtype, mpi_red_op, _comm));
     },
     "MPI_AllReduce(reduction=" + ReductionType2Str(red_type) + ")");
+  NDArray::MarkUsedBy({input, output}, _stream);
 }
 
 void MPICommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
@@ -255,7 +259,7 @@ void MPICommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
           std::memcpy(buffer_ptr + offset, send_buf, num_bytes);
           offset += num_bytes;
         }
-        MPICallGuard();
+        MPICallGuard mpi_guard;
         MPI_CALL(MPI_Allreduce(MPI_IN_PLACE, buffer_ptr,
                                int(offset / num_bytes_per_element), mpi_dtype,
                                mpi_red_op, _comm));
@@ -271,7 +275,7 @@ void MPICommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
   } else {
     _latest_future = CPUStream(_stream).EnqueueTask(
       [inputs, outputs, mpi_dtype, mpi_red_op, this]() {
-        MPICallGuard();
+        MPICallGuard mpi_guard;
         for (size_t i = 0; i < inputs.size(); i++) {
           void* send_buf = inputs[i]->raw_data_ptr();
           void* recv_buf = outputs[i]->raw_data_ptr();
@@ -283,6 +287,8 @@ void MPICommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
       },
       "MPI_AllReduce(reduction=" + ReductionType2Str(red_type) + ")");
   }
+  NDArray::MarkUsedBy(inputs, _stream);
+  NDArray::MarkUsedBy(outputs, _stream);
 }
 
 void MPICommunicationGroupDef::AlltoAll(const NDArray& input, NDArray& output) {
@@ -296,11 +302,12 @@ void MPICommunicationGroupDef::AlltoAll(const NDArray& input, NDArray& output) {
   auto mpi_dtype = to_MPI_Datatype(input->dtype());
   _latest_future = CPUStream(_stream).EnqueueTask(
     [send_buf, recv_buf, send_numl, recv_numl, mpi_dtype, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_CALL(MPI_Alltoall(send_buf, send_numl, mpi_dtype, recv_buf, recv_numl,
                             mpi_dtype, _comm));
     },
     "MPI_AlltoAll");
+  NDArray::MarkUsedBy({input, output}, _stream);
 }
 
 void MPICommunicationGroupDef::Reduce(const NDArray& input, NDArray& output,
@@ -320,11 +327,12 @@ void MPICommunicationGroupDef::Reduce(const NDArray& input, NDArray& output,
   auto mpi_red_op = to_MPI_Op(red_type);
   _latest_future = CPUStream(_stream).EnqueueTask(
     [send_buf, recv_buf, numel, mpi_dtype, mpi_red_op, root, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_CALL(MPI_Reduce(send_buf, recv_buf, numel, mpi_dtype, mpi_red_op,
                           root, _comm));
     },
     "MPI_Reduce(reduction=" + ReductionType2Str(red_type) + ")");
+  NDArray::MarkUsedBy({input, output}, _stream);
 }
 
 void MPICommunicationGroupDef::AllGather(const NDArray& input,
@@ -344,11 +352,12 @@ void MPICommunicationGroupDef::AllGather(const NDArray& input,
   auto mpi_dtype = to_MPI_Datatype(input->dtype());
   _latest_future = CPUStream(_stream).EnqueueTask(
     [send_buf, recv_buf, input_size, mpi_dtype, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_CALL(MPI_Allgather(send_buf, input_size, mpi_dtype, recv_buf,
                              input_size, mpi_dtype, _comm));
     },
     "MPI_AllGather");
+  NDArray::MarkUsedBy({input, output}, _stream);
 }
 
 void MPICommunicationGroupDef::ReduceScatter(const NDArray& input,
@@ -370,7 +379,7 @@ void MPICommunicationGroupDef::ReduceScatter(const NDArray& input,
   auto mpi_red_op = to_MPI_Op(red_type);
   _latest_future = CPUStream(_stream).EnqueueTask(
     [send_buf, recv_buf, output_size, mpi_dtype, mpi_red_op, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       int recv_cnts[_size];
       for (int i = 0; i < _size; i++)
         recv_cnts[i] = output_size;
@@ -379,6 +388,7 @@ void MPICommunicationGroupDef::ReduceScatter(const NDArray& input,
                            recv_buf, recv_cnts, mpi_dtype, mpi_red_op, _comm));
     },
     "MPI_ReduceScatter(reduction=" + ReductionType2Str(red_type) + ")");
+  NDArray::MarkUsedBy({input, output}, _stream);
 }
 
 void MPICommunicationGroupDef::Gather(const NDArray& input, NDArray& output,
@@ -401,11 +411,12 @@ void MPICommunicationGroupDef::Gather(const NDArray& input, NDArray& output,
   auto mpi_dtype = to_MPI_Datatype(input->dtype());
   _latest_future = CPUStream(_stream).EnqueueTask(
     [send_buf, recv_buf, input_size, mpi_dtype, root, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_CALL(MPI_Gather(send_buf, input_size, mpi_dtype, recv_buf, input_size,
                           mpi_dtype, root, _comm));
     },
     "MPI_Gather(gatherer" + std::to_string(gatherer) + ")");
+  NDArray::MarkUsedBy({input, output}, _stream);
 }
 
 void MPICommunicationGroupDef::Scatter(const NDArray& input, NDArray& output,
@@ -428,11 +439,12 @@ void MPICommunicationGroupDef::Scatter(const NDArray& input, NDArray& output,
   auto mpi_dtype = to_MPI_Datatype(output->dtype());
   _latest_future = CPUStream(_stream).EnqueueTask(
     [send_buf, recv_buf, output_size, mpi_dtype, root, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_CALL(MPI_Scatter(send_buf, output_size, mpi_dtype, recv_buf,
                            output_size, mpi_dtype, root, _comm));
     },
     "MPI_Scatter(scatterer=" + std::to_string(scatterer) + ")");
+  NDArray::MarkUsedBy({input, output}, _stream);
 }
 
 void MPICommunicationGroupDef::Send(const NDArray& data, int receiver) {
@@ -446,10 +458,11 @@ void MPICommunicationGroupDef::Send(const NDArray& data, int receiver) {
   int tag = static_cast<int>(data->dtype()); // simply use type as tag
   _latest_future = CPUStream(_stream).EnqueueTask(
     [send_buf, size, mpi_dtype, dst, tag, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_CALL(MPI_Send(send_buf, size, mpi_dtype, dst, tag, _comm));
     },
     "MPI_Send(receiver=" + std::to_string(receiver) + ")");
+  NDArray::MarkUsedBy(data, _stream);
 }
 
 void MPICommunicationGroupDef::Recv(NDArray& data, int sender) {
@@ -463,66 +476,72 @@ void MPICommunicationGroupDef::Recv(NDArray& data, int sender) {
   int tag = static_cast<int>(data->dtype()); // simply use type as tag
   _latest_future = CPUStream(_stream).EnqueueTask(
     [recv_buf, size, mpi_dtype, src, tag, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_Status s;
       memset(&s, 0, sizeof(MPI_Status));
       MPI_CALL(MPI_Recv(recv_buf, size, mpi_dtype, src, tag, _comm, &s));
       HT_ASSERT(s.MPI_ERROR == MPI_SUCCESS) << "Failed in MPI_RECV.";
     },
     "MPI_Recv(sender=" + std::to_string(sender) + ")");
+  NDArray::MarkUsedBy(data, _stream);
 }
 
-Task MPICommunicationGroupDef::ISend(const NDArray& data, int receiver) {
+CommTask MPICommunicationGroupDef::ISend(const NDArray& data, int receiver) {
   int dst = world_to_group_rank(receiver);
   HT_ASSERT(dst != _rank) << "Cannot send to self.";
   size_t size = data->numel();
   if (size == 0)
-    return Task();
+    return CommTask();
   void* send_buf = data->raw_data_ptr();
   auto mpi_dtype = to_MPI_Datatype(data->dtype());
   int tag = static_cast<int>(data->dtype()); // simply use type as tag
-  auto task =
-    std::function<void()>([send_buf, size, mpi_dtype, dst, tag, this]() {
+  auto task = CommTask(
+    std::function<void()>([data, send_buf, size, mpi_dtype, dst, tag, this]() {
       MPI_CALL(MPI_Send(send_buf, size, mpi_dtype, dst, tag, _comm));
-    });
+    }),
+    {data});
   return task;
 }
 
-Task MPICommunicationGroupDef::IRecv(NDArray& data, int sender) {
+CommTask MPICommunicationGroupDef::IRecv(NDArray& data, int sender) {
   int src = world_to_group_rank(sender);
   HT_ASSERT(src != _rank) << "Cannot receive from self.";
   size_t size = data->numel();
   if (size == 0)
-    return Task();
+    return CommTask();
   void* recv_buf = data->raw_data_ptr();
   auto mpi_dtype = to_MPI_Datatype(data->dtype());
   int tag = static_cast<int>(data->dtype()); // simply use type as tag
-  auto task =
-    std::function<void()>([recv_buf, size, mpi_dtype, src, tag, this]() {
+  auto task = CommTask(
+    std::function<void()>([data, recv_buf, size, mpi_dtype, src, tag, this]() {
       MPI_Status s;
       memset(&s, 0, sizeof(MPI_Status));
       MPI_CALL(MPI_Recv(recv_buf, size, mpi_dtype, src, tag, _comm, &s));
       HT_ASSERT(s.MPI_ERROR == MPI_SUCCESS) << "Failed in MPI_RECV.";
-    });
+    }),
+    {data});
   return task;
 }
 
 void MPICommunicationGroupDef::BatchedISendIRecv(
-  const std::vector<Task>& tasks) {
+  const std::vector<CommTask>& tasks) {
   _latest_future = CPUStream(_stream).EnqueueTask(
     [tasks, this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       for (auto& task : tasks) {
-        task();
+        task.fn();
       }
     },
     "MPI_BatchedISendIRecv");
+  for (auto& task : tasks) {
+    NDArray::MarkUsedBy(task.data, _stream);
+  }
 }
 
 void MPICommunicationGroupDef::Barrier(bool sync) {
   _latest_future = CPUStream(_stream).EnqueueTask(
     [this]() {
-      MPICallGuard();
+      MPICallGuard mpi_guard;
       MPI_CALL(MPI_Barrier(_comm));
     },
     "MPI Barrier Wait");
@@ -536,7 +555,7 @@ void MPICommunicationGroupDef::Sync() {
 }
 
 void MPICommunicationGroupDef::WaitRequest(MPI_Request request) {
-  MPICallGuard();
+  MPICallGuard mpi_guard;
   MPI_Status s;
   memset(&s, 0, sizeof(MPI_Status));
   MPI_CALL(MPI_Wait(&request, &s));
@@ -640,10 +659,10 @@ DeviceGroup global_device_group;
 
 std::vector<std::string> AllGatherHostnames(MPICommunicationGroup& comm) {
   // Walkaround: communication groups handle ndarrays only
-  NDArray local_arr =
-    NDArray::empty({1, 1 + HT_MAX_HOSTNAME_LENGTH}, kCPU, kUInt8);
-  NDArray gathered_arr =
-    NDArray::empty({comm->size(), 1 + HT_MAX_HOSTNAME_LENGTH}, kCPU, kUInt8);
+  NDArray local_arr = NDArray::empty({1, 1 + HT_MAX_HOSTNAME_LENGTH}, kCPU,
+                                     kUInt8, kBlockingStream);
+  NDArray gathered_arr = NDArray::empty(
+    {comm->size(), 1 + HT_MAX_HOSTNAME_LENGTH}, kCPU, kUInt8, kBlockingStream);
   auto* local_ptr = local_arr->data_ptr<uint8_t>();
   std::string local_hostname = Device::GetLocalHostname();
   local_ptr[0] = static_cast<uint8_t>(local_hostname.length());
@@ -670,8 +689,9 @@ void SetUpDeviceMappingWithAssignedLocalDevice(const Device& local_device) {
   auto hostnames = AllGatherHostnames(comm);
   // Walkaround: communication groups handle ndarrays only
   auto world_size = GetWorldSize();
-  NDArray local_arr = NDArray::empty({1, 3}, kCPU, kInt8);
-  NDArray gathered_arr = NDArray::empty({comm->size(), 3}, kCPU, kInt8);
+  NDArray local_arr = NDArray::empty({1, 3}, kCPU, kInt8, kBlockingStream);
+  NDArray gathered_arr =
+    NDArray::empty({comm->size(), 3}, kCPU, kInt8, kBlockingStream);
   auto* local_ptr = local_arr->data_ptr<int8_t>();
   local_ptr[0] = static_cast<int8_t>(local_device.type());
   local_ptr[1] = static_cast<int8_t>(local_device.index());

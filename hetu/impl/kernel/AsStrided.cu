@@ -23,8 +23,8 @@ __global__ void asstrided_kernel(const spec_t *input, spec_t *output, size_t siz
   output[idx] = input[index];
 }
 
-
-void AsStridedCuda(const NDArray& input, NDArray& output, HTShape stride, const Stream& stream) {
+void AsStridedCuda(const NDArray& input, NDArray& output, const HTShape& stride,
+                   const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
@@ -33,9 +33,9 @@ void AsStridedCuda(const NDArray& input, NDArray& output, HTShape stride, const 
   int64_t *stride_in = NULL;
   int64_t *stride_out = NULL;
   size_t buf_size = 3 * ndim * sizeof(int64_t);
-  DataPtr stride_in_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr stride_in_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   stride_in = (int64_t*) stride_in_ptr.ptr;
-  DataPtr stride_out_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr stride_out_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   stride_out = (int64_t*) stride_out_ptr.ptr;
   if (size == 0)
     return;
@@ -74,7 +74,8 @@ __global__ void asstrided_gradient_kernel(const spec_t *input, spec_t *output, s
   hetu::cuda::AtomicAdd(&output[index], input[idx]);
 }
 
-void AsStridedGradientCuda(const NDArray& output, NDArray& input, HTShape stride, const Stream& stream) {
+void AsStridedGradientCuda(const NDArray& output, NDArray& input,
+                           const HTShape& stride, const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
@@ -83,9 +84,9 @@ void AsStridedGradientCuda(const NDArray& output, NDArray& input, HTShape stride
   int64_t *stride_in = NULL;
   int64_t *stride_out = NULL;
   size_t buf_size = 3 * ndim * sizeof(int64_t);
-  DataPtr stride_in_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr stride_in_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   stride_in = (int64_t*) stride_in_ptr.ptr;
-  DataPtr stride_out_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr stride_out_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   stride_out = (int64_t*) stride_out_ptr.ptr;
   if (size == 0)
     return;
@@ -111,7 +112,6 @@ void AsStridedGradientCuda(const NDArray& output, NDArray& input, HTShape stride
   FreeToMemoryPool(stride_in_ptr);
   FreeToMemoryPool(stride_out_ptr);
 }
-
 
 } // namespace impl
 } // namespace hetu

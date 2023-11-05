@@ -150,8 +150,8 @@ void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
       int dev_id = cuda_stream.device_id();
 
       DataPtr temp_data_ptr = (input_y->dtype() == DataType::FLOAT16 || input_y->dtype() == DataType::BFLOAT16) ?
-        AllocFromMemoryPool(grad->device(), size * sizeof(float)) :
-        AllocFromMemoryPool(grad->device(), size * sizeof(spec_t));
+        AllocFromMemoryPool(grad->device(), size * sizeof(float), stream) :
+        AllocFromMemoryPool(grad->device(), size * sizeof(spec_t), stream);
       void* temp_data = temp_data_ptr.ptr;
 
       spec_t alpha = 1.0;

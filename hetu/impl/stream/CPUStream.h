@@ -38,7 +38,7 @@ void SynchronizeAllCPUStreams();
 
 class CPUEvent final : public Event {
  public:
-  CPUEvent() : Event(Device(kCPU)) {
+  CPUEvent(bool enable_timing = true) : Event(Device(kCPU), enable_timing) {
     _record_fn = std::bind(CPUEvent::_Record, this);
     _block_fn = std::bind(CPUEvent::_Block, this);
   }
@@ -61,6 +61,8 @@ class CPUEvent final : public Event {
   }
 
   inline int64_t TimeSince(const Event& event) const {
+    HT_VALUE_ERROR_IF(!enable_timing() || !event.enable_timing())
+      << "Cannot measure time when timing is disabled";
     const auto& e = reinterpret_cast<const CPUEvent&>(event);
     HT_ASSERT(e._recorded && _recorded || !e._recorded && !_recorded) 
       << "Only one of Start/Stop event has been recorded!";
@@ -73,7 +75,8 @@ class CPUEvent final : public Event {
 
  private:
   static void _Record(CPUEvent* const event) {
-    event->_recorded_at = std::chrono::steady_clock::now();
+    if (event->enable_timing())
+      event->_recorded_at = std::chrono::steady_clock::now();
     event->_record_fn_completed = true;
   }
 

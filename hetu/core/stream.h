@@ -13,6 +13,7 @@ constexpr StreamIndex kH2DStream = 2;
 constexpr StreamIndex kD2HStream = 3;
 constexpr StreamIndex kP2PStream = 4;
 constexpr StreamIndex kCollectiveStream = 5;
+constexpr StreamIndex kJoinStream = HT_NUM_STREAMS_PER_DEVICE - 1;
 
 class Stream {
  public:
@@ -30,7 +31,7 @@ class Stream {
 
   void Sync() const;
 
-  inline Device device() const noexcept {
+  inline const Device& device() const noexcept {
     return _device;
   }
 
@@ -48,6 +49,10 @@ class Stream {
 
   inline bool is_defined() const noexcept {
     return !_device.is_undetermined();
+  }
+
+  inline bool is_blocking() const noexcept {
+    return is_defined() && stream_index() == kBlockingStream;
   }
 
   inline bool operator==(const Stream& stream) const {
@@ -69,7 +74,8 @@ std::ostream& operator<<(std::ostream&, const Stream&);
 
 class Event {
  public:
-  Event(Device device) : _device(device) {}
+  Event(Device device, bool enable_timing = true)
+  : _device(std::move(device)), _enable_timing(enable_timing) {}
 
   virtual void Record(const Stream& stream) = 0;
 
@@ -79,43 +85,17 @@ class Event {
 
   virtual int64_t TimeSince(const Event& event) const = 0;
 
+  inline const Device& device() const {
+    return _device;
+  }
+  
+  inline bool enable_timing() const {
+    return _enable_timing;
+  }
+
  protected:
-  Device _device;
-};
-
-class DefaultEvent final : public Event {
- public:
-  DefaultEvent(Device device) : Event(device) {
-    HT_ASSERT(device.is_cpu())
-      << "DefaultEvent should be used with host devices. "
-      << "Got " << device;
-  }
-
-  inline void Record(const Stream& stream) {
-    _tp = std::chrono::steady_clock::now();
-    _recorded = true;
-  }
-
-  inline void Sync() {
-    HT_ASSERT(_recorded) << "Event has not been recorded";
-  }
-
-  inline void Block(const Stream& stream) {}
-
-  inline int64_t TimeSince(const Event& event) const {
-    const auto& e = reinterpret_cast<const DefaultEvent&>(event);
-    HT_ASSERT(e._recorded && _recorded || !e._recorded && !_recorded) 
-      << "Only one of Start/Stop event has been recorded!";
-    if (!e._recorded && !_recorded) 
-      return 0;
-    else
-      return std::chrono::duration_cast<std::chrono::nanoseconds>(
-              _tp - e._tp).count();
-  }
-
- private:
-  std::chrono::time_point<std::chrono::steady_clock> _tp;
-  bool _recorded{false};
+  const Device _device;
+  const bool _enable_timing;
 };
 
 } // namespace hetu

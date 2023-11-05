@@ -6,8 +6,6 @@
 
 namespace hetu {
 
-static std::atomic<uint64_t> _global_id{0};
-
 template <typename T>
 class shared_ptr_wrapper;
 

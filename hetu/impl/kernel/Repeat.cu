@@ -46,11 +46,11 @@ void RepeatCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   int64_t *stride_out = NULL;
   int64_t *dim = NULL;
   size_t buf_size = 3 * ndim * sizeof(int64_t);
-  DataPtr stride_in_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr stride_in_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   stride_in = (int64_t*) stride_in_ptr.ptr;
-  DataPtr stride_out_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr stride_out_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   stride_out = (int64_t*) stride_out_ptr.ptr;
-  DataPtr dim_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr dim_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   dim = (int64_t*) dim_ptr.ptr;
   if (size == 0)
     return;
@@ -115,11 +115,11 @@ void RepeatGradientCuda(const NDArray& output, NDArray& input, const Stream& str
   int64_t *stride_out = NULL;
   int64_t *dim = NULL;
   size_t buf_size = 3 * ndim * sizeof(int64_t);
-  DataPtr stride_in_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr stride_in_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   stride_in = (int64_t*) stride_in_ptr.ptr;
-  DataPtr stride_out_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr stride_out_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   stride_out = (int64_t*) stride_out_ptr.ptr;
-  DataPtr dim_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr dim_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   dim = (int64_t*) dim_ptr.ptr;
   if (size == 0)
     return;

@@ -27,8 +27,10 @@ DECLARE_KERNEL_CPU_AND_CUDA(AddConst, const NDArray&, double, NDArray&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AddElewise, const NDArray&, const NDArray&,
                             NDArray&, const Stream&);
-DECLARE_KERNEL_CPU_AND_CUDA(AsStrided, const NDArray&, NDArray&, HTShape, const Stream&);
-DECLARE_KERNEL_CPU_AND_CUDA(AsStridedGradient, const NDArray&, NDArray&, HTShape, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(AsStrided, const NDArray&, NDArray&,
+                            const HTStride&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(AsStridedGradient, const NDArray&, NDArray&,
+                            const HTStride&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AvgPool, const NDArray&, const size_t, const size_t,
                             NDArray&, const size_t, const size_t,
                             const Stream&);

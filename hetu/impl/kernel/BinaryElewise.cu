@@ -71,12 +71,12 @@ namespace impl {
     dim3 blocks, threads;                                                     \
     threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);                  \
     blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);                 \
-    DataPtr gpu_dimsA_ptr = AllocFromMemoryPool(inputA->device(), allocated); \
+    DataPtr gpu_dimsA_ptr = AllocFromMemoryPool(inputA->device(), allocated, stream); \
     uint* gpu_dimsA = (uint*) gpu_dimsA_ptr.ptr;                              \
-    DataPtr gpu_dimsB_ptr = AllocFromMemoryPool(inputA->device(), allocated); \
+    DataPtr gpu_dimsB_ptr = AllocFromMemoryPool(inputA->device(), allocated, stream); \
     uint* gpu_dimsB = (uint*) gpu_dimsB_ptr.ptr;                              \
     DataPtr gpu_output_strides_ptr =                                          \
-      AllocFromMemoryPool(inputA->device(), allocated);                       \
+      AllocFromMemoryPool(inputA->device(), allocated, stream);                       \
     uint* gpu_output_strides = (uint*) gpu_output_strides_ptr.ptr;            \
     CudaMemcpyAsync(gpu_dimsA, A_dims, allocated,                             \
                     cudaMemcpyHostToDevice, cuda_stream);                     \

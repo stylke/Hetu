@@ -70,11 +70,11 @@ void RollCuda(const NDArray& input, const HTShape& shift, const HTAxes& axis,
   uint *strides_buf = NULL;
   uint *sizes_buf = NULL;
   size_t buf_size = nums * sizeof(uint);
-  DataPtr shifts_buf_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr shifts_buf_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   shifts_buf = (uint*) shifts_buf_ptr.ptr;
-  DataPtr strides_buf_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr strides_buf_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   strides_buf = (uint*) strides_buf_ptr.ptr;
-  DataPtr sizes_buf_ptr = AllocFromMemoryPool(input->device(), buf_size);
+  DataPtr sizes_buf_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
   sizes_buf = (uint*) sizes_buf_ptr.ptr;
 
   dim3 blocks, threads;

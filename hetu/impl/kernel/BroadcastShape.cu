@@ -68,9 +68,9 @@ void BroadcastShapeCuda(const NDArray& input, NDArray& output,
     }
   }
 
-  DataPtr gpu_strides_ptr = AllocFromMemoryPool(input->device(), allocated);
+  DataPtr gpu_strides_ptr = AllocFromMemoryPool(input->device(), allocated, stream);
   uint* gpu_strides = (uint*) gpu_strides_ptr.ptr;
-  DataPtr gpu_dims_ptr = AllocFromMemoryPool(input->device(), allocated);
+  DataPtr gpu_dims_ptr = AllocFromMemoryPool(input->device(), allocated, stream);
   uint* gpu_dims = (uint*) gpu_dims_ptr.ptr;
 
   if (size == 0 || input_size == 0)
@@ -162,9 +162,9 @@ void BroadcastShapeMulCuda(const NDArray& input, double const_value,
     }
   }
 
-  DataPtr gpu_strides_ptr = AllocFromMemoryPool(input->device(), allocated);
+  DataPtr gpu_strides_ptr = AllocFromMemoryPool(input->device(), allocated, stream);
   uint* gpu_strides = (uint*) gpu_strides_ptr.ptr;
-  DataPtr gpu_dims_ptr = AllocFromMemoryPool(input->device(), allocated);
+  DataPtr gpu_dims_ptr = AllocFromMemoryPool(input->device(), allocated, stream);
   uint* gpu_dims = (uint*) gpu_dims_ptr.ptr;
 
   if (size == 0 || input_size == 0)

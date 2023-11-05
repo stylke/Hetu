@@ -207,18 +207,18 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       reduce_dims, eps, ndim, lastdims, total_elements, size]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       spec_t* ds = NULL;
-      DataPtr ds_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
+      DataPtr ds_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t), stream);
       ds = (spec_t*) ds_ptr.ptr;
 
       spec_t* db = NULL;
-      DataPtr db_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
+      DataPtr db_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t), stream);
       db = (spec_t*) db_ptr.ptr;
 
       spec_t* dy_mul_x = NULL;
-      DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), in_arr->numel() * sizeof(spec_t));
+      DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), in_arr->numel() * sizeof(spec_t), stream);
       dy_mul_x = (spec_t*) dy_mul_x_ptr.ptr;
 
-      DataPtr gscale_ptr = AllocFromMemoryPool(out_grads->device(), in_arr->numel() * sizeof(spec_t));
+      DataPtr gscale_ptr = AllocFromMemoryPool(out_grads->device(), in_arr->numel() * sizeof(spec_t), stream);
       spec_t* gscale = (spec_t*) gscale_ptr.ptr;
 
       HTShape scale_shape(ndim), scale_stride(ndim);

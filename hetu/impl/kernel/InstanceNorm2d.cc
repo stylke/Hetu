@@ -157,15 +157,15 @@ void InstanceNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       auto _future = cpu_stream.EnqueueTask(
       [stream, out_grads, in_arr, grad_arr, mean_arr, var_arr, eps, ndim, last2dim, size]() {
       spec_t* dscale = NULL;
-      DataPtr dscale_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
+      DataPtr dscale_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t), stream);
       dscale = (spec_t*) dscale_ptr.ptr;
 
       spec_t* dbias = NULL;
-      DataPtr dbias_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
+      DataPtr dbias_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t), stream);
       dbias = (spec_t*) dbias_ptr.ptr;
 
       spec_t* dy_mul_x = NULL;
-      DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), in_arr->numel() * sizeof(spec_t));
+      DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), in_arr->numel() * sizeof(spec_t), stream);
       dy_mul_x = (spec_t*) dy_mul_x_ptr.ptr;
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng); 

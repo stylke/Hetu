@@ -210,10 +210,10 @@ void ReduceMeanCuda(const NDArray& in_arr, NDArray& out_arr,
       strides_rest[i] = strides_rest[i + 1] * shape_rest[i + 1];
 
     DataPtr reduce_dims_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(int));
+      AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(int), stream);
     int* reduce_dims_cu = (int*) reduce_dims_cu_ptr.ptr;
     DataPtr rest_dims_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_rest * sizeof(int));
+      AllocFromMemoryPool(in_arr->device(), ndim_rest * sizeof(int), stream);
     int* rest_dims_cu = (int*) rest_dims_cu_ptr.ptr;
     CUDA_CALL(cudaMemcpyAsync(reduce_dims_cu, reduce_dims,
                               ndim_reduce * sizeof(int), cudaMemcpyHostToDevice,
@@ -222,22 +222,22 @@ void ReduceMeanCuda(const NDArray& in_arr, NDArray& out_arr,
                               cudaMemcpyHostToDevice, cuda_stream));
 
     DataPtr shape_in_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_input * sizeof(size_t));
+      AllocFromMemoryPool(in_arr->device(), ndim_input * sizeof(size_t), stream);
     size_t* shape_in_cu = (size_t*) shape_in_cu_ptr.ptr;
     DataPtr shape_reduce_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(size_t));
+      AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(size_t), stream);
     size_t* shape_reduce_cu = (size_t*) shape_reduce_cu_ptr.ptr;
     DataPtr shape_rest_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_rest * sizeof(int));
+      AllocFromMemoryPool(in_arr->device(), ndim_rest * sizeof(int), stream);
     size_t* shape_rest_cu = (size_t*) shape_rest_cu_ptr.ptr;
     DataPtr strides_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_input * sizeof(size_t));
+      AllocFromMemoryPool(in_arr->device(), ndim_input * sizeof(size_t), stream);
     size_t* strides_cu = (size_t*) strides_cu_ptr.ptr;
     DataPtr strides_reduce_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(size_t));
+      AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(size_t), stream);
     size_t* strides_reduce_cu = (size_t*) strides_reduce_cu_ptr.ptr;
     DataPtr strides_rest_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_rest * sizeof(size_t));
+      AllocFromMemoryPool(in_arr->device(), ndim_rest * sizeof(size_t), stream);
     size_t* strides_rest_cu = (size_t*) strides_rest_cu_ptr.ptr;
 
     CUDA_CALL(cudaMemcpyAsync(shape_in_cu, shape_in,

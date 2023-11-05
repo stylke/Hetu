@@ -124,7 +124,7 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
         &workspace_size));
 
       DataPtr work_data_ptr =
-        AllocFromMemoryPool(input_x->device(), workspace_size);
+        AllocFromMemoryPool(input_x->device(), workspace_size, stream);
       void* work_data = work_data_ptr.ptr;
 
       spec_t alpha = 1.0f;
@@ -270,7 +270,7 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
         handle, input_desc, dy_desc, conv_desc, df_desc, algo,
         &workspace_size));
       DataPtr work_data_ptr =
-        AllocFromMemoryPool(input_x->device(), workspace_size);
+        AllocFromMemoryPool(input_x->device(), workspace_size, stream);
       void* work_data = work_data_ptr.ptr;
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
@@ -407,7 +407,7 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
         &workspace_size));
 
       DataPtr work_data_ptr =
-        AllocFromMemoryPool(input_f->device(), workspace_size);
+        AllocFromMemoryPool(input_f->device(), workspace_size, stream);
       void* work_data = work_data_ptr.ptr;
 
       spec_t alpha = 1.0;
@@ -567,7 +567,7 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
         &workspace_size));
 
       DataPtr work_data_ptr =
-        AllocFromMemoryPool(input_x->device(), workspace_size);
+        AllocFromMemoryPool(input_x->device(), workspace_size, stream);
       void* work_data = work_data_ptr.ptr;
 
       spec_t alpha = 1.0f;

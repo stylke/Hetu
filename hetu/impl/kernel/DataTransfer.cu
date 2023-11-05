@@ -35,7 +35,8 @@ void DataTransferCuda(const NDArray& from, NDArray& to, const Stream& stream) {
         NDArray::to(from, from->device(), to->dtype(), stream.stream_index());
       DataTransferCuda(aux, to, stream);
     } else {
-      auto aux = NDArray::empty(to->shape(), to->device(), from->dtype());
+      auto aux = NDArray::empty(to->shape(), to->device(), from->dtype(),
+                                stream.stream_index());
       DataTransferCuda(from, aux, stream);
       // Do NOT call `DataTransferCuda` since `to` may be on host memory
       NDArray::to(aux, to->device(), to->dtype(), stream.stream_index(), to);
@@ -64,7 +65,7 @@ void DataTransferCuda(const NDArray& from, NDArray& to, const Stream& stream) {
         threads.x = MIN(numel, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
         blocks.x = DIVUP(numel, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
         HT_DISPATCH_PAIRED_SIGNED_INTEGER_AND_FLOATING_TYPES(
-          from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCpu",
+          from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCuda",
           [&]() {
             data_transfer_kernel<spec_a_t, spec_b_t>
               <<<blocks, threads, 0, cuda_stream>>>(
@@ -89,7 +90,9 @@ void DataTransferCuda(const NDArray& from, NDArray& to, const Stream& stream) {
     HT_RUNTIME_ERROR << "Cannot use DataTransferCuda to "
                      << "copy data between CPU tensors. "
                      << "Please use DataTransferCpu instead.";
+    __builtin_unreachable();
   }
+  NDArray::MarkUsedBy({from, to}, stream);
 }
 
 } // namespace impl

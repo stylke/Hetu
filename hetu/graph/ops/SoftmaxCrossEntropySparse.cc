@@ -12,17 +12,6 @@ using SCESGradOpImpl = SoftmaxCrossEntropySparseGradientOpImpl;
 void SCESOpImpl::DoCompute(Operator& op, 
                            const NDArrayList& inputs, NDArrayList& outputs,
                            RuntimeContext& ctx) const {
-  // HTShape output_shape = HTShape(inputs.at(0)->shape().begin(), inputs.at(0)->shape().end() - 1);
-  // NDArray unreduced =
-  //   reduction() == kNONE ? outputs.at(0) : NDArray::empty(output_shape, 
-  //                                          inputs.at(0)->device(), inputs.at(0)->dtype());
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-  //                                 hetu::impl::SoftmaxCrossEntropySparse, inputs.at(0),
-  //                                 inputs.at(1), unreduced, ignored_index(), op->instantiation_ctx().stream());
-  // if (reduction() != kNONE) {
-  //   NDArray::reduce(unreduced, reduction(), HTAxes(), false, op->instantiation_ctx().stream_index,
-  //                   outputs.at(0));
-  // }
   NDArray::sceloss(inputs.at(0), inputs.at(1), ignored_index(), reduction(),
                    op->instantiation_ctx().stream_index, outputs.at(0));
 }
@@ -71,10 +60,12 @@ void SCESGradOpImpl::DoCompute(Operator& op,
                                const NDArrayList& inputs, NDArrayList& outputs,
                                RuntimeContext& ctx) const {
     HTShape output_shape = HTShape(inputs.at(0)->shape().begin(), inputs.at(0)->shape().end() - 1);
-    NDArray broadcasted =
-        reduction() == kNONE ? inputs.at(2) : NDArray::empty(output_shape, 
-                                            inputs.at(0)->device(), inputs.at(0)->dtype());
-  if (reduction() == kMEAN) {
+    NDArray broadcasted = reduction() == kNONE
+      ? inputs.at(2)
+      : NDArray::empty(output_shape, inputs.at(0)->device(),
+                       inputs.at(0)->dtype(),
+                       op->instantiation_ctx().stream_index);
+    if (reduction() == kMEAN) {
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       op->instantiation_ctx().placement.type(), type(), hetu::impl::BroadcastShapeMul, inputs.at(2),
       1.0f / broadcasted->numel(), broadcasted, HTAxes(), op->instantiation_ctx().stream());
