@@ -61,7 +61,6 @@ DataPtr CUDAMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   
   InitDeviceMemoryPoolOnce(device().index());
   
-  std::lock_guard<std::mutex> lock(_mtx);
   auto alignment = get_data_alignment();
   size_t aligned_num_bytes = DIVUP(num_bytes, alignment) * alignment;
 
@@ -72,6 +71,7 @@ DataPtr CUDAMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   _allocated += aligned_num_bytes;
   _peak_allocated = MAX(_peak_allocated, _allocated);
   
+  std::lock_guard<std::mutex> lock(_mtx);
   auto insertion =
     _data_ptr_info.emplace(ptr, CudaDataPtrInfo(aligned_num_bytes, stream));
   HT_RUNTIME_ERROR_IF(!insertion.second)
@@ -186,6 +186,7 @@ std::future<void> CUDAMemoryPool::WaitDataSpace(DataPtr data_ptr, bool async) {
     << "Cannot find data " << data_ptr << " from info";
   auto& alloc_stream = it->second.alloc_stream;
   auto& used_streams = it->second.used_streams;
+  lock.unlock();
 
   // TODO: Avoid synchronizing allocation and used streams again 
   // when freeing the memory. However, remember that it necessitates 
