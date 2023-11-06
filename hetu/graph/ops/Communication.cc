@@ -226,13 +226,24 @@ HTShapeList AllReduceOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-void AllReduceOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
-                                NDArrayList& outputs, RuntimeContext& runtime_ctx) const {
+NDArrayList AllReduceOpImpl::DoCompute(Operator& op,
+                                       const NDArrayList& inputs,
+                                       RuntimeContext& ctx) const {
+  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::AllReduce, inputs.at(0),
                                   outputs.at(0), _comm_group, // _comm_group is a subset of placement_group
-                                  op->instantiation_ctx().stream());                              
+                                  op->instantiation_ctx().stream()); 
+  return outputs;
 }
+
+// void AllReduceOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+//                                 NDArrayList& outputs, RuntimeContext& runtime_ctx) const {
+//   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
+//                                   hetu::impl::AllReduce, inputs.at(0),
+//                                   outputs.at(0), _comm_group, // _comm_group is a subset of placement_group
+//                                   op->instantiation_ctx().stream());                              
+// }
 
 bool P2PSendOpImpl::DoMapToParallelDevices(Operator& op,
                                            const DeviceGroup& pg) const {
@@ -471,18 +482,46 @@ HTShapeList ReduceScatterOpImpl::DoInferShape(Operator& op,
   return {scatter_shape};
 }
 
-void ReduceScatterOpImpl::DoCompute(Operator& op, 
-                                    const NDArrayList& inputs,
-                                    NDArrayList& outputs,
-                                    RuntimeContext& runtime_ctx) const {
+NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
+                                           const NDArrayList& inputs,
+                                           RuntimeContext& ctx) const {                              
+  NDArrayList outputs = {};
   HT_ASSERT(inputs.at(0)->dtype() == op->input(0)->dtype())
     << "Data type mismatched for ReduceScatter communication: " << inputs.at(0)->dtype()
     << " vs. " << op->input(0)->dtype();
 
+  if (inplace()) {
+    NDArrayMeta meta = inputs.at(0)->meta();
+    HTShape scatter_shape = inputs.at(0)->shape();
+    scatter_shape[0] /= _comm_group.num_devices();
+    meta.set_shape(scatter_shape);
+    int rank = GetWorldRank();
+    size_t storage_offset = rank * (inputs.at(0)->numel() / _comm_group.num_devices());
+    NDArray output = NDArray(meta, inputs.at(0)->storage(), inputs.at(0)->storage_offset() + storage_offset);
+    outputs.emplace_back(output);
+  }
+  else {
+    outputs = DoAllocOutputs(op, inputs, ctx);
+  }
+
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::ReduceScatter, inputs.at(0), outputs.at(0), 
                                   _comm_group, op->instantiation_ctx().stream());
+  return outputs;
 }
+
+// void ReduceScatterOpImpl::DoCompute(Operator& op, 
+//                                     const NDArrayList& inputs,
+//                                     NDArrayList& outputs,
+//                                     RuntimeContext& runtime_ctx) const {
+//   HT_ASSERT(inputs.at(0)->dtype() == op->input(0)->dtype())
+//     << "Data type mismatched for ReduceScatter communication: " << inputs.at(0)->dtype()
+//     << " vs. " << op->input(0)->dtype();
+
+//   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
+//                                   hetu::impl::ReduceScatter, inputs.at(0), outputs.at(0), 
+//                                   _comm_group, op->instantiation_ctx().stream());
+// }
 
 Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, DeviceGroup dst_group, OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds, dst_group), 
@@ -494,9 +533,9 @@ Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, OpMeta op_meta) {
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, bool inplace,
                        OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<AllReduceOpImpl>(comm_group, op_meta.device_group), 
+  return Graph::MakeOp(std::make_shared<AllReduceOpImpl>(comm_group, inplace, op_meta.device_group), 
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
@@ -533,9 +572,9 @@ Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group,
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, bool inplace, 
                            OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, op_meta.device_group), 
+  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, inplace, op_meta.device_group), 
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 

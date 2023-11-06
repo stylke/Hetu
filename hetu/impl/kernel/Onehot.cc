@@ -45,7 +45,6 @@ void OnehotCpu(const NDArray& input, size_t num_classes, NDArray& output,
       onehot_cpu<spec_t>(input->data_ptr<spec_t>(), size, last_dim,
                          output->data_ptr<spec_t>());
       },"Onehot");
-      //cpu_stream.Sync();
     });
 }
 

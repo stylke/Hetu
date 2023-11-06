@@ -39,8 +39,7 @@ void AsStridedCpu(const NDArray& input, NDArray& output, HTShape stride, const S
         asstrided_cpu<spec_t>(
           input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size, 
           stride.data(), output->stride().data(), ndim);
-      },"AsStrided");
-      //cpu_stream.Sync();
+      },"AsStrided");     
     });
 }
 
@@ -89,8 +88,7 @@ void AsStridedGradientCpu(const NDArray& output, NDArray& input, HTShape stride,
           output->data_ptr<spec_t>(), input->data_ptr<spec_t>(), size, 
           stride.data(), output->stride().data(), ndim);
       },
-      "AsStridedGradient");
-      //cpu_stream.Sync();
+      "AsStridedGradient");     
     });
 }
 

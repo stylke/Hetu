@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
@@ -39,8 +40,9 @@ void SoftmaxCrossEntropyCpu(const NDArray& input, const NDArray& label,
         DataPtr temp_data_ptr = AllocFromMemoryPool(input->device(), size * sizeof(spec_t));
         void* temp_data = temp_data_ptr.ptr;
         dnnl::stream engine_stream(eng);
-        auto src_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
-        auto dst_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+        auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
+        auto src_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
+        auto dst_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
         auto src_mem = dnnl::memory(src_md, eng, input->data_ptr<spec_t>());
         auto dst_mem = dnnl::memory(dst_md, eng, temp_data);
 
@@ -68,14 +70,14 @@ void SoftmaxCrossEntropyCpu(const NDArray& input, const NDArray& label,
 
         HTShape outshape = output->shape(); outshape.emplace_back(1);
         HTShape outstride = output->stride(); outstride.emplace_back(1);
-        auto rsrc_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
-        auto rdst_md = dnnl::memory::desc(outshape, dnnl::memory::data_type::f32, outstride);
+        auto rsrc_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
+        auto rdst_md = dnnl::memory::desc(outshape, dnnltype, outstride);
 
         auto rsrc_mem = dnnl::memory(rsrc_md, eng, temp_data);
         auto rdst_mem = dnnl::memory(rdst_md, eng, output->data_ptr<spec_t>());
 
         if (input->shape() == outshape)
-          hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), rsrc_mem);
+          hetu::cpu::read_from_dnnl_memory(output->data_ptr<spec_t>(), rsrc_mem);
         else {
           // Create primitive descriptor.
           auto reduction_pd = dnnl::reduction::primitive_desc(
@@ -95,7 +97,7 @@ void SoftmaxCrossEntropyCpu(const NDArray& input, const NDArray& label,
           FreeToMemoryPool(temp_data_ptr);
         }
         },"SoftmaxCrossEntropy");
-      //cpu_stream.Sync();
+      
   });
 } 
 
@@ -128,13 +130,14 @@ void SoftmaxCrossEntropyGradientCpu(const NDArray& input_y,
       auto _future = cpu_stream.EnqueueTask(
         [input_y, label, grad, output, stream, c_, size]() {
         dnnl::engine eng(dnnl::engine::kind::cpu, 0);
+        auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_y->dtype());
         DataPtr temp_data_ptr =
           AllocFromMemoryPool(grad->device(), size * sizeof(spec_t));
         void* temp_data = temp_data_ptr.ptr;
         dnnl::stream engine_stream(eng);
 
-        auto src_md = dnnl::memory::desc(input_y->shape(), dnnl::memory::data_type::f32, input_y->stride());
-        auto dst_md = dnnl::memory::desc(input_y->shape(), dnnl::memory::data_type::f32, input_y->stride());
+        auto src_md = dnnl::memory::desc(input_y->shape(), dnnltype, input_y->stride());
+        auto dst_md = dnnl::memory::desc(input_y->shape(), dnnltype, input_y->stride());
         auto src_mem = dnnl::memory(src_md, eng, input_y->data_ptr<spec_t>());
         auto dst_mem = dnnl::memory(dst_md, eng, temp_data);
 
@@ -160,7 +163,6 @@ void SoftmaxCrossEntropyGradientCpu(const NDArray& input_y,
             grad->data_ptr<spec_t>(), output->data_ptr<spec_t>(), c_, size);
         FreeToMemoryPool(temp_data_ptr);
         },"SoftmaxCrossEntropyGradient");
-      //cpu_stream.Sync();
     });
 }
 } // namespace impl

@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
@@ -55,9 +56,10 @@ void ConcatenateCpu(const NDArrayList& inputs, NDArray& output, size_t axis,
     inputs[0]->dtype(), spec_t, "ConcatenateCpu", [&]() {
       std::vector<dnnl::memory::desc> src_mds;
       std::vector<dnnl::memory> src_mems;
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(inputs[0]->dtype());
 
       for (size_t i = 0; i < inputs.size(); ++i) {
-          auto md = dnnl::memory::desc(inputs[i]->shape(), dnnl::memory::data_type::f32, inputs[i]->stride());
+          auto md = dnnl::memory::desc(inputs[i]->shape(), dnnltype, inputs[i]->stride());
           auto mem = dnnl::memory(md, eng, inputs[i]->data_ptr<spec_t>());
 
           src_mds.push_back(md);
@@ -86,8 +88,6 @@ void ConcatenateCpu(const NDArrayList& inputs, NDArray& output, size_t axis,
         engine_stream.wait();
       },
       "Concatenate");
-      //cpu_stream.Sync();
-      
     });
 }
 
@@ -126,8 +126,7 @@ void ConcatenateGradientCpu(const NDArray& output_grad, NDArray& input_grad,
         output_grad->data_ptr<spec_t>(), input_grad->data_ptr<spec_t>(),
         input_width, output_width, offset, concat_size, size);
       },
-      "ConcatGradient");
-      //cpu_stream.Sync();
+      "ConcatGradient");  
     });
 }
 

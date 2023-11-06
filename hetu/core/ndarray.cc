@@ -988,6 +988,17 @@ NDArray NDArray::conv2d(const NDArray& input, const NDArray& filter,
   return out;
 }
 
+NDArray NDArray::cos(const NDArray& input,
+                     StreamIndex stream_id,
+                     NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Cos, input,
+                                  out, stream);
+  return out;
+}
+
 // TODO: support dynamic if output is not defined
 NDArray NDArray::embedding(const NDArray& input, const NDArray& id,
                            StreamIndex stream_id,

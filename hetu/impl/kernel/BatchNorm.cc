@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
@@ -28,9 +29,10 @@ void BatchNormCpu(const NDArray& input_X, const NDArray& bn_scale,
         auto _future = cpu_stream.EnqueueTask(
         [eng, input_X, bn_scale, bn_bias,
          output_Y, save_mean, save_var, momentum, eps]() {
-        auto src_md = dnnl::memory::desc(input_X->shape(), dnnl::memory::data_type::f32, input_X->stride());
-        auto dst_md = dnnl::memory::desc(output_Y->shape(), dnnl::memory::data_type::f32, output_Y->stride());
-        auto scaleshift_md = dnnl::memory::desc(bn_bias->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
+        auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_X->dtype());
+        auto src_md = dnnl::memory::desc(input_X->shape(), dnnltype, input_X->stride());
+        auto dst_md = dnnl::memory::desc(output_Y->shape(), dnnltype, output_Y->stride());
+        auto scaleshift_md = dnnl::memory::desc(bn_bias->shape(), dnnltype, dnnl::memory::format_tag::x);
 
         auto src_mem = dnnl::memory(src_md, eng, input_X->data_ptr<spec_t>());
         auto dst_mem = dnnl::memory(dst_md, eng, output_Y->data_ptr<spec_t>());
@@ -61,7 +63,7 @@ void BatchNormCpu(const NDArray& input_X, const NDArray& bn_scale,
         engine_stream.wait();
       },
       "BatchNorm");
-      //cpu_stream.Sync();
+      
     });
   return;
 }
@@ -88,10 +90,11 @@ void BatchNormGradientCpu(const NDArray& gradient_Y, const NDArray& input_X,
         auto _future = cpu_stream.EnqueueTask(
         [eng, gradient_Y, input_X, bn_scale, gradient_X,
          gradient_bn_scale, gradient_bn_bias, save_mean, save_var, eps]() {
-        auto src_md = dnnl::memory::desc(input_X->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
-        auto gdst_md = dnnl::memory::desc(gradient_Y->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
-        auto scaleshift_md = dnnl::memory::desc(bn_scale->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
-        auto mean_md = dnnl::memory::desc(save_mean->shape(), dnnl::memory::data_type::f32, save_mean->stride());
+        auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_X->dtype());
+        auto src_md = dnnl::memory::desc(input_X->shape(), dnnltype, dnnl::memory::format_tag::nchw);
+        auto gdst_md = dnnl::memory::desc(gradient_Y->shape(), dnnltype, dnnl::memory::format_tag::nchw);
+        auto scaleshift_md = dnnl::memory::desc(bn_scale->shape(), dnnltype, dnnl::memory::format_tag::x);
+        auto mean_md = dnnl::memory::desc(save_mean->shape(), dnnltype, save_mean->stride());
 
 
         auto src_mem = dnnl::memory(src_md, eng, input_X->data_ptr<spec_t>());
@@ -141,7 +144,7 @@ void BatchNormGradientCpu(const NDArray& gradient_Y, const NDArray& input_X,
         engine_stream.wait();
       },
          "BatchNormGradient");
-      //cpu_stream.Sync();
+      
     });
 }    
 } // namespace impl

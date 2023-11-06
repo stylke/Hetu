@@ -10,15 +10,15 @@ void AttentionOpImpl::DoCompute(Operator& op,
                                 RuntimeContext& ctx) const {
   
   double softmax_scale_ = softmax_scale() >= 0 ? softmax_scale() : std::pow(inputs.at(0)->shape(3), -0.5);
-  std::chrono::system_clock::time_point t0 = std::chrono::system_clock::now();
+  // std::chrono::system_clock::time_point t0 = std::chrono::system_clock::now();
   HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::FlashAttn,
                                inputs.at(0), inputs.at(1), inputs.at(2), outputs.at(0), outputs.at(1),
                                outputs.at(2), outputs.at(3), outputs.at(4), outputs.at(5),
                                outputs.at(6), outputs.at(7), p_dropout(), softmax_scale_,
                                is_causal(), return_softmax(), op->instantiation_ctx().stream());
-  std::chrono::system_clock::time_point t1 = std::chrono::system_clock::now();
-  HT_LOG_INFO << "ATTN with shape " << inputs.at(0)->shape() << ":" << 
-  float(std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()) / 1000.0 << "ms.";
+  // std::chrono::system_clock::time_point t1 = std::chrono::system_clock::now();
+  // HT_LOG_INFO << "ATTN with shape " << inputs.at(0)->shape() << ":" << 
+  // float(std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()) / 1000.0 << "ms.";
 }
 
 TensorList AttentionOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
@@ -101,7 +101,7 @@ TensorList MakeAttentionGradientOp(Tensor grad_out, Tensor q, Tensor k, Tensor v
         std::make_shared<AttentionGradientOpImpl>(p_dropout, softmax_scale, is_causal),
         {std::move(grad_out), std::move(q), std::move(k), std::move(v),
          std::move(out), std::move(softmax_lse), std::move(rng_state)},
-        std::move(op_meta))->outputs();
+         std::move(op_meta))->outputs();
 }
 
 } // namespace graph

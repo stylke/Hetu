@@ -116,6 +116,22 @@ class NDArrayMeta {
     return *this;
   }
 
+  inline NDArrayMeta& set_stride(const HTStride& s) {
+    HT_ASSERT(s.size() <= HT_MAX_NDIM)
+      << "Currently we only support shape up to " << HT_MAX_NDIM
+      << " dimensions. Got " << s.size() << ".";
+    stride = s;
+    return *this;
+  }
+
+  inline NDArrayMeta& set_stride(HTStride&& s) {
+    HT_ASSERT(s.size() <= HT_MAX_NDIM)
+      << "Currently we only support shape up to " << HT_MAX_NDIM
+      << " dimensions. Got " << s.size() << ".";
+    stride = std::move(s);
+    return *this;
+  }
+
   inline NDArrayMeta& set_dynamic_shape(const HTShape& dynamic_s) {
     if(dynamic_s.empty() || dynamic_s == shape) {
       dynamic_shape = {};

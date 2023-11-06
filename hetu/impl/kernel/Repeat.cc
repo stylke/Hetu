@@ -29,7 +29,6 @@ void RepeatCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_SAME_DEVICE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   int ndim = output->ndim();
@@ -56,7 +55,7 @@ void RepeatCpu(const NDArray& input, NDArray& output, const Stream& stream) {
         free(stride_tmp);
         free(shape_tmp);
         },"Repeat");
-      //cpu_stream.Sync();
+      
     });
 }
 
@@ -87,7 +86,6 @@ void RepeatGradientCpu(const NDArray& output, NDArray& input, const Stream& stre
   HT_ASSERT_SAME_DEVICE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   int ndim = output->ndim();
@@ -117,7 +115,7 @@ void RepeatGradientCpu(const NDArray& output, NDArray& input, const Stream& stre
         free(stride_tmp);
         free(shape_tmp);
         },"RepeatGradient");
-      //cpu_stream.Sync();
+      
     });
 }
 

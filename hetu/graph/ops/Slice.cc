@@ -5,21 +5,37 @@
 namespace hetu {
 namespace graph {
 
-void SliceOpImpl::DoCompute(Operator& op, 
-                            const NDArrayList& inputs, NDArrayList& outputs,
-                            RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), hetu::impl::Slice,
-  //                                 inputs.at(0), outputs.at(0),
-  //                                 get_begin_pos().data(), op->instantiation_ctx().stream());
-  NDArray::slice(inputs.at(0), get_begin_pos(), outputs.at(0)->shape(),
-                 op->instantiation_ctx().stream_index, outputs.at(0));
+
+NDArrayList SliceOpImpl::DoCompute(Operator& op,
+                                   const NDArrayList& inputs,
+                                   RuntimeContext& ctx) const {
+  NDArrayList outputs = {};
+  if (inplace()) {
+    NDArrayMeta meta = inputs.at(0)->meta();
+    HTShape begin_pos = get_begin_pos();
+    HTShape out_shape = get_output_shape();
+    meta.set_shape(out_shape);
+    size_t storage_offset = 0;
+    for (int i = 0; i < out_shape.size(); ++i) {
+      storage_offset += begin_pos[i] * inputs.at(0)->stride(i);
+    }
+    meta.set_stride(inputs.at(0)->stride());
+    NDArray output = NDArray(meta, inputs.at(0)->storage(), inputs.at(0)->storage_offset() + storage_offset);
+    outputs.emplace_back(output);
+  }
+  else {
+    outputs = DoAllocOutputs(op, inputs, ctx);
+    NDArray::slice(inputs.at(0), get_begin_pos(), outputs.at(0)->shape(),
+                   op->instantiation_ctx().stream_index, outputs.at(0));
+  }
+  return outputs;
 }
 
 TensorList SliceOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   return {op->requires_grad(0) ? MakeSliceGradientOp(grad_outputs.at(0), op->output(0), op->input(0), get_begin_pos(),
-                                get_output_shape(),
-                                op->grad_op_meta().set_name(op->grad_name()))
-                              : Tensor()};
+                                 get_output_shape(),
+                                 op->grad_op_meta().set_name(op->grad_name()))
+                               : Tensor()};
 }
 
 HTShapeList SliceOpImpl::DoInferShape(Operator& op, 
@@ -88,7 +104,15 @@ void SliceGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& o
 Tensor MakeSliceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
                    OpMeta op_meta) {
   return Graph::MakeOp(
-    std::make_shared<SliceOpImpl>(begin_pos, output_shape),
+    std::make_shared<SliceOpImpl>(begin_pos, output_shape, -1, false),
+    {std::move(input)},
+    std::move(op_meta))->output(0);
+}
+
+Tensor MakeSliceInplaceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
+                          OpMeta op_meta) {
+  return Graph::MakeOp(
+    std::make_shared<SliceOpImpl>(begin_pos, output_shape, -1, true),
     {std::move(input)},
     std::move(op_meta))->output(0);
 }

@@ -31,7 +31,6 @@ void BroadcastShapeCpu(const NDArray& input, NDArray& output,
   HT_ASSERT_SAME_DEVICE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   size_t input_size = input->numel();
@@ -84,8 +83,7 @@ void BroadcastShapeCpu(const NDArray& input, NDArray& output,
       free(out_strides);
       free(in_dims);
       },
-      "BroadcastShape");
-      //cpu_stream.Sync();
+      "BroadcastShape");     
     });
 }
 
@@ -115,7 +113,6 @@ void BroadcastShapeMulCpu(const NDArray& input, double const_value,
   HT_ASSERT_SAME_DEVICE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   size_t input_size = input->numel();
@@ -168,8 +165,7 @@ void BroadcastShapeMulCpu(const NDArray& input, double const_value,
       free(out_strides);
       free(in_dims);
       },
-      "BroadcastShapeMul");
-      //cpu_stream.Sync();
+      "BroadcastShapeMul");     
     });
 }
 

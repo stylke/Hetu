@@ -6,12 +6,6 @@
 namespace hetu {
 namespace graph {
 
-void DropoutOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
-                              NDArrayList& outputs,
-                              RuntimeContext& runtime_ctx) const {
-  HT_LOG_INFO << "This is useless.";
-};
-
 NDArrayList DropoutOpImpl::DoCompute(Operator& op,
                                      const NDArrayList& inputs,
                                      RuntimeContext& ctx) const {

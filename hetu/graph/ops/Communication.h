@@ -91,9 +91,9 @@ Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
 
 class AllReduceOpImpl final : public OpInterface {
  public:
-  AllReduceOpImpl(const DeviceGroup& comm_group,
+  AllReduceOpImpl(const DeviceGroup& comm_group, bool inplace,
                   const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(AllReduceOp)), _comm_group(comm_group) {
+  : OpInterface(quote(AllReduceOp)), _comm_group(comm_group), _inplace(inplace) {
     HT_ASSERT(_comm_group.num_devices() >= 2)
              << "AllReduce requires two or more comm devices. Got " << _comm_group;
     if (!device_group.empty()) {
@@ -109,6 +109,10 @@ class AllReduceOpImpl final : public OpInterface {
     return ALL_REDUCE_OP;
   }
 
+  inline bool inplace() const {
+    return _inplace;
+  }
+
  protected:
   bool DoMapToParallelDevices(Operator& op,
                               const DeviceGroup& pg) const override;
@@ -122,8 +126,14 @@ class AllReduceOpImpl final : public OpInterface {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;
 
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const {};
+  
+  bool _inplace;
 
  public:
   const DeviceGroup& comm_group() const {
@@ -134,7 +144,7 @@ class AllReduceOpImpl final : public OpInterface {
   DeviceGroup _comm_group;
 };
 
-Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, bool inplace = false,
                        OpMeta op_meta = OpMeta());
 
 class P2PSendOpImpl final : public OpInterface {
@@ -370,8 +380,9 @@ Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group,
 
 class ReduceScatterOpImpl final : public OpInterface {
  public:
-  ReduceScatterOpImpl(const DeviceGroup& comm_group, const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(ReduceScatterOp)), _comm_group(comm_group) {
+  ReduceScatterOpImpl(const DeviceGroup& comm_group, bool inplace,
+                      const DeviceGroup& device_group = DeviceGroup())
+  : OpInterface(quote(ReduceScatterOp)), _comm_group(comm_group), _inplace(inplace) {
     HT_ASSERT(comm_group.num_devices() >= 2)
       << "ReduceScatter requires two or more devices. Got " << comm_group;          
     if (!device_group.empty()) {
@@ -387,6 +398,10 @@ class ReduceScatterOpImpl final : public OpInterface {
     return REDUCE_SCATTER_OP;
   }
 
+  inline bool inplace() const {
+    return _inplace;
+  }
+
  protected:
   bool DoMapToParallelDevices(Operator& op,
                               const DeviceGroup& pg) const override;
@@ -400,14 +415,20 @@ class ReduceScatterOpImpl final : public OpInterface {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;  
 
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const {};
+
+  bool _inplace;
 
  protected:
   DeviceGroup _comm_group;
 };
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group,
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, bool inplace = false,
                            OpMeta op_meta = OpMeta());
 
 }

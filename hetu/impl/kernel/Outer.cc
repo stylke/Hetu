@@ -22,7 +22,6 @@ void OuterCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output, con
   HT_ASSERT_SAME_DEVICE(inputA, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   size_t sizeB = inputB->numel();
@@ -35,7 +34,6 @@ void OuterCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output, con
       outer_cpu<spec_t>(
         inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), sizeB, size, output->data_ptr<spec_t>());
       },"Outer");
-      //cpu_stream.Sync();
     });
 }
 

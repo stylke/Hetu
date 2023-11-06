@@ -82,7 +82,6 @@ void EmbeddingLookupCpu(const NDArray& input, const NDArray& id,
                            size, length, input_row, output->data_ptr<spec_t>());
       },
       "EmbbedingLookup");
-      //cpu_stream.Sync();
     });
 }
 
@@ -116,8 +115,7 @@ void EmbeddingLookupGradientCpu(const NDArray& output_grad, const NDArray& id,
                                     id->data_ptr<int64_t>(), output_grad->numel(), length,
                                     input_grad->data_ptr<spec_t>());
       },
-      "EmbbedingLookupGradient");
-      //cpu_stream.Sync();
+      "EmbbedingLookupGradient");  
     });
 }
 

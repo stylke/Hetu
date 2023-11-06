@@ -53,7 +53,6 @@ void MatVecMulCpu(const NDArray& a, bool trans, const NDArray& x,
       matvecmul_cpu<spec_t>(a->data_ptr<spec_t>(), x->data_ptr<spec_t>(),
                             trans, m, n, output->data_ptr<spec_t>());
     },"MatVecmul");
-    //cpu_stream.Sync();
   });
 }
 

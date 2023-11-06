@@ -51,7 +51,7 @@ protected:
 
   void DoCompute(Operator& op, const NDArrayList& inputs,
                  NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& runtime_ctx) const {};
 
   NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
                         RuntimeContext& runtime_ctx) const override;

@@ -68,7 +68,6 @@ void PadCpu(const NDArray& input, NDArray& output, const HTShape& paddings,
     << output->device();
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t pad_len = paddings.size();
   size_t len = pad_len;
@@ -98,8 +97,7 @@ void PadCpu(const NDArray& input, NDArray& output, const HTShape& paddings,
                         endpoint[3], output->shape(1), endpoint[4], endpoint[5],
                         output->shape(2), endpoint[6], endpoint[7],
                         output->shape(3), constant_values);
-        },"Pad");
-        //cpu_stream.Sync();
+        },"Pad");      
       });
   }
 }
@@ -115,7 +113,6 @@ void PadGradientCpu(const NDArray& output_grad, NDArray& input_grad,
     << output_grad->device();
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t pad_len = paddings.size();
   size_t len = pad_len;
@@ -148,8 +145,7 @@ void PadGradientCpu(const NDArray& output_grad, NDArray& input_grad,
                                  input_grad->data_ptr<spec_t>(), N, C, H, W,
                                  begin_p[0], begin_p[1], begin_p[2], begin_p[3],
                                  out_N, out_C, out_H, out_W);
-        },"PadGradient");
-        //cpu_stream.Sync();
+        },"PadGradient");   
       });
   }
 }

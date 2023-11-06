@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "cmath"
@@ -31,6 +32,7 @@ void ReciprocalCpu(const NDArray& input, NDArray& output,
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output]() {
         dnnl::engine eng(dnnl::engine::kind::cpu, 0);
+        auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
         auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
         auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
         auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
@@ -47,7 +49,6 @@ void ReciprocalCpu(const NDArray& input, NDArray& output,
           Reciprocal.execute(engine_stream, reciprocal_args);
           engine_stream.wait();
         },"Reciprocal");
-      //cpu_stream.Sync();
     });
 }
 

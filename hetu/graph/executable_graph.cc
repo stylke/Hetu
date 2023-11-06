@@ -113,11 +113,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         }
       }
       op->MapToParallelDevices(inferred);
-<<<<<<< HEAD
       // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": op " << op << " inferred placement group = " << inferred;
-=======
-      HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": op " << op << " inferred placement group = " << inferred;
->>>>>>> 2c2b41a04751c35a197d821a66142997e0d95613
     }
     // udpate stages
     DeviceGroup stage_group;
@@ -343,7 +339,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         } else if (comm_type == ALL_REDUCE_OP) {
           DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2); // do allreduce among comm_group
           Tensor all_reduce_output = MakeAllReduceOp(
-            input, comm_group, // comm_group is a subset of placement_group
+            input, comm_group, false,// comm_group is a subset of placement_group
             OpMeta().set_device_group(src_group)
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllReduce"));
@@ -367,7 +363,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         } else if (comm_type == REDUCE_SCATTER_OP) {
           DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2);
           Tensor reduce_scatter_output =  MakeReduceScatterOp(
-            input, comm_group,
+            input, comm_group, false,
             OpMeta().set_device_group(src_group)
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_ReduceScatter"));

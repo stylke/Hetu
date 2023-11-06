@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
@@ -73,14 +74,15 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
       dimA, strideA, dimC, strideC, eps, last_dims, ndim]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng);
-      auto src_md = dnnl::memory::desc(in_arr->shape(), dnnl::memory::data_type::f32, in_arr->stride());
-      auto dst_md = dnnl::memory::desc(mean_arr->shape(), dnnl::memory::data_type::f32, mean_arr->stride());
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(in_arr->dtype());
+      auto src_md = dnnl::memory::desc(in_arr->shape(), dnnltype, in_arr->stride());
+      auto dst_md = dnnl::memory::desc(mean_arr->shape(), dnnltype, mean_arr->stride());
 
       auto src_mem = dnnl::memory(src_md, eng, in_arr->data_ptr<spec_t>());
       auto dst_mem = dnnl::memory(dst_md, eng, mean_arr->data_ptr<spec_t>());
 
       if (in_arr->shape() == mean_arr->shape())
-        hetu::omp::read_from_dnnl_memory(mean_arr->data_ptr<spec_t>(), src_mem);
+        hetu::cpu::read_from_dnnl_memory(mean_arr->data_ptr<spec_t>(), src_mem);
       else {
 
         // Create primitive descriptor.
@@ -108,7 +110,7 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
       src_mem = dnnl::memory(src_md, eng, out_arr->data_ptr<spec_t>());
       dst_mem = dnnl::memory(dst_md, eng, var_arr->data_ptr<spec_t>());
       if (in_arr->shape() == mean_arr->shape())
-        hetu::omp::read_from_dnnl_memory(var_arr->data_ptr<spec_t>(), src_mem);
+        hetu::cpu::read_from_dnnl_memory(var_arr->data_ptr<spec_t>(), src_mem);
       else {
 
         // Create primitive descriptor.
@@ -133,7 +135,7 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
         ln_scale->data_ptr<spec_t>(), ln_bias->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(), 
         last_dims, eps, temp_strideA); 
       },"LayerNorm");
-      //cpu_stream.Sync();         
+               
     });
   return;
 }
@@ -230,16 +232,17 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
         stride_size *= scale_shape[ndim - 1 - i];
       }
       dnnl::stream engine_stream(eng);
-      auto src_md = dnnl::memory::desc(in_arr->shape(), dnnl::memory::data_type::f32, in_arr->stride());
-      auto scale_md = dnnl::memory::desc(scale_shape, dnnl::memory::data_type::f32, scale_stride);
-      auto mean_md = dnnl::memory::desc(mean_arr->shape(), dnnl::memory::data_type::f32, mean_arr->stride());
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(in_arr->dtype());
+      auto src_md = dnnl::memory::desc(in_arr->shape(), dnnltype, in_arr->stride());
+      auto scale_md = dnnl::memory::desc(scale_shape, dnnltype, scale_stride);
+      auto mean_md = dnnl::memory::desc(mean_arr->shape(), dnnltype, mean_arr->stride());
 
       auto src_mem = dnnl::memory(src_md, eng, out_grads->data_ptr<spec_t>());
       auto scale_mem = dnnl::memory(scale_md, eng, grad_bias->data_ptr<spec_t>());
       auto mean_mem = dnnl::memory(mean_md, eng);
 
       if (in_arr->shape() == ln_scale->shape())
-        hetu::omp::read_from_dnnl_memory(grad_bias->data_ptr<spec_t>(), src_mem);
+        hetu::cpu::read_from_dnnl_memory(grad_bias->data_ptr<spec_t>(), src_mem);
       else {
 
         // Create primitive descriptor.
@@ -267,7 +270,7 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       src_mem = dnnl::memory(src_md, eng, gscale);
       scale_mem = dnnl::memory(scale_md, eng, grad_scale->data_ptr<spec_t>());
       if (in_arr->shape() == ln_scale->shape())
-        hetu::omp::read_from_dnnl_memory(grad_scale->data_ptr<spec_t>(), src_mem);
+        hetu::cpu::read_from_dnnl_memory(grad_scale->data_ptr<spec_t>(), src_mem);
       else {
 
         // Create primitive descriptor.
@@ -289,7 +292,7 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       src_mem = dnnl::memory(src_md, eng, out_grads->data_ptr<spec_t>());
       mean_mem = dnnl::memory(mean_md, eng, db);
       if (in_arr->shape() == mean_arr->shape())
-        hetu::omp::read_from_dnnl_memory(db, src_mem);
+        hetu::cpu::read_from_dnnl_memory(db, src_mem);
       else {
 
         // Create primitive descriptor.
@@ -332,7 +335,7 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
 
       mean_mem = dnnl::memory(mean_md, eng, ds);
       if (in_arr->shape() == ln_scale->shape())
-        hetu::omp::read_from_dnnl_memory(ds, mdst_mem);
+        hetu::cpu::read_from_dnnl_memory(ds, mdst_mem);
       else {
 
         // Create primitive descriptor.
@@ -362,7 +365,7 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
         FreeToMemoryPool(dy_mul_x_ptr);
         FreeToMemoryPool(gscale_ptr);
       },"LayerNormGradient");
-      //cpu_stream.Sync();
+      
     }); 
 }
 

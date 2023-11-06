@@ -23,7 +23,6 @@ void FloorCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_EXCHANGABLE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = input->numel();
   if (size == 0)
@@ -34,8 +33,7 @@ void FloorCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       [input, output, size]() {
         floor_cpu<spec_t>(input->data_ptr<spec_t>(), size,
                           output->data_ptr<spec_t>());
-      }, "Floor");
-      //cpu_stream.Sync();
+      }, "Floor");    
     });
 }
 
@@ -54,7 +52,6 @@ void CeilCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_EXCHANGABLE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = input->numel();
   if (size == 0)
@@ -66,7 +63,6 @@ void CeilCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       ceil_cpu<spec_t>(input->data_ptr<spec_t>(), size,
                        output->data_ptr<spec_t>());
       }, "Ceil");
-      //cpu_stream.Sync();
     });
 }
 
@@ -85,7 +81,6 @@ void RoundCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_EXCHANGABLE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = input->numel();
   if (size == 0)
@@ -97,7 +92,6 @@ void RoundCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       round_cpu<spec_t>(input->data_ptr<spec_t>(), size,
                         output->data_ptr<spec_t>());
       }, "Round");
-      //cpu_stream.Sync();
     });
 }
 

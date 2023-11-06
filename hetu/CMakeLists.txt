@@ -65,5 +65,9 @@ target_compile_options(hetu_C PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
                        -O3;
                        -std=c++17;
                        --use_fast_math;
+                       -U__CUDA_NO_HALF_OPERATORS__,
+                       -U__CUDA_NO_HALF_CONVERSIONS__,
+                       -U__CUDA_NO_HALF2_OPERATORS__,
+                       -U__CUDA_NO_BFLOAT16_CONVERSIONS__,
                        --threads 8
                        >)

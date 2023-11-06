@@ -68,7 +68,6 @@ void DiagonalCpu(const NDArray& input, NDArray& output, int dim1, int dim2,
                              strideC, static_cast<int>(input->shape(dim1)),
                              static_cast<int>(input->shape(dim2)), dim_len,
                              offset, output->data_ptr<spec_t>());}, "Diagonal");
-      //cpu_stream.Sync();      
     });
 }
 
@@ -136,8 +135,7 @@ void DiagonalGradientCpu(const NDArray& input, NDArray& output, int dim1,
               diagonal_gradient_cpu<spec_t>(input->data_ptr<spec_t>(), size, strideA,
                                     strideB, strideC, dim_len,
                                     output->data_ptr<spec_t>());
-      }, "DiagonalGradient");
-      //cpu_stream.Sync();            
+      }, "DiagonalGradient");          
     });
 }
 

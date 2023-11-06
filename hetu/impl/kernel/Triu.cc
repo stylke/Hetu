@@ -24,7 +24,6 @@ void TriuTrilCpu(const NDArray& input, NDArray& output, bool lower,
   HT_ASSERT_EXCHANGABLE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   int64_t ndim = input->ndim();
@@ -40,7 +39,6 @@ void TriuTrilCpu(const NDArray& input, NDArray& output, bool lower,
           input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
           lower, H, W, diagonal, size);
         },"TriuTril");
-      //cpu_stream.Sync();
     });
 }
 

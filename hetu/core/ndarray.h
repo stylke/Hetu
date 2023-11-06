@@ -331,6 +331,10 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                         StreamIndex stream_id = DEFAULT_STREAM,
                         NDArray& output = EMPTY);
 
+  static NDArray cos(const NDArray& input,
+                     StreamIndex stream_id = DEFAULT_STREAM,
+                     NDArray& output = EMPTY);
+
   static NDArray embedding(const NDArray& input, const NDArray& id,
                            StreamIndex stream_id = DEFAULT_STREAM,
                            NDArray& output = EMPTY);
@@ -666,8 +670,6 @@ class NDArrayDef : public shared_ptr_target {
     return _meta.stride;
   }
 
-<<<<<<< HEAD
-=======
   const int64_t stride(int64_t idx) const {
     int64_t ndim_ = ndim();
     HT_ASSERT(idx >= -ndim_ && idx < ndim_)
@@ -678,7 +680,17 @@ class NDArrayDef : public shared_ptr_target {
     return _meta.stride[idx];
   }
 
->>>>>>> 2c2b41a04751c35a197d821a66142997e0d95613
+  bool is_contiguous() const {
+    int64_t ndim_ = ndim();
+    int64_t contiguous_stride = 1;
+    for (int i = ndim_ - 1; i >= 0; i--) {
+      if (stride(i) != contiguous_stride)
+        return false;
+      contiguous_stride *= shape(i);
+    }
+    return true;
+  }
+
   bool is_dynamic() const {
     return !_meta.dynamic_shape.empty();
   }

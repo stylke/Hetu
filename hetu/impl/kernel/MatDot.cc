@@ -25,7 +25,6 @@ void MatDotCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
   HT_ASSERT_EXCHANGABLE(inputA, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = inputA->numel();
   size_t size2 = inputB->numel();
@@ -37,8 +36,7 @@ void MatDotCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
       [inputA, inputB, output, size, size2]() {
       dot_cpu<spec_t>(inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(),
                       size, size2, output->data_ptr<spec_t>());
-      },"MatDot");
-      //cpu_stream.Sync();
+      },"MatDot");   
     });
 }
 

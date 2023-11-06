@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 
 namespace hetu {
@@ -54,16 +55,10 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
       auto _future = cpu_stream.EnqueueTask(
         [eng, inputA, inputB, output, A_dims, A_stride,
          B_dims, B_stride, out_strides, op]() {
-          dnnl::memory::data_type mtype;
-          if (inputA->dtype() == DataType::FLOAT32)
-            mtype = dnnl::memory::data_type::f32;
-          else if (inputA->dtype() == DataType::FLOAT16) 
-            mtype = dnnl::memory::data_type::f16;
-          else
-            mtype = dnnl::memory::data_type::f64;
-          auto src_A_md = dnnl::memory::desc(A_dims, mtype, A_stride);
-          auto src_B_md = dnnl::memory::desc(B_dims, mtype, B_stride);
-          auto dst_md = dnnl::memory::desc(output->shape(), mtype, out_strides);
+          auto dnnltype = hetu::cpu::dtype_to_dnnltype(inputA->dtype());
+          auto src_A_md = dnnl::memory::desc(A_dims, dnnltype, A_stride);
+          auto src_B_md = dnnl::memory::desc(B_dims, dnnltype, B_stride);
+          auto dst_md = dnnl::memory::desc(output->shape(), dnnltype, out_strides);
 
           // Create src memory objects.
           auto src_A_mem = dnnl::memory(src_A_md, eng, inputA->data_ptr<spec_t>());

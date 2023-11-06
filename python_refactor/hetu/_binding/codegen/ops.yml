@@ -73,6 +73,66 @@
   args: float value, Tensor tensor
   self: tensor
 
+- name: add_
+  op: AddElewiseInplaceOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: add_
+  op: AddByConstInplaceOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: add_
+  op: AddByConstInplaceOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: sub_
+  op: SubElewiseInplaceOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: sub_
+  op: SubByConstInplaceOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: sub_
+  op: SubFromConstInplaceOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: mul_
+  op: MulElewiseInplaceOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: mul_
+  op: MulByConstInplaceOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: mul_
+  op: MulByConstInplaceOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: div_
+  op: DivElewiseInplaceOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: div_
+  op: DivByConstInplaceOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: div_
+  op: DivFromConstInplaceOp
+  args: float value, Tensor tensor
+  self: tensor
+
 - name: reciprocal
   op: ReciprocalOp
   args: Tensor input
@@ -152,6 +212,11 @@
 
 - name: slice
   op: SliceOp
+  args: Tensor input, HTShape begin_pos, HTShape output_shape
+  self: input
+
+- name: slice_
+  op: SliceInplaceOp
   args: Tensor input, HTShape begin_pos, HTShape output_shape
   self: input
 
@@ -287,9 +352,19 @@
   args: Tensor input, double keep_prob, bool recompute=False, bool inplace=False
   self: input
 
+- name: dropout_
+  op: DropoutOp
+  args: Tensor input, double keep_prob, bool recompute=False, bool inplace=True
+  self: input
+
 - name: dropout2d
   op: Dropout2dOp
   args: Tensor input, double keep_prob, bool recompute=False, bool inplace=False
+  self: input
+
+- name: dropout2d_
+  op: Dropout2dOp
+  args: Tensor input, double keep_prob, bool recompute=False, bool inplace=True
   self: input
 
 # #######################################################
@@ -310,11 +385,6 @@
   args: Tensor input
   self: input
 
-- name: gelu
-  op: GeluOp
-  args: Tensor input
-  self: input
-
 - name: leakyrelu
   op: LeakyReluOp
   args: Tensor input, double alpha
@@ -327,6 +397,41 @@
 
 - name: sin
   op: SinOp
+  args: Tensor input
+  self: input
+
+- name: sin_
+  op: SinInplaceOp
+  args: Tensor input
+  self: input
+
+- name: abs
+  op: AbsOp
+  args: Tensor input
+  self: input
+
+- name: abs_
+  op: AbsInplaceOp
+  args: Tensor input
+  self: input
+
+- name: exp
+  op: ExpOp
+  args: Tensor input
+  self: input
+
+- name: log
+  op: LogOp
+  args: Tensor input
+  self: input
+
+- name: exp_
+  op: ExpInplaceOp
+  args: Tensor input
+  self: input
+
+- name: log_
+  op: LogInplaceOp
   args: Tensor input
   self: input
 
@@ -430,6 +535,7 @@
   op: WhereOp
   args: Tensor cond, Tensor inputA, Tensor inputB
 
-- name: attention
-  op: AttentionOp
-  args: Tensor q, Tensor k, Tensor v, double p_dropout=0, float softmax_scale=-1, bool is_causal=False, bool return_softmax=False
+- name: contiguous
+  op: ContiguousOp
+  args: Tensor input
+  self: input

@@ -27,7 +27,6 @@ void WhereCpu(const NDArray& cond, const NDArray& inputA, const NDArray& inputB,
   HT_ASSERT_EXCHANGABLE(inputA, inputB);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = cond->numel();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
@@ -38,7 +37,6 @@ void WhereCpu(const NDArray& cond, const NDArray& inputA, const NDArray& inputB,
                           inputB->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
                           size);
         },"Where");
-      //cpu_stream.Sync();
     });
 }
 

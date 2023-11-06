@@ -38,7 +38,7 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
       output_shape[axe] = ori_shape[axe] - begin_pos[axe];
     }
   }
-  return Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), std::move(output_shape)),
+  return Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), std::move(output_shape), -1, true), 
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
@@ -60,7 +60,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
     begin_pos[dim] = chunk_sum;
     chunk_sum += chunk_size;
     outputs.emplace_back(Graph::MakeOp(
-                         std::make_shared<SliceOpImpl>(begin_pos, output_shape),
+                         std::make_shared<SliceOpImpl>(begin_pos, output_shape, -1, true),
                          {input}, op_meta)->output(0));
   }
   return std::move(outputs);
@@ -85,7 +85,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
     begin_pos[dim] = chunk_sum;
     chunk_sum += chunk_size;
     outputs.emplace_back(Graph::MakeOp(
-                         std::make_shared<SliceOpImpl>(begin_pos, output_shape, padding_axis),
+                         std::make_shared<SliceOpImpl>(begin_pos, output_shape, padding_axis, true),
                          {input}, op_meta)->output(0));
   }
   return std::move(outputs);
@@ -111,7 +111,7 @@ TensorList MakeSplitOp(Tensor input, const HTShape& chunks, int64_t dim,
     begin_pos[dim] = chunk_sum;
     chunk_sum += chunks[i];
     outputs.emplace_back(Graph::MakeOp(
-                         std::make_shared<SliceOpImpl>(begin_pos, output_shape),
+                         std::make_shared<SliceOpImpl>(begin_pos, output_shape, -1, true),
                          {input}, op_meta)->output(0));
   }
   return std::move(outputs);

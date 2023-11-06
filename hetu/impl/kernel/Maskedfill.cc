@@ -32,8 +32,7 @@ void MaskedfillCpu(const NDArray& input, const NDArray& mask,
         maskedfill_cpu<spec_t>(
         input->data_ptr<spec_t>(), mask->data_ptr<int64_t>(),
         static_cast<spec_t>(val), output->data_ptr<spec_t>(), size);
-      },"Maskfill");
-      //cpu_stream.Sync();
+      },"Maskfill"); 
     });
 }
 

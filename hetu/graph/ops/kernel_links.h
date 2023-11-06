@@ -21,6 +21,7 @@ namespace impl {
   DECLARE_KERNEL_CUDA(KERNEL, __VA_ARGS__)
 
 DECLARE_KERNEL_CPU_AND_CUDA(Abs, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(AbsGradient, const NDArray&, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Arange, double, double, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ArraySet, NDArray&, double, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AddConst, const NDArray&, double, NDArray&,
@@ -69,6 +70,8 @@ DECLARE_KERNEL_CUDA(Concatenate, const NDArray&, NDArray&, size_t,
                     size_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ConcatenateGradient, const NDArray&, NDArray&,
                             size_t, size_t, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(Contiguous, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(ContiguousGradient, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CUDA(DynamicConcatenate, const NDArray&, NDArray&, size_t,
                     size_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Conv2d, const NDArray&, const NDArray&, NDArray&,
@@ -244,7 +247,9 @@ DECLARE_KERNEL_CPU_AND_CUDA(SGDUpdateWithGradScaler, const NDArray&, const NDArr
 DECLARE_KERNEL_CPU_AND_CUDA(Sigmoid, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(SigmoidGradient, const NDArray&, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Sin, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(SinGradient, const NDArray&, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Cos, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(CosGradient, const NDArray&, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Slice, const NDArray&, NDArray&, int64_t*,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(SliceGradient, const NDArray&, NDArray&, int64_t*,

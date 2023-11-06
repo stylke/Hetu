@@ -24,7 +24,6 @@ void ArangeCpu(double start, double step, NDArray& output, const Stream& stream)
         static_cast<spec_t>(start), static_cast<spec_t>(step), size, output->data_ptr<spec_t>());
       },
       "Arange");
-      //cpu_stream.Sync();
     });
 }
 

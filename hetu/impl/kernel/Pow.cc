@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "cmath"
@@ -19,6 +20,32 @@ void pow_cpu(const spec_t* input, double exponent, size_t size,
   }
 }
 
+template <typename spec_t>
+void pow_cpu(const spec_t* input, double exponent, size_t size, spec_t* output,
+             int64_t ndims, const int64_t* stride, const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; idx++) {
+    int64_t i_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    output[i_idx] = std::pow(input[i_idx], exponent);
+  }
+}
+
+template <typename spec_t>
+void pow_cpu(const spec_t* input, double exponent, size_t size, spec_t* output,
+             int64_t ndims, const int64_t* stride, const int64_t* stride_out,
+             const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; idx++) {
+    int64_t i_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    int64_t o_idx = hetu::impl::get_index(idx, ndims, stride_out, c_shape);
+    output[o_idx] = std::pow(input[i_idx], exponent);
+  }
+}
+
 void PowCpu(const NDArray& input, double exponent, NDArray& output,
             const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
@@ -34,7 +61,8 @@ void PowCpu(const NDArray& input, double exponent, NDArray& output,
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output, exponent]() {
         dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-        auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+        auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
+        auto mat_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
         auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
         auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 
@@ -50,7 +78,6 @@ void PowCpu(const NDArray& input, double exponent, NDArray& output,
         Pow.execute(engine_stream, pow_args);
         engine_stream.wait();
       },"Pow");
-      //cpu_stream.Sync();
     });
 }
 

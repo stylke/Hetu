@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
@@ -30,21 +31,22 @@ void BatchMatMulCpu(const NDArray& a, bool trans_a, const NDArray& b,
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "BatchMatMul", [&]() {
     auto _future = cpu_stream.EnqueueTask(
     [stream, a, b, trans_a, trans_b, output, m, n, k, batchCount]() {
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(output->dtype());
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::memory::desc srcA_md, srcB_md, dst_md;
       if (!trans_a)
-          srcA_md = dnnl::memory::desc({batchCount, m, k}, dnnl::memory::data_type::f32, 
+          srcA_md = dnnl::memory::desc({batchCount, m, k}, dnnltype, 
                                         dnnl::memory::format_tag::abc);
       else
-          srcA_md = dnnl::memory::desc({batchCount, m, k}, dnnl::memory::data_type::f32, 
+          srcA_md = dnnl::memory::desc({batchCount, m, k}, dnnltype, 
                                         dnnl::memory::format_tag::acb);
       if (!trans_b)
-          srcB_md = dnnl::memory::desc({batchCount, k, n}, dnnl::memory::data_type::f32, 
+          srcB_md = dnnl::memory::desc({batchCount, k, n}, dnnltype, 
                                         dnnl::memory::format_tag::abc);
       else
-          srcB_md = dnnl::memory::desc({batchCount, k, n}, dnnl::memory::data_type::f32, 
+          srcB_md = dnnl::memory::desc({batchCount, k, n}, dnnltype, 
                                         dnnl::memory::format_tag::acb);
-      dst_md = dnnl::memory::desc({batchCount, m, n}, dnnl::memory::data_type::f32, 
+      dst_md = dnnl::memory::desc({batchCount, m, n}, dnnltype, 
                                   dnnl::memory::format_tag::abc);
                           
       auto srcA_mem = dnnl::memory(srcA_md, eng, a->data_ptr<spec_t>());
@@ -64,7 +66,6 @@ void BatchMatMulCpu(const NDArray& a, bool trans_a, const NDArray& b,
       engine_stream.wait();
     },
     "BatchMatmul");
-    //cpu_stream.Sync();
   });
 }
 

@@ -169,6 +169,17 @@ class TensorDef : public shared_ptr_target {
     _is_grad = is_grad;
   }
 
+  bool is_contiguous() const {
+    int64_t ndim_ = ndim();
+    int64_t contiguous_stride = 1;
+    for (int i = ndim_ - 1; i >= 0; i--) {
+      if (stride(i) != contiguous_stride)
+        return false;
+      contiguous_stride *= shape(i);
+    }
+    return true;
+  }
+
   NDArray get_or_compute();
 
   bool has_distributed_states() const {

@@ -13,11 +13,12 @@ class SliceGradientOp;
 
 class SliceOpImpl : public OpInterface {
  public:
-  SliceOpImpl(const HTShape& begin_pos, const HTShape& output_shape, const int64_t& padding_axis = -1)
+  SliceOpImpl(const HTShape& begin_pos, const HTShape& output_shape, const int64_t& padding_axis = -1, bool inplace = false)
   : OpInterface(quote(SliceOp)),
     _begin_pos(begin_pos),
     _output_shape(output_shape),
-    _padding_axis(padding_axis) {
+    _padding_axis(padding_axis),
+    _inplace(inplace) {
   }
   
   uint64_t op_indicator() const noexcept override {
@@ -34,6 +35,10 @@ class SliceOpImpl : public OpInterface {
 
   int64_t get_padding_axis() const {
     return _padding_axis;
+  }
+
+  bool inplace() const {
+    return _inplace;
   }
 
  protected:
@@ -55,8 +60,12 @@ class SliceOpImpl : public OpInterface {
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;
 
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const override;
+                 RuntimeContext& ctx) const {};
 
   TensorList DoGradient(Operator& op, const TensorList& grad_outputs) const override;
 
@@ -70,12 +79,15 @@ class SliceOpImpl : public OpInterface {
 
   int64_t _padding_axis;
 
+  bool _inplace;
+
  public:
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const SliceOpImpl&>(rhs);
       return (get_begin_pos() == rhs_.get_begin_pos()
-              && get_output_shape() == rhs_.get_output_shape());
+              && get_output_shape() == rhs_.get_output_shape()
+              && inplace() == rhs_.inplace());
     }
     return false;
   }
@@ -83,6 +95,8 @@ class SliceOpImpl : public OpInterface {
 
 Tensor MakeSliceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
                    OpMeta op_meta = OpMeta());
+Tensor MakeSliceInplaceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
+                          OpMeta op_meta = OpMeta());
 
 class SliceGradientOpImpl : public OpInterface {
 
