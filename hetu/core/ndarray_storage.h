@@ -11,12 +11,6 @@ class NDArrayStorage {
   
   NDArrayStorage(DataPtr ptr): _ptr(ptr) {}
 
-  NDArrayStorage(void* p, size_t size, const Device& device,
-                 DataPtrDeleter deleter)
-  : _ptr{DataPtr{p, size, device}} {
-    GetMemoryPool(device)->BorrowDataSpace(_ptr, std::move(deleter));
-  }
-
   ~NDArrayStorage() {
     FreeToMemoryPool(_ptr);
   }

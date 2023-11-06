@@ -60,6 +60,12 @@ DataPtr AllocFromMemoryPool(const Device& device, size_t num_bytes,
   }
 }
 
+DataPtr BorrowToMemoryPool(const Device& device, void* ptr, size_t num_bytes, 
+                           DataPtrDeleter deleter) {
+  return GetMemoryPool(device)->BorrowDataSpace(ptr, num_bytes,
+                                                std::move(deleter));
+}
+
 void FreeToMemoryPool(DataPtr ptr) {
   auto memory_pool = GetMemoryPool(ptr.device);
   if (memory_pool) {
@@ -80,7 +86,7 @@ void FreeToMemoryPool(DataPtr ptr) {
 
 std::ostream& operator<<(std::ostream& os, const DataPtr& data_ptr) {
   os << "DataPtr(address=" << data_ptr.ptr << ", size=" << data_ptr.size
-     << ", device=" << data_ptr.device << ")";
+     << ", device=" << data_ptr.device << ", id=" << data_ptr.id << ")";
   return os;
 }
 

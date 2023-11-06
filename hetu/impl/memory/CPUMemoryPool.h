@@ -15,7 +15,7 @@ class CPUMemoryPool final : public MemoryPool {
 
   DataPtr AllocDataSpace(size_t num_bytes, const Stream& stream = Stream());
 
-  void BorrowDataSpace(DataPtr data_ptr, DataPtrDeleter deleter);
+  DataPtr BorrowDataSpace(void* ptr, size_t num_bytes, DataPtrDeleter deleter);
 
   void FreeDataSpace(DataPtr data_ptr);
 
@@ -31,14 +31,16 @@ class CPUMemoryPool final : public MemoryPool {
 
  private:
   struct CPUDataPtrInfo {
+    void* ptr;
     size_t num_bytes;
     Stream alloc_stream;
     DataPtrDeleter deleter;
     std::unordered_map<Stream, std::shared_ptr<Event>> dependent_events;
 
-    CPUDataPtrInfo(size_t num_bytes_, Stream alloc_stream_,
+    CPUDataPtrInfo(void* ptr_, size_t num_bytes_, Stream alloc_stream_,
                    DataPtrDeleter deleter_ = {})
-    : num_bytes(num_bytes_),
+    : ptr(ptr_),
+      num_bytes(num_bytes_),
       alloc_stream{std::move(alloc_stream_)},
       deleter{std::move(deleter_)} {}
   };
@@ -48,7 +50,7 @@ class CPUMemoryPool final : public MemoryPool {
 
   size_t _allocated = 0;
   size_t _peak_allocated = 0;
-  std::unordered_map<const void*, CPUDataPtrInfo> _data_ptr_info;
+  std::unordered_map<uint64_t, CPUDataPtrInfo> _data_ptr_info;
   std::function<void(DataPtr)> _free_on_alloc_stream_fn;
   std::function<void(DataPtr)> _free_on_join_stream_fn;
 };

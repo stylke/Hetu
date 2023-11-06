@@ -13,6 +13,7 @@ struct DataPtr {
   void* ptr;
   size_t size;
   Device device;
+  uint64_t id; // id provided by the memory pool
 };
 
 using DataPtrList = std::vector<DataPtr>;
@@ -29,8 +30,9 @@ class MemoryPool {
   virtual DataPtr AllocDataSpace(size_t num_bytes,
                                  const Stream& stream = Stream()) = 0;
 
-  virtual void BorrowDataSpace(DataPtr data_ptr, DataPtrDeleter deleter) = 0;
-  
+  virtual DataPtr BorrowDataSpace(void* ptr, size_t num_bytes,
+                                  DataPtrDeleter deleter) = 0;
+
   virtual void FreeDataSpace(DataPtr data_ptr) = 0;
 
   virtual void MarkDataSpaceUsedByStream(DataPtr data_ptr,
@@ -51,8 +53,14 @@ class MemoryPool {
   }
 
 protected:
+  uint64_t next_id() {
+    // Only called on alloc or borrow, so the lock has been acquired.
+    return _next_id++;
+  }
+  
   const Device _device;
   const std::string _name;
+  uint64_t _next_id;
   std::mutex _mtx;
 };
 
@@ -62,6 +70,9 @@ std::shared_ptr<MemoryPool> GetMemoryPool(const Device& device);
 
 DataPtr AllocFromMemoryPool(const Device& device, size_t num_bytes,
                             const Stream& stream = Stream());
+
+DataPtr BorrowToMemoryPool(const Device& device, void* ptr, size_t num_bytes,
+                           DataPtrDeleter deleter);
 
 void FreeToMemoryPool(DataPtr ptr);
 

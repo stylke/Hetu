@@ -17,6 +17,7 @@ inline static void batch_sync_dependent_events(
 } // namespace
 
 CPUMemoryPool::CPUMemoryPool() : MemoryPool(Device(kCPU), "CPUMemPool") {
+  _data_ptr_info.reserve(8192);
   _free_on_alloc_stream_fn =
     std::bind(CPUMemoryPool::_FreeOnAllocStream, this, std::placeholders::_1);
   _free_on_join_stream_fn =
@@ -30,7 +31,7 @@ CPUMemoryPool::~CPUMemoryPool() {
 
 DataPtr CPUMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   if (num_bytes == 0)
-    return {nullptr, 0, Device(kCPU)};
+    return DataPtr{nullptr, 0, Device(kCPU), static_cast<uint64_t>(-1)};
 
   std::lock_guard<std::mutex> lock(_mtx);
   auto alignment = get_data_alignment();
@@ -44,7 +45,7 @@ DataPtr CPUMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   HT_BAD_ALLOC_IF(err != 0)
     << "Failed to allocate " << aligned_num_bytes
     << " bytes of host memory. Error: " << strerror(err);
-  DataPtr data_ptr{ptr, aligned_num_bytes, Device(kCPU)};
+  DataPtr data_ptr{ptr, aligned_num_bytes, Device(kCPU), next_id()};
   _allocated += aligned_num_bytes;
   _peak_allocated = MAX(_peak_allocated, _allocated);
 
@@ -57,28 +58,33 @@ DataPtr CPUMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   Stream alloc_stream =
     stream.device().is_cpu() ? stream : Stream(Device(kCPU), kJoinStream);
   auto insertion = _data_ptr_info.emplace(
-    data_ptr.ptr, CPUDataPtrInfo(aligned_num_bytes, alloc_stream));
+    data_ptr.id, 
+    CPUDataPtrInfo(data_ptr.ptr, aligned_num_bytes, alloc_stream));
   HT_RUNTIME_ERROR_IF(!insertion.second)
     << "Failed to insert data " << data_ptr << " to info";
 
-  return data_ptr;  
+  return data_ptr;
 }
 
-void CPUMemoryPool::BorrowDataSpace(DataPtr data_ptr, DataPtrDeleter deleter) {
-  HT_VALUE_ERROR_IF(data_ptr.ptr == nullptr || data_ptr.size == 0)
+DataPtr CPUMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
+                                       DataPtrDeleter deleter) {
+  HT_VALUE_ERROR_IF(ptr == nullptr || num_bytes == 0)
     << "Borrowing an empty storage is not allowed";
-  HT_VALUE_ERROR_IF(!data_ptr.device.is_cpu())
-    << "Cannot borrow memory " << data_ptr << " from CPU memory pool";
   HT_VALUE_ERROR_IF(!deleter)
     << "Deleter must not be empty when borrowing storages";
   
   std::lock_guard<std::mutex> lock(_mtx);
   // Note: The borrowed memory must be ready, so we use blokcing stream here
-  Stream alloc_stream = Stream(data_ptr.device, kBlockingStream);
-  auto insertion = _data_ptr_info.emplace(
-    data_ptr.ptr, CPUDataPtrInfo(data_ptr.size, alloc_stream, deleter));
+  DataPtr data_ptr{ptr, num_bytes, Device(kCPU), next_id()};
+  Stream alloc_stream = Stream(Device(kCPU), kBlockingStream);
+  auto insertion =
+    _data_ptr_info.emplace(data_ptr.id,
+                           CPUDataPtrInfo(data_ptr.ptr, data_ptr.size,
+                                          alloc_stream, std::move(deleter)));
   HT_RUNTIME_ERROR_IF(!insertion.second)
     << "Failed to insert data " << data_ptr << " to info";
+  
+  return data_ptr;
 }
 
 void CPUMemoryPool::FreeDataSpace(DataPtr data_ptr) {
@@ -87,7 +93,7 @@ void CPUMemoryPool::FreeDataSpace(DataPtr data_ptr) {
 
   std::lock_guard<std::mutex> lock(_mtx);
 
-  auto it = _data_ptr_info.find(data_ptr.ptr);
+  auto it = _data_ptr_info.find(data_ptr.id);
   HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
     << "Cannot find data " << data_ptr << " from info";
   auto& alloc_stream = it->second.alloc_stream;
@@ -123,7 +129,7 @@ void CPUMemoryPool::FreeDataSpace(DataPtr data_ptr) {
 void CPUMemoryPool::_FreeOnAllocStream(CPUMemoryPool* const pool,
                                        DataPtr data_ptr) {
   std::lock_guard<std::mutex> lock(pool->_mtx);
-  auto it = pool->_data_ptr_info.find(data_ptr.ptr);
+  auto it = pool->_data_ptr_info.find(data_ptr.id);
   HT_RUNTIME_ERROR_IF(it == pool->_data_ptr_info.end())
     << "Cannot find data " << data_ptr << " in from info";
   if (it->second.deleter) {
@@ -138,7 +144,7 @@ void CPUMemoryPool::_FreeOnAllocStream(CPUMemoryPool* const pool,
 void CPUMemoryPool::_FreeOnJoinStream(CPUMemoryPool* const pool,
                                       DataPtr data_ptr) {
   std::unique_lock<std::mutex> lock(pool->_mtx);
-  auto it = pool->_data_ptr_info.find(data_ptr.ptr);
+  auto it = pool->_data_ptr_info.find(data_ptr.id);
   HT_RUNTIME_ERROR_IF(it == pool->_data_ptr_info.end())
     << "Cannot find data " << data_ptr << " from info";
   // Note: Currently the allocation on host memory is blocking, 
@@ -163,7 +169,7 @@ void CPUMemoryPool::MarkDataSpaceUsedByStream(DataPtr data_ptr,
     return;
 
   std::lock_guard<std::mutex> lock(_mtx);
-  auto it = _data_ptr_info.find(data_ptr.ptr);
+  auto it = _data_ptr_info.find(data_ptr.id);
   HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
     << "Cannot find data " << data_ptr << " from info";
   auto& dependent_events = it->second.dependent_events;
@@ -203,7 +209,7 @@ void CPUMemoryPool::MarkDataSpacesUsedByStream(DataPtrList& data_ptrs,
     __builtin_unreachable();
   }
   for (auto& data_ptr : data_ptrs) {
-    auto it = _data_ptr_info.find(data_ptr.ptr);
+    auto it = _data_ptr_info.find(data_ptr.id);
     HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
       << "Cannot find data " << data_ptr << " from info";
     it->second.dependent_events[stream] = event;
@@ -215,7 +221,7 @@ std::future<void> CPUMemoryPool::WaitDataSpace(DataPtr data_ptr, bool async) {
     return async ? std::async([]() {}) : std::future<void>();
 
   std::lock_guard<std::mutex> lock(_mtx);
-  auto it = _data_ptr_info.find(data_ptr.ptr);
+  auto it = _data_ptr_info.find(data_ptr.id);
   HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
     << "Cannot find data " << data_ptr << " from info";
   auto& alloc_stream = it->second.alloc_stream;

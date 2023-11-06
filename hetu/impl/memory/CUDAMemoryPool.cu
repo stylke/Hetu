@@ -44,6 +44,7 @@ inline static std::string _make_name(DeviceIndex device_id) {
 
 CUDAMemoryPool::CUDAMemoryPool(DeviceIndex device_id)
 : MemoryPool(Device(kCUDA, device_id), _make_name(device_id)) {
+  _data_ptr_info.reserve(8192);
   _free_stream_watcher.reset(
     new TaskQueue("free_stream_watcher_of_" + name(), 8));
 }
@@ -57,7 +58,7 @@ DataPtr CUDAMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   HT_VALUE_ERROR_IF(!stream.device().is_cuda())
     << "Cuda arrays must be allocated on cuda streams. Got " << stream;
   if (num_bytes == 0)
-    return {nullptr, 0, device()};
+    return DataPtr{nullptr, 0, device(), static_cast<uint64_t>(-1)};
   
   InitDeviceMemoryPoolOnce(device().index());
   
@@ -67,24 +68,26 @@ DataPtr CUDAMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   CUDADeviceGuard guard(device().index());
   void* ptr;
   CudaMallocAsync(&ptr, aligned_num_bytes, CUDAStream(stream));
-  DataPtr data_ptr{ptr, aligned_num_bytes, device()};
+  DataPtr data_ptr{ptr, aligned_num_bytes, device(), next_id()};
   _allocated += aligned_num_bytes;
   _peak_allocated = MAX(_peak_allocated, _allocated);
   
   std::lock_guard<std::mutex> lock(_mtx);
-  auto insertion =
-    _data_ptr_info.emplace(ptr, CudaDataPtrInfo(aligned_num_bytes, stream));
+  auto insertion = _data_ptr_info.emplace(
+    data_ptr.id, 
+    CudaDataPtrInfo(data_ptr.ptr, aligned_num_bytes, stream));
   HT_RUNTIME_ERROR_IF(!insertion.second)
     << "Failed to insert data " << data_ptr << " to info";
   
   return data_ptr;
 }
 
-void CUDAMemoryPool::BorrowDataSpace(DataPtr, DataPtrDeleter) {
+DataPtr CUDAMemoryPool::BorrowDataSpace(void*, size_t, DataPtrDeleter) {
   // TODO: support customized deleter when freeing the memory 
   // so that we can support borrowing on CUDA devices
-  HT_NOT_IMPLEMENTED << "Borrowing memory on " << device()
-                     << " is not supported yet";
+  HT_NOT_IMPLEMENTED << name()
+                     << ": Borrowing CUDA memory is not supported yet";
+  __builtin_unreachable();
 }
 
 void CUDAMemoryPool::FreeDataSpace(DataPtr data_ptr) {
@@ -92,7 +95,7 @@ void CUDAMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     return;
   std::lock_guard<std::mutex> lock(_mtx);
 
-  auto it = _data_ptr_info.find(data_ptr.ptr);
+  auto it = _data_ptr_info.find(data_ptr.id);
   HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
     << "Cannot find data " << data_ptr << " from info";
   auto& alloc_stream = it->second.alloc_stream;
@@ -152,7 +155,7 @@ void CUDAMemoryPool::MarkDataSpaceUsedByStream(DataPtr data_ptr,
     << "Cuda arrays must be used on cuda streams. Got " << stream;
 
   std::lock_guard<std::mutex> lock(_mtx);
-  auto it = _data_ptr_info.find(data_ptr.ptr);
+  auto it = _data_ptr_info.find(data_ptr.id);
   HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
     << "Cannot find data " << data_ptr << " from info";
   it->second.used_streams.insert(stream);
@@ -169,7 +172,7 @@ void CUDAMemoryPool::MarkDataSpacesUsedByStream(DataPtrList& data_ptrs,
   for (auto& data_ptr : data_ptrs) {
     if (data_ptr.ptr == nullptr || data_ptr.size == 0)
       continue;
-    auto it = _data_ptr_info.find(data_ptr.ptr);
+    auto it = _data_ptr_info.find(data_ptr.id);
     HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
       << "Cannot find data " << data_ptr << " from info";
     it->second.used_streams.insert(stream);
@@ -181,7 +184,7 @@ std::future<void> CUDAMemoryPool::WaitDataSpace(DataPtr data_ptr, bool async) {
     return async ? std::async([]() {}) : std::future<void>();
 
   std::unique_lock<std::mutex> lock(_mtx);
-  auto it = _data_ptr_info.find(data_ptr.ptr);
+  auto it = _data_ptr_info.find(data_ptr.id);
   HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
     << "Cannot find data " << data_ptr << " from info";
   auto& alloc_stream = it->second.alloc_stream;
