@@ -82,20 +82,17 @@ void InstanceNormCuda(const NDArray& in_arr, NDArray& mean_arr,
   HT_ASSERT_SAME_DEVICE(in_arr, var_arr); 
   HT_ASSERT_SAME_DEVICE(in_arr, out_arr);   
 
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
-
-
   int ndim = in_arr->ndim();
   HT_ASSERT(ndim == 4);
   int last_2dim = in_arr->shape(ndim - 1) * in_arr->shape(ndim - 2);
   int base_dim = in_arr->shape(0) * in_arr->shape(1);
 
+  auto device_id = in_arr->device().index();
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CUDAStream cuda_stream(stream);
   dim3 blocks, threads;
   threads.x = (last_2dim >= 1024 ? 1024 : 64);
   blocks.x = base_dim;
-
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "InstanceNormCuda", [&]() {
       instance_norm_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
@@ -103,7 +100,7 @@ void InstanceNormCuda(const NDArray& in_arr, NDArray& mean_arr,
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(), 
         eps, last_2dim);
     });
-  return;
+  NDArray::MarkUsedBy({in_arr, mean_arr, var_arr, out_arr}, stream);
 }
 
 template <typename spec_t>
@@ -337,10 +334,6 @@ void InstanceNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
   HT_ASSERT_SAME_DEVICE(out_grads, mean_arr);   
   HT_ASSERT_SAME_DEVICE(out_grads, var_arr); 
 
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
-
   int ndim = out_grads->ndim();
   HT_ASSERT(ndim == 4);
   size_t total_elements = 1;
@@ -356,24 +349,27 @@ void InstanceNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
   size_t size = total_elements;
   if (size == 0)
     return;
+  
+  auto device_id = out_grads->device().index();
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CUDAStream cuda_stream(stream);
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
+  NDArray dbias_arr = NDArray::sum(out_grads, {2, 3}, true, stream.stream_index());
+  NDArray dy_mul_x_arr = NDArray::mul(out_grads, in_arr, stream.stream_index());
+  NDArray dscale_arr = NDArray::sum(dy_mul_x_arr, {2, 3}, true, stream.stream_index());
   HT_DISPATCH_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "CauculateGradCuda", [&]() {
-      
-      NDArray dbias_ = NDArray::sum(out_grads, {2, 3}, true, stream.stream_index());
-
-      NDArray dy_mul_x_ = NDArray::mul(out_grads, in_arr,stream.stream_index());
-
-      NDArray dscale_ = NDArray::sum(dy_mul_x_, {2, 3}, true, stream.stream_index());
-
       calculate_grad_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
-        dscale_->data_ptr<spec_t>(), dbias_->data_ptr<spec_t>(),
+        dscale_arr->data_ptr<spec_t>(), dbias_arr->data_ptr<spec_t>(),
         grad_arr->data_ptr<spec_t>(), last2dim, eps, size);
     });
+  NDArray::MarkUsedBy({out_grads, in_arr, grad_arr, mean_arr, var_arr,
+                       dbias_arr, dy_mul_x_arr, dscale_arr},
+                      stream);
 }
 
 } // namespace impl

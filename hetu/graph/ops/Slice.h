@@ -24,11 +24,11 @@ class SliceOpImpl : public OpInterface {
     return SLICE_OP;
   }
 
-  HTShape get_begin_pos() const {
+  const HTShape& get_begin_pos() const {
     return _begin_pos;
   }
 
-  HTShape get_output_shape() const {
+  const HTShape& get_output_shape() const {
     return _output_shape;
   }
 
@@ -94,11 +94,11 @@ class SliceGradientOpImpl : public OpInterface {
     _output_shape(output_shape) {
   }
 
-  HTShape get_begin_pos() const {
+  const HTShape& get_begin_pos() const {
     return _begin_pos;
   }
 
-  HTShape get_output_shape() const {
+  const HTShape& get_output_shape() const {
     return _output_shape;
   }
 

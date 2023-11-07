@@ -236,9 +236,9 @@ DECLARE_KERNEL_CPU_AND_CUDA(SGDUpdateWithGradScaler, const NDArray&, const NDArr
 DECLARE_KERNEL_CPU_AND_CUDA(Sigmoid, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Sin, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Cos, const NDArray&, NDArray&, const Stream&);
-DECLARE_KERNEL_CPU_AND_CUDA(Slice, const NDArray&, NDArray&, int64_t*,
+DECLARE_KERNEL_CPU_AND_CUDA(Slice, const NDArray&, NDArray&, const HTShape&,
                             const Stream&);
-DECLARE_KERNEL_CPU_AND_CUDA(SliceGradient, const NDArray&, NDArray&, int64_t*,
+DECLARE_KERNEL_CPU_AND_CUDA(SliceGradient, const NDArray&, NDArray&, const HTShape&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Softmax, const NDArray&, NDArray&, int64_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(SoftmaxGradient, const NDArray&, const NDArray&,
@@ -265,7 +265,7 @@ DECLARE_KERNEL_CPU_AND_CUDA(Reciprocal, const NDArray&, NDArray&,
 DECLARE_KERNEL_CPU_AND_CUDA(Tanh, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(TanhGradient, const NDArray&, const NDArray&,
                             NDArray&, const Stream&);
-DECLARE_KERNEL_CPU_AND_CUDA(Transpose, const NDArray&, NDArray&, int64_t*,
+DECLARE_KERNEL_CPU_AND_CUDA(Transpose, const NDArray&, NDArray&, const HTAxes&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(TriuTril, const NDArray&, NDArray&, bool, 
                             int64_t, const Stream&);

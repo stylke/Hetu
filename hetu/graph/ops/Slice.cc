@@ -10,7 +10,7 @@ void SliceOpImpl::DoCompute(Operator& op,
                             RuntimeContext& ctx) const {
   // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), hetu::impl::Slice,
   //                                 inputs.at(0), outputs.at(0),
-  //                                 get_begin_pos().data(), op->instantiation_ctx().stream());
+  //                                 get_begin_pos(), op->instantiation_ctx().stream());
   NDArray::slice(inputs.at(0), get_begin_pos(), outputs.at(0)->shape(),
                  op->instantiation_ctx().stream_index, outputs.at(0));
 }
@@ -25,8 +25,7 @@ TensorList SliceOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs)
 HTShapeList SliceOpImpl::DoInferShape(Operator& op, 
                                       const HTShapeList& input_shapes, 
                                       RuntimeContext& ctx) const {
-  HTShape output_shape = get_output_shape();
-  return {output_shape};
+  return {get_output_shape()};
 }
 
 HTShapeList SliceOpImpl::DoInferDynamicShape(Operator& op, 
@@ -37,7 +36,7 @@ HTShapeList SliceOpImpl::DoInferDynamicShape(Operator& op,
   // TODO: a more scalable approach to infer the dynamic shape
   // HTShape begin_pos = get_begin_pos();
   // int64_t padding_axis = get_padding_axis();
-  for (int64_t i; i < ndim; i++)
+  for (int64_t i = 0; i < ndim; i++)
     output_shape[i] = output_shape[i] < input_shapes[0][i] ? output_shape[i] : input_shapes[0][i];
   HT_LOG_TRACE << "SliceOpImpl::DoInferDynamicShape, input_shape: " << input_shapes[0]
    << " output_shape: " << output_shape;
@@ -53,10 +52,10 @@ void SliceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
     << "Input tensor shouldn't be partial!";
   // HT_ASSERT(ds_input.check_pure_duplicate())
   //   << "Input tensor cannot be splited in any dimension!";
-  HTShape ori_shape = inputs.at(0)->shape();
+  const HTShape& ori_shape = inputs.at(0)->shape();
   int ndim = ori_shape.size();
-  HTShape output_shape = get_output_shape();
-  HTShape begin_pos = get_begin_pos();
+  const HTShape& output_shape = get_output_shape();
+  const HTShape& begin_pos = get_begin_pos();
   for (int i = 0; i < ndim; i++) {
     if (!(begin_pos[i] == 0 && begin_pos[i] + output_shape[i] == ori_shape[i])) {
       HT_ASSERT(ds_input.get_dim(i) == 1)
@@ -70,7 +69,7 @@ void SliceGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                    NDArrayList& outputs, RuntimeContext& ctx) const {
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::SliceGradient, inputs.at(0),
-    outputs.at(0), get_begin_pos().data(), op->instantiation_ctx().stream());
+    outputs.at(0), get_begin_pos(), op->instantiation_ctx().stream());
 }
 
 

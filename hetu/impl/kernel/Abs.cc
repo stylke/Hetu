@@ -27,14 +27,14 @@ void AbsCpu(const NDArray& input, NDArray& output, const Stream& stream) {
     return;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "AbsCpu", [&]() {
-      auto _abs_future = cpu_stream.EnqueueTask(
-      [input, output, size]() {
+      cpu_stream.EnqueueTask(
+        [input, output, size]() {
           abs_cpu<spec_t>(input->data_ptr<spec_t>(), size,
                           output->data_ptr<spec_t>());
-      },
-      "Abs");
-      //cpu_stream.Sync();
+        },
+        "Abs");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

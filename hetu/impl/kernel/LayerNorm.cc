@@ -44,11 +44,11 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
   int ndim = in_arr->ndim();
   HT_ASSERT(ndim == 4);
   int last_dims = 1;
-  size_t cpu_mem = ndim * sizeof(int);
-  int* dimA = (int*) malloc(cpu_mem);
-  int* strideA = (int*) malloc(cpu_mem);
-  int* dimC = (int*) malloc(cpu_mem);
-  int* strideC = (int*) malloc(cpu_mem);
+
+  HTShape dimA(ndim);
+  HTShape strideA(ndim);
+  HTShape dimC(ndim);
+  HTShape strideC(ndim);
 
   int temp_strideA = 1;
   int temp_strideC = 1;
@@ -68,9 +68,9 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "LayerNormCpu", [&]() {
-      auto _future = cpu_stream.EnqueueTask(
+      cpu_stream.EnqueueTask(
       [stream, in_arr, ln_scale, ln_bias, mean_arr, var_arr, out_arr, temp_strideA, temp_strideC,
-      dimA, strideA, dimC, strideC, eps, last_dims, ndim]() {
+       eps, last_dims, ndim]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng);
       auto src_md = dnnl::memory::desc(in_arr->shape(), dnnl::memory::data_type::f32, in_arr->stride());
@@ -79,9 +79,9 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
       auto src_mem = dnnl::memory(src_md, eng, in_arr->data_ptr<spec_t>());
       auto dst_mem = dnnl::memory(dst_md, eng, mean_arr->data_ptr<spec_t>());
 
-      if (in_arr->shape() == mean_arr->shape())
+      if (in_arr->shape() == mean_arr->shape()) {
         hetu::omp::read_from_dnnl_memory(mean_arr->data_ptr<spec_t>(), src_mem);
-      else {
+      } else {
 
         // Create primitive descriptor.
         auto reduction_pd = dnnl::reduction::primitive_desc(
@@ -107,9 +107,9 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
       // Write data to memory object's handle.
       src_mem = dnnl::memory(src_md, eng, out_arr->data_ptr<spec_t>());
       dst_mem = dnnl::memory(dst_md, eng, var_arr->data_ptr<spec_t>());
-      if (in_arr->shape() == mean_arr->shape())
+      if (in_arr->shape() == mean_arr->shape()) {
         hetu::omp::read_from_dnnl_memory(var_arr->data_ptr<spec_t>(), src_mem);
-      else {
+      } else {
 
         // Create primitive descriptor.
         auto reduction_pd = dnnl::reduction::primitive_desc(
@@ -133,9 +133,9 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
         ln_scale->data_ptr<spec_t>(), ln_bias->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(), 
         last_dims, eps, temp_strideA); 
       },"LayerNorm");
-      //cpu_stream.Sync();         
     });
-  return;
+  NDArray::MarkUsedBy({in_arr, ln_scale, ln_bias, mean_arr, var_arr, out_arr},
+                      stream);
 }
 
 template <typename spec_t>
@@ -198,28 +198,24 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
   size_t size = total_elements;
   if (size == 0)
     return;
+  
+  auto ds_arr = NDArray::empty_like(mean_arr, stream.stream_index());
+  auto db_arr = NDArray::empty_like(mean_arr, stream.stream_index());
+  auto dy_mul_x_arr = NDArray::empty_like(in_arr, stream.stream_index());
+  auto gscale_arr = NDArray::empty_like(in_arr, stream.stream_index());
 
   CPUStream cpu_stream(stream);
   HT_DISPATCH_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "LayerNormGradientCpu", [&]() {
-      auto _future = cpu_stream.EnqueueTask(
+      cpu_stream.EnqueueTask(
       [stream, out_grads, in_arr, ln_scale, grad_scale, grad_bias, grad_arr, mean_arr, var_arr, 
+      ds_arr, db_arr, dy_mul_x_arr, gscale_arr,
       reduce_dims, eps, ndim, lastdims, total_elements, size]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-      spec_t* ds = NULL;
-      DataPtr ds_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t), stream);
-      ds = (spec_t*) ds_ptr.ptr;
-
-      spec_t* db = NULL;
-      DataPtr db_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t), stream);
-      db = (spec_t*) db_ptr.ptr;
-
-      spec_t* dy_mul_x = NULL;
-      DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), in_arr->numel() * sizeof(spec_t), stream);
-      dy_mul_x = (spec_t*) dy_mul_x_ptr.ptr;
-
-      DataPtr gscale_ptr = AllocFromMemoryPool(out_grads->device(), in_arr->numel() * sizeof(spec_t), stream);
-      spec_t* gscale = (spec_t*) gscale_ptr.ptr;
+      spec_t* ds = ds_arr->data_ptr<spec_t>();
+      spec_t* db = db_arr->data_ptr<spec_t>();
+      spec_t* dy_mul_x = dy_mul_x_arr->data_ptr<spec_t>();
+      spec_t* gscale = gscale_arr->data_ptr<spec_t>();
 
       HTShape scale_shape(ndim), scale_stride(ndim);
       int64_t stride_size = 1;
@@ -238,9 +234,9 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       auto scale_mem = dnnl::memory(scale_md, eng, grad_bias->data_ptr<spec_t>());
       auto mean_mem = dnnl::memory(mean_md, eng);
 
-      if (in_arr->shape() == ln_scale->shape())
+      if (in_arr->shape() == ln_scale->shape()) {
         hetu::omp::read_from_dnnl_memory(grad_bias->data_ptr<spec_t>(), src_mem);
-      else {
+      } else {
 
         // Create primitive descriptor.
         auto reduction_pd = dnnl::reduction::primitive_desc(
@@ -266,9 +262,9 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       
       src_mem = dnnl::memory(src_md, eng, gscale);
       scale_mem = dnnl::memory(scale_md, eng, grad_scale->data_ptr<spec_t>());
-      if (in_arr->shape() == ln_scale->shape())
+      if (in_arr->shape() == ln_scale->shape()) {
         hetu::omp::read_from_dnnl_memory(grad_scale->data_ptr<spec_t>(), src_mem);
-      else {
+      } else {
 
         // Create primitive descriptor.
         auto reduction_pd = dnnl::reduction::primitive_desc(
@@ -288,9 +284,9 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
 
       src_mem = dnnl::memory(src_md, eng, out_grads->data_ptr<spec_t>());
       mean_mem = dnnl::memory(mean_md, eng, db);
-      if (in_arr->shape() == mean_arr->shape())
+      if (in_arr->shape() == mean_arr->shape()) {
         hetu::omp::read_from_dnnl_memory(db, src_mem);
-      else {
+      } else {
 
         // Create primitive descriptor.
         auto reduction_pd = dnnl::reduction::primitive_desc(
@@ -331,9 +327,9 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
       engine_stream.wait();
 
       mean_mem = dnnl::memory(mean_md, eng, ds);
-      if (in_arr->shape() == ln_scale->shape())
+      if (in_arr->shape() == ln_scale->shape()) {
         hetu::omp::read_from_dnnl_memory(ds, mdst_mem);
-      else {
+      } else {
 
         // Create primitive descriptor.
         auto reduction_pd = dnnl::reduction::primitive_desc(
@@ -357,13 +353,12 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
         ds, db,
         grad_arr->data_ptr<spec_t>(), lastdims, eps, size);
-        FreeToMemoryPool(ds_ptr);
-        FreeToMemoryPool(db_ptr);
-        FreeToMemoryPool(dy_mul_x_ptr);
-        FreeToMemoryPool(gscale_ptr);
       },"LayerNormGradient");
-      //cpu_stream.Sync();
-    }); 
+    });
+  NDArray::MarkUsedBy({out_grads, in_arr, ln_scale, grad_arr, grad_scale,
+                       grad_bias, mean_arr, var_arr, ds_arr, db_arr,
+                       dy_mul_x_arr, gscale_arr},
+                      stream);
 }
 
 

@@ -826,7 +826,7 @@ NDArray NDArray::permute(const NDArray& input, HTAxes& dims,
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
                                   hetu::impl::Transpose, input, out,
-                                  dims.data(), stream);
+                                  dims, stream);
   return out;
 }
 
@@ -1467,7 +1467,7 @@ NDArray NDArray::slice(const NDArray& input,
    Stream stream(input->device(), stream_id);
    HT_DISPATCH_KERNEL_CPU_AND_CUDA(
      input->device().type(), __FUNCTION__, hetu::impl::Slice, input, out,
-     const_cast<HTShape&>(begin_pos).data(), stream);
+     begin_pos, stream);
    return out;
 }
 

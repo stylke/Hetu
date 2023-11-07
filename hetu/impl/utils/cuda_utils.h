@@ -1,12 +1,14 @@
 #pragma once
-#define __CUDA_NO_HALF_OPERATORS__
 
 #include "hetu/common/macros.h"
 #include "hetu/core/device.h"
+#include "hetu/core/ndarray.h"
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <curand_kernel.h>
+#include <type_traits>
+#include <functional>
 
 namespace hetu {
 namespace cuda {
@@ -101,6 +103,46 @@ class CUDADeviceGuard final {
   int32_t _prev_device_id{-1};
   int32_t _cur_device_id;
 };
+
+// A helper buffer to pass arguments like shapes, strides, axes to cuda kernels
+// Remember that kernel arguments are stored in constant memory, 
+// which may have a slower access speed than global memory. 
+// If that matters, use `to_int64_ndarray` instead.
+template <std::size_t N>
+struct Int64Buffer {
+  int64_t values[N];
+  __forceinline__ __host__ __device__ const int64_t&
+  operator[](size_t i) const {
+    return values[i];
+  }
+  __forceinline__ __host__ __device__ int64_t& operator[](size_t i) {
+    return values[i];
+  }
+};
+
+template <std::size_t N>
+inline Int64Buffer<N> to_int64_buffer(const std::vector<int64_t>& vec) {
+  HT_VALUE_ERROR_IF(vec.size() > N)
+    << "Trying to set " << vec.size() << " values in buffer with size " << N;
+  Int64Buffer<N> ret;
+  std::copy(vec.begin(), vec.end(), &(ret.values[0]));
+  return ret;
+}
+
+template <std::size_t N, class InputIt>
+inline Int64Buffer<N> to_int64_buffer(InputIt first, InputIt last) {
+  auto n = std::distance(first, last);
+  HT_VALUE_ERROR_IF(n > N) << "Trying to set " << n
+                           << " values in buffer with size " << N;
+  Int64Buffer<N> ret;
+  std::copy(first, last, &(ret.values[0]));
+  return ret;
+}
+
+// Helper functions to copy shapes, strides, or axes into NDArrays (blocking)
+NDArray to_int64_ndarray(const std::vector<int64_t>& vec,
+                         DeviceIndex device_id);
+NDArray to_int64_ndarray(const int64_t* from, size_t n, DeviceIndex device_id);
 
 } // namespace cuda
 } // namespace hetu

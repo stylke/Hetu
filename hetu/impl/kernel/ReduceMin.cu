@@ -58,10 +58,16 @@ __forceinline__ __device__ void BlockReduceArgmin(spec_t& val,
 template <typename spec_t>
 __global__ void
 reduce_min_kernel(const spec_t* input, spec_t* output, int ndim_input,
-                  int ndim_rest, int ndim_reduce, size_t* strides,
-                  size_t* strides_reduce, size_t* stride_rest, size_t* shape_in,
-                  size_t* shape_rest, size_t* shape_reduce, int* reduce_dims,
-                  int* rest_dims, int reduce_num) {
+                  int ndim_rest, int ndim_reduce, 
+                  const hetu::cuda::Int64Buffer<HT_MAX_NDIM> strides,
+                  const hetu::cuda::Int64Buffer<HT_MAX_NDIM> strides_reduce,
+                  const hetu::cuda::Int64Buffer<HT_MAX_NDIM> stride_rest,
+                  const hetu::cuda::Int64Buffer<HT_MAX_NDIM> shape_in,
+                  const hetu::cuda::Int64Buffer<HT_MAX_NDIM> shape_rest,
+                  const hetu::cuda::Int64Buffer<HT_MAX_NDIM> shape_reduce,
+                  const hetu::cuda::Int64Buffer<HT_MAX_NDIM> reduce_dims,
+                  const hetu::cuda::Int64Buffer<HT_MAX_NDIM> rest_dims,
+                  int reduce_num) {
   __shared__ spec_t shared_sum[32];
 
   size_t start_index = threadIdx.x;
@@ -136,18 +142,17 @@ void ReduceMinCuda(const NDArray& in_arr, NDArray& out_arr, const int64_t* axes,
     return;
   for (int i = 0; i < num_ax; ++i)
     HT_ASSERT(axes[i] >= 0 && axes[i] < in_arr->ndim());
-  int64_t* reduce_axes = (int64_t*) malloc(num_ax * sizeof(int64_t));
-  memcpy(reduce_axes, axes, num_ax * sizeof(int64_t));
-  std::sort(reduce_axes, reduce_axes + num_ax);
-  num_ax = std::unique(reduce_axes, reduce_axes + num_ax) - reduce_axes;
+  
+  HTShape reduce_axes(axes, axes + num_ax);
+  std::sort(reduce_axes.begin(), reduce_axes.end());
+  num_ax =
+    std::unique(reduce_axes.begin(), reduce_axes.end()) - reduce_axes.begin();
 
-  int* reduce_dims = (int*) malloc(num_ax * sizeof(int));
-  int* rest_dims = (int*) malloc((in_arr->ndim() - num_ax) * sizeof(int));
-
-  size_t* shape_in = (size_t*) malloc(in_arr->ndim() * sizeof(size_t));
-  size_t* shape_reduce = (size_t*) malloc(num_ax * sizeof(size_t));
-  size_t* shape_rest =
-    (size_t*) malloc((in_arr->ndim() - num_ax) * sizeof(size_t));
+  hetu::cuda::Int64Buffer<HT_MAX_NDIM> reduce_dims;
+  hetu::cuda::Int64Buffer<HT_MAX_NDIM> rest_dims;
+  hetu::cuda::Int64Buffer<HT_MAX_NDIM> shape_in;
+  hetu::cuda::Int64Buffer<HT_MAX_NDIM> shape_reduce;
+  hetu::cuda::Int64Buffer<HT_MAX_NDIM> shape_rest;
 
   // merge continuous reduce_dims
   int reduce_num = 1, rest_num = 1;
@@ -195,9 +200,9 @@ void ReduceMinCuda(const NDArray& in_arr, NDArray& out_arr, const int64_t* axes,
           befor_dim_size, reduce_dim_size, after_dim_size);
       });
   } else {
-    size_t* strides = (size_t*) malloc(ndim_input * sizeof(size_t));
-    size_t* strides_rest = (size_t*) malloc(ndim_rest * sizeof(size_t));
-    size_t* strides_reduce = (size_t*) malloc(ndim_reduce * sizeof(size_t));
+    hetu::cuda::Int64Buffer<HT_MAX_NDIM> strides;
+    hetu::cuda::Int64Buffer<HT_MAX_NDIM> strides_rest;
+    hetu::cuda::Int64Buffer<HT_MAX_NDIM> strides_reduce;
 
     strides[ndim_input - 1] = strides_reduce[ndim_reduce - 1] =
       strides_rest[ndim_rest - 1] = 1;
@@ -210,85 +215,18 @@ void ReduceMinCuda(const NDArray& in_arr, NDArray& out_arr, const int64_t* axes,
 
     CUDAStream cuda_stream(stream);
     hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-
-    DataPtr reduce_dims_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(int), stream);
-    int* reduce_dims_cu = (int*) reduce_dims_cu_ptr.ptr;
-    DataPtr rest_dims_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_rest * sizeof(int), stream);
-    int* rest_dims_cu = (int*) rest_dims_cu_ptr.ptr;
-    CUDA_CALL(cudaMemcpyAsync(reduce_dims_cu, reduce_dims,
-                              ndim_reduce * sizeof(int), cudaMemcpyHostToDevice,
-                              cuda_stream));
-    CUDA_CALL(cudaMemcpyAsync(rest_dims_cu, rest_dims, ndim_rest * sizeof(int),
-                              cudaMemcpyHostToDevice, cuda_stream));
-
-    DataPtr shape_in_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_input * sizeof(size_t), stream);
-    size_t* shape_in_cu = (size_t*) shape_in_cu_ptr.ptr;
-    DataPtr shape_reduce_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(size_t), stream);
-    size_t* shape_reduce_cu = (size_t*) shape_reduce_cu_ptr.ptr;
-    DataPtr shape_rest_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_rest * sizeof(int), stream);
-    size_t* shape_rest_cu = (size_t*) shape_rest_cu_ptr.ptr;
-    DataPtr strides_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_input * sizeof(size_t), stream);
-    size_t* strides_cu = (size_t*) strides_cu_ptr.ptr;
-    DataPtr strides_reduce_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_reduce * sizeof(size_t), stream);
-    size_t* strides_reduce_cu = (size_t*) strides_reduce_cu_ptr.ptr;
-    DataPtr strides_rest_cu_ptr =
-      AllocFromMemoryPool(in_arr->device(), ndim_rest * sizeof(size_t), stream);
-    size_t* strides_rest_cu = (size_t*) strides_rest_cu_ptr.ptr;
-
-    CUDA_CALL(cudaMemcpyAsync(shape_in_cu, shape_in,
-                              ndim_input * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cuda_stream));
-    CUDA_CALL(cudaMemcpyAsync(shape_rest_cu, shape_rest,
-                              ndim_rest * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cuda_stream));
-    CUDA_CALL(cudaMemcpyAsync(shape_reduce_cu, shape_reduce,
-                              ndim_reduce * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cuda_stream));
-    CUDA_CALL(cudaMemcpyAsync(strides_cu, strides, ndim_input * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cuda_stream));
-    CUDA_CALL(cudaMemcpyAsync(strides_reduce_cu, strides_reduce,
-                              ndim_reduce * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cuda_stream));
-    CUDA_CALL(cudaMemcpyAsync(strides_rest_cu, strides_rest,
-                              ndim_rest * sizeof(size_t),
-                              cudaMemcpyHostToDevice, cuda_stream));
-
     int blocks = rest_num;
     int threads = hetu::impl::GetThreadNum(reduce_num);
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       in_arr->dtype(), spec_t, "ReduceMinCuda", [&]() {
         reduce_min_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
           in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(), ndim_input,
-          ndim_rest, ndim_reduce, strides_cu, strides_reduce_cu,
-          strides_rest_cu, shape_in_cu, shape_rest_cu, shape_reduce_cu,
-          reduce_dims_cu, rest_dims_cu, reduce_num);
+          ndim_rest, ndim_reduce, strides, strides_reduce, strides_rest,
+          shape_in, shape_rest, shape_reduce, reduce_dims, rest_dims,
+          reduce_num);
       });
-    FreeToMemoryPool(rest_dims_cu_ptr);
-    FreeToMemoryPool(reduce_dims_cu_ptr);
-    FreeToMemoryPool(shape_in_cu_ptr);
-    FreeToMemoryPool(shape_rest_cu_ptr);
-    FreeToMemoryPool(shape_reduce_cu_ptr);
-    FreeToMemoryPool(strides_cu_ptr);
-    FreeToMemoryPool(strides_rest_cu_ptr);
-    FreeToMemoryPool(strides_reduce_cu_ptr);
-    free(strides);
-    free(strides_rest);
-    free(strides_reduce);
   }
-  free(rest_dims);
-  free(reduce_dims);
-  free(shape_in);
-  free(shape_rest);
-  free(shape_reduce);
-  free(reduce_axes);
-  return;
+  NDArray::MarkUsedBy({in_arr, out_arr}, stream);
 }
 
 } // namespace impl

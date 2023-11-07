@@ -9,8 +9,9 @@ namespace impl {
 
 template <typename spec_t>
 __global__ void broadcast_shape_kernel(const spec_t* input, spec_t* output,
-                                       uint* out_strides, uint* in_dims,
-                                       size_t ndims, size_t size) {
+                                       const int64_t* out_strides,
+                                       const int64_t* in_dims, size_t ndims,
+                                       size_t size) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -28,28 +29,22 @@ void BroadcastShapeCuda(const NDArray& input, NDArray& output,
                         const HTShape& add_axes, const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
-
   size_t size = output->numel();
   size_t input_size = input->numel();
+  if (size == 0 || input_size == 0)
+    return;
 
   int input_dim = input->ndim();
   int output_dim = output->ndim();
-  size_t allocated = output_dim * sizeof(uint);
-  uint* out_strides = (uint*) malloc(allocated);
-  uint* in_dims = (uint*) malloc(allocated);
-
+  HTShape in_dims(HT_MAX_NDIM);
+  HTStride out_strides(HT_MAX_NDIM);
   size_t output_size = 1;
   size_t diff = output_dim - input_dim;
-
   if (add_axes.empty()) {
     for (int i = output_dim - 1; i >= 0; --i) {
       out_strides[i] = output_size;
       output_size *= output->shape(i);
-      if (i < diff) {
-        in_dims[i] = 1;
-      } else {
-        in_dims[i] = input->shape(i - diff);
-      }
+      in_dims[i] = i < diff ? 1 : input->shape(i - diff);
     }
   } else {
     for (int i = output_dim - 1; i >= 0; --i) {
@@ -62,48 +57,36 @@ void BroadcastShapeCuda(const NDArray& input, NDArray& output,
     }
     int o_ind = 0;
     for (int i = 0; i < input->ndim(); ++i) {
-      while (in_dims[o_ind++] == 1)
-        ;
+      while (in_dims[o_ind++] == 1) {}
       in_dims[o_ind - 1] = input->shape(i);
     }
   }
 
-  DataPtr gpu_strides_ptr = AllocFromMemoryPool(input->device(), allocated, stream);
-  uint* gpu_strides = (uint*) gpu_strides_ptr.ptr;
-  DataPtr gpu_dims_ptr = AllocFromMemoryPool(input->device(), allocated, stream);
-  uint* gpu_dims = (uint*) gpu_dims_ptr.ptr;
-
-  if (size == 0 || input_size == 0)
-    return;
+  
+  auto device_id = input->device().index();
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CUDAStream cuda_stream(stream);
+  auto in_dims_arr = hetu::cuda::to_int64_ndarray(in_dims, device_id);
+  auto out_strides_arr = hetu::cuda::to_int64_ndarray(out_strides, device_id);
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-
-  CudaMemcpyAsync(gpu_strides, out_strides, allocated, cudaMemcpyHostToDevice,
-                  cuda_stream);
-  CudaMemcpyAsync(gpu_dims, in_dims, allocated, cudaMemcpyHostToDevice,
-                  cuda_stream);
-
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "BroadcastShapeCuda", [&]() {
       broadcast_shape_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), gpu_strides,
-        gpu_dims, output_dim, size);
+        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
+        out_strides_arr->data_ptr<int64_t>(),
+        in_dims_arr->data_ptr<int64_t>(), 
+        output_dim, size);
     });
-
-  FreeToMemoryPool(gpu_strides_ptr);
-  FreeToMemoryPool(gpu_dims_ptr);
-  free(out_strides);
-  free(in_dims);
+  NDArray::MarkUsedBy({input, output, in_dims_arr, out_strides_arr}, stream);
 }
 
 template <typename spec_t>
-__global__ void broadcast_shape_mul_kernel(const spec_t* input,
-                                           spec_t const_value, spec_t* output,
-                                           uint* out_strides, uint* in_dims,
-                                           size_t ndims, size_t size) {
+__global__ void
+broadcast_shape_mul_kernel(const spec_t* input, spec_t const_value,
+                           spec_t* output, const int64_t* out_strides,
+                           const int64_t* in_dims, size_t ndims, size_t size) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -122,28 +105,22 @@ void BroadcastShapeMulCuda(const NDArray& input, double const_value,
                            const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
-
   size_t size = output->numel();
   size_t input_size = input->numel();
+  if (size == 0 || input_size == 0)
+    return;
 
   int input_dim = input->ndim();
   int output_dim = output->ndim();
-  size_t allocated = output_dim * sizeof(uint);
-  uint* out_strides = (uint*) malloc(allocated);
-  uint* in_dims = (uint*) malloc(allocated);
-
-  size_t output_size = 1;
-  size_t diff = output_dim - input_dim;
-
+  HTStride out_strides(HT_MAX_NDIM);
+  HTShape in_dims(HT_MAX_NDIM);
+  int64_t output_size = 1;
+  int diff = output_dim - input_dim;
   if (add_axes.empty()) {
     for (int i = output_dim - 1; i >= 0; --i) {
       out_strides[i] = output_size;
       output_size *= output->shape(i);
-      if (i < diff) {
-        in_dims[i] = 1;
-      } else {
-        in_dims[i] = input->shape(i - diff);
-      }
+      in_dims[i] = i < diff ? 1 : input->shape(i - diff);
     }
   } else {
     for (int i = output_dim - 1; i >= 0; --i) {
@@ -156,41 +133,30 @@ void BroadcastShapeMulCuda(const NDArray& input, double const_value,
     }
     int o_ind = 0;
     for (int i = 0; i < input->ndim(); ++i) {
-      while (in_dims[o_ind++] == 1)
-        ;
+      while (in_dims[o_ind++] == 1) {}
       in_dims[o_ind - 1] = input->shape(i);
     }
   }
 
-  DataPtr gpu_strides_ptr = AllocFromMemoryPool(input->device(), allocated, stream);
-  uint* gpu_strides = (uint*) gpu_strides_ptr.ptr;
-  DataPtr gpu_dims_ptr = AllocFromMemoryPool(input->device(), allocated, stream);
-  uint* gpu_dims = (uint*) gpu_dims_ptr.ptr;
-
-  if (size == 0 || input_size == 0)
-    return;
+  auto device_id = input->device().index();
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CUDAStream cuda_stream(stream);
+  auto in_dims_arr = hetu::cuda::to_int64_ndarray(in_dims, device_id);
+  auto out_strides_arr = hetu::cuda::to_int64_ndarray(out_strides, device_id);
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-
-  CudaMemcpyAsync(gpu_strides, out_strides, allocated, cudaMemcpyHostToDevice,
-                  cuda_stream);
-  CudaMemcpyAsync(gpu_dims, in_dims, allocated, cudaMemcpyHostToDevice,
-                  cuda_stream);
-
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "BroadcastShapeMulCuda", [&]() {
       broadcast_shape_mul_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), static_cast<spec_t>(const_value),
-        output->data_ptr<spec_t>(), gpu_strides, gpu_dims, output_dim, size);
+        output->data_ptr<spec_t>(), 
+        out_strides_arr->data_ptr<int64_t>(), 
+        in_dims_arr->data_ptr<int64_t>(), 
+        output_dim, size);
     });
 
-  FreeToMemoryPool(gpu_strides_ptr);
-  FreeToMemoryPool(gpu_dims_ptr);
-  free(out_strides);
-  free(in_dims);
+  NDArray::MarkUsedBy({input, output, in_dims_arr, out_strides_arr}, stream);
 }
 
 } // namespace impl

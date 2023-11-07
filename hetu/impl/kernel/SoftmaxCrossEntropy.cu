@@ -37,28 +37,8 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
   if (size == 0)
     return;
 
-  int dev_id = cuda_stream.device_id();
-  cudnnDataType_t datatype;
-  cudnnIndicesType_t indicetype;
-  if (input->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-    indicetype = CUDNN_32BIT_INDICES;
-  } else if (input->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-    indicetype = CUDNN_64BIT_INDICES;
-  } else if (input->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-    indicetype = CUDNN_32BIT_INDICES;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-    indicetype = CUDNN_32BIT_INDICES;
-  }
-  #endif
-  else {
-    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input->dtype());
+  cudnnIndicesType_t indicetype = to_cudnn_IndicidesType(input->dtype());
 
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
@@ -94,6 +74,7 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
         temp_->data_ptr<spec_t>(), size);
       NDArray::sum(temp_, {1}, false, stream.stream_index(), output);
     });
+  NDArray::MarkUsedBy({input, label, output}, stream);
 }
 
 template <typename spec_t>
@@ -124,36 +105,23 @@ void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
   int c_ = input_y->shape(indim - 1);
   size_t size = n_ * c_;
 
-  cudnnDataType_t datatype;
-  if (input_y->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (input_y->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (input_y->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input_y->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_y->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input_y->dtype());
 
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
 
+  int64_t workspace_size;
+  if (input_y->dtype() == DataType::FLOAT16 || input_y->dtype() == DataType::BFLOAT16) {
+    workspace_size = size * sizeof(float);
+  } else {
+    workspace_size = size * DataType2Size(input_y->dtype());
+  }
+  auto workspace_arr =
+    NDArray::empty({workspace_size}, grad->device(), kInt8, stream.stream_index());
+
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_y->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
-      int dev_id = cuda_stream.device_id();
-
-      DataPtr temp_data_ptr = (input_y->dtype() == DataType::FLOAT16 || input_y->dtype() == DataType::BFLOAT16) ?
-        AllocFromMemoryPool(grad->device(), size * sizeof(float), stream) :
-        AllocFromMemoryPool(grad->device(), size * sizeof(spec_t), stream);
-      void* temp_data = temp_data_ptr.ptr;
-
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
 
@@ -167,22 +135,23 @@ void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
       if (input_y->dtype() == DataType::FLOAT16 || input_y->dtype() == DataType::BFLOAT16) {
       CUDNN_CALL(cudnnSoftmaxForward(
         handle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha_f,
-        desc, input_y->data_ptr<spec_t>(), &beta_f, desc, temp_data));
-      }
-      else {
+        desc, input_y->data_ptr<spec_t>(), &beta_f, desc, 
+        workspace_arr->raw_data_ptr()));
+      } else {
       CUDNN_CALL(cudnnSoftmaxForward(
         handle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
-        desc, input_y->data_ptr<spec_t>(), &beta, desc, temp_data));        
+        desc, input_y->data_ptr<spec_t>(), &beta, desc, 
+        workspace_arr->raw_data_ptr()));        
       }
 
       softmax_cross_entropy_gradient_kernel<spec_t>
         <<<blocks, threads, 0, cuda_stream>>>(
-          (const spec_t*) temp_data, label->data_ptr<spec_t>(),
+          (const spec_t*) workspace_arr->raw_data_ptr(), label->data_ptr<spec_t>(),
           grad->data_ptr<spec_t>(), output->data_ptr<spec_t>(), c_, size);
 
       CUDNN_CALL(cudnnDestroyTensorDescriptor(desc));
-      FreeToMemoryPool(temp_data_ptr);
     });
+  NDArray::MarkUsedBy({input_y, label, grad, workspace_arr}, stream);
 }
 
 } // namespace impl

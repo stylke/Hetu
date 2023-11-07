@@ -26,29 +26,10 @@ void MaxPoolCuda(const NDArray& input, const size_t kernel_H,
   size_t output_H = output->shape(2);
   size_t output_W = output->shape(3);
 
-  cudnnDataType_t datatype;
-  if (input->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (input->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (input->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_NOT_IMPLEMENTED << "UNSUPPORTED TYPE:" << input->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input->dtype());
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "MaxPoolCuda", [&]() {
-      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
-      if (input->dtype() == DataType::BFLOAT16)
-        return;
-      #endif
       const spec_t* input_data = (const spec_t*) input->data_ptr<spec_t>();
       spec_t* output_data = (spec_t*) output->data_ptr<spec_t>();
       // pooling descriptor
@@ -82,8 +63,7 @@ void MaxPoolCuda(const NDArray& input, const size_t kernel_H,
         CUDNN_CALL(cudnnPoolingForward(handle, maxpool_desc, &alpha_f, input_desc,
                                       input_data, &beta_f, output_desc,
                                       output_data));
-      }
-      else {
+      } else {
         CUDNN_CALL(cudnnPoolingForward(handle, maxpool_desc, &alpha, input_desc,
                                       input_data, &beta, output_desc,
                                       output_data));
@@ -93,6 +73,7 @@ void MaxPoolCuda(const NDArray& input, const size_t kernel_H,
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
       CUDNN_CALL(cudnnDestroyPoolingDescriptor(maxpool_desc));
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void MaxPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
@@ -118,22 +99,7 @@ void MaxPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
   size_t output_H = output_Y->shape(2);
   size_t output_W = output_Y->shape(3);
 
-  cudnnDataType_t datatype;
-  if (output_Y->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (output_Y->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (output_Y->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (output_Y->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_LOG_INFO << "UNSUPPORTED TYPE:" << output_Y->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(output_Y->dtype());
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     output_Y->dtype(), spec_t, "MaxPoolGradientCuda", [&]() {
@@ -174,8 +140,7 @@ void MaxPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
                                         output_data, output_desc, gradient_Y_data,
                                         input_desc, input_data, &beta_f, input_desc,
                                         gradient_x_data));
-      }
-      else {
+      } else {
         CUDNN_CALL(cudnnPoolingBackward(handle, maxpool_desc, &alpha, output_desc,
                                         output_data, output_desc, gradient_Y_data,
                                         input_desc, input_data, &beta, input_desc,
@@ -185,6 +150,7 @@ void MaxPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
       CUDNN_CALL(cudnnDestroyPoolingDescriptor(maxpool_desc));
     });
+  NDArray::MarkUsedBy({output_Y, gradient_Y, input_X}, stream);
 }
 
 } // namespace impl

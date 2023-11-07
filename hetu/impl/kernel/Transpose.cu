@@ -71,19 +71,19 @@ namespace impl {
 
 template <typename spec_t>
 __global__ void transpose_kernel(const spec_t* input, spec_t* output,
-                                 const uint* buf, const uint ndims,
+                                 const int64_t* buf, uint32_t ndims,
                                  size_t size) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  const uint* in_strides = buf;
-  const uint* out_strides = buf + ndims;
-  const uint* perm = buf + ndims * 2;
-  uint i_idx = 0;
-  uint t = idx;
+  const auto* in_strides = buf;
+  const auto* out_strides = buf + ndims;
+  const auto* perm = buf + ndims * 2;
+  uint32_t i_idx = 0;
+  uint32_t t = idx;
 #pragma unroll
-  for (int i = 0; i < ndims; ++i) {
-    const uint ratio = t / out_strides[i];
+  for (uint32_t i = 0; i < ndims; ++i) {
+    const uint32_t ratio = t / out_strides[i];
     t -= ratio * out_strides[i];
     i_idx += ratio * in_strides[perm[i]];
   }
@@ -100,14 +100,14 @@ bool BatchTranspose(size_t ndims, int64_t* perm) {
   return false;
 }
 
-void TransposeCuda(const NDArray& input, NDArray& output, int64_t* perm,
+void TransposeCuda(const NDArray& input, NDArray& output, const HTAxes& perm,
                    const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT(input->numel() == output->numel());
 
-  uint ndim = uint(input->ndim());
-  uint ndim_ = uint(output->ndim());
+  auto ndim = static_cast<uint32_t>(input->ndim());
+  auto ndim_ = static_cast<uint32_t>(output->ndim());
   HT_ASSERT(ndim == ndim_);
   // if (BatchTranspose(ndim, perm)) {
   //   int64_t rows = input->shape(ndim - 2);
@@ -131,45 +131,39 @@ void TransposeCuda(const NDArray& input, NDArray& output, int64_t* perm,
   //         num_tile_rows, num_tile_cols, block_nums, tile_size);
   //     });
   // } else {
-    const int64_t* in_dims = input->shape().data();
-    const int64_t* out_dims = output->shape().data();
-    uint* buf = (uint*) malloc(3 * ndim * sizeof(uint));
-    uint* gpu_buf = NULL;
+    const auto& in_dims = input->shape();
+    const auto& out_dims = output->shape();
+    HTShape buf(3 * ndim);
 
-    uint in_stride = 1;
-    uint out_stride = 1;
+    int64_t in_stride = 1;
+    int64_t out_stride = 1;
     for (int i = ndim - 1; i >= 0; --i) {
-      buf[i] = uint(in_stride);
-      buf[ndim + i] = uint(out_stride);
-      buf[ndim * 2 + i] = uint(perm[i]);
-      in_stride *= uint(in_dims[i]);
-      out_stride *= uint(out_dims[i]);
+      buf[i] = in_stride;
+      buf[ndim + i] = out_stride;
+      buf[ndim * 2 + i] = perm[i];
+      in_stride *= in_dims[i];
+      out_stride *= out_dims[i];
     }
     HT_ASSERT(in_stride == out_stride);
     size_t size = in_stride;
-    CUDAStream cuda_stream(stream);
-    int dev_id = cuda_stream.device_id();
-
-    size_t buf_size = 3 * ndim * sizeof(uint);
-    DataPtr gpu_buf_ptr = AllocFromMemoryPool(input->device(), buf_size, stream);
-    gpu_buf = (uint*) gpu_buf_ptr.ptr;
 
     if (size == 0)
       return;
+
+    int device_id = input->device().index();
+    hetu::cuda::CUDADeviceGuard guard(device_id);
+    CUDAStream cuda_stream(stream);
+    auto buf_arr = hetu::cuda::to_int64_ndarray(buf, device_id);
     dim3 blocks, threads;
     threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
     blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-    CUDA_CALL(cudaMemcpyAsync(gpu_buf, (void*) buf, buf_size,
-                              cudaMemcpyHostToDevice, cuda_stream));
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       input->dtype(), spec_t, "TransposeCuda", [&]() {
         transpose_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-          input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), gpu_buf, ndim,
-          size);
+          input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
+          buf_arr->data_ptr<int64_t>(), ndim, size);
       });
-    FreeToMemoryPool(gpu_buf_ptr);
-    free(buf);
+    NDArray::MarkUsedBy({input, output, buf_arr}, stream);
   // }
 }
 
