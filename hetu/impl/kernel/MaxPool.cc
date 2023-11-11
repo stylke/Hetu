@@ -116,10 +116,6 @@ void MaxPoolCpu(const NDArray& input, const size_t kernel_H,
                 dnnl::prop_kind::forward_inference, dnnl::algorithm::pooling_max, 
                 src_md, dst_md, strides_dims, kernel_dims, dilation, padding_dims_l, padding_dims_r);
 
-        // Create workspace memory objects using memory descriptor created by the
-        // primitive descriptor.
-        // NOTE: Here, the workspace is required to save the indices where maximum
-        // was found, and is used in backward pooling to perform upsampling.
         auto workspace_mem = dnnl::memory(pooling_pd.workspace_desc(), eng);
 
         // Create the primitive.
@@ -136,6 +132,7 @@ void MaxPoolCpu(const NDArray& input, const size_t kernel_H,
         engine_stream.wait();
       },"MaxPool");     
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void MaxPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
@@ -188,10 +185,6 @@ void MaxPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
                 gsrc_md, gdst_md, strides_dims, kernel_dims, dilation, 
                 padding_dims_l, padding_dims_r, pooling_pd);
 
-        // Create workspace memory objects using memory descriptor created by the
-        // primitive descriptor.
-        // NOTE: Here, the workspace is required to save the indices where maximum
-        // was found, and is used in backward pooling to perform upsampling.
         auto workspace_mem = dnnl::memory(pooling_pd.workspace_desc(), eng);
 
         // Create the primitive.
@@ -219,6 +212,7 @@ void MaxPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
       },"MaxPoolGradient");
       
     });
+  NDArray::MarkUsedBy({output_Y, input_X, gradient_Y, gradient_X}, stream);
 }
 
 } // namespace impl

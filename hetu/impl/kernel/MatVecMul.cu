@@ -41,10 +41,7 @@ void MatVecMulCuda(const NDArray& a, bool trans, const NDArray& x,
                           output->data_ptr<spec_t>(), 1);
     }
   });
-    //   HT_LOG_INFO << "_____________up____________\n"
-    // << a << "\n"
-    // << x << "\n" << output
-    // << "\n__________down_____________";
+  NDArray::MarkUsedBy({a, x, output}, stream);
 }
 
 } // namespace impl

@@ -153,6 +153,7 @@ void SGDUpdateWithGradScalerCuda(const NDArray& grad, const NDArray& infinite_co
           param->data_ptr<spec_t>(), velocity->data_ptr<spec_t>(), lr, momentum, size);
     }
   });
+  NDArray::MarkUsedBy({grad, param, velocity}, stream);
 }
 
 } // namespace impl

@@ -55,7 +55,6 @@ void SigmoidCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   size_t size = output->numel();
   if (size == 0)
     return;
-
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "SigmoidCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
@@ -78,6 +77,7 @@ void SigmoidCpu(const NDArray& input, NDArray& output, const Stream& stream) {
           engine_stream.wait();
       }, "Sigmoid");   
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -136,6 +136,7 @@ void SigmoidGradientCpu(const NDArray& out_grad, const NDArray& output, NDArray&
         }
         },"SigmoidGradient");  
     });
+  NDArray::MarkUsedBy({output, out_grad, in_grad}, stream);
 }
 
 } // namespace impl

@@ -49,12 +49,6 @@ void ContiguousCpu(const NDArray& input, NDArray& output,
   HT_ASSERT(input->numel() == output->numel());
 
   int ndim = input->ndim();
-  int64_t* stride = (int64_t*) malloc(ndim * sizeof(int64_t));
-  int64_t* new_stride = (int64_t*) malloc(ndim * sizeof(int64_t));
-  for (int i = 0; i < ndim; ++i) {
-    stride[i] = input->stride(i);
-    new_stride[i] = output->stride(i);
-  }
   size_t size = output->numel();
   CPUStream cpu_stream(stream);
   
@@ -65,11 +59,9 @@ void ContiguousCpu(const NDArray& input, NDArray& output,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "Contiguous", [&]() {
       auto _future = cpu_stream.EnqueueTask(
-      [input, output, stride, new_stride, ndim, size]() {
+      [input, output, ndim, size]() {
       contiguous_cpu<spec_t>(input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
-                             stride, new_stride, ndim, size);
-      free(stride);
-      free(new_stride);
+                             input->stride().data(), output->stride().data(), ndim, size);
       },
       "Contiguous");
     });
@@ -82,12 +74,6 @@ void ContiguousGradientCpu(const NDArray& input, NDArray& output,
   HT_ASSERT(input->numel() == output->numel());
 
   int ndim = input->ndim();
-  int64_t* stride = (int64_t*) malloc(ndim * sizeof(int64_t));
-  int64_t* new_stride = (int64_t*) malloc(ndim * sizeof(int64_t));
-  for (int i = 0; i < ndim; ++i) {
-    stride[i] = input->stride(i);
-    new_stride[i] = output->stride(i);
-  }
   size_t size = output->numel();
   CPUStream cpu_stream(stream);
 
@@ -97,11 +83,9 @@ void ContiguousGradientCpu(const NDArray& input, NDArray& output,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "ContiguousGradient", [&]() {
       auto _future = cpu_stream.EnqueueTask(
-      [input, output, stride, new_stride, ndim, size]() {
+      [input, output, ndim, size]() {
       contiguous_gradient_cpu<spec_t>(input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
-                                      stride, new_stride, ndim, size);
-      free(stride);
-      free(new_stride);
+                                      input->stride().data(), output->stride().data(), ndim, size);
       },
       "ContiguousGradient");
     });

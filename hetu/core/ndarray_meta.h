@@ -15,7 +15,7 @@ using HTShapeList = std::vector<HTShape>;
 using HTStrideList = std::vector<HTStride>;
 using HTKeepDims = std::vector<bool>;
 
-constexpr size_t HT_MAX_NDIM = 10;
+constexpr size_t HT_MAX_NDIM = 16;
 
 namespace {
 inline int64_t NumEl(const HTShape& shape) {

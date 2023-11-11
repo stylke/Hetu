@@ -55,6 +55,7 @@ void KLDivLossCuda(const NDArray& pred, const NDArray& label,
         pred->data_ptr<spec_t>(), label->data_ptr<spec_t>(), n_rows,
         loss->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 void KLDivLossGradientCuda(const NDArray& pred, const NDArray& label,
@@ -84,6 +85,7 @@ void KLDivLossGradientCuda(const NDArray& pred, const NDArray& label,
         pred->data_ptr<spec_t>(), label->data_ptr<spec_t>(),
         grad_loss->data_ptr<spec_t>(), n_rows, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

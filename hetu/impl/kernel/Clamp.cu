@@ -9,31 +9,35 @@ namespace impl {
 template <typename spec_t>
 __global__ void clamp_kernel(const spec_t* input, const spec_t min_val, const spec_t max_val, 
                              size_t size, spec_t* output) {
-  // auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  // if (idx >= size)
-  //   return;
-  // if (input[idx] < min_val)
-  //   output[idx] = min_val;
-  // else if (input[idx] > max_val) {
-  //   output[idx] = max_val;
-  // }
-  // else 
-  //   output[idx] = input[idx];
+  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  spec_t min_v = min_val, max_v = max_val;
+  spec_t cur_v = input[idx];
+  if (idx >= size)
+    return;
+  if (cur_v < min_v)
+    output[idx] = min_v;
+  else if (cur_v > max_v) {
+    output[idx] = max_v;
+  }
+  else 
+    output[idx] = input[idx];
 }
 
 template <typename spec_t>
 __global__ void clamp_elewise_kernel(const spec_t* input, const spec_t* min_val, const spec_t* max_val, 
                                      size_t size, spec_t* output) {
-  // auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  // if (idx >= size)
-  //   return;
-  // if (input[idx] < min_val[idx])
-  //   output[idx] = min_val[idx];
-  // else if (input[idx] > max_val[idx]) {
-  //   output[idx] = max_val[idx];
-  // }
-  // else 
-  //   output[idx] = input[idx];
+  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= size)
+    return;
+  spec_t min_v = min_val[idx], max_v = max_val[idx];
+  spec_t cur_v = input[idx];
+  if (cur_v < min_v)
+    output[idx] = min_v;
+  else if (cur_v > max_v) {
+    output[idx] = max_v;
+  }
+  else 
+    output[idx] = input[idx];
 }
 
 void ClampCuda(const NDArray& input, double min_val, double max_val, NDArray& output, const Stream& stream) {
@@ -54,6 +58,7 @@ void ClampCuda(const NDArray& input, double min_val, double max_val, NDArray& ou
       clamp_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), min_val, max_val, size, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void ClampElewiseCuda(const NDArray& input, const NDArray& min_val, const NDArray& max_val, NDArray& output, const Stream& stream) {
@@ -75,6 +80,7 @@ void ClampElewiseCuda(const NDArray& input, const NDArray& min_val, const NDArra
         input->data_ptr<spec_t>(), min_val->data_ptr<spec_t>(), max_val->data_ptr<spec_t>(), 
         size, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, min_val, max_val, output}, stream);
 }
 
 } // namespace impl

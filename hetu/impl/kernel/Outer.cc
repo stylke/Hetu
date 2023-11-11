@@ -35,6 +35,7 @@ void OuterCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output, con
         inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), sizeB, size, output->data_ptr<spec_t>());
       },"Outer");
     });
+  NDArray::MarkUsedBy({inputA, inputB, output}, stream);
 }
 
 

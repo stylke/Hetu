@@ -8,27 +8,15 @@ namespace hetu {
 
 class NDArrayStorage {
  public:
-  using DeleterFn = std::function<void(DataPtr)>;
-  NDArrayStorage(size_t size, Device device)
-  : _size(size), _device(device), _ptr(AllocFromMemoryPool(device, size)) {}
-
-  NDArrayStorage(void* p, size_t size, const Device& device, DeleterFn deleter)
-  : _size(size), _device(device), _deleter(deleter) {
-    HT_ASSERT(deleter)
-      << "Deleter fn must not be empty when borrowing storages";
-    HT_ASSERT(p && size > 0) << "Borrowing an empty storage is not allowed";
-    _ptr = {p, size, device};
-  }
+  
+  NDArrayStorage(DataPtr ptr): _ptr(ptr) {}
 
   ~NDArrayStorage() {
-    if (_deleter)
-      _deleter(_ptr);
-    else
-      FreeToMemoryPool(_ptr);
+    FreeToMemoryPool(_ptr);
   }
 
   inline size_t size() const {
-    return _size;
+    return _ptr.size;
   }
 
   inline void* mutable_data() {
@@ -39,16 +27,21 @@ class NDArrayStorage {
     return _ptr.ptr;
   }
 
-  inline Device device() const {
-    return _device;
+  inline const Device& device() const {
+    return _ptr.device;
+  }
+
+  inline Device& device() {
+    return _ptr.device;
+  }
+
+  inline DataPtr data_ptr() const {
+    return _ptr;
   }
 
  protected:
-  size_t _size;
-  Device _device;
   DataPtr _ptr;
-  DeleterFn _deleter;
-  bool _writable;
+  bool _writable{true};
 };
 
 } // namespace hetu

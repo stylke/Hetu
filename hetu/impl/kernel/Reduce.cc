@@ -29,7 +29,7 @@ void ReduceCpu(const NDArray& input, NDArray& output, const HTAxes& axes,
       stride_size *= out_shape[i];
     }
     auto _future = cpu_stream.EnqueueTask(
-      [stream, input, output, in_shape, in_stride, out_shape, out_stride, red_type]() {
+      [input, output, in_shape, in_stride, out_shape, out_stride, red_type]() {
         dnnl::engine eng(dnnl::engine::kind::cpu, 0);
         auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
         auto src_md = dnnl::memory::desc(in_shape, dnnltype, in_stride);
@@ -51,7 +51,6 @@ void ReduceCpu(const NDArray& input, NDArray& output, const HTAxes& axes,
         }
         else {
           // Create primitive descriptor.
-          dnnl::engine eng(dnnl::engine::kind::cpu, 0);
           auto reduction_pd = dnnl::reduction::primitive_desc(
                   eng, algo, src_md, dst_md, float(0.f), float(0.f));
 
@@ -70,30 +69,23 @@ void ReduceCpu(const NDArray& input, NDArray& output, const HTAxes& axes,
         } 
       },"Reduce"); 
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void ReduceMinCpu(const NDArray& input, NDArray& output, const int64_t* axes,
                   int64_t num_axes, const Stream& stream) {
-  // HTAxes m_axes(axes, axes + num_axes);
-  // ReduceCpu(input, output, m_axes, ReductionType::MIN, stream);
 }
 
 void ReduceMaxCpu(const NDArray& input, NDArray& output, const int64_t* axes,
-                  int64_t num_axes, const Stream& stream) {
-  // HTAxes m_axes(axes, axes + num_axes);
-  // ReduceCpu(input, output, m_axes, ReductionType::MAX, stream);  
+                  int64_t num_axes, const Stream& stream) { 
 }
 
 void ReduceMeanCpu(const NDArray& input, NDArray& output, const int64_t* axes,
                    int64_t num_axes, const Stream& stream) {
-  // HTAxes m_axes(axes, axes + num_axes);
-  // ReduceCpu(input, output, m_axes, ReductionType::MEAN, stream);
 }
 
 void ReduceSumCpu(const NDArray& input, NDArray& output, const int64_t* axes,
                   int64_t num_axes, const Stream& stream) {
-  // HTAxes m_axes(axes, axes + num_axes);
-  // ReduceCpu(input, output, m_axes, ReductionType::SUM, stream);
 }
 
 } // namespace impl

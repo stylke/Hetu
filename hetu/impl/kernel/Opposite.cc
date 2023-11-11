@@ -69,6 +69,7 @@ void OppositeCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       }
       },"Opposite");     
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

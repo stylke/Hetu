@@ -36,6 +36,7 @@ void OuterCuda(const NDArray& inputA, const NDArray& inputB, NDArray& output, co
       outer_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), sizeB, size, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({inputA, inputB, output}, stream);
 }
 
 

@@ -8,10 +8,12 @@ namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-__global__ void
-slice_kernel(const spec_t* input, spec_t* output, const int64_t* output_shape,
-             const int64_t* input_shape, const int64_t* begin_pos, size_t ndim,
-             size_t size) {
+__global__ void slice_kernel(const spec_t* input, spec_t* output,
+                             const int64_t* output_shape,
+                             const int64_t* input_shape,
+                             const int64_t* begin_pos, 
+                             size_t ndim,
+                             size_t size) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -29,10 +31,11 @@ slice_kernel(const spec_t* input, spec_t* output, const int64_t* output_shape,
 }
 
 template <typename spec_t>
-__global__ void
-slice_gradient_kernel(const spec_t* input, spec_t* output,
-                      const int64_t* output_shape, const int64_t* input_shape,
-                      const int64_t* begin_pos, size_t ndim, size_t size) {
+__global__ void slice_gradient_kernel(const spec_t* input, spec_t* output,
+                                      const int64_t* output_shape,
+                                      const int64_t* input_shape,
+                                      const int64_t* begin_pos,
+                                      size_t ndim, size_t size) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -51,7 +54,7 @@ slice_gradient_kernel(const spec_t* input, spec_t* output,
   output[idx] = input[i_index];
 }
 
-void SliceCuda(const NDArray& input, NDArray& output, int64_t* begin_pos,
+void SliceCuda(const NDArray& input, NDArray& output, const HTShape& begin_pos,
                const Stream& stream) {
   HT_ASSERT(input->is_cuda()) << "Input is not on a host device.";
   HT_ASSERT(output->is_cuda()) << "Output is not on a host device.";
@@ -70,44 +73,34 @@ void SliceCuda(const NDArray& input, NDArray& output, int64_t* begin_pos,
     HT_ASSERT(begin_pos[i] + output->shape(i) <= input->shape(i));
     o_size *= output->shape(i);
   }
-  CUDAStream cuda_stream(stream);
-  int dev_id = cuda_stream.device_id();
-
-  size_t alloc_size = ndim * sizeof(int64_t);
-  DataPtr pos_ptr = AllocFromMemoryPool(input->device(), alloc_size);
-  void* pos = pos_ptr.ptr;
-  DataPtr i_shape_ptr = AllocFromMemoryPool(input->device(), alloc_size);
-  void* i_shape = i_shape_ptr.ptr;
-  DataPtr o_shape_ptr = AllocFromMemoryPool(input->device(), alloc_size);
-  void* o_shape = o_shape_ptr.ptr;
-
+  
   size_t size = o_size;
   if (size == 0)
     return;
+  
+  auto device_id = input->device().index();
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CUDAStream cuda_stream(stream);
+  auto pos_arr = hetu::cuda::to_int64_ndarray(begin_pos, device_id);
+  auto i_shape_arr = hetu::cuda::to_int64_ndarray(input->shape(), device_id);
+  auto o_shape_arr = hetu::cuda::to_int64_ndarray(output->shape(), device_id);
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  CUDA_CALL(cudaMemcpyAsync(pos, (void*) begin_pos, alloc_size,
-                            cudaMemcpyHostToDevice, cuda_stream));
-  CUDA_CALL(cudaMemcpyAsync(i_shape, (void*) input->shape().data(), alloc_size,
-                            cudaMemcpyHostToDevice, cuda_stream));
-  CUDA_CALL(cudaMemcpyAsync(o_shape, (void*) output->shape().data(), alloc_size,
-                            cudaMemcpyHostToDevice, cuda_stream));
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "SliceCuda", [&]() {
       slice_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
-        (const int64_t*) o_shape, (const int64_t*) i_shape,
-        (const int64_t*) pos, ndim, size);
+        o_shape_arr->data_ptr<int64_t>(), 
+        i_shape_arr->data_ptr<int64_t>(), 
+        pos_arr->data_ptr<int64_t>(), 
+        ndim, size);
     });
-  FreeToMemoryPool(o_shape_ptr);
-  FreeToMemoryPool(i_shape_ptr);
-  FreeToMemoryPool(pos_ptr);
+  NDArray::MarkUsedBy({input, output, pos_arr, i_shape_arr, o_shape_arr}, stream);
 }
 
 void SliceGradientCuda(const NDArray& output_grad, NDArray& input_grad,
-                       int64_t* begin_pos, const Stream& stream) {
+                       const HTShape& begin_pos, const Stream& stream) {
   HT_ASSERT(output_grad->is_cuda()) << "Output_grad is not on a host device.";
   HT_ASSERT(input_grad->is_cuda()) << "Input_grad is not on a host device.";
   HT_ASSERT(input_grad->device() == output_grad->device())
@@ -123,40 +116,32 @@ void SliceGradientCuda(const NDArray& output_grad, NDArray& input_grad,
     HT_ASSERT(begin_pos[i] + output_grad->shape(i) <= input_grad->shape(i));
     o_size *= input_grad->shape(i);
   }
-  CUDAStream cuda_stream(stream);
-  int dev_id = cuda_stream.device_id();
-
-  size_t alloc_size = ndim * sizeof(int64_t);
-  DataPtr pos_ptr = AllocFromMemoryPool(output_grad->device(), alloc_size);
-  void* pos = pos_ptr.ptr;
-  DataPtr i_shape_ptr = AllocFromMemoryPool(output_grad->device(), alloc_size);
-  void* i_shape = i_shape_ptr.ptr;
-  DataPtr o_shape_ptr = AllocFromMemoryPool(output_grad->device(), alloc_size);
-  void* o_shape = o_shape_ptr.ptr;
 
   size_t size = input_grad->numel();
   if (size == 0)
     return;
+  
+  auto device_id = output_grad->device().index();
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CUDAStream cuda_stream(stream);
+  auto pos_arr = hetu::cuda::to_int64_ndarray(begin_pos, device_id);
+  auto i_shape_arr =
+    hetu::cuda::to_int64_ndarray(output_grad->shape(), device_id);
+  auto o_shape_arr =
+    hetu::cuda::to_int64_ndarray(input_grad->shape(), device_id);
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  CUDA_CALL(cudaMemcpyAsync(pos, (void*) begin_pos, alloc_size,
-                            cudaMemcpyHostToDevice, cuda_stream));
-  CUDA_CALL(cudaMemcpyAsync(i_shape, (void*) output_grad->shape().data(),
-                            alloc_size, cudaMemcpyHostToDevice, cuda_stream));
-  CUDA_CALL(cudaMemcpyAsync(o_shape, (void*) input_grad->shape().data(),
-                            alloc_size, cudaMemcpyHostToDevice, cuda_stream));
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     output_grad->dtype(), spec_t, "SliceGradientCuda", [&]() {
       slice_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         output_grad->data_ptr<spec_t>(), input_grad->data_ptr<spec_t>(),
-        (const int64_t*) o_shape, (const int64_t*) i_shape,
-        (const int64_t*) pos, ndim, size);
+        o_shape_arr->data_ptr<int64_t>(), 
+        i_shape_arr->data_ptr<int64_t>(), 
+        pos_arr->data_ptr<int64_t>(), 
+        ndim, size);
     });
-  FreeToMemoryPool(o_shape_ptr);
-  FreeToMemoryPool(i_shape_ptr);
-  FreeToMemoryPool(pos_ptr);
+  NDArray::MarkUsedBy({output_grad, input_grad, pos_arr, i_shape_arr, o_shape_arr}, stream);
 }
 
 } // namespace impl

@@ -21,7 +21,8 @@
           input->dtype(), spec_t, "BinaryConstCuda", [&]() {                    \
             binary_const_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(   \
             input->data_ptr<spec_t>(), static_cast<spec_t>(value), size,        \
-            op<spec_t, spec_t>(), output->data_ptr<spec_t>());});                                                                   
+            op<spec_t, spec_t>(), output->data_ptr<spec_t>());});               \
+        NDArray::MarkUsedBy({input, output}, stream);                                                            
 
 namespace hetu {
 namespace impl {

@@ -61,28 +61,16 @@ void ContiguousCuda(const NDArray& input, NDArray& output,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  NDArrayMeta meta;
-  HTShape alloc = {ndim};
-  size_t alloc_size = ndim * sizeof(int64_t);
-  meta.set_device(kCPU)
-      .set_dtype(DataType::INT64)
-      .set_shape(alloc);
-  NDArray stride_buf_ptr = NDArray::cuda(NDArray(meta, std::make_shared<NDArrayStorage>(
-                            (void*)input->stride().data(), alloc_size, Device(kCPU), 
-                            [](DataPtr ptr) { 
-                            })), input->device().index(), stream.stream_index());
-  int64_t* stride_buf = stride_buf_ptr->data_ptr<int64_t>();
-  NDArray new_stride_buf_ptr = NDArray::cuda(NDArray(meta, std::make_shared<NDArrayStorage>(
-                            (void*)output->stride().data(), alloc_size, Device(kCPU), 
-                            [](DataPtr ptr) { 
-                            })), input->device().index(), stream.stream_index());
-  int64_t* new_stride_buf = new_stride_buf_ptr->data_ptr<int64_t>();
+  int device_id = input->device().index();
+  auto stride_buf = hetu::cuda::to_int64_ndarray(input->stride(), device_id);
+  auto new_stride_buf = hetu::cuda::to_int64_ndarray(output->stride(), device_id);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "Contiguous", [&]() {
       contiguous_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), stride_buf,
-        new_stride_buf, ndim, size);
+        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), stride_buf->data_ptr<int64_t>(),
+        new_stride_buf->data_ptr<int64_t>(), ndim, size);
     });
+  NDArray::MarkUsedBy({input, output, stride_buf, new_stride_buf}, stream);
 }
 
 void ContiguousGradientCuda(const NDArray& input, NDArray& output,
@@ -103,28 +91,16 @@ void ContiguousGradientCuda(const NDArray& input, NDArray& output,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  NDArrayMeta meta;
-  HTShape alloc = {ndim};
-  size_t alloc_size = ndim * sizeof(int64_t);
-  meta.set_device(kCPU)
-      .set_dtype(DataType::INT64)
-      .set_shape(alloc);
-  NDArray stride_buf_ptr = NDArray::cuda(NDArray(meta, std::make_shared<NDArrayStorage>(
-                            (void*)input->stride().data(), alloc_size, Device(kCPU), 
-                            [](DataPtr ptr) { 
-                            })), input->device().index(), stream.stream_index());
-  int64_t* stride_buf = stride_buf_ptr->data_ptr<int64_t>();
-  NDArray new_stride_buf_ptr = NDArray::cuda(NDArray(meta, std::make_shared<NDArrayStorage>(
-                            (void*)output->stride().data(), alloc_size, Device(kCPU), 
-                            [](DataPtr ptr) { 
-                            })), input->device().index(), stream.stream_index());
-  int64_t* new_stride_buf = new_stride_buf_ptr->data_ptr<int64_t>();
+  int device_id = input->device().index();
+  auto stride_buf = hetu::cuda::to_int64_ndarray(input->stride(), device_id);
+  auto new_stride_buf = hetu::cuda::to_int64_ndarray(output->stride(), device_id);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "ContiguousGradient", [&]() {
       contiguous_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), stride_buf,
-        new_stride_buf, ndim, size);
+        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), stride_buf->data_ptr<int64_t>(),
+        new_stride_buf->data_ptr<int64_t>(), ndim, size);
     });
+  NDArray::MarkUsedBy({input, output, stride_buf, new_stride_buf}, stream);
 }
 
 } // namespace impl

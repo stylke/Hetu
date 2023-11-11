@@ -49,8 +49,7 @@ void UpdateScaleCuda(NDArray& scale, NDArray& growth_tracker,
         found_inf->data_ptr<float>(), growth_factor, backoff_factor,
         growth_interval, size);
     });
-  // CudaStreamSynchronize(cuda_stream);
-  // HT_LOG_INFO << scale << " " << found_inf;  
+  NDArray::MarkUsedBy({scale, growth_tracker, found_inf}, stream); 
 }
 
 } // namespace impl

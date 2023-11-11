@@ -83,6 +83,7 @@ void EmbeddingLookupCpu(const NDArray& input, const NDArray& id,
       },
       "EmbbedingLookup");
     });
+  NDArray::MarkUsedBy({input, id, output}, stream);
 }
 
 void EmbeddingLookupGradientCpu(const NDArray& output_grad, const NDArray& id,
@@ -117,6 +118,7 @@ void EmbeddingLookupGradientCpu(const NDArray& output_grad, const NDArray& id,
       },
       "EmbbedingLookupGradient");  
     });
+  NDArray::MarkUsedBy({output_grad, id, input_grad}, stream);
 }
 
 } // namespace impl

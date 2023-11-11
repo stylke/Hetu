@@ -68,6 +68,7 @@ void AbsCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       },
       "Abs");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -119,6 +120,7 @@ void AbsGradientCpu(const NDArray& input, const NDArray& output_grad, NDArray& i
           output_grad->stride().data(), input_grad->stride().data(), input->shape().data());
       }
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

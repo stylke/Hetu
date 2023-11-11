@@ -113,6 +113,7 @@ void LeakyReluCpu(const NDArray& input, double alpha, NDArray& output,
       engine_stream.wait();
       },"LeakyRelu");    
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void LeakyReluGradientCpu(const NDArray& input, const NDArray& output_grad,
@@ -156,6 +157,7 @@ void LeakyReluGradientCpu(const NDArray& input, const NDArray& output_grad,
       engine_stream.wait();
       },"LeakyReluGradient");
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

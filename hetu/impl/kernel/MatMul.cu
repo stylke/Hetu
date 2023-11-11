@@ -42,9 +42,7 @@ void MatMulCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
                           output->data_ptr<spec_t>(), m);
     }
   });
-    //   HT_LOG_INFO << "_____________up____________\n" << a << 
-    // "\n" << b << "\n" << output
-    // << "\n__________down_____________";
+  NDArray::MarkUsedBy({a, b, output}, stream);
 }
 
 } // namespace impl

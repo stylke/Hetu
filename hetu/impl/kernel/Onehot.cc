@@ -46,6 +46,7 @@ void OnehotCpu(const NDArray& input, size_t num_classes, NDArray& output,
                          output->data_ptr<spec_t>());
       },"Onehot");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

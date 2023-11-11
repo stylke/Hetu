@@ -76,6 +76,7 @@ void BoolCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       },
       "Bool");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

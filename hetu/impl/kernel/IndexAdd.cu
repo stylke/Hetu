@@ -58,6 +58,7 @@ void IndexAddCuda(const NDArray& input, const NDArray& id, NDArray& output,
         input->data_ptr<spec_t>(), id->data_ptr<spec_t>(), size, before_stride,
         after_stride, cur_stride, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, id, output}, stream);
 }
 
 } // namespace impl

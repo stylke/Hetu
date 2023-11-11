@@ -60,6 +60,7 @@ void IndexAddCpu(const NDArray& input, const NDArray& id, NDArray& output,
                             output->data_ptr<spec_t>());
       },"IndexAdd");   
     });
+  NDArray::MarkUsedBy({input, id, output}, stream);
 }
 
 } // namespace impl

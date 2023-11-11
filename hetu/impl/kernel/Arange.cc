@@ -25,6 +25,7 @@ void ArangeCpu(double start, double step, NDArray& output, const Stream& stream)
       },
       "Arange");
     });
+  NDArray::MarkUsedBy({output}, stream);
 }
 
 } // namespace impl

@@ -49,6 +49,7 @@ void LeakyReluCuda(const NDArray& input, double alpha, NDArray& output,
       leaky_relu_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), alpha, size, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void LeakyReluGradientCuda(const NDArray& input, const NDArray& output_grad,
@@ -74,6 +75,7 @@ void LeakyReluGradientCuda(const NDArray& input, const NDArray& output_grad,
         input->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(),
         static_cast<spec_t>(alpha), size, input_grad->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

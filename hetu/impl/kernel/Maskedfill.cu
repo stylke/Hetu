@@ -35,6 +35,7 @@ void MaskedfillCuda(const NDArray& input, const NDArray& mask,
         input->data_ptr<spec_t>(), mask->data_ptr<int64_t>(),
         static_cast<spec_t>(val), output->data_ptr<spec_t>(), size);
     });
+  NDArray::MarkUsedBy({input, mask, output}, stream);
 }
 
 } // namespace impl

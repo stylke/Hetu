@@ -70,6 +70,7 @@ void ExpCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       },
       "Exp");  
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

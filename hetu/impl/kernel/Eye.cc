@@ -36,6 +36,7 @@ void EyeCpu(NDArray& output, const Stream& stream) {
         output->data_ptr<spec_t>(), size, ncols);
       },"Eye");
     });
+  NDArray::MarkUsedBy({output}, stream);
 }
 
 } // namespace impl

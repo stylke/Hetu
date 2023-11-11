@@ -48,9 +48,8 @@ void GeluCuda(const NDArray& input, NDArray& output, const Stream& stream) {
     input->dtype(), spec_t, "GeluCuda", [&]() {
       gelu_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
-    });
-        // CudaStreamSynchronize(cuda_stream);
-    //   HT_LOG_INFO << output->data_ptr<void>();
+  });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void GeluGradientCuda(const NDArray& input, const NDArray& output_grad,
@@ -74,7 +73,8 @@ void GeluGradientCuda(const NDArray& input, const NDArray& output_grad,
       gelu_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(), size,
         input_grad->data_ptr<spec_t>());
-    });
+  });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

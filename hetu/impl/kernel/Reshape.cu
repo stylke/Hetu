@@ -35,6 +35,7 @@ void ReshapeCuda(const NDArray& input, NDArray& output, const Stream& stream) {
       memory_copy_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size);
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

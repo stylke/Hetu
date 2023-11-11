@@ -74,6 +74,7 @@ void NLLLossCuda(const NDArray& pred, const NDArray& label,
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(), n_rows, n_cols,
         loss->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 void NLLLossGradientCuda(const NDArray& pred, const NDArray& label,
@@ -105,6 +106,7 @@ void NLLLossGradientCuda(const NDArray& pred, const NDArray& label,
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(),
         grad_loss->data_ptr<spec_t>(), n_rows, n_cols, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

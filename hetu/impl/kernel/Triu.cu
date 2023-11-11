@@ -43,8 +43,7 @@ void TriuTrilCuda(const NDArray& input, NDArray& output, bool lower,
         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
         lower, H, W, diagonal, size);
     });
-        // CudaStreamSynchronize(cuda_stream);
-    //   HT_LOG_INFO << output->data_ptr<void>();
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

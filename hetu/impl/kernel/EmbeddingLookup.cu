@@ -77,6 +77,7 @@ void EmbeddingLookupCuda(const NDArray& input, const NDArray& id,
         input->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size, length,
         input_row, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, id, output}, stream);
 }
 
 void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
@@ -119,6 +120,7 @@ void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
           output_grad->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size2, length,
           input_row, input_grad->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({output_grad, id, input_grad}, stream);
 }
 
 } // namespace impl

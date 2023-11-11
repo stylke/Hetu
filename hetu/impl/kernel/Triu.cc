@@ -40,6 +40,7 @@ void TriuTrilCpu(const NDArray& input, NDArray& output, bool lower,
           lower, H, W, diagonal, size);
         },"TriuTril");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

@@ -69,6 +69,7 @@ void LogCpu(const NDArray& input, NDArray& output, const Stream& stream) {
         }
       },"Log");     
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

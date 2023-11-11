@@ -21,8 +21,8 @@ void asstrided_cpu(const spec_t *input, spec_t *output, size_t size,
   }
 }
 
-
-void AsStridedCpu(const NDArray& input, NDArray& output, HTShape stride, const Stream& stream) {
+void AsStridedCpu(const NDArray& input, NDArray& output, const HTShape& stride,
+                  const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
   CPUStream cpu_stream(stream);
@@ -41,6 +41,7 @@ void AsStridedCpu(const NDArray& input, NDArray& output, HTShape stride, const S
           stride.data(), output->stride().data(), ndim);
       },"AsStrided");     
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -68,7 +69,8 @@ void asstrided_gradient_cpu(const spec_t *input, spec_t *output, size_t size,
   }
 }
 
-void AsStridedGradientCpu(const NDArray& output, NDArray& input, HTShape stride, const Stream& stream) {
+void AsStridedGradientCpu(const NDArray& output, NDArray& input,
+                          const HTShape& stride, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
@@ -90,8 +92,8 @@ void AsStridedGradientCpu(const NDArray& output, NDArray& input, HTShape stride,
       },
       "AsStridedGradient");     
     });
+  NDArray::MarkUsedBy({output, input}, stream);
 }
-
 
 } // namespace impl
 } // namespace hetu

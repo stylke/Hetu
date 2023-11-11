@@ -100,6 +100,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
       outputs.push_back(NDArray::empty(output_shapes[i],
                                        op->instantiation_ctx().placement,
                                        op->output(i)->dtype(),
+                                       op->instantiation_ctx().stream_index,
                                        is_dynamic ? output_dynamic_shapes[i] : HTShape()));
     }
     if (is_dynamic)
@@ -231,6 +232,8 @@ void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
     return;
   // for commom case
   auto& input_op = input->producer();
+  if (is_placeholder_op(input_op) || is_variable_op(input_op))
+    return;
   const auto& input_placement = input_op->instantiation_ctx().placement;
   const auto& current_placement = instantiation_ctx().placement;
   HT_RUNTIME_ERROR_IF(input_placement.is_undetermined() ||
@@ -243,9 +246,6 @@ void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
     input_op->instantiation_ctx().stop[micro_batch_id]->Sync();
   } else if (input_op->instantiation_ctx().stream_index !=
              instantiation_ctx().stream_index) {
-    // in_degree=0 op should't be blocked
-    if (is_placeholder_op(input_op) || is_variable_op(input_op))
-      return;
     // Both ops are on the same device. We can block the current op
     // by waiting for the stop event of the dependency.
     input_op->instantiation_ctx().stop[micro_batch_id]->Block(instantiation_ctx().stream());

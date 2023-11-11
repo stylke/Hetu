@@ -45,8 +45,8 @@ void SoftmaxCpu(const NDArray& input, NDArray& output, int64_t dim, const Stream
           softmax_prim.execute(engine_stream, softmax_args);
           engine_stream.wait();
         },"Softmax");
-      
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void SoftmaxGradientCpu(const NDArray& input_Y, const NDArray& output_grad,
@@ -93,6 +93,7 @@ void SoftmaxGradientCpu(const NDArray& input_Y, const NDArray& output_grad,
           engine_stream.wait();
         },"SoftmaxGradient");
     });
+  NDArray::MarkUsedBy({input_Y, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

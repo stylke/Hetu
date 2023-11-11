@@ -61,9 +61,8 @@ void LinearCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
                         b->data_ptr<spec_t>(), trans_b ? k : m,
                         a->data_ptr<spec_t>(), trans_a ? n : k, &beta,
                         output->data_ptr<spec_t>(), m);
-    CudaStreamSynchronize(cuda_stream);
-    // HT_LOG_INFO << a << "\n" <<  b << "\n"  << output;
   });
+  NDArray::MarkUsedBy({a, b, bias, output}, stream);
 }
 
 } // namespace impl

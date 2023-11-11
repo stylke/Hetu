@@ -49,12 +49,19 @@ void SynchronizeAllCUDAStreams(const Device& device = {});
 
 class CUDAEvent final : public Event {
  public:
-  CUDAEvent(Device device) : Event(device) {
-    HT_ASSERT(device.is_cuda())
+  CUDAEvent(Device device, bool enable_timing = true)
+  : Event(std::move(device), enable_timing) {
+    HT_ASSERT(this->device().is_cuda())
       << "CUDAEvent should be used with CUDA devices. "
-      << "Got " << device;
-    hetu::cuda::CUDADeviceGuard guard(_device.index());
-    CudaEventCreate(&_event);
+      << "Got " << this->device();
+    hetu::cuda::CUDADeviceGuard guard(this->device().index());
+    CudaEventCreate(&_event,
+                    enable_timing ? cudaEventDefault : cudaEventDisableTiming);
+  }
+
+  ~CUDAEvent() {
+    hetu::cuda::CUDADeviceGuard guard(device().index());
+    CudaEventDestroy(_event);
   }
 
   inline void Record(const Stream& stream) {
@@ -75,6 +82,8 @@ class CUDAEvent final : public Event {
   }
 
   inline int64_t TimeSince(const Event& event) const {
+    HT_VALUE_ERROR_IF(!enable_timing() || !event.enable_timing())
+      << "Cannot measure time when timing is disabled";
     const auto& e = reinterpret_cast<const CUDAEvent&>(event);
     HT_ASSERT(e._recorded && _recorded || !e._recorded && !_recorded)
       << "Only one of Start/Stop event has been recorded!";

@@ -36,9 +36,7 @@ void WhereCuda(const NDArray& cond, const NDArray& inputA,
         cond->data_ptr<int64_t>(), inputA->data_ptr<spec_t>(),
         inputB->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size);
     });
-  // CudaStreamSynchronize(cuda_stream);
-  // HT_LOG_INFO << cond << "\n" << inputA << "\n"
-  // << inputB<< "\n" << output;
+  NDArray::MarkUsedBy({cond, inputA, inputB, output}, stream);
 }
 
 } // namespace impl

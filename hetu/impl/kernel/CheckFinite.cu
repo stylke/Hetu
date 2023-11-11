@@ -19,7 +19,6 @@ __global__ void check_finite_kernel(const spec_t* input, size_t size, float* out
 }
 
 void CheckFiniteCuda(const NDArray& input, NDArray& output, const Stream& stream) {
-  // HT_LOG_INFO << input << "\n" << output;
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
 
@@ -38,7 +37,7 @@ void CheckFiniteCuda(const NDArray& input, NDArray& output, const Stream& stream
       check_finite_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), size, output->data_ptr<float>());
     });
-  // HT_LOG_INFO << input << "\n" << output;
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

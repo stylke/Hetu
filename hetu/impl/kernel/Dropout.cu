@@ -54,6 +54,7 @@ void DropoutCuda(const NDArray& input, double drop_rate, uint64_t seed,
       static_cast<float>(drop_rate), size,
       GetCUDARandomState(cuda_stream.device_id(), seed, 4));
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void DropoutGradientWithRecomputationCuda(const NDArray& grad, double drop_rate,
@@ -79,6 +80,7 @@ void DropoutGradientWithRecomputationCuda(const NDArray& grad, double drop_rate,
       static_cast<float>(drop_rate), size,
       GetCUDARandomState(cuda_stream.device_id(), seed, 4));
   });
+  NDArray::MarkUsedBy({grad, output}, stream);
 }
 
 void DropoutGradientCuda(const NDArray& grad, const NDArray& fw_output,
@@ -103,6 +105,7 @@ void DropoutGradientCuda(const NDArray& grad, const NDArray& fw_output,
         grad->data_ptr<spec_t>(), fw_output->data_ptr<spec_t>(),
         output->data_ptr<spec_t>(), static_cast<float>(drop_rate), size);
     });
+  NDArray::MarkUsedBy({grad, fw_output, output}, stream);
 }
 
 } // namespace impl

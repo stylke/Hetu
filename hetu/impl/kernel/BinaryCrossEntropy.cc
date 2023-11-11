@@ -105,8 +105,8 @@ void BinaryCrossEntropyCpu(const NDArray& pred, const NDArray& label,
       }
       },
       "BinaryCrossEntropy");
-      
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 void BinaryCrossEntropyGradientCpu(const NDArray& pred, const NDArray& label,
@@ -146,6 +146,7 @@ void BinaryCrossEntropyGradientCpu(const NDArray& pred, const NDArray& label,
       },
       "BinaryCrossEntropyGradient");
     });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

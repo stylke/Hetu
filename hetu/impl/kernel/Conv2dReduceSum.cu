@@ -45,6 +45,7 @@ void Conv2dReduceSumCuda(const NDArray& input, NDArray& output,
         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), input_size,
         output_size, batch_size);
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

@@ -93,6 +93,7 @@ void PadCuda(const NDArray& input, NDArray& output, const HTShape& paddings,
           endpoint[6], endpoint[7], output->shape(3), constant_values);
       });
   }
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void PadGradientCuda(const NDArray& output_grad, NDArray& input_grad,
@@ -139,6 +140,7 @@ void PadGradientCuda(const NDArray& output_grad, NDArray& input_grad,
           out_H, out_W);
       });
   }
+  NDArray::MarkUsedBy({input_grad, output_grad}, stream);
 }
 
 } // namespace impl

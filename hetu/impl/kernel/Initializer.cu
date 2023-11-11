@@ -63,6 +63,7 @@ void NormalInitsCuda(NDArray& data, double mean, double stddev, uint64_t seed,
         static_cast<spec_t>(stddev),
         GetCUDARandomState(cuda_stream.device_id(), seed, 4));
     });
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void UniformInitsCuda(NDArray& data, double lb, double ub, uint64_t seed,
@@ -85,6 +86,7 @@ void UniformInitsCuda(NDArray& data, double lb, double ub, uint64_t seed,
         static_cast<spec_t>(ub),
         GetCUDARandomState(cuda_stream.device_id(), seed, 4));
     });
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void TruncatedNormalInitsCuda(NDArray& data, double mean, double stddev,
@@ -107,6 +109,7 @@ void TruncatedNormalInitsCuda(NDArray& data, double mean, double stddev,
         static_cast<spec_t>(ub),
         GetCUDARandomState(cuda_stream.device_id(), seed, 32));
     });
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 } // namespace impl

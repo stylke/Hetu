@@ -97,8 +97,8 @@ void MSELossCpu(const NDArray& pred, const NDArray& label,
                     loss->stride().data(), pred->shape().data());
       }
       },"MSELoss");
-      
     });
+   NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 void MSELossGradientCpu(const NDArray& pred, const NDArray& label,
@@ -137,6 +137,7 @@ void MSELossGradientCpu(const NDArray& pred, const NDArray& label,
       }
       },"MSELossGradient");
     });
+   NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

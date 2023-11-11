@@ -41,6 +41,7 @@ void DotCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
                       size, output->data_ptr<spec_t>());
       },"Dot");
     });
+  NDArray::MarkUsedBy({inputA, inputB, output}, stream);
 }
 
 } // namespace impl

@@ -55,6 +55,7 @@ void AddConstCpu(const NDArray& input, double value,
     },
     "AddConst");
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void SubConstCpu(const NDArray& input, double value,
@@ -84,6 +85,7 @@ void SubConstCpu(const NDArray& input, double value,
     },
     "SubConst"); 
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void MulConstCpu(const NDArray& input, double value,
@@ -114,6 +116,7 @@ void MulConstCpu(const NDArray& input, double value,
     },
     "MulConst");
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void DivConstCpu(const NDArray& input, double value,
@@ -145,6 +148,7 @@ void DivConstCpu(const NDArray& input, double value,
     },
     "DivConst");
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

@@ -58,6 +58,7 @@ void NormCpu(const NDArray& input, NDArray& output, int64_t dim, int64_t p, cons
     }
   },"Norm");
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -130,6 +131,7 @@ void NormGradientCpu(const NDArray& input, const NDArray& output, const NDArray&
       input_grad->data_ptr<spec_t>(), p, reduce_dim_size, after_dim_size, size);
       },"NormGradient");
     });
+  NDArray::MarkUsedBy({input, output, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

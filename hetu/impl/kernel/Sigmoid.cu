@@ -42,6 +42,7 @@ void SigmoidCuda(const NDArray& input, NDArray& output, const Stream& stream) {
     sigmoid_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
       input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void SigmoidGradientCuda(const NDArray& out_grad, const NDArray& output, NDArray& in_grad, const Stream& stream) {
@@ -64,6 +65,7 @@ void SigmoidGradientCuda(const NDArray& out_grad, const NDArray& output, NDArray
       out_grad->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
       size, in_grad->data_ptr<spec_t>());
   });
+  NDArray::MarkUsedBy({out_grad, output, in_grad}, stream);
 }
 
 } // namespace impl

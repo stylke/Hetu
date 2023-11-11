@@ -59,6 +59,7 @@ void DynamicConcatenateCuda(const NDArray& input, NDArray& output, size_t axis,
         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
         dynamic_input_width, input_width, output_width, offset, concat_size, size);
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

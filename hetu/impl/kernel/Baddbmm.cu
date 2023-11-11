@@ -49,6 +49,7 @@ void BaddbmmCuda(const NDArray& input, const NDArray& a, bool trans_a, const NDA
       trans_a ? n : k, strideA, &beta1, output->data_ptr<spec_t>(), m, strideC,
       batchCount);
   });
+  NDArray::MarkUsedBy({input, a, b, output}, stream);
 }
 
 } // namespace impl

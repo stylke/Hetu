@@ -92,8 +92,8 @@ void KLDivLossCpu(const NDArray& pred, const NDArray& label,
           loss->stride().data(), pred->shape().data());
       }
       },"KLDivLoss");
-      
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 void KLDivLossGradientCpu(const NDArray& pred, const NDArray& label,
@@ -131,8 +131,8 @@ void KLDivLossGradientCpu(const NDArray& pred, const NDArray& label,
           output->stride().data(), pred->shape().data());        
       }
       },"KLDivLossGradient");
-      
     });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

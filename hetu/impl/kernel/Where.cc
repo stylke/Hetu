@@ -38,6 +38,7 @@ void WhereCpu(const NDArray& cond, const NDArray& inputA, const NDArray& inputB,
                           size);
         },"Where");
     });
+  NDArray::MarkUsedBy({cond, inputA, inputB, output}, stream);
 }
 
 } // namespace impl

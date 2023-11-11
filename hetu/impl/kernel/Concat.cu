@@ -74,6 +74,7 @@ void ConcatCuda(const NDArray& inputA, const NDArray& inputB, NDArray& output,
         inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size,
         concat_size, offset1, offset2, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({inputA, inputB, output}, stream);
 }
 
 void ConcatGradientCuda(const NDArray& output_grad, NDArray& input_grad,
@@ -104,6 +105,7 @@ void ConcatGradientCuda(const NDArray& output_grad, NDArray& input_grad,
         output_grad->data_ptr<spec_t>(), size, concat_size, concat_offset,
         small_offset, big_offset, input_grad->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({output_grad, input_grad}, stream);
 }
 
 } // namespace impl

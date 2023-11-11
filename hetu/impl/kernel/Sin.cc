@@ -69,8 +69,8 @@ void SinCpu(const NDArray& input, NDArray& output, const Stream& stream) {
                         input->shape().data());
       }
       }, "Sin");
-      
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -135,6 +135,7 @@ void CosCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       }
       }, "Cos");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -221,6 +222,7 @@ void SinGradientCpu(const NDArray& input, const NDArray& output_grad,
       }
       }, "SinGradient");
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 void CosGradientCpu(const NDArray& input, const NDArray& output_grad,
@@ -253,6 +255,7 @@ void CosGradientCpu(const NDArray& input, const NDArray& output_grad,
       }
       }, "CosGradient");
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

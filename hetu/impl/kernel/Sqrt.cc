@@ -87,8 +87,8 @@ void SqrtCpu(const NDArray& input, NDArray& output, const Stream& stream) {
           Sqrt.execute(engine_stream, sqrt_args);
           engine_stream.wait();
         },"Sqrt");
-      
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void ReciprocalSqrtCpu(const NDArray& output_grad, NDArray& input_grad,
@@ -123,8 +123,8 @@ void ReciprocalSqrtCpu(const NDArray& output_grad, NDArray& input_grad,
           Reciprocal.execute(engine_stream, sqrt_args);
           engine_stream.wait();
         },"ReciprocalSqrt");
-      
     });
+  NDArray::MarkUsedBy({output_grad, input_grad}, stream);
 }
 
 } // namespace impl

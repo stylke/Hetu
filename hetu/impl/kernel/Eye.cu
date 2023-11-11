@@ -37,6 +37,7 @@ void EyeCuda(NDArray& output, const Stream& stream) {
       eye_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         output->data_ptr<spec_t>(), size, ncols);
     });
+  NDArray::MarkUsedBy({output}, stream);
 }
 
 } // namespace impl

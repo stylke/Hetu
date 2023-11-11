@@ -28,6 +28,7 @@ void ArraySetCuda(NDArray& data, double value, const Stream& stream) {
       array_set_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         data->data_ptr<spec_t>(), static_cast<spec_t>(value), size);
     });
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 } // namespace impl

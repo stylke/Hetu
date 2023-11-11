@@ -54,6 +54,7 @@ void MatVecMulCpu(const NDArray& a, bool trans, const NDArray& x,
                             trans, m, n, output->data_ptr<spec_t>());
     },"MatVecmul");
   });
+  NDArray::MarkUsedBy({a, x, output}, stream);
 }
 
 } // namespace impl

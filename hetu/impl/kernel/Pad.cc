@@ -100,6 +100,7 @@ void PadCpu(const NDArray& input, NDArray& output, const HTShape& paddings,
         },"Pad");      
       });
   }
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void PadGradientCpu(const NDArray& output_grad, NDArray& input_grad,
@@ -148,6 +149,7 @@ void PadGradientCpu(const NDArray& output_grad, NDArray& input_grad,
         },"PadGradient");   
       });
   }
+  NDArray::MarkUsedBy({input_grad, output_grad}, stream);
 }
 
 } // namespace impl

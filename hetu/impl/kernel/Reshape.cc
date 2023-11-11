@@ -36,6 +36,7 @@ void ReshapeCpu(const NDArray& input, NDArray& output, const Stream& stream) {
                                 output->data_ptr<spec_t>(), size);
         },"Reshape");
     });
+  NDArray::MarkUsedBy({input, output}, stream);  
 }
 
 } // namespace impl

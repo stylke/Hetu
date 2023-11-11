@@ -153,12 +153,11 @@ NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape) {
   void* ptr = PyArray_DATA(numpy_array);
   Py_INCREF(obj);
   // TODO: mark non-writable and lazy copy on writing
-  auto storage = std::make_shared<NDArrayStorage>(
-    ptr, meta.numel() * element_size, Device(kCPU), 
-    [obj](DataPtr ptr) { 
+  auto storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
+    Device(kCPU), ptr, meta.numel() * element_size, [obj](DataPtr ptr) {
       py::gil_scoped_acquire gil;
       Py_DECREF(obj);
-    });
+    }));
 
   return NDArray(meta, storage);
 }

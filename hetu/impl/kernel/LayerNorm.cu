@@ -74,12 +74,9 @@ void LayerNormCuda(const NDArray& in_arr, const NDArray& ln_scale,
     base_dim *= in_arr->shape(i);
   for (int i = ndim - reduce_dims; i < ndim; ++i)
     last_dim *= in_arr->shape(i);
-  // int BlockDim = (last_dim >= 1024 ? 1024: 64);
   dim3 blocks, threads;
   threads.x = (last_dim >= 1024 ? 1024 : 64);
   blocks.x = base_dim;
-  // CudaStreamSynchronize(cuda_stream);
-  // std::chrono::system_clock::time_point t1 = std::chrono::system_clock::now();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "LayerNormCuda", [&]() {
       layer_norm_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
@@ -88,12 +85,8 @@ void LayerNormCuda(const NDArray& in_arr, const NDArray& ln_scale,
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(), eps,
         last_dim);
     });
-  // CudaStreamSynchronize(cuda_stream);
-  // std::chrono::system_clock::time_point t2 = std::chrono::system_clock::now();
-  // std::cout << in_arr->shape() << ":" <<
-  // float(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count()) / 1000.0
-  // << "ms" << std::endl;
-  return;
+  NDArray::MarkUsedBy({in_arr, ln_scale, ln_bias, mean_arr, var_arr, out_arr},
+                      stream);
 }
 
 template <typename spec_t>
@@ -236,6 +229,8 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
         ds_->data_ptr<spec_t>(), db_->data_ptr<spec_t>(),
         grad_arr->data_ptr<spec_t>(), lastdim, eps, size);
     });
+  NDArray::MarkUsedBy({out_grads, in_arr, ln_scale, grad_arr,
+                       grad_scale, grad_bias, mean_arr, var_arr}, stream);
 }
 
 } // namespace impl

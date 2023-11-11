@@ -67,6 +67,7 @@ void BatchMatMulCpu(const NDArray& a, bool trans_a, const NDArray& b,
     },
     "BatchMatmul");
   });
+  NDArray::MarkUsedBy({a, b, output}, stream);
 }
 
 } // namespace impl

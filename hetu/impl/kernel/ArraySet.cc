@@ -25,6 +25,7 @@ void ArraySetCpu(NDArray& data, double value, const Stream& stream) {
                               static_cast<spec_t>(value), size);
       },"ArraySet");
     });
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 } // namespace impl

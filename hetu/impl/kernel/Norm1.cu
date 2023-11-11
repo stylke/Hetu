@@ -117,8 +117,7 @@ void NormCuda(const NDArray& input, NDArray& output, int64_t dim, int64_t p, con
         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size, p, 
         before_dim_size, reduce_dim_size, after_dim_size);
     });
-        // CudaStreamSynchronize(cuda_stream);
-    //   HT_LOG_INFO << output->data_ptr<void>();
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void NormGradientCuda(const NDArray& input, const NDArray& output, const NDArray& output_grad,
@@ -151,6 +150,7 @@ void NormGradientCuda(const NDArray& input, const NDArray& output, const NDArray
       input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(), 
       input_grad->data_ptr<spec_t>(), p, reduce_dim_size, after_dim_size, size);
     });
+  NDArray::MarkUsedBy({input, output, input_grad, output_grad}, stream);
 }
 
 } // namespace impl

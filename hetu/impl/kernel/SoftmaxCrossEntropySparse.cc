@@ -95,6 +95,7 @@ void SoftmaxCrossEntropySparseCpu(const NDArray& pred, const NDArray& label,
           ignored_index, loss->data_ptr<spec_t>());
         },"SoftmaxCrossEntropySparse");
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 void SoftmaxCrossEntropySparseGradientCpu(const NDArray& pred, const NDArray& label,
@@ -121,6 +122,7 @@ void SoftmaxCrossEntropySparseGradientCpu(const NDArray& pred, const NDArray& la
           ignored_index, output->data_ptr<spec_t>());
         },"SoftmaxCrossEntropySparseGradient");
     });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

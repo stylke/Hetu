@@ -35,6 +35,7 @@ void FloorCpu(const NDArray& input, NDArray& output, const Stream& stream) {
                           output->data_ptr<spec_t>());
       }, "Floor");    
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -64,6 +65,7 @@ void CeilCpu(const NDArray& input, NDArray& output, const Stream& stream) {
                        output->data_ptr<spec_t>());
       }, "Ceil");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -93,6 +95,7 @@ void RoundCpu(const NDArray& input, NDArray& output, const Stream& stream) {
                         output->data_ptr<spec_t>());
       }, "Round");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

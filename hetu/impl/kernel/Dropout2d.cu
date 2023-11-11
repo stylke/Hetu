@@ -48,6 +48,7 @@ void Dropout2dCuda(const NDArray& input, double drop_rate, uint64_t seed,
       static_cast<float>(drop_rate), size, last_two_size);
   });
   CURAND_CALL(curandDestroyGenerator(gen));
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void Dropout2dGradientWithRecomputationCuda(const NDArray& grad,
@@ -80,6 +81,7 @@ void Dropout2dGradientWithRecomputationCuda(const NDArray& grad,
       static_cast<float>(drop_rate), size, last_two_size);
   });
   CURAND_CALL(curandDestroyGenerator(gen));
+  NDArray::MarkUsedBy({grad, output}, stream);
 }
 
 } // namespace impl

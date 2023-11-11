@@ -44,6 +44,7 @@ void Conv2dBroadcastCpu(const NDArray& input, NDArray& output,
       "Conv2dBroadcast");
        
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

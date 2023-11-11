@@ -65,7 +65,8 @@ void BatchNormCpu(const NDArray& input_X, const NDArray& bn_scale,
       "BatchNorm");
       
     });
-  return;
+  NDArray::MarkUsedBy({input_X, bn_scale, bn_bias, output_Y,
+                       running_mean, running_var, save_mean, save_var}, stream);
 }
 
 void BatchNormGradientCpu(const NDArray& gradient_Y, const NDArray& input_X,
@@ -115,19 +116,10 @@ void BatchNormGradientCpu(const NDArray& gradient_Y, const NDArray& input_X,
                 dnnl::prop_kind::backward, src_md, gdst_md, src_md, float(eps),
                 dnnl::normalization_flags::use_scale | dnnl::normalization_flags::use_shift, bnorm_pd);
         
-
-        // Create memory objects using memory descriptors created by the primitive
-        // descriptor: mean, variance, workspace.
-        // NOTE: Here, the ReLU post-ops require a workspace for later usage in
-        // backward propagation mode.
-        // auto mean_mem = dnnl::memory(bnorm_pd.mean_desc(), eng);
-        // auto variance_mem = dnnl::memory(bnorm_pd.variance_desc(), eng);
         auto workspace_mem = dnnl::memory(bnorm_bwd_pd.workspace_desc(), eng);
 
-        // Create the primitive.
         auto bnorm_prim = dnnl::batch_normalization_backward(bnorm_bwd_pd);
 
-        // Primitive arguments. Set up in-place execution by assigning src as DST.
         std::unordered_map<int, dnnl::memory> bnorm_args;
         bnorm_args.insert({DNNL_ARG_SRC, src_mem});
         bnorm_args.insert({DNNL_ARG_MEAN, mean_mem});
@@ -144,8 +136,9 @@ void BatchNormGradientCpu(const NDArray& gradient_Y, const NDArray& input_X,
         engine_stream.wait();
       },
          "BatchNormGradient");
-      
     });
+  NDArray::MarkUsedBy({gradient_Y, input_X, bn_scale, gradient_X,
+                       gradient_bn_scale, gradient_bn_bias, save_mean, save_var}, stream);
 }    
 } // namespace impl
 } // namespace hetu

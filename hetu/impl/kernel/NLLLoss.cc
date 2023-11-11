@@ -67,8 +67,8 @@ void NLLLossCpu(const NDArray& pred, const NDArray& label,
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(), n_rows, n_cols,
         loss->data_ptr<spec_t>());
       },"NLLLoss");
-      
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 template <typename spec_t>
@@ -103,6 +103,7 @@ void NLLLossGradientCpu(const NDArray& pred, const NDArray& label,
         grad_loss->data_ptr<spec_t>(), n_rows, n_cols, output->data_ptr<spec_t>());
       },"NLLLossGradient");    
     });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

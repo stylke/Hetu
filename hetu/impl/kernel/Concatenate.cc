@@ -89,6 +89,8 @@ void ConcatenateCpu(const NDArrayList& inputs, NDArray& output, size_t axis,
       },
       "Concatenate");
     });
+  NDArray::MarkUsedBy(inputs, stream);
+  NDArray::MarkUsedBy({output}, stream);
 }
 
 void ConcatenateGradientCpu(const NDArray& output_grad, NDArray& input_grad,
@@ -128,6 +130,7 @@ void ConcatenateGradientCpu(const NDArray& output_grad, NDArray& input_grad,
       },
       "ConcatGradient");  
     });
+  NDArray::MarkUsedBy({output_grad, input_grad}, stream);
 }
 
 } // namespace impl

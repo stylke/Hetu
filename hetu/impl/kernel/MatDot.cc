@@ -38,6 +38,7 @@ void MatDotCpu(const NDArray& inputA, const NDArray& inputB, NDArray& output,
                       size, size2, output->data_ptr<spec_t>());
       },"MatDot");   
     });
+  NDArray::MarkUsedBy({inputA, inputB, output}, stream);
 }
 
 } // namespace impl

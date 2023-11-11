@@ -58,10 +58,9 @@ void Conv2dCpu(const NDArray& input_x, const NDArray& input_f, NDArray& output,
         conv_prim.execute(engine_stream, conv_args);
         engine_stream.wait();
       },
-      "Conv2d");
-      
+      "Conv2d"); 
     });
-  return;
+  NDArray::MarkUsedBy({input_x, input_f, output}, stream);
 }
 
 void Conv2dGradientofFilterCpu(const NDArray& input_x,
@@ -120,8 +119,7 @@ void Conv2dGradientofFilterCpu(const NDArray& input_x,
       conv_prim.execute(engine_stream, conv_args);   
       engine_stream.wait();      
       },
-      "Conv2dFilter");
-      
+      "Conv2dFilter");  
     });
   return;
 }
@@ -181,7 +179,6 @@ void Conv2dGradientofDataCpu(const NDArray& input_f, const NDArray& gradient_y,
       conv_prim.execute(engine_stream, conv_args);         
       },
       "Conv2dData");
-      
     });
   return;
 }
@@ -242,7 +239,6 @@ void Conv2dAddBiasCpu(const NDArray& input_x, const NDArray& input_f,
       conv_prim.execute(engine_stream, conv_args); 
       },
       "Conv2dBias");
-      
     });
   return;
 }

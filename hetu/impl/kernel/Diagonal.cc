@@ -69,6 +69,7 @@ void DiagonalCpu(const NDArray& input, NDArray& output, int dim1, int dim2,
                              static_cast<int>(input->shape(dim2)), dim_len,
                              offset, output->data_ptr<spec_t>());}, "Diagonal");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -137,6 +138,7 @@ void DiagonalGradientCpu(const NDArray& input, NDArray& output, int dim1,
                                     output->data_ptr<spec_t>());
       }, "DiagonalGradient");          
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

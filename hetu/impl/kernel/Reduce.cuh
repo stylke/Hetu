@@ -842,8 +842,6 @@ void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t
     FreeToMemoryPool(global_meta_cu_ptr);
   }
   FreeToMemoryPool(reduce_meta_cu_ptr);
-  free(reduce_meta);
-  free(reduce_axes);
   return;
 }
 

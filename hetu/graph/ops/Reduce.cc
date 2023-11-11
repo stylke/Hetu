@@ -171,17 +171,18 @@ void ReduceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   outputs.at(0)->set_distributed_states(ds_output);
 }
 
-void  ReduceGradientOpImpl::DoCompute(Operator& op,
+void ReduceGradientOpImpl::DoCompute(Operator& op,
                                      const NDArrayList& inputs,
                                      NDArrayList& outputs, RuntimeContext& ctx) const {
   if (reduction() == ReductionType::MEAN) {
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       op->instantiation_ctx().placement.type(), type(), hetu::impl::BroadcastShapeMul, inputs.at(0),
-      get_const_value(), outputs.at(0), get_add_axes(), op->instantiation_ctx().stream());
+      get_const_value(), outputs.at(0), get_axes(), op->instantiation_ctx().stream());
   } else {
+    auto axes = get_axes();
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                     hetu::impl::BroadcastShape, inputs.at(0),
-                                    outputs.at(0), get_add_axes(), op->instantiation_ctx().stream());
+                                    outputs.at(0), axes, op->instantiation_ctx().stream());
   }
 }
 

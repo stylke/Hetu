@@ -11,8 +11,6 @@
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
 
-// #define CHECK_SHAPE(x, ...) HT_ASSERT(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
-
 namespace hetu {
 namespace impl {
 
@@ -302,7 +300,6 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
     << "FlashAttention forward only supports head dimension at most 256";
     HT_ASSERT(num_heads % num_heads_k == 0)
     << "Number of heads in key/value must divide number of heads in query";
-    std::chrono::system_clock::time_point t0_2 = std::chrono::system_clock::now();
 
 
     if (head_size_og % 8 != 0) {
@@ -311,16 +308,10 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
         NDArray::pad(k, pad_shape, "constant", 0, stream.stream_index(), k_padded);
         NDArray::pad(v, pad_shape, "constant", 0, stream.stream_index(), v_padded);
     } else {
-        // NDArray::copy(q, stream.stream_index(), q_padded);
-        // NDArray::copy(k, stream.stream_index(), k_padded);
-        // NDArray::copy(v, stream.stream_index(), v_padded);
         q_padded = q;
         k_padded = k;
         v_padded = v;
     }
-    CudaStreamSynchronize(cuda_stream);
-    std::chrono::system_clock::time_point t1 = std::chrono::system_clock::now();
-
 
     NDArray out;
     if (out_.is_defined()) {
@@ -335,8 +326,6 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
     } else {
         out = NDArray::empty_like(q_padded);
     }
-    CudaStreamSynchronize(cuda_stream);
-    std::chrono::system_clock::time_point t2 = std::chrono::system_clock::now();
 
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
@@ -374,10 +363,7 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
                      p_dropout,
                      softmax_scale,
                      is_causal);
-    CudaStreamSynchronize(cuda_stream);
-    std::chrono::system_clock::time_point t3 = std::chrono::system_clock::now();
     
-
     // This needs to match with run_mha_fwd_splitkv_dispatch
     const int block_n = is_sm90 || is_sm8x
         ? (head_size <= 64 ? 256 : (head_size <= 160 ? 128 : 64))
@@ -397,32 +383,15 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
         }
     }
 
-    CudaStreamSynchronize(cuda_stream);
-    std::chrono::system_clock::time_point t4 = std::chrono::system_clock::now();
 
-
-    // number of times random will be generated per thread, to offset philox counter in thc random
-    // state
-    // We use a custom RNG that increases the offset by batch_size * nheads * 32.
     int64_t counter_offset = params.b * params.h * 32;
-    // auto options = torch::TensorOptions()->dtype(torch::kFloat32).device(torch::kCUDA);
-    // auto rng_state = NDArray::empty({2}, kCUDA,  kInt64);
-    // Forward kernel will populate memory with the seed and offset.
     params.rng_state = reinterpret_cast<uint64_t*>(rng_state->raw_data_ptr());
 
     if (p_dropout > 0.0)  {
-        // auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        //     gen_, at::cuda::detail::getDefaultCUDAGenerator());
-        // See Note [Acquire lock when using random generators]
-        // std::lock_guard<std::mutex> lock(gen->mutex_);
         params.philox_args = CUDARandomState(hetu::impl::GenNextRandomSeed(), counter_offset);
     }
 
-    CudaStreamSynchronize(cuda_stream);
-    std::chrono::system_clock::time_point t5 = std::chrono::system_clock::now();
     run_mha_fwd(params, cuda_stream);
-    CudaStreamSynchronize(cuda_stream);
-    std::chrono::system_clock::time_point t6 = std::chrono::system_clock::now();
 
 
     if (head_size_og % 8 != 0) {
@@ -434,19 +403,15 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
         // NDArray::copy(out, stream.stream_index(), out_padded);
     }
 
-
-    HT_LOG_INFO << float(std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()) / 1000.0 << "ms."
-                << float(std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count()) / 1000.0 << "ms."
-                << float(std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count()) / 1000.0 << "ms."
-                << float(std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3).count()) / 1000.0 << "ms."
-                << float(std::chrono::duration_cast<std::chrono::microseconds>(t5 - t4).count()) / 1000.0 << "ms."
-                << float(std::chrono::duration_cast<std::chrono::microseconds>(t6 - t5).count()) / 1000.0 << "ms.";
-
     // if (head_size_og % 8 != 0) {
     //     out = out.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
     //     if (out_.is_defined()) { out_.value().copy_(out); }
     // }
-    return;
+   NDArray::MarkUsedBy({q, k, v, out_,           
+                        q_padded, k_padded,        
+                        v_padded, out_padded,    
+                        softmax_lse, p, 
+                        rng_state}, stream);
 }
 
 void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream, const bool configure) {
@@ -701,7 +666,9 @@ FlashAttnGradientCuda(const NDArray& dout,  // batch_size x seqlen_q x num_heads
     //     dv = dv.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
     // }
 
-    return;
+    NDArray::MarkUsedBy({dout, q, k, v, out,           
+                         softmax_lse, rng_state, 
+                         dq_, dk_, dv_}, stream);
 }
 
 } // namespace impl

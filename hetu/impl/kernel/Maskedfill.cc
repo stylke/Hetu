@@ -34,6 +34,7 @@ void MaskedfillCpu(const NDArray& input, const NDArray& mask,
         static_cast<spec_t>(val), output->data_ptr<spec_t>(), size);
       },"Maskfill"); 
     });
+  NDArray::MarkUsedBy({input, mask, output}, stream);
 }
 
 } // namespace impl

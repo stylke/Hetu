@@ -45,11 +45,11 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
   int ndim = in_arr->ndim();
   HT_ASSERT(ndim == 4);
   int last_dims = 1;
-  size_t cpu_mem = ndim * sizeof(int);
-  int* dimA = (int*) malloc(cpu_mem);
-  int* strideA = (int*) malloc(cpu_mem);
-  int* dimC = (int*) malloc(cpu_mem);
-  int* strideC = (int*) malloc(cpu_mem);
+
+  HTShape dimA(ndim);
+  HTShape strideA(ndim);
+  HTShape dimC(ndim);
+  HTShape strideC(ndim);
 
   int temp_strideA = 1;
   int temp_strideC = 1;
@@ -69,9 +69,9 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "LayerNormCpu", [&]() {
-      auto _future = cpu_stream.EnqueueTask(
+      cpu_stream.EnqueueTask(
       [stream, in_arr, ln_scale, ln_bias, mean_arr, var_arr, out_arr, temp_strideA, temp_strideC,
-      dimA, strideA, dimC, strideC, eps, last_dims, ndim]() {
+       eps, last_dims, ndim]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng);
       auto dnnltype = hetu::cpu::dtype_to_dnnltype(in_arr->dtype());
@@ -137,7 +137,8 @@ void LayerNormCpu(const NDArray& in_arr, const NDArray& ln_scale,
       },"LayerNorm");
                
     });
-  return;
+  NDArray::MarkUsedBy({in_arr, ln_scale, ln_bias, mean_arr, var_arr, out_arr},
+                      stream);
 }
 
 template <typename spec_t>
@@ -200,28 +201,24 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
   size_t size = total_elements;
   if (size == 0)
     return;
+  
+  auto ds_arr = NDArray::empty_like(mean_arr, stream.stream_index());
+  auto db_arr = NDArray::empty_like(mean_arr, stream.stream_index());
+  auto dy_mul_x_arr = NDArray::empty_like(in_arr, stream.stream_index());
+  auto gscale_arr = NDArray::empty_like(in_arr, stream.stream_index());
 
   CPUStream cpu_stream(stream);
   HT_DISPATCH_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "LayerNormGradientCpu", [&]() {
-      auto _future = cpu_stream.EnqueueTask(
+      cpu_stream.EnqueueTask(
       [stream, out_grads, in_arr, ln_scale, grad_scale, grad_bias, grad_arr, mean_arr, var_arr, 
+      ds_arr, db_arr, dy_mul_x_arr, gscale_arr,
       reduce_dims, eps, ndim, lastdims, total_elements, size]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-      spec_t* ds = NULL;
-      DataPtr ds_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
-      ds = (spec_t*) ds_ptr.ptr;
-
-      spec_t* db = NULL;
-      DataPtr db_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
-      db = (spec_t*) db_ptr.ptr;
-
-      spec_t* dy_mul_x = NULL;
-      DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), in_arr->numel() * sizeof(spec_t));
-      dy_mul_x = (spec_t*) dy_mul_x_ptr.ptr;
-
-      DataPtr gscale_ptr = AllocFromMemoryPool(out_grads->device(), in_arr->numel() * sizeof(spec_t));
-      spec_t* gscale = (spec_t*) gscale_ptr.ptr;
+      spec_t* ds = ds_arr->data_ptr<spec_t>();
+      spec_t* db = db_arr->data_ptr<spec_t>();
+      spec_t* dy_mul_x = dy_mul_x_arr->data_ptr<spec_t>();
+      spec_t* gscale = gscale_arr->data_ptr<spec_t>();
 
       HTShape scale_shape(ndim), scale_stride(ndim);
       int64_t stride_size = 1;
@@ -360,13 +357,10 @@ void LayerNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
         ds, db,
         grad_arr->data_ptr<spec_t>(), lastdims, eps, size);
-        FreeToMemoryPool(ds_ptr);
-        FreeToMemoryPool(db_ptr);
-        FreeToMemoryPool(dy_mul_x_ptr);
-        FreeToMemoryPool(gscale_ptr);
       },"LayerNormGradient");
-      
     }); 
+  NDArray::MarkUsedBy({out_grads, in_arr, ln_scale, grad_arr,
+                       grad_scale, grad_bias, mean_arr, var_arr}, stream);
 }
 
 

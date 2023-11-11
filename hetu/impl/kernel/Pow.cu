@@ -35,6 +35,7 @@ void PowCuda(const NDArray& input, double exponent, NDArray& output,
       input->data_ptr<spec_t>(), static_cast<spec_t>(exponent), size,
       output->data_ptr<spec_t>());
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

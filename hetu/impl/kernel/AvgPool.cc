@@ -126,6 +126,7 @@ void AvgPoolCpu(const NDArray& input, const size_t kernel_H,
       },
       "AvgPool");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void AvgPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
@@ -192,6 +193,7 @@ void AvgPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
       },
       "AvgPoolGradient");     
     });
+  NDArray::MarkUsedBy({output_Y, gradient_Y, input_X, gradient_X}, stream);
 }
 
 } // namespace impl

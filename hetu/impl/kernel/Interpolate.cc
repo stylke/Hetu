@@ -184,8 +184,8 @@ void InterpolateCpu(const NDArray& input, NDArray& output,
         input->data_ptr<spec_t>(), input_N, input_C, input_H, input_W, output->data_ptr<spec_t>(),
         output_H, output_W, static_cast<spec_t>(ratio_h), static_cast<spec_t>(ratio_w), align_corners, size);
       },"Interpolate");
-      
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void InterpolateGradientCpu(const NDArray& output, NDArray& input,
@@ -226,8 +226,8 @@ void InterpolateGradientCpu(const NDArray& output, NDArray& input,
         output->data_ptr<spec_t>(), input_N, input_C, input_H, input_W, input->data_ptr<spec_t>(),
         output_H, output_W, static_cast<spec_t>(ratio_h), static_cast<spec_t>(ratio_w), align_corners, size);
       },"Interpolate");
-      
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

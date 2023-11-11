@@ -75,6 +75,7 @@ void GatherCuda(const NDArray& input, const NDArray& id, NDArray& output,
         input->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size,
         after_stride, cur_stride, after_stride_out, cur_stride_out, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, id, output}, stream);
 }
 
 void GatherGradientCuda(const NDArray& grad_output, const NDArray& id, NDArray& grad_input,
@@ -111,6 +112,7 @@ void GatherGradientCuda(const NDArray& grad_output, const NDArray& id, NDArray& 
         grad_output->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size, 
         after_stride, cur_stride, after_stride_out, cur_stride_out, grad_input->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({grad_output, id, grad_input}, stream);
 }
 
 } // namespace impl

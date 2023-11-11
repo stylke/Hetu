@@ -45,7 +45,7 @@ void InstanceNormCpu(const NDArray& in_arr, NDArray& mean_arr, NDArray& var_arr,
   CPUStream cpu_stream(stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "InstanceNormCpu", [&]() {
-      auto _future = cpu_stream.EnqueueTask(
+      cpu_stream.EnqueueTask(
       [stream, in_arr, mean_arr, var_arr, out_arr, eps, last_2dim, ndim]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng); 
@@ -112,7 +112,7 @@ void InstanceNormCpu(const NDArray& in_arr, NDArray& mean_arr, NDArray& var_arr,
       },"InstanceNorm");
       
     });
-  return;
+  NDArray::MarkUsedBy({in_arr, mean_arr, var_arr}, stream);
 }
 
 template <typename spec_t>
@@ -153,22 +153,21 @@ void InstanceNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
   size_t size = out_grads->numel();
   if (size == 0)
     return;
+  
+  auto dscale_arr = NDArray::empty_like(mean_arr, stream.stream_index());
+  auto dbias_arr = NDArray::empty_like(mean_arr, stream.stream_index());
+  auto dy_mul_x_arr = NDArray::empty_like(in_arr, stream.stream_index());
+  
   CPUStream cpu_stream(stream);
   HT_DISPATCH_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "InstanceNormGradientCpu", [&]() {
-      auto _future = cpu_stream.EnqueueTask(
-      [stream, out_grads, in_arr, grad_arr, mean_arr, var_arr, eps, ndim, last2dim, size]() {
-      spec_t* dscale = NULL;
-      DataPtr dscale_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
-      dscale = (spec_t*) dscale_ptr.ptr;
-
-      spec_t* dbias = NULL;
-      DataPtr dbias_ptr = AllocFromMemoryPool(in_arr->device(), mean_arr->numel() * sizeof(spec_t));
-      dbias = (spec_t*) dbias_ptr.ptr;
-
-      spec_t* dy_mul_x = NULL;
-      DataPtr dy_mul_x_ptr = AllocFromMemoryPool(in_arr->device(), in_arr->numel() * sizeof(spec_t));
-      dy_mul_x = (spec_t*) dy_mul_x_ptr.ptr;
+      cpu_stream.EnqueueTask(
+      [stream, out_grads, in_arr, grad_arr, mean_arr, var_arr, 
+      dscale_arr, dbias_arr, dy_mul_x_arr, eps, ndim, last2dim, size]() {
+      spec_t* dscale = dscale_arr->data_ptr<spec_t>();
+      spec_t* dbias = dbias_arr->data_ptr<spec_t>();
+      spec_t* dy_mul_x = dy_mul_x_arr->data_ptr<spec_t>();
+      
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng); 
       auto dnnltype = hetu::cpu::dtype_to_dnnltype(in_arr->dtype());
@@ -246,12 +245,9 @@ void InstanceNormGradientCpu(const NDArray& out_grads, const NDArray& in_arr,
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
         dscale, dbias,
         grad_arr->data_ptr<spec_t>(), last2dim, eps, size);
-      FreeToMemoryPool(dscale_ptr);
-      FreeToMemoryPool(dbias_ptr);
-      FreeToMemoryPool(dy_mul_x_ptr);
       },"InstanceNormGradient");
-      
     }); 
+  NDArray::MarkUsedBy({out_grads, in_arr, mean_arr, var_arr, grad_arr}, stream);
 }
 
 } // namespace impl

@@ -215,6 +215,7 @@ void SoftmaxCrossEntropySparseCuda(const NDArray& pred, const NDArray& label,
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(), n_rows, n_cols,
         ignored_index, loss->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 void SoftmaxCrossEntropySparseGradientCuda(const NDArray& pred, const NDArray& label,
@@ -241,7 +242,8 @@ void SoftmaxCrossEntropySparseGradientCuda(const NDArray& pred, const NDArray& l
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(),
         grad_loss->data_ptr<spec_t>(), n_rows, n_cols,
         ignored_index, output->data_ptr<spec_t>());
-    });  
+    });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);  
 }
 
 } // namespace impl

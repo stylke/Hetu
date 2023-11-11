@@ -41,6 +41,7 @@ void SqrtCuda(const NDArray& input, NDArray& output, const Stream& stream) {
     sqrt_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
       input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void ReciprocalSqrtCuda(const NDArray& output_grad, NDArray& input_grad,
@@ -62,6 +63,7 @@ void ReciprocalSqrtCuda(const NDArray& output_grad, NDArray& input_grad,
       reciprocal_sqrt_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         output_grad->data_ptr<spec_t>(), size, input_grad->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({output_grad, input_grad}, stream);
 }
 
 } // namespace impl

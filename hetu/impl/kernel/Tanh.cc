@@ -104,8 +104,8 @@ void TanhCpu(const NDArray& input, NDArray& output, const Stream& stream) {
           engine_stream.wait();
           engine_stream.wait();
         },"Tanh");
-      
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void TanhGradientCpu(const NDArray& input, const NDArray& output_grad,
@@ -138,8 +138,8 @@ void TanhGradientCpu(const NDArray& input, const NDArray& output_grad,
                                     input_grad->stride().data(), input->shape().data());
         } 
         },"TanhGradient");
-      
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

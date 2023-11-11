@@ -82,11 +82,7 @@ void run_flash_splitkv_fwd(Flash_fwd_params &params, cudaStream_t stream) {
                                 kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
                         }
 
-                        std::chrono::system_clock::time_point t0 = std::chrono::system_clock::now();
                         kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
-                        cudaStreamSynchronize(stream);
-                        std::chrono::system_clock::time_point t1 = std::chrono::system_clock::now();
-                        HT_LOG_INFO << float(std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()) / 1000.0 << "ms.";
                     });
                 });
             });

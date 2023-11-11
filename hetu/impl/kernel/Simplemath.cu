@@ -31,6 +31,7 @@ void FloorCuda(const NDArray& input, NDArray& output, const Stream& stream) {
     floor_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
       input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -57,6 +58,7 @@ void CeilCuda(const NDArray& input, NDArray& output, const Stream& stream) {
     ceil_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
       input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -83,6 +85,7 @@ void RoundCuda(const NDArray& input, NDArray& output, const Stream& stream) {
     round_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
       input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

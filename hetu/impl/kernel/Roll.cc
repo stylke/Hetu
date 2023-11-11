@@ -9,7 +9,7 @@ namespace impl {
 
 template <typename spec_t>
 void roll_cpu(const spec_t *input, spec_t *output, size_t size, int rank,
-              int64_t *shifts, int64_t *strides, int64_t *sizes) {
+              const int64_t *shifts, const int64_t *strides, const int64_t *sizes) {
   for (size_t idx = 0; idx < size; ++idx) {
 
     int output_idx = idx;
@@ -47,9 +47,9 @@ void RollCpu(const NDArray& input, const HTShape& shift, const HTAxes& axis,
         input->shape(n_dims - i) * stride_dim[n_dims - i];
   }
 
-  int64_t *strides = new int64_t[nums];
-  int64_t *sizes = new int64_t[nums];
-  int64_t *shifts = new int64_t[nums];
+  HTStride strides(n_dims);
+  HTShape sizes(n_dims);
+  HTShape shifts(n_dims);
 
   if (axis.size() == 0) {
     strides[0] = 1;
@@ -73,12 +73,10 @@ void RollCpu(const NDArray& input, const HTShape& shift, const HTAxes& axis,
         [input, output, len, nums, shifts, strides, sizes]() {
         roll_cpu<spec_t>(
           input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
-          len, nums, shifts, strides, sizes);
-        free(shifts);
-        free(strides);
-        free(sizes);
+          len, nums, shifts.data(), strides.data(), sizes.data());
         },"Roll"); 
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

@@ -50,6 +50,7 @@ void ReciprocalCpu(const NDArray& input, NDArray& output,
           engine_stream.wait();
         },"Reciprocal");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

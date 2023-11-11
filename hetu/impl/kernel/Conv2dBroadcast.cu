@@ -41,6 +41,7 @@ void Conv2dBroadcastCuda(const NDArray& input, NDArray& output,
         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), input_size,
         output_size, size);
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

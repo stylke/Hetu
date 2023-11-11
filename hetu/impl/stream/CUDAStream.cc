@@ -9,7 +9,7 @@ namespace {
 static int32_t num_devices;
 static std::once_flag global_init_flag;
 static std::once_flag device_init_flags[HT_MAX_GPUS_COMPILE_TIME];
-static std::vector<bool> device_initialized(HT_MAX_GPUS_COMPILE_TIME, false);
+static std::vector<int> device_initialized(HT_MAX_GPUS_COMPILE_TIME, 0);
 static std::vector<std::vector<cudaStream_t>>
   device_streams(HT_MAX_GPUS_COMPILE_TIME,
                  std::vector<cudaStream_t>(HT_NUM_STREAMS_PER_DEVICE));
@@ -32,10 +32,11 @@ static void InitDevice(int32_t device_id) {
     << num_devices;
   hetu::cuda::CUDADeviceGuard guard(device_id);
   for (int32_t i = 0; i < HT_NUM_STREAMS_PER_DEVICE; i++) {
-    CudaStreamCreateWithPriority(&device_streams[device_id][i],
-                                 cudaStreamNonBlocking, 0);
+    CudaStreamCreateWithPriority(
+      &device_streams[device_id][i],
+      i == 0 ? cudaStreamDefault : cudaStreamNonBlocking, 0);
   }
-  device_initialized[device_id] = true;
+  device_initialized[device_id] = 1;
 }
 
 inline static void InitDeviceOnce(int32_t device_id) {
@@ -52,14 +53,14 @@ CUDAStream::CUDAStream(const Stream& stream)
   HT_ASSERT(_stream_id >= kBlockingStream &&
             _stream_id < HT_NUM_STREAMS_PER_DEVICE)
     << "Invalid device stream id: " << _stream_id;
-  InitGlobalOnce();
-  if (_stream_id != kBlockingStream)
+  if (!device_initialized[_device_id]) {
+    InitGlobalOnce();
     InitDeviceOnce(_device_id);
+  }
 }
 
 cudaStream_t CUDAStream::cuda_stream() const noexcept {
-  return _stream_id == kBlockingStream ? static_cast<cudaStream_t>(0)
-                                       : device_streams[_device_id][_stream_id];
+  return device_streams[_device_id][_stream_id];
 }
 
 int GetCUDADeiceCount() {

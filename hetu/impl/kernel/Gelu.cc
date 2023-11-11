@@ -104,6 +104,7 @@ void GeluCpu(const NDArray& input, NDArray& output, const Stream& stream) {
         }
       },"Gelu");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void GeluGradientCpu(const NDArray& input, const NDArray& output_grad,
@@ -134,6 +135,7 @@ void GeluGradientCpu(const NDArray& input, const NDArray& output_grad,
         }
       },"Gelu");
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

@@ -106,6 +106,7 @@ void ReluCpu(const NDArray& input, NDArray& output, const Stream& stream) {
         },"Relu");
       
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void ReluGradientCpu(const NDArray& input, const NDArray& output_grad,
@@ -151,9 +152,8 @@ void ReluGradientCpu(const NDArray& input, const NDArray& output_grad,
           Relu_bwd.execute(engine_stream, relu_args);
           engine_stream.wait();
         },"ReluGradient");
-      
-
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

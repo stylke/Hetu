@@ -28,6 +28,7 @@ void DotCuda(const NDArray& x, const NDArray& y, NDArray& output, const Stream& 
                        y->data_ptr<spec_t>(), incy,
                        output->data_ptr<spec_t>());
   });
+  NDArray::MarkUsedBy({x, y, output}, stream);
 }
 
 } // namespace impl

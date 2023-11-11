@@ -48,6 +48,7 @@ void Conv2dReduceSumCpu(const NDArray& input, NDArray& output,
       },
       "Conv2dReduce");   
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

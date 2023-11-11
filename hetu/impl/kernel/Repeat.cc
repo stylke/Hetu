@@ -32,8 +32,8 @@ void RepeatCpu(const NDArray& input, NDArray& output, const Stream& stream) {
 
   size_t size = output->numel();
   int ndim = output->ndim();
-  int64_t *stride_tmp = new int64_t[ndim];
-  int64_t *shape_tmp = new int64_t[ndim];
+  HTStride stride_tmp(ndim);
+  HTShape shape_tmp(ndim);
   for (int i = 0; i < ndim; i++) {
       if (i < int(ndim - input->ndim())) {
           stride_tmp[i] = input->stride()[0];
@@ -50,13 +50,11 @@ void RepeatCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       auto _future = cpu_stream.EnqueueTask(
         [input, output, size, stride_tmp, shape_tmp, ndim]() {
         repeat_cpu<spec_t>(
-        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size, stride_tmp, 
-        output->stride().data(), shape_tmp, ndim);
-        free(stride_tmp);
-        free(shape_tmp);
+        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size, stride_tmp.data(), 
+        output->stride().data(), shape_tmp.data(), ndim);
         },"Repeat");
-      
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -89,8 +87,8 @@ void RepeatGradientCpu(const NDArray& output, NDArray& input, const Stream& stre
 
   size_t size = output->numel();
   int ndim = output->ndim();
-  int64_t *stride_tmp = new int64_t[ndim];
-  int64_t *shape_tmp = new int64_t[ndim];
+  HTStride stride_tmp(ndim);
+  HTShape shape_tmp(ndim);
   for (int i = 0; i < ndim; i++) {
       if (i < int(ndim - input->ndim())) {
           stride_tmp[i] = input->stride()[0];
@@ -110,13 +108,12 @@ void RepeatGradientCpu(const NDArray& output, NDArray& input, const Stream& stre
         array_zero_set_cpu<spec_t>(
                 input->data_ptr<spec_t>(), input->numel());
         repeat_gradient_cpu<spec_t>(
-        output->data_ptr<spec_t>(), input->data_ptr<spec_t>(), size, stride_tmp, 
-        output->stride().data(), shape_tmp, ndim);
-        free(stride_tmp);
-        free(shape_tmp);
+        output->data_ptr<spec_t>(), input->data_ptr<spec_t>(), size, stride_tmp.data(), 
+        output->stride().data(), shape_tmp.data(), ndim);
         },"RepeatGradient");
       
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 

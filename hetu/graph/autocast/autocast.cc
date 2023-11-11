@@ -10,13 +10,14 @@ std::shared_ptr<AutoCast> AutoCast::_default_autocast;
 thread_local std::stack<AutoCastId> AutoCast::_cur_autocast_ctx;
 
 void AutoCast::Init() {
-    // exit handler
-  std::atexit([]() {
-  });
-
   auto concurrency = std::thread::hardware_concurrency();
   AutoCast::_autocasts.reserve(MIN(concurrency, 16) * 2);
   AutoCast::_default_autocast = AutoCast::MakeAutoCast(true);
+}
+
+AutoCastId AutoCast::_next_autocast_id() {
+  static std::atomic<AutoCastId> _global_autocast_id{0};
+  return _global_autocast_id++;
 }
 
 DataType AutoCast::WidestType(const TensorList& inputs) {

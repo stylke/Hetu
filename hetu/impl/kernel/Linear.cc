@@ -74,6 +74,7 @@ void LinearCpu(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
       engine_stream.wait();
     },"Linear");
   });
+  NDArray::MarkUsedBy({a, b, bias, output}, stream);
 }
 
 } // namespace impl

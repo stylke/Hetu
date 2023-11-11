@@ -33,6 +33,7 @@ void OppositeCuda(const NDArray& input, NDArray& output, const Stream& stream) {
       opposite_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

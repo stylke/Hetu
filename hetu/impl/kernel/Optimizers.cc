@@ -83,8 +83,9 @@ void SGDUpdateCpu(const NDArray& grad, NDArray& param, NDArray& velocity,
           grad->data_ptr<spec_t>(), param->data_ptr<spec_t>(),
           velocity->data_ptr<spec_t>(), lr, momentum, size);
       }
-    },"Reciprocal");
+    },"SGDUpdate");
   });
+ NDArray::MarkUsedBy({grad, param, velocity}, stream);
 }
 
 } // namespace impl

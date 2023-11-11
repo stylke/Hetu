@@ -43,6 +43,7 @@ void MatMul2Cuda(const NDArray& a, bool trans_a, const NDArray& b,
       trans_a ? n : k, strideA, &beta, output->data_ptr<spec_t>(), m, strideC,
       batchCount);
   });
+  NDArray::MarkUsedBy({a, b, output}, stream);
 }
 
 } // namespace impl

@@ -17,10 +17,14 @@ static std::once_flag error_suppression_flag;
 void RegisterMemoryPool(std::shared_ptr<MemoryPool> memory_pool) {
   // register exit handler
   std::call_once(memory_pool_exit_handler_register_flag, []() {
-    std::atexit([]() {
+    auto status = std::atexit([]() {
       std::lock_guard<std::mutex> lock(pool_register_mutex);
+      HT_LOG_DEBUG << "Destructing all memory pools...";
       device_mem_pools.clear();
+      HT_LOG_DEBUG << "Destructed all memory pools";
     });
+    HT_ASSERT(status == 0)
+      << "Failed to register the exit function for memory pools.";
   });
 
   std::lock_guard<std::mutex> lock(pool_register_mutex);
@@ -44,8 +48,22 @@ std::shared_ptr<MemoryPool> GetMemoryPool(const Device& device) {
   return ret;
 }
 
-DataPtr AllocFromMemoryPool(const Device& device, size_t num_bytes) {
-  return GetMemoryPool(device)->AllocDataSpace(num_bytes);
+DataPtr AllocFromMemoryPool(const Device& device, size_t num_bytes,
+                            const Stream& stream) {
+  if (stream.device().is_undetermined()) {
+    HT_LOG_WARN << "Allocation stream not provided (" << device << ", "
+                << stream << ", " << num_bytes << " bytes)";
+    return GetMemoryPool(device)->AllocDataSpace(
+      num_bytes, Stream(device, kComputingStream));
+  } else {
+    return GetMemoryPool(device)->AllocDataSpace(num_bytes, stream);
+  }
+}
+
+DataPtr BorrowToMemoryPool(const Device& device, void* ptr, size_t num_bytes, 
+                           DataPtrDeleter deleter) {
+  return GetMemoryPool(device)->BorrowDataSpace(ptr, num_bytes,
+                                                std::move(deleter));
 }
 
 void FreeToMemoryPool(DataPtr ptr) {
@@ -64,6 +82,12 @@ void FreeToMemoryPool(DataPtr ptr) {
                   << "collect the storage, which is not elegant though.";
     });
   }
+}
+
+std::ostream& operator<<(std::ostream& os, const DataPtr& data_ptr) {
+  os << "DataPtr(address=" << data_ptr.ptr << ", size=" << data_ptr.size
+     << ", device=" << data_ptr.device << ", id=" << data_ptr.id << ")";
+  return os;
 }
 
 } // namespace hetu

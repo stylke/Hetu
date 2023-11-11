@@ -8,7 +8,9 @@
 #include "hetu/graph/ops/Arithmetics.h"
 #include "hetu/graph/ops/Loss.h"
 #include "hetu/impl/communication/comm_group.h"
+#include "hetu/impl/communication/mpi_comm_group.h"
 #include "nccl.h"
+#include <ctime>
 
 namespace hetu {
 namespace graph {
@@ -39,14 +41,16 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
                                                  const Initializer& init,
                                                  uint64_t seed,
                                                  const HTShape& global_shape) {
-  // TODO: check meta is valid
-  _preserved_data[tensor->id()] =
-    NDArray::empty(tensor->shape(), tensor->placement(), tensor->dtype());
+  // TODO: check meta is valid & maybe we can use non-blocking stream?
+  _preserved_data[tensor->id()] = NDArray::empty(
+    tensor->shape(), tensor->placement(), tensor->dtype(), kBlockingStream);
   auto it = _add_on_inits.find(tensor->id());
   if (it != _add_on_inits.end()) {
-    it->second->Init(_preserved_data[tensor->id()], seed, global_shape);
+    it->second->Init(_preserved_data[tensor->id()], seed, global_shape,
+                     kBlockingStream);
   } else if (!init.vodify()) {
-    init.Init(_preserved_data[tensor->id()], seed, global_shape);
+    init.Init(_preserved_data[tensor->id()], seed, global_shape,
+              kBlockingStream);
   }
   return _preserved_data[tensor->id()];
 }
@@ -839,11 +843,17 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       continue;
     }
 
+    HT_LOG_TRACE << "Running op " << op << " (type: " << op->type() << ")...";
+
     // batched p2p send & recv
-    if (is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) {
+    if ((is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) &&
+        op->instantiation_ctx().placement.is_cuda()) {
       if (!is_continuous_p2p) {
         is_continuous_p2p = true;
-        CudaStreamSynchronize(hetu::impl::CUDAStream(Stream(hetu::impl::comm::GetLocalDevice(), kComputingStream)));
+        auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+        event->Record(Stream(op->placement(), kComputingStream));
+        event->Block(Stream(op->placement(), kP2PStream));
+        _p2p_events.emplace_back(std::move(event));
         ncclGroupStart();
         // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group start";
       }
@@ -851,7 +861,10 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       is_continuous_p2p = false;
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group end";
       ncclGroupEnd();
-      CudaStreamSynchronize(hetu::impl::CUDAStream(Stream(hetu::impl::comm::GetLocalDevice(), kP2PStream)));
+      auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+      event->Record(Stream(op->placement(), kP2PStream));
+      event->Block(Stream(op->placement(), kComputingStream));
+      _p2p_events.emplace_back(std::move(event));
     }
 
     NDArrayList input_vals;
@@ -873,10 +886,15 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       // should free memory until op aync compute complete!!!
       // workaround: erase when the stream of input_op is the same as cur_op 
       if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end()) {
-      //   tensor2data.erase(input->id());
+        tensor2data.erase(input->id());
       }
     }
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
+    // Note: The usage should be marked inside kernels, 
+    // but we still mark here in case we forget to do so in some kernels. 
+    NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
+    NDArray::MarkUsedBy(output_vals, op->instantiation_ctx().stream());
+    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op;
     for (size_t i = 0; i < op->num_outputs(); i++) {
       const auto& output = op->output(i);
       if (accumulated_tensor.find(output->id()) != accumulated_tensor.end()) {
@@ -896,100 +914,189 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 }
 
 NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
-                                 const FeedDict& feed_dict, const int num_micro_batches) {                        
+                                 const FeedDict& feed_dict, const int num_micro_batches) {
+  TIK(run);
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
-  _num_micro_batches = num_micro_batches;
 
+  // TODO: For each pair of `fetches` and `feed_dict`,
+  // deduce the optimal execution plan, and cache it.
+  _num_micro_batches = num_micro_batches;
+  HT_LOG_DEBUG << local_device << ": 0. Create Execution Plan [begin]";
   auto is_op_computed = [&](const Operator& op) -> bool {
     return Operator::all_output_tensors_of(op, [&](const Tensor& tensor) {
       return feed_dict.find(tensor->id()) != feed_dict.end();
     });
   };
-  // TODO: For each pair of `fetches` and `feed_dict`,
-  // deduce the optimal execution plan, and cache it.
+  bool is_execute_plan_changed = false;
   for (auto& fetch : fetches) {
     if (fetch->placement_group().empty() || 
         (fetch->placement_group().contains(local_device) && 
          fetch->placement().is_undetermined())) {
       // instantiate ops
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] Instantiate begin...";
       Instantiate(fetches, local_device);
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] Instantiate end...";
+
       // init topo contains comm_op
       OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
       // HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo;
 
       // substitute comm_op
-      HT_LOG_DEBUG << local_device << ": substitute comm_op begin...";
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op begin...";
       Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
       SubstituteCommOp(topo);
       Graph::pop_graph_ctx();
-      HT_LOG_DEBUG << local_device << ": substitute comm_op end...";      
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op end...";
+      is_execute_plan_changed = true;
       break;
     }
   }
+  if (is_execute_plan_changed) {
+    // TODO: replace the fetches to the new substitued results after SubstituteCommOp
+    for (auto& fetch : fetches) {
+      auto& fetch_op = fetch->producer();
+      HT_ASSERT(!is_comm_op(fetch_op)) << fetch << ": is substitued already, don't try to fetch it.";
+    }
 
-  // TODO: replace the fetches to the new substitued results after SubstituteCommOp
-  for (auto& fetch : fetches) {
-    auto& fetch_op = fetch->producer();
-    HT_ASSERT(!is_comm_op(fetch_op)) << fetch << ": is substitued already, don't try to fetch it.";
-  }
+    // execute in each iteration, should be cached 
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo begin...";
+    // update topo
+    OpRefList updated_topo = Graph::TopoSort(fetches, -1, is_op_computed);
+    // HT_LOG_DEBUG << local_device << ": updated global topo after substitute comm_op: " << updated_topo;
 
-  // update topo
-  OpRefList updated_topo = Graph::TopoSort(fetches, -1, is_op_computed);
-  // HT_LOG_DEBUG << local_device << ": updated global topo after substitute comm_op: " << updated_topo;
+    // split into fw_topo and bw_topo
+    OpRefList fw_topo, bw_topo;
+    std::tie(fw_topo, bw_topo) = disentangle_forward_and_backward_ops_by_loss(updated_topo, {loss});
+    // OpRefList fw_topo, bw_topo;
+    // std::tie(fw_topo, bw_topo) = disentangle_forward_and_backward_ops(updated_topo);
 
-  // split into fw_topo and bw_topo
-  OpRefList fw_topo, bw_topo;
-  std::tie(fw_topo, bw_topo) = disentangle_forward_and_backward_ops_by_loss(updated_topo, {loss});
-  // OpRefList fw_topo, bw_topo;
-  // std::tie(fw_topo, bw_topo) = disentangle_forward_and_backward_ops(updated_topo);
+    // get local_fw_topo and local_bw_topo
+    // ops to substitute comm_op is in the same placement_group, but in the different placement
+    OpRefList local_fw_topo, local_bw_topo, local_topo;
+    auto get_local_topo = [&](OpRefList& _topo, OpRefList& _local_topo) {
+      // move p2p send op to topo tail
+      OpRefList send_op_list;
+      OpRefList recv_op_list;
+      OpRefList compute_op_list;
+      OpRefList update_op_list;
+      for (auto& op_ref : _topo) {
+        if (op_ref.get()->placement() == local_device) {
+          if (is_peer_to_peer_send_op(op_ref)) {
+            send_op_list.push_back(op_ref);
+          } else if (is_peer_to_peer_recv_op(op_ref)) {
+            recv_op_list.push_back(op_ref);
+          } else {
+            if (is_all_reduce_op(op_ref) && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0))) {
+              update_op_list.push_back(op_ref);
+            } else if (is_optimizer_update_op(op_ref)) {
+              update_op_list.push_back(op_ref);
+            } else if (is_group_op(op_ref)) {
+              update_op_list.push_back(op_ref);
+            } else {
+              compute_op_list.push_back(op_ref);
+            }
+          }
+        }
+      }
+      _local_topo.insert(_local_topo.end(), recv_op_list.begin(), recv_op_list.end());
+      _local_topo.insert(_local_topo.end(), compute_op_list.begin(), compute_op_list.end());
+      _local_topo.insert(_local_topo.end(), send_op_list.begin(), send_op_list.end());
+      // move move allreduce & udpate & group op after pipeline p2p, to make p2p & allreduce overlap
+      _local_topo.insert(_local_topo.end(), update_op_list.begin(), update_op_list.end());
+    };
+    get_local_topo(fw_topo, local_fw_topo);
+    get_local_topo(bw_topo, local_bw_topo);  
 
-  // get local_fw_topo and local_bw_topo
-  // ops to substitute comm_op is in the same placement_group, but in the different placement
-  OpRefList local_fw_topo, local_bw_topo, local_topo;
-  auto get_local_topo = [&](OpRefList& _topo, OpRefList& _local_topo) {
-    // move p2p send op to topo tail
-    OpRefList send_op_list;
-    OpRefList recv_op_list;
-    OpRefList compute_op_list;
-    for (auto& op_ref : _topo) {
-      if (op_ref.get()->placement() == local_device) {
-        if (is_peer_to_peer_send_op(op_ref)) {
-          send_op_list.push_back(op_ref);
-        } else if (is_peer_to_peer_recv_op(op_ref)) {
-          recv_op_list.push_back(op_ref);
+    local_topo.reserve(local_fw_topo.size() + local_bw_topo.size());
+    local_topo.insert(local_topo.end(), local_fw_topo.begin(), local_fw_topo.end());
+    local_topo.insert(local_topo.end(), local_bw_topo.begin(), local_bw_topo.end());
+    // HT_LOG_DEBUG << local_device << ": local fw topo: " << local_fw_topo; 
+    // HT_LOG_DEBUG << local_device << ": local bw topo: " << local_bw_topo;
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo end...";
+
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get accumulated tensor & ops begin...";
+    // some special ops shouldn't be updated before grad accumulation finished
+    TensorIdSet accumulated_tensor;
+    OpRefDeque accumulated_ops_deque;
+    for (auto& op_ref : local_bw_topo) {
+      auto& op = op_ref.get();
+      // 1. compute_op -(local_grad)-> update_op (local_group)
+      // 2. compute_op -(local_grad)-> allreduce -> update_op (local_group)
+      // 3. compute_op -(grad_in_group2)-> p2p_send (group1)  p2p_recv -> update_op (group2)
+      // 4. compute_op -(grad_in_group2)-> allreduce -> p2p_send (goup1)  p2p_recv -> update_op (group2)
+      if (is_optimizer_update_op(op)) {
+        Tensor& grad = op->input(1);
+        Operator& grad_op = grad->producer();
+        if (is_all_reduce_op(grad_op)) {
+          accumulated_tensor.insert(grad_op->input(0)->id());
+          accumulated_ops_deque.push_back(std::ref(grad_op));
+        } else if (is_peer_to_peer_recv_op(grad_op)) {
+          accumulated_ops_deque.push_back(std::ref(grad_op));
         } else {
-          compute_op_list.push_back(op_ref);
+          accumulated_tensor.insert(grad->id());
+          accumulated_ops_deque.push_back(op_ref);
+        }
+      } else if (is_peer_to_peer_send_op(op)) {
+        for (auto& consumer_op : op->out_dep_linker()->consumers()) {
+          if (is_optimizer_update_op(consumer_op)) {
+            Tensor& grad = op->input(0);
+            Operator& grad_op = grad->producer();
+            if (is_all_reduce_op(grad_op)) {
+              accumulated_tensor.insert(grad_op->input(0)->id());
+              accumulated_ops_deque.push_back(std::ref(grad_op));
+            } else {
+              accumulated_tensor.insert(grad->id());
+              accumulated_ops_deque.push_back(op_ref);
+            }
+            break;
+          }
         }
       }
     }
-    _local_topo.insert(_local_topo.end(), recv_op_list.begin(), recv_op_list.end());
-    _local_topo.insert(_local_topo.end(), compute_op_list.begin(), compute_op_list.end());
-    _local_topo.insert(_local_topo.end(), send_op_list.begin(), send_op_list.end());
-  };
-  get_local_topo(fw_topo, local_fw_topo);
-  get_local_topo(bw_topo, local_bw_topo);  
+    OpIdSet accumulated_ops;
+    while (!accumulated_ops_deque.empty()) {
+      auto& op_ref = accumulated_ops_deque.front();
+      accumulated_ops_deque.pop_front();
+      accumulated_ops.insert(op_ref.get()->id());
+      Operator::for_each_output_tensor(op_ref.get(), [&](const Tensor& output) {
+        for (auto& consumer_op : output->consumers()) {
+          if (consumer_op.get()->placement() == local_device) {
+            accumulated_ops_deque.push_back(consumer_op);
+          }
+        }
+      });
+    }
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get accumulated tensor & ops end...";
+    // update & cached execute plan 
+    _execute_plan.update(local_fw_topo, local_bw_topo, local_topo, accumulated_tensor, accumulated_ops);
+    // sync globally
+    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+    comm_group->Barrier(true);
+  }
+  TOK(run);
+  HT_LOG_DEBUG << local_device << ": prepare execution plan cost time = " << COST_MSEC(run) << " ms."; 
 
-  local_topo.reserve(local_fw_topo.size() + local_bw_topo.size());
-  local_topo.insert(local_topo.end(), local_fw_topo.begin(), local_fw_topo.end());
-  local_topo.insert(local_topo.end(), local_bw_topo.begin(), local_bw_topo.end());
-  HT_LOG_DEBUG << local_device << ": local fw topo: " << local_fw_topo << "\nlocal bw topo: " << local_bw_topo;
+  // calculate params
+  bool is_calculate_params = false;
+  if (is_calculate_params) {
+    int64_t params_size = 0;
+    for (auto& op : _execute_plan.local_topo) {
+      if (is_variable_op(op)) {
+        params_size += op.get()->output(0)->numel();
+        // HT_LOG_INFO << local_device << ": variable op " << op << ", shape = " << op.get()->output(0)->shape();
+      }
+    }
+    HT_LOG_INFO << local_device << ": params_size = " << params_size;
+  }
 
-  // // calculate params
-  // int64_t params_size = 0;
-  // for (auto& op : local_topo) {
-  //   if (is_variable_op(op)) {
-  //     params_size += op.get()->output(0)->numel();
-  //     HT_LOG_INFO << local_device << ": variable op " << op << ", shape = " << op.get()->output(0)->shape();
-  //   }
-  // }
-  // HT_LOG_INFO << local_device << ": params_size = " << params_size;
+  HT_LOG_DEBUG << local_device << ": 0. Create Execution Plan [end]";
 
   HT_LOG_DEBUG << local_device << ": 1. pipeline init[begin]";
   // pipeline compute
   // runtimectx for m micro batches
   std::vector<RuntimeContext> runtime_ctx_list(num_micro_batches, 
-    RuntimeContext(local_topo.size()));
+    RuntimeContext(_execute_plan.local_topo.size()));
   // tensor data for m micro batches
   std::vector<Tensor2NDArrayMap> tensor2data_list(num_micro_batches);
   // tensor degrees for m micro batches, if degree=0 && not in fetches, free memory for this tensor
@@ -1014,7 +1121,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   // get consume times for each tensor
   Tensor2IntMap tensor2degrees;
-  for (auto& op_ref : local_topo) {
+  for (auto& op_ref : _execute_plan.local_topo) {
     for (auto& input : op_ref.get()->inputs()) {
       tensor2degrees[input->id()]++;
     }
@@ -1022,63 +1129,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   for (int i = 0; i < num_micro_batches; i++) {
     tensor2degrees_list[i] = tensor2degrees;
   }
-
-  // some special ops shouldn't be updated before grad accumulation finished
-  TensorIdSet accumulated_tensor;
-  OpRefDeque accumulated_ops_deque;
-  for (auto& op_ref : local_bw_topo) {
-    auto& op = op_ref.get();
-    // 1. compute_op -(local_grad)-> update_op (local_group)
-    // 2. compute_op -(local_grad)-> allreduce -> update_op (local_group)
-    // 3. compute_op -(grad_in_group2)-> p2p_send (group1)  p2p_recv -> update_op (group2)
-    // 4. compute_op -(grad_in_group2)-> allreduce -> p2p_send (goup1)  p2p_recv -> update_op (group2)
-    if (is_optimizer_update_op(op)) {
-      Tensor& grad = op->input(1);
-      Operator& grad_op = grad->producer();
-      if (is_all_reduce_op(grad_op)) {
-        accumulated_tensor.insert(grad_op->input(0)->id());
-        accumulated_ops_deque.push_back(std::ref(grad_op));
-      } else if (is_peer_to_peer_recv_op(grad_op)) {
-        accumulated_ops_deque.push_back(std::ref(grad_op));
-      } else {
-        accumulated_tensor.insert(grad->id());
-        accumulated_ops_deque.push_back(op_ref);
-      }
-    } else if (is_peer_to_peer_send_op(op)) {
-      for (auto& consumer_op : op->out_dep_linker()->consumers()) {
-        if (is_optimizer_update_op(consumer_op)) {
-          Tensor& grad = op->input(0);
-          Operator& grad_op = grad->producer();
-          if (is_all_reduce_op(grad_op)) {
-            accumulated_tensor.insert(grad_op->input(0)->id());
-            accumulated_ops_deque.push_back(std::ref(grad_op));
-          } else {
-            accumulated_tensor.insert(grad->id());
-            accumulated_ops_deque.push_back(op_ref);
-          }
-          break;
-        }
-      }
-    }
-  }
-  OpIdSet accumulated_ops;
-  while (!accumulated_ops_deque.empty()) {
-    auto& op_ref = accumulated_ops_deque.front();
-    accumulated_ops_deque.pop_front();
-    accumulated_ops.insert(op_ref.get()->id());
-    Operator::for_each_output_tensor(op_ref.get(), [&](const Tensor& output) {
-      for (auto& consumer_op : output->consumers()) {
-        if (consumer_op.get()->placement() == local_device) {
-          accumulated_ops_deque.push_back(consumer_op);
-        }
-      }
-    });
-  }
   HT_LOG_DEBUG << local_device << ": 1. pipeline init[end]";
 
   HT_LOG_DEBUG << local_device << ": 2. compute[begin]";
   int num_stages = _stages.size();
-  bool is_inference = (bw_topo.size() == 0);
+  bool is_inference = (_execute_plan.local_bw_topo.size() == 0);
   HT_LOG_DEBUG << local_device << ": num_stages = " << num_stages 
     << ", num_micro_batches = " << num_micro_batches << ", is_inference = " 
     << is_inference;
@@ -1107,13 +1162,16 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
     auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
     if (is_forward) {
-      ComputeFunc(micro_batch_id, local_fw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
-                  false, accumulated_tensor, accumulated_ops, feed_dict, fetches, fetch_indices, is_continuous_p2p);
+      ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx, 
+                  tensor2data, tensor2degrees, grad_accumulation, false, 
+                  _execute_plan.accumulated_tensor, _execute_plan.accumulated_ops, 
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
     } else {
       bool grad_accumulation_finished = (i == tasks.size() - 1);
-      ComputeFunc(micro_batch_id, local_bw_topo, runtime_ctx, tensor2data, tensor2degrees, grad_accumulation,
-                  grad_accumulation_finished, accumulated_tensor, accumulated_ops, feed_dict, 
-                  fetches, fetch_indices, is_continuous_p2p);
+      ComputeFunc(micro_batch_id, _execute_plan.local_bw_topo, runtime_ctx, 
+                  tensor2data, tensor2degrees, grad_accumulation, grad_accumulation_finished, 
+                  _execute_plan.accumulated_tensor, _execute_plan.accumulated_ops, 
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
     }
     if (is_forward) {
       HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward]";
@@ -1122,8 +1180,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
   }
   if (is_continuous_p2p) {
-    ncclGroupEnd(); // sometimes p2p will exists in the tail of pipeline topo, need add group end here
-    CudaStreamSynchronize(hetu::impl::CUDAStream(Stream(hetu::impl::comm::GetLocalDevice(), kP2PStream)));
+    ncclGroupEnd();
+    auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
+    event->Record(Stream(local_device, kP2PStream));
+    event->Block(Stream(local_device, kComputingStream));
+    _p2p_events.emplace_back(std::move(event));
   }
   HT_LOG_DEBUG << local_device << ": 2. compute[end]";
 
@@ -1131,14 +1192,14 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   NDArrayList results(fetches.size(), NDArray());
   std::unordered_set<OpId> to_sync_op_ids;
   to_sync_op_ids.reserve(fetches.size());
-  for (auto& op_ref : local_topo) {
+  for (auto& op_ref : _execute_plan.local_topo) {
     auto& op = op_ref.get();
     Operator::for_each_output_tensor(op, [&](const Tensor& output) {
       auto it = fetch_indices.find(output->id());
       if (it != fetch_indices.end()) {
         if (output->output_id() >= 0) {
-          if (is_variable_op(op) || accumulated_ops.find(op) != accumulated_ops.end() 
-            || accumulated_tensor.find(output->id()) != accumulated_tensor.end()) {
+          if (is_variable_op(op) || _execute_plan.accumulated_ops.find(op) != _execute_plan.accumulated_ops.end() 
+            || _execute_plan.accumulated_tensor.find(output->id()) != _execute_plan.accumulated_tensor.end()) {
             results[it->second] = tensor2data_list[num_micro_batches - 1][output->id()];
           } else if (is_placeholder_op(op)) {
             auto feed_it = feed_dict.find(output->id());
@@ -1151,7 +1212,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             for (auto& tensor2data : tensor2data_list) {
               result.push_back(tensor2data[output->id()]);
             }
-            HT_LOG_TRACE << "result:" << result;
             results[it->second] = NDArray::cat(result);
           }
         }
@@ -1165,16 +1225,33 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     // sync_ops.push_back(_op_indexing[op_id]);
   }
   // HT_LOG_DEBUG << local_device << ": sync ops = " << sync_ops;
+  for (size_t i = 0; i < results.size(); i++)
+    HT_LOG_TRACE << "results[" << i << "]: " << results[i];
   HT_LOG_DEBUG << local_device << ": 3. get results[end]";
 
+  TOK(run);
+  HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)
+               << " ms";
+  
   // get op execute time, sort and analysis
   bool is_analysis_perf = false;
-  if (local_device.index() == 0 && is_analysis_perf) {
-    std::vector<std::pair<OpId, int64_t>> op_execute_time;
-    // HT_LOG_INFO << local_device << ": local_topo = " << local_topo;
-    for (auto& op_ref : local_topo) {
+  if (is_analysis_perf) {
+    TIK(free);
+    runtime_ctx_list.clear();
+    tensor2data_list.clear();
+    grad_accumulation.clear();
+    TOK(free);
+    HT_LOG_DEBUG << local_device
+                 << ": free temporary memory time = " << COST_MSEC(free)
+                 << " ms";
+
+    std::vector<std::pair<int64_t, int64_t>> op_execute_time;
+    for (auto& op_ref : _execute_plan.local_topo) {
       auto& op = op_ref.get();
       if (is_placeholder_op(op) || is_variable_op(op)) {
+        continue;
+      }
+      if (is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) {
         continue;
       }
       // get time cost for all micro batches
@@ -1184,60 +1261,75 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       }
       op_execute_time.push_back({op->id(), time_cost});
     }
+    // p2p events
+    for (int i = 0; i < _p2p_events.size() / 2; i++) {
+      auto& start = _p2p_events[2 * i];
+      auto& end = _p2p_events[2 * i + 1];
+      // record the time of p2p for each pipeline micro-batch
+      op_execute_time.push_back({-(i+1), end->TimeSince(*start)});
+    }
     std::sort(op_execute_time.begin(), op_execute_time.end(), [](
-      std::pair<OpId, int64_t>& op_t1, std::pair<OpId, int64_t>& op_t2) {
+      std::pair<int64_t, int64_t>& op_t1, std::pair<int64_t, int64_t>& op_t2) {
         return op_t1.second > op_t2.second;
       });
     double compute_time = 0;
-    double p2p_time = 0;
+    double tp_p2p_time = 0;
+    double pp_p2p_time = 0;
     double collective_time = 0;
     double blocking_time = 0;
     double other_time = 0;
     std::ostringstream out;
     out << "Op Execute Time: ";
     for (auto& op_time : op_execute_time) {
-      auto op = _op_indexing[op_time.first];
-      if (is_all_reduce_op(op)) {
-        auto allreduce_op = op;
-        auto& allreduce_impl = reinterpret_cast<AllReduceOpImpl&>(allreduce_op->body());
-        out << std::endl << local_device << ": " 
-            << allreduce_op->input(0) << ", shape = "
-            << allreduce_op->input(0)->shape() << ", type = "
-            << allreduce_op->input(0)->dtype() << ", comm group = [";
-        auto comm_group = allreduce_impl.comm_group();
-        for (auto device : comm_group.devices()) {
-          out << comm_group.get_index(device) << ", ";
+      if (op_time.first >= 0) {
+        auto op = _op_indexing[op_time.first];
+        if (is_all_reduce_op(op)) {
+          auto allreduce_op = op;
+          auto& allreduce_impl = reinterpret_cast<AllReduceOpImpl&>(allreduce_op->body());
+          out << std::endl << local_device << ": " 
+              << allreduce_op->input(0) << ", shape = "
+              << allreduce_op->input(0)->shape() << ", type = "
+              << allreduce_op->input(0)->dtype() << ", comm group = [";
+          auto comm_group = allreduce_impl.comm_group();
+          for (auto device : comm_group.devices()) {
+            out << comm_group.get_index(device) << ", ";
+          }
+          out << "]";
+        } else {
+          if (op->num_inputs() > 0)
+          out << std::endl << local_device << ": " 
+              << op->input(0) << ", shape = "
+              << op->input(0)->shape() << ", type = "
+              << op->input(0)->dtype();        
         }
-        out << "]";
+        out << std::endl << local_device << ": " << op << ": " << op_time.second * 1.0 / 1e6 << " ms";
+        if (op->stream_index() == kComputingStream) {
+          compute_time += op_time.second * 1.0 / 1e6;
+        } else if (op->stream_index() == kP2PStream) {
+          tp_p2p_time += op_time.second * 1.0 / 1e6;
+        } else if (op->stream_index() == kCollectiveStream) {
+          collective_time += op_time.second * 1.0 / 1e6;
+        } else if (op->stream_index() == kBlockingStream) {
+          blocking_time += op_time.second * 1.0 / 1e6;
+        } else {
+          other_time += op_time.second * 1.0 / 1e6;
+        }        
       } else {
-        if (op->num_inputs() > 0)
-        out << std::endl << local_device << ": " 
-            << op->input(0) << ", shape = "
-            << op->input(0)->shape() << ", type = "
-            << op->input(0)->dtype();        
-      }
-      out << std::endl << local_device << ": " << op << ": " << op_time.second * 1.0 / 1e6 << " ms";
-
-      if (op->stream_index() == kComputingStream) {
-        compute_time += op_time.second * 1.0 / 1e6;
-      } else if (op->stream_index() == kP2PStream) {
-        p2p_time += op_time.second * 1.0 / 1e6;
-      } else if (op->stream_index() == kCollectiveStream) {
-        collective_time += op_time.second * 1.0 / 1e6;
-      } else if (op->stream_index() == kBlockingStream) {
-        blocking_time += op_time.second * 1.0 / 1e6;
-      } else {
-        other_time += op_time.second * 1.0 / 1e6;
+        out << std::endl << local_device << ": batch p2p " << -op_time.first << " : " << op_time.second * 1.0 / 1e6 << " ms";
+        pp_p2p_time += op_time.second * 1.0 / 1e6;
       }
     }
     HT_LOG_INFO << local_device << ": " 
+                << "\ntotal run time: " << COST_MSEC(run) << " ms, "
                 << "compute time: " << compute_time << " ms, "
-                << "p2p time: " << p2p_time << " ms, "
+                << "tp p2p time: " << tp_p2p_time << " ms, "
+                << "pp p2p time: " << pp_p2p_time << " ms, "
                 << "collective time: " << collective_time << " ms, "
                 << "blocking time: " << blocking_time << " ms, "
                 << "other time: " << other_time << " ms" << std::endl
                 << out.str();
   }
+  _p2p_events.clear();
   return results;
 }
 

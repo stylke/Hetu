@@ -35,6 +35,7 @@ void DataTransferCpu(const NDArray& from, NDArray& to, const Stream& stream) {
     }
   },
   "DataTransfer");
+  NDArray::MarkUsedBy({from, to}, stream);
 }
 
 } // namespace impl

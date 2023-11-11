@@ -36,6 +36,7 @@ void MatDotCuda(const NDArray& inputA, const NDArray& inputB, NDArray& output,
         inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size, size2,
         output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({inputA, inputB, output}, stream);
 }
 
 } // namespace impl

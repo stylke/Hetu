@@ -12,6 +12,8 @@
 namespace hetu {
 namespace graph {
 
+using AutoCastId = uint64_t;
+
 class AutoCast {
 public:
   AutoCast(bool enabled = true) : _enabled(enabled) {
@@ -77,10 +79,7 @@ private:
 //TODO:currently we only support autocast on GPU.
   bool _gpu_enabled;
 
-  static AutoCastId _next_autocast_id() {
-    static std::atomic<AutoCastId> _global_autocast_id{0};
-    return _global_autocast_id++;
-  }
+  static AutoCastId _next_autocast_id();
   
 protected:
   static void InitOnce() {

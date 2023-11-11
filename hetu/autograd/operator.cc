@@ -3,6 +3,7 @@
 #include "hetu/autograd/ops/Communicate.h"
 #include "hetu/autograd/ops/Group.h"
 #include "hetu/autograd/ops/Variable.h"
+#include "hetu/impl/stream/CPUStream.h"
 #include "hetu/impl/stream/CUDAStream.h"
 
 namespace hetu {
@@ -253,8 +254,8 @@ bool OperatorDef::DoPlaceToLocalDevice(const Device& placement,
     _start = std::make_shared<hetu::impl::CUDAEvent>(_placement);
     _stop = std::make_shared<hetu::impl::CUDAEvent>(_placement);
   } else {
-    _start = std::make_shared<DefaultEvent>(_placement);
-    _stop = std::make_shared<DefaultEvent>(_placement);
+    _start = std::make_shared<hetu::impl::CPUEvent>(_placement);
+    _stop = std::make_shared<hetu::impl::CPUEvent>(_placement);
   }
   
   // 顺便给tensor的distributed_states也增加placement的attribute

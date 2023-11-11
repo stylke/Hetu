@@ -62,6 +62,7 @@ void MatMulCpu(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
       engine_stream.wait();
     },"Matmul");
   });
+  NDArray::MarkUsedBy({a, b, output}, stream);
 }
 
 } // namespace impl

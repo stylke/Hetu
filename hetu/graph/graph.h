@@ -240,10 +240,7 @@ class Graph {
   std::atomic<GraphId> _next_tensor_id{0};
 
  private:
-  static GraphId _next_graph_id() {
-    static std::atomic<GraphId> _global_graph_id{0};
-    return _global_graph_id++;
-  }
+  static GraphId _next_graph_id();
 
   /******************************************************
    * Static helper functions
@@ -635,6 +632,8 @@ inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_
 
   return {fw_ops, bw_ops};
 }
+
+std::ostream& operator<<(std::ostream&, const Graph&);
 
 // variable related APIs that need to used in python
 

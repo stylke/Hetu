@@ -272,6 +272,7 @@ void SoftmaxCuda(const NDArray& input, NDArray& output, int64_t dim, const Strea
           );
       }); 
   }
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -339,6 +340,7 @@ void SoftmaxGradientCuda(const NDArray& input_Y, const NDArray& output_grad,
         input_grad->data_ptr<spec_t>(),
         before_dim_size, reduce_dim_size, after_dim_size);
     });
+  NDArray::MarkUsedBy({input_Y, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

@@ -52,6 +52,7 @@ void BatchMatMulCuda(const NDArray& a, bool trans_a, const NDArray& b,
         batchCount);
     }
   });
+  NDArray::MarkUsedBy({a, b, output}, stream);
 }
 
 } // namespace impl

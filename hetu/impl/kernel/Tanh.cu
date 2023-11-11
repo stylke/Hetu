@@ -42,6 +42,7 @@ void TanhCuda(const NDArray& input, NDArray& output, const Stream& stream) {
     tanh_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
       input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>());
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void TanhGradientCuda(const NDArray& input, const NDArray& output_grad,
@@ -66,6 +67,7 @@ void TanhGradientCuda(const NDArray& input, const NDArray& output_grad,
         input->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(), size,
         input_grad->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

@@ -79,6 +79,7 @@ void PowCpu(const NDArray& input, double exponent, NDArray& output,
         engine_stream.wait();
       },"Pow");
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

@@ -43,6 +43,7 @@ void OnehotCuda(const NDArray& input, size_t num_classes, NDArray& output,
       onehot_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), size, last_dim, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

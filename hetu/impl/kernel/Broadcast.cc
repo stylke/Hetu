@@ -48,6 +48,7 @@ void BroadcastCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       },
       "Broadcast");     
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void BroadcastGradientCpu(const NDArray& input, NDArray& output,
@@ -71,6 +72,7 @@ void BroadcastGradientCpu(const NDArray& input, NDArray& output,
       },
       "BroadcastGradient");     
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl
