@@ -38,3 +38,5 @@ set(DNNL_BUILD)
 
 # if you have a protoc in conda bin, ignore `/path/to/anaconda3/bin`
 set(CMAKE_IGNORE_PATH)
+
+set(FLASH_ROOT)
