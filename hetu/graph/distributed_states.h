@@ -55,6 +55,10 @@ class DistributedStates {
     return _order[i];
   }
 
+  bool has_placement_group() const {
+    return !_placement_group.empty();
+  }
+
   const DeviceGroup& get_placement_group() const {
     return _placement_group;
   }

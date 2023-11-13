@@ -70,7 +70,7 @@ HTShapeList LinearOpImpl::DoInferShape(Operator& op,
   const HTShape& b = input_shapes.at(1);
   HT_ASSERT(a.size() == 2 && b.size() == 2 &&
             a.at(trans_a() ? 0 : 1) == b.at(trans_b() ? 1 : 0))
-    << "Invalid input shapes for " << type() << ":"
+    << "Invalid input shapes for " << op << ":"
     << " (shape_a) " << a << " (shape_b) " << b << " (transpose_a) "
     << trans_a() << " (transpose_b) " << trans_b();
   return {{a.at(trans_a() ? 1 : 0), b.at(trans_b() ? 0 : 1)}};

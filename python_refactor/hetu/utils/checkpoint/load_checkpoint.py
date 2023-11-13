@@ -46,7 +46,7 @@ def load_state_dict(checkpoint_file):
     return torch.load(checkpoint_file, map_location="cpu")
 
 
-def load_checkpoint(model, path, config=None, device_index=None):
+def load_checkpoint(model, path, config=None, local_device=None):
     
     # Load from a PyTorch checkpoint
     # TODO: more than one file to load (if the model is quite big)
@@ -70,7 +70,7 @@ def load_checkpoint(model, path, config=None, device_index=None):
         state_dict[k] = state_dict[k].numpy()
         
     # Time to load the checkpoint
-    model.load_state_dict(state_dict, device_index=device_index)
+    model.load_state_dict(state_dict, local_device=local_device)
     
     return model
     

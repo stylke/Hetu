@@ -58,18 +58,12 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta) {
   Graph::InitOnce();
   if (inputs.empty() && op_meta.extra_deps.empty()) {
-    if (is_placeholder_op(*body)) {
-      HT_LOG_TRACE << "Make placeholder op (use default_define_and_run_graph)";
-      return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
-                  Graph::get_default_define_and_run_graph());
-    } else {
-      HT_VALUE_ERROR_IF(Graph::_cur_graph_ctx.empty())
-        << "The target graph must be explicitly passed or enqueued to ctx "
-        << "when making a new op with zero inputs";
-      HT_LOG_TRACE << "Make variable op on a " << Graph::GetGraph(Graph::_cur_graph_ctx.top()).type() << " graph";
-      return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
-                    Graph::GetGraph(Graph::_cur_graph_ctx.top()));
-    }
+    HT_VALUE_ERROR_IF(Graph::_cur_graph_ctx.empty())
+      << "The target graph must be explicitly passed or enqueued to ctx "
+      << "when making a new op with zero inputs";
+    HT_LOG_TRACE << "Make variable op on a " << Graph::GetGraph(Graph::_cur_graph_ctx.top()).type() << " graph";
+    return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
+                  Graph::GetGraph(Graph::_cur_graph_ctx.top()));
   } else {
     GraphId target_graph_id = std::numeric_limits<GraphId>::max();
     bool input_graph_changed = false;
@@ -150,7 +144,8 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       it->second.push_back(filled_grads[i]);
   }
 
-  auto reduce_grad = [](const TensorList& unreduced_grads) -> Tensor {
+  // the fw_op_id is also needed for the intermediate op
+  auto reduce_grad = [](const OpId& fw_op_id, const TensorList& unreduced_grads) -> Tensor {
     TensorList filtered;
     filtered.reserve(unreduced_grads.size());
     for (const auto& grad : unreduced_grads)
@@ -185,9 +180,11 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
           partial_grad_list.push_back(partial_grad);
         }
         // if allreduce group is different between input grads,
-        // then assert error in state deduce process.
+        // it automatically turns to p2p + SumOp + allreduce (p2p will be added when instantiating).
         Tensor partial_grad_sum = MakeSumOp(partial_grad_list, OpMeta().set_name("sum_op_for_partial_grad"));
         partial_grad_sum->set_is_grad(true);
+        // an intermediate op, remember to set the fw_op_id as well!
+        partial_grad_sum->producer()->set_fw_op_id(fw_op_id);
         DistributedStates ds_dst = filtered[0]->get_distributed_states();
         grad_sum = MakeCommOp(partial_grad_sum, ds_dst, OpMeta().set_name("comm_op_after_partial_grad_sum"));
       } else {
@@ -206,7 +203,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
     if (op->num_outputs() > 0) {
       grad_outputs.reserve(op->num_outputs());
       for (auto& output : op->outputs()) {
-        auto grad = reduce_grad(tensor_to_grads[output->id()]);
+        auto grad = reduce_grad(op->id(), tensor_to_grads[output->id()]);
         tensor_to_reduced_grad[output->id()] = grad;
         grad_outputs.push_back(grad);
       }
@@ -227,7 +224,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         Tensor final_grad = grad_inputs[i];
         if (ds_grad.is_valid()) {
           // HT_LOG_DEBUG << local_device << ": " << "grad_op: " << grad_op << ": states: " << ds_grad.ds_info() << ", shape: " << grad_inputs[i]->shape();
-          if (ds_grad.get_dim(-2) > 1) { // partial->duplicate
+          if (ds_grad.get_dim(-2) > 1) { // partial->duplicate to sync the gradients for dp
             int32_t device_num = ds_grad.get_device_num();
             std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
             std::unordered_map<int32_t, int32_t> res_states = ds_grad.combine_states(src2dst);

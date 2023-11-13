@@ -14,14 +14,10 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   Device placement = op->eager_device();
   if (placement.is_undetermined()) {
       if (op->op_indicator() == VARIABLE_OP) {
-      HT_LOG_TRACE << "Eager instantiation and execution 2";
-      HT_LOG_TRACE << typeid(op->body()).name();
-      const auto& opimpl = dynamic_cast<const VariableOpImpl&>(op->body());
-      HT_LOG_TRACE << "Eager instantiation and execution 3";
+      const auto& opimpl = reinterpret_cast<const VariableOpImpl&>(op->body());
       placement = opimpl.device();
     }
   }
-  HT_LOG_TRACE << "Eager instantiation and execution 4";
   if (placement.is_undetermined()) {
     if (op->num_inputs() > 0) {
       placement = op->input(0)->device();
@@ -29,7 +25,6 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
       placement = Device(kCPU);
     }
   }
-  HT_LOG_TRACE << "Eager instantiation and execution 5";
   StreamIndex stream_id = get_suggested_stream_index(op);
 
   HT_LOG_TRACE << "Instantiating op " << op << " (placement=" << placement

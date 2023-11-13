@@ -298,7 +298,7 @@ PyObject* PyTensor_reset_data(PyTensor* self, PyObject* args, PyObject* kwargs) 
   if (parsed_args.signature_index() == 0) {
     auto* array_obj = parsed_args.get_numpy_array(0);
     ResetVariableData(self->tensor, NDArrayFromNumpy(array_obj));
-    HT_LOG_TRACE << "ResetVariableData successfully.";
+    // HT_LOG_TRACE << "ResetVariableData successfully.";
     Py_RETURN_BOOLEAN_COND(true);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -316,7 +316,7 @@ PyObject* PyTensor_get_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     auto ret = GetDetachedVariableData(self->tensor);
-    HT_LOG_TRACE << "GetDetachedVariableData successfully.";
+    // HT_LOG_TRACE << "GetDetachedVariableData successfully.";
     return NDArrayToNumpy(ret, false);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -324,6 +324,24 @@ PyObject* PyTensor_get_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
   }
   HT_PY_FUNC_END
 }
+
+PyObject* PyTensor_get_device_group(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "get_device_group()"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    auto ret = GetVariableDeviceGroup(self->tensor);
+    // HT_LOG_TRACE << "GetVariableDeviceGroup successfully.";
+    return PyDeviceGroup_New(ret);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
 
 PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
@@ -438,6 +456,7 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"to", (PyCFunction) PyTensor_data_transfer, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"reset_data", (PyCFunction) PyTensor_reset_data, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_data", (PyCFunction) PyTensor_get_data, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"get_device_group", (PyCFunction) PyTensor_get_device_group, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {nullptr}

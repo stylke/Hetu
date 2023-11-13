@@ -8,6 +8,9 @@ namespace graph {
 Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
                                          TensorList inputs, OpMeta op_meta) {
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
+  if (!op_meta.device_group.empty() && std::find(_device_groups.begin(), _device_groups.end(), op_meta.device_group) == _device_groups.end())
+    _device_groups.push_back(op_meta.device_group);
+  // HT_LOG_TRACE << name() << " make op: " << op_meta.name;
   return MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
 }
 
@@ -27,8 +30,8 @@ NDArray DefineAndRunGraph::GetDetachedVariableDataInner(const Tensor& tensor) {
   auto it_1 = _tensor_to_exec_tensor_mapping.find(tensor->id());
   if (it_1 == _tensor_to_exec_tensor_mapping.end()) {
     // The op is not instantiated yet.
-    // TODO: store the data on different devices, for now, store all on CPU.
-    auto ret = NDArray::empty(tensor->shape(), Device(kCPU), tensor->dtype());
+    // Question: store the data on different devices? For now, store all on CPU and return.
+    auto ret = NDArray::empty(tensor->shape(), Device(kCPU), tensor->dtype(), kBlockingStream);
     auto it_2 = _add_on_inits.find(tensor->id());
     if (it_2 != _add_on_inits.end()) {
       HT_LOG_TRACE << "The data is reset, but not instantiated yet, so getting the data of the variable from its initializer.";
@@ -40,13 +43,27 @@ NDArray DefineAndRunGraph::GetDetachedVariableDataInner(const Tensor& tensor) {
       else
         dynamic_cast<VariableOpImpl&>(tensor->producer()->body()).initializer().Init(ret);  
     }
+    Stream stream(Device(kCPU), NDArray::DEFAULT_STREAM);
+    stream.Sync();
     return ret;
   } else {
     // The op has been instantiated. Let the executable graph handle it.
-    HT_LOG_TRACE << "Fetch the data from the executable graph.";
-    auto tmp = Graph::GetVariableData(it_1->second);
-    return NDArray::to(tmp, Device(kCPU));
+    if (!it_1->second->producer()->device_group().contains(impl::comm::GetLocalDevice())) {
+      HT_LOG_TRACE << "The data is not locate at local executable graph, return an empty NDArray.";
+      return NDArray::empty(tensor->shape(), Device(kCPU), tensor->dtype(), kBlockingStream);
+    }
+    auto ret = Graph::GetDetachedVariableData(it_1->second);
+    Stream stream(Device(kCPU), NDArray::DEFAULT_STREAM);
+    stream.Sync();
+    return ret;
   }  
+}
+
+DeviceGroup DefineAndRunGraph::GetVariableDeviceGroupInner(const Tensor& tensor) {
+  auto& device_group = tensor->producer()->device_group();
+  HT_RUNTIME_ERROR_IF(device_group.empty()) << "You are getting an empty device group, please ensure you have set "
+    << tensor->producer() << " a device group before!";
+  return device_group;
 }
 
 void DefineAndRunGraph::Instantiate() {
@@ -55,6 +72,9 @@ void DefineAndRunGraph::Instantiate() {
       Graph::_make_new_graph<ExecutableGraph>(name() + "_executable");
 
   Graph::push_graph_ctx(_exec_graph->id());
+
+  // assign pp stages
+  _exec_graph->set_stages(_device_groups);
 
   auto get_exec_input = [&](const Tensor& input) -> Tensor {
     auto it = _tensor_to_exec_tensor_mapping.find(input->id());
@@ -153,7 +173,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   exec_feed_dict.reserve(feed_dict.size());
   for (const auto& kv : feed_dict)
     exec_feed_dict[_tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;
-  auto& exec_loss = _tensor_to_exec_tensor_mapping[loss->id()];    
+  auto& exec_loss = _tensor_to_exec_tensor_mapping[loss->id()]; 
+  HT_LOG_TRACE << "_exec_graph start running..." ;
   return _exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches);
 }
 

@@ -1,7 +1,7 @@
 export HETU_INTERNAL_LOG_LEVEL=INFO
-export CUDA_VISIBLE_DEVICES=0,1,2,3 
-mpirun --allow-run-as-root -np 4 python inference_hetu_gpt_parallel.py \
+mpirun --allow-run-as-root -np 8 python inference_hetu_gpt_3d_parallel.py \
 --global_batch_size 4 \
+--num_micro_batches 2 \
 --dp 2 \
 --vocab_size 50257 \
 --hidden_size 768 \

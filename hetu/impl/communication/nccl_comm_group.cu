@@ -629,7 +629,7 @@ NCCLCommunicationGroup::GetOrCreate(const std::vector<int>& world_ranks,
                                     const Stream& stream) {
   HT_ASSERT(stream.device().is_cuda())
     << "The argument \"stream\" for "
-    << "MPICommunicationGroup::GetOrCreate "
+    << "NCCLCommunicationGroup::GetOrCreate "
     << "must be a CUDA stream. Got " << stream << ".";
   // Note: stream id could be -1, we shall shift it by one when accessing
   int stream_id = static_cast<int>(stream.stream_index());

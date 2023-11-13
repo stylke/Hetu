@@ -1,4 +1,5 @@
 #include "hetu/_binding/graph/distributed_states.h"
+#include "hetu/_binding/core/device.h"
 #include "hetu/_binding/utils/except.h"
 #include "hetu/_binding/utils/arg_parser.h"
 #include "hetu/_binding/utils/decl_utils.h"
@@ -74,6 +75,15 @@ PyObject* PyDistributedStates_order(PyDistributedStates* self) {
   HT_PY_FUNC_END
 }
 
+/*
+// deprecated
+PyObject* PyDistributedStates_placement_group(PyDistributedStates* self) {
+  HT_PY_FUNC_BEGIN
+  return PyDeviceGroup_New(self->distributed_states.get_placement_group());
+  HT_PY_FUNC_END
+}
+*/
+
 PyObject* PyDistributedStates_is_pure_duplicate(PyDistributedStates* self) {
   HT_PY_FUNC_BEGIN
   Py_RETURN_BOOLEAN_COND(self->distributed_states.check_pure_duplicate());
@@ -139,6 +149,7 @@ PyObject* PyDistributedStates_get_dup_group_index(PyDistributedStates* self, PyO
 PyGetSetDef PyDistributedStates_properties[] = {
   {PY_GET_SET_DEF_NAME("states"), (getter) PyDistributedStates_states, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("order"), (getter) PyDistributedStates_order, nullptr, nullptr, nullptr},
+  // {PY_GET_SET_DEF_NAME("placement_group"), (getter) PyDistributedStates_placement_group, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("is_pure_duplicate"), (getter) PyDistributedStates_is_pure_duplicate, nullptr, nullptr, nullptr},
   {nullptr}
 };

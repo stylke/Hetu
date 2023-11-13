@@ -53,6 +53,10 @@ class ExecutableGraph : public Graph {
     return GraphType::EXECUTABLE;
   }
 
+  void set_stages(const std::vector<DeviceGroup>& device_groups) {
+    _stages = device_groups;
+  }
+
  protected:
   std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
   GenerateGpipeSchedule(size_t num_stages, size_t num_micro_batches, bool is_inference);
@@ -87,6 +91,8 @@ class ExecutableGraph : public Graph {
                               const Initializer& init) override;
 
   NDArray& GetVariableDataInner(const Tensor& tensor) override;
+
+  NDArray GetDetachedVariableDataInner(const Tensor& tensor) override;
 
   NDArray& AllocVariableDataInner(
     const Tensor& tensor,

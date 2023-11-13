@@ -122,6 +122,7 @@ Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data,
 Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape, 
                               const DistributedStates& ds, int64_t local_idx,
                               DataType dtype, bool requires_grad, OpMeta op_meta) {
+  // auto placement_group = op_meta.device_group;
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
                            init, std::move(global_shape), ds, 
                            local_idx, dtype, requires_grad),
@@ -130,12 +131,18 @@ Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape,
     << "DistributedStates for ParallelVariableOp must be valid! got: " 
     << ds.ds_info();
   out->set_distributed_states(ds);
+  // deprecated
+  // If we set the placement group right now,
+  // we can load the checkpoint easier in 3D parallel situation.
+  // out->set_placement_group(placement_group); 
+  // HT_LOG_TRACE << "MakeParallelVariableOp, placement group is: " << out->placement_group();
   return out;
 }
 
 Tensor MakeParallelVariableOp(NDArray provided_data, const DistributedStates& ds, 
                               bool copy_provided_data, DataType dtype, 
                               bool requires_grad, OpMeta op_meta) {
+  // auto placement_group = op_meta.device_group;
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
                            provided_data, copy_provided_data, 
                            ds, dtype, requires_grad),
@@ -144,6 +151,11 @@ Tensor MakeParallelVariableOp(NDArray provided_data, const DistributedStates& ds
     << "DistributedStates for ParallelVariableOp must be valid! got: " 
     << ds.ds_info();
   out->set_distributed_states(ds);
+  // deprecated
+  // If we set the placement group right now,
+  // we can load the checkpoint easier in 3D parallel situation.
+  // out->set_placement_group(placement_group);
+  // HT_LOG_TRACE << "MakeParallelVariableOp, placement group is: " << out->placement_group();
   return out;  
 }
 

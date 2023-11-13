@@ -37,6 +37,26 @@ NDArray& ExecutableGraph::GetVariableDataInner(const Tensor& tensor) {
   return it->second;
 }
 
+NDArray ExecutableGraph::GetDetachedVariableDataInner(const Tensor& tensor) {
+  // Question: store the data on different devices? For now, store all on CPU and return.
+  auto it_1 = _preserved_data.find(tensor->id());
+  if (it_1 == _preserved_data.end()) {
+    auto it_2 = _add_on_inits.find(tensor->id());
+    // haven't alloc yet
+    if (it_2 != _add_on_inits.end()) {
+      auto ret = NDArray::empty(tensor->shape(), Device(kCPU), tensor->dtype(), kBlockingStream);
+      HT_LOG_TRACE << "The data is in executable graph, but not allocated yet, so getting the data of the variable from its initializer.";
+      it_2->second->Init(ret);
+      return ret;
+    }
+    else {
+      HT_RUNTIME_ERROR << "Cannot find data in executable graph for variable tensor " << tensor;
+    }
+  }
+  HT_LOG_TRACE << "Fetch the data from the executable graph.";
+  return NDArray::to(it_1->second, Device(kCPU), it_1->second->dtype(), kBlockingStream);
+}
+
 NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
                                                  const Initializer& init,
                                                  uint64_t seed,
@@ -113,6 +133,9 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         if (op->fw_op_id() != -1) {
           inferred = _op_indexing[op->fw_op_id()]->placement_group();
         } else {
+          // is it a proper assumption?
+          // i.e. attn_weights = ht.where(causal_mask, attn_weights, mask)
+          // while causal_mask is on g0 but attn_weights is expected to be on g1
           inferred = op->input(0)->placement_group();
         }
       }
@@ -127,9 +150,12 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     } else if (!is_group_op(op)) {
       stage_group = op->placement_group();
     }
+    // the stage groups may have a random order after topo sort
+    /*
     if (!stage_group.empty() && std::find(_stages.begin(), _stages.end(), stage_group) == _stages.end()) {
       _stages.push_back(stage_group);
     }
+    */
 
     // loss & grad should div by num_micro_batches when reduction type = MEAN!!! 
     if (is_loss_gradient_op(op) && op->input(0)->has_distributed_states()) {
@@ -232,6 +258,10 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         // will be splited into intra_comm + p2p_send(src_group) and p2p_recv(dst_group)
         p2p_op->MapToParallelDevices(input_op->placement_group());
         ReplaceInput(op, i, p2p_input);
+        /*
+        HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": add p2p between " 
+          << input_op << " " << src_group << " and " << op << " " << dst_group;
+        */
       }
     }
   }
@@ -940,7 +970,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
       // init topo contains comm_op
       OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
-      // HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo;
+      HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo;
 
       // substitute comm_op
       HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op begin...";
@@ -1143,13 +1173,13 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // // get task schedule table for gpipe    
   // auto schedule = generate_gpipe_schedule(num_stages, num_micro_batches);
   // get tasks for current stage
-  int stage_id = local_device.index() / _stages.at(0).num_devices();
-  // int stage_id = -1;
-  // for (int i = 0; i < _stages.size(); i++) {
-  //   if (_stages[i].contains(local_device)) {
-  //     stage_id = i;
-  //   }
-  // }
+  // int stage_id = local_device.index() / _stages.at(0).num_devices();
+  int stage_id = -1;
+  for (int i = 0; i < _stages.size(); i++) {
+    if (_stages[i].contains(local_device)) {
+      stage_id = i;
+    }
+  }
   // HT_LOG_DEBUG << local_device << ": stages = " << _stages << "; stage id = " << stage_id;
   auto& tasks = schedule[stage_id];
   HT_LOG_DEBUG << local_device << ": stage id = " << stage_id;
@@ -1161,6 +1191,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     auto& tensor2data = tensor2data_list[micro_batch_id];
     auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
     auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
+    if (is_forward) {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward begin]";
+    } else {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward begin]";
+    }
     if (is_forward) {
       ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx, 
                   tensor2data, tensor2degrees, grad_accumulation, false, 
@@ -1174,9 +1209,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   feed_dict, fetches, fetch_indices, is_continuous_p2p);
     }
     if (is_forward) {
-      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward]";
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward end]";
     } else {
-      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward]";
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward end]";
     }
   }
   if (is_continuous_p2p) {
@@ -1210,6 +1245,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             NDArrayList result;
             result.reserve(num_micro_batches);
             for (auto& tensor2data : tensor2data_list) {
+              auto it = tensor2data.find(output->id());
+              HT_ASSERT (it != tensor2data.end()) << "Something wrong! Can't find the data to fetch.";
               result.push_back(tensor2data[output->id()]);
             }
             results[it->second] = NDArray::cat(result);

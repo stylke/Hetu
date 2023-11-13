@@ -151,19 +151,25 @@ class Graph {
 
   virtual void ResetVariableDataInner(const Tensor& tensor,
                                       const Initializer& init) {
-    HT_RUNTIME_ERROR << "Cannot reset variable data in graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot reset variable data in graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }
 
   virtual NDArray& GetVariableDataInner(const Tensor& tensor) {
-    HT_RUNTIME_ERROR << "Cannot get variable data from graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot get variable data from graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }
 
   virtual NDArray GetDetachedVariableDataInner(const Tensor& tensor) {
-    HT_RUNTIME_ERROR << "Cannot get detached variable data from graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot get detached variable data from graph " << name()
+                     << " with type " << type();
+    __builtin_unreachable();
+  }
+
+  virtual DeviceGroup GetVariableDeviceGroupInner(const Tensor& tensor) {
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot get variable device group from graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }
@@ -172,7 +178,7 @@ class Graph {
   AllocVariableDataInner(const Tensor& tensor,
                          const Initializer& init = VoidifiedInitializer(),
                          uint64_t seed = 0, const HTShape& global_shape = HTShape()) {
-    HT_RUNTIME_ERROR << "Cannot allocate variable data in graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot allocate variable data in graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }  
@@ -180,7 +186,7 @@ class Graph {
   virtual void
   RegisterVariableDataInner(const Tensor& tensor, NDArray data,
                             const Initializer& init = VoidifiedInitializer()) {
-    HT_RUNTIME_ERROR << "Cannot register variable data for graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot register variable data for graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }
@@ -411,6 +417,12 @@ class Graph {
     return Graph::GetGraph(tensor).GetDetachedVariableDataInner(tensor);
   }
 
+    static DeviceGroup GetVariableDeviceGroup(const Tensor& tensor) {
+    HT_VALUE_ERROR_IF(!tensor->is_variable())
+      << "'GetDetachedVariableData' does not support non-variable tensor: " << tensor;
+    return Graph::GetGraph(tensor).GetVariableDeviceGroupInner(tensor);
+  }
+
   static NDArray&
   AllocVariableData(const Tensor& tensor,
                     const Initializer& init = VoidifiedInitializer(),
@@ -448,6 +460,8 @@ class Graph {
                   "Template class is not derived from Graph");
     auto graph = std::make_shared<T>(Graph::constrcutor_access_key(),
                                      std::forward<Args>(args)...);
+    HT_LOG_DEBUG << "device = " << hetu::impl::comm::GetLocalDevice() << ": make a new graph named " 
+      << graph->name() << ", whose id is " << graph->id();
     HT_VALUE_ERROR_IF(Graph::_global_graphs.size() != graph->id())
       << "Graph must be initialized using the `_make_new_graph` function";
     HT_VALUE_ERROR_IF(Graph::_name_to_graphs.find(graph->name()) !=
@@ -546,6 +560,8 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
         }
       }
     }
+    /*
+    // Question: is it necessary?
     // ensure update ops are executed later
     if (is_optimizer_update_op(ret[i])) {
       if (visited.find(ret[i].get()->id()) != visited.end())
@@ -569,6 +585,7 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
         break;
       }
     }
+    */
   }
 
   return ret;
@@ -643,6 +660,10 @@ inline void ResetVariableData(const Tensor& tensor, const NDArray& provided_data
 
 inline NDArray GetDetachedVariableData(const Tensor& tensor) {
   return Graph::GetDetachedVariableData(tensor);
+}
+
+inline DeviceGroup GetVariableDeviceGroup(const Tensor& tensor) {
+  return Graph::GetVariableDeviceGroup(tensor);
 }
 
 } // namespace graph

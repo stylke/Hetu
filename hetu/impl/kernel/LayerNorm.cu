@@ -122,6 +122,7 @@ __global__ void calculate_gscale<float16>(const float16* grads, const float16* i
 template <typename spec_t>
 __global__ void calculate_grad_kernel_layer(const spec_t* out_grads,
                                       const spec_t* in_arr,
+                                      const spec_t* scale_arr,
                                       const spec_t* mean_arr,
                                       const spec_t* var_arr, 
                                       spec_t* ds, spec_t* db,
@@ -134,13 +135,14 @@ __global__ void calculate_grad_kernel_layer(const spec_t* out_grads,
   // float y = (in_arr[idx] - mean_arr[mo_idx]) / sqrtf(var_arr[mo_idx] + eps);
   spec_t tmp = (db[mo_idx] * mean_arr[mo_idx] - ds[mo_idx]) * (in_arr[idx] - mean_arr[mo_idx]) /
                 (var_arr[mo_idx] + eps);
-  grad_arr[idx] = (out_grads[idx] + (tmp - db[mo_idx]) / (spec_t)lastdim) / 
+  grad_arr[idx] = (scale_arr[idx % lastdim] * out_grads[idx] + (tmp - db[mo_idx]) / (spec_t)lastdim) / 
     hetu::cuda::cuda_sqrt(var_arr[mo_idx] + eps);
 }
 
 template <>
 __global__ void calculate_grad_kernel_layer<float16>(const float16* out_grads,
                                       const float16* in_arr,
+                                      const float16* scale_arr,
                                       const float16* mean_arr,
                                       const float16* var_arr, 
                                       float16* ds, float16* db,
@@ -153,7 +155,7 @@ __global__ void calculate_grad_kernel_layer<float16>(const float16* out_grads,
   // float y = (in_arr[idx] - mean_arr[mo_idx]) / sqrtf(var_arr[mo_idx] + eps);
   float16 tmp = (db[mo_idx] * mean_arr[mo_idx] - ds[mo_idx]) * (in_arr[idx] - mean_arr[mo_idx]) /
                 (var_arr[mo_idx] + eps);
-  grad_arr[idx] = (out_grads[idx] + (tmp - db[mo_idx]) / (float16)lastdim) / 
+  grad_arr[idx] = (scale_arr[idx % lastdim] * out_grads[idx] + (tmp - db[mo_idx]) / (float16)lastdim) / 
     hetu::cuda::cuda_sqrt(var_arr[mo_idx] + eps);
 }
 
@@ -176,7 +178,7 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
   int ndim = out_grads->ndim();
-//   HT_ASSERT(ndim == 4);
+  // HT_ASSERT(ndim == 4);
   size_t total_elements = 1;
 
   int last_2dim = in_arr->shape(ndim - 1) * in_arr->shape(ndim - 2);
@@ -193,7 +195,7 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
     total_elements *= out_grads->shape(i);
   int lastdim = 1;
   for (size_t i = 0; i < reduce_dims; ++i) {
-    lastdim *= out_grads->shape(ndim - 1 -i);
+    lastdim *= out_grads->shape(ndim - 1 - i);
   }
 
   size_t size = total_elements;
@@ -205,8 +207,7 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
   HT_DISPATCH_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "CauculateGradCuda", [&]() {
     
-
-      NDArray grad_bias_ = NDArray::sum(out_grads, reduce_axes_before, true, stream.stream_index());
+      NDArray::sum(out_grads, reduce_axes_before, true, stream.stream_index(), grad_bias);
 
       NDArray gscale_ = NDArray::empty_like(in_arr);
 
@@ -217,18 +218,21 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
       
       NDArray::sum(gscale_, reduce_axes_before, true, stream.stream_index(), grad_scale);
 
-      NDArray db_ = NDArray::sum(out_grads, reduce_axes_after, true, stream.stream_index());
+      NDArray scale_out_grads_ = NDArray::mul(out_grads, ln_scale, stream.stream_index());
 
-      NDArray dy_mul_x_ = NDArray::mul(out_grads, in_arr, stream.stream_index());
+      NDArray db_ = NDArray::sum(scale_out_grads_, reduce_axes_after, true, stream.stream_index());
+
+      NDArray dy_mul_x_ = NDArray::mul(scale_out_grads_, in_arr, stream.stream_index());
 
       NDArray ds_ = NDArray::sum(dy_mul_x_, reduce_axes_after, true, stream.stream_index());
 
       calculate_grad_kernel_layer<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
+        out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(), ln_scale->data_ptr<spec_t>(),
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
         ds_->data_ptr<spec_t>(), db_->data_ptr<spec_t>(),
         grad_arr->data_ptr<spec_t>(), lastdim, eps, size);
     });
+    
   NDArray::MarkUsedBy({out_grads, in_arr, ln_scale, grad_arr,
                        grad_scale, grad_bias, mean_arr, var_arr}, stream);
 }

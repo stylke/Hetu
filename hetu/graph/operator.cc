@@ -249,6 +249,8 @@ void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
     // Both ops are on the same device. We can block the current op
     // by waiting for the stop event of the dependency.
     input_op->instantiation_ctx().stop[micro_batch_id]->Block(instantiation_ctx().stream());
+    HT_LOG_TRACE << "input op " << input_op << " stream is: " << input_op->instantiation_ctx().stream() 
+      << " and current op " << name() << " stream is " << instantiation_ctx().stream();
   }
 }
 

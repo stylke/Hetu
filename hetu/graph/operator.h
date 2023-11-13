@@ -7,6 +7,7 @@
 #include "hetu/utils/context_store.h"
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/stream/CPUStream.h"
+#include "hetu/impl/communication/comm_group.h"
 
 namespace hetu {
 namespace graph {
@@ -365,9 +366,14 @@ class OpDef : public shared_ptr_target {
       << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
       << ", got micro batch id: " << micro_batch_id;
     BlockOrSyncAllInputs(micro_batch_id);
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
+      << ", the input vals are (may not sync) " << inputs;
     instantiation_ctx().start[micro_batch_id]->Record(stream());
     auto ret = _body->Compute(get_self(), inputs, runtime_ctx);
     instantiation_ctx().stop[micro_batch_id]->Record(stream());
+    stream().Sync();
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": compute op: " << name()
+      << ", the result is (may not sync) " << ret;
     return ret;
   }
 

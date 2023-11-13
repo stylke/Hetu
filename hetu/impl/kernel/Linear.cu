@@ -34,7 +34,7 @@ void LinearCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   cublasHandle_t cublas_handle = GetCublasHandle(output->device().index());
-  hetu::cuda::CUDADeviceGuard guard(output->device().index());  
+  hetu::cuda::CUDADeviceGuard guard(output->device().index()); 
   
   bool bias_exist = bias.is_defined();
   if (bias_exist) {

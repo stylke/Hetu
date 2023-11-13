@@ -44,6 +44,8 @@ class DefineAndRunGraph : public Graph {
 
   NDArray GetDetachedVariableDataInner(const Tensor& tensor) override;
 
+  DeviceGroup GetVariableDeviceGroupInner(const Tensor& tensor) override;
+
   void RemoveOp(Operator& op) override {
     _op_to_exec_op_mapping.erase(op->id());
     Operator::for_each_output_tensor(op, [&](Tensor& tensor) {
@@ -62,6 +64,7 @@ class DefineAndRunGraph : public Graph {
   Op2OpMap _op_to_exec_op_mapping;
   Tensor2TensorMap _tensor_to_exec_tensor_mapping;
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
+  std::vector<DeviceGroup> _device_groups; // all the device groups of ops, in the order of MakeOp calls
 };
 
 } // namespace graph

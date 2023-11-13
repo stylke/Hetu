@@ -62,7 +62,7 @@ HTShapeList BatchMatMulOpImpl::DoInferShape(Operator& op,
   HT_ASSERT(a.size() >= 2 && b.size() >= 2 && a.size() == b.size() &&
             a.at(trans_a() ? ndims + 0 : ndims + 1) ==
               b.at(trans_b() ? ndims + 1 : ndims + 0))
-    << "Invalid input shapes for " << type() << ":"
+    << "Invalid input shapes for " << op << ":"
     << " (shape_a) " << a << " (shape_b) " << b << " (transpose_a) "
     << trans_a() << " (transpose_b) " << trans_b();
   HTShape shape = {};

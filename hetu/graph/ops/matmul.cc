@@ -136,14 +136,10 @@ void MatMulGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, ND
     outputs.at(0) = a * b;
   } else if (dim_b == 1 && trans_b()) {
     auto a_shape = a->shape();
-    auto a_dynamic_shape = a->dynamic_shape();
     auto a_ = a;
     if (dim_a >= 2 && trans_a()) {
       std::iter_swap(a_shape.end() - 2, a_shape.end() - 1);
-      std::iter_swap(a_dynamic_shape.end() - 2, a_dynamic_shape.end() - 1);
-      a_ =
-        NDArray::empty(a_shape, a->device(), a->dtype(),
-                       op->instantiation_ctx().stream_index, a_dynamic_shape);
+      a_ = NDArray::empty(a_shape, a->device(), a->dtype(), op->instantiation_ctx().stream_index);
       auto ndims_a_ = HTAxes(dim_a);
       std::iota(ndims_a_.begin(), ndims_a_.end(), 0);
       std::iter_swap(ndims_a_.end() - 2, ndims_a_.end() - 1);

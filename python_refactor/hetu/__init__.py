@@ -57,25 +57,36 @@ def control_dependencies(control_inputs):
     return _OpContext(extra_deps=control_inputs)
 
 class _GraphContext(object):
-    def __init__(self, g):
+    def __init__(self, g, create_new=False, prefix='default'):
         if isinstance(g, Graph):
+            assert create_new == False, f"Using type {type(g).__name__} to create a hetu.Graph is not allowed, please use a str instead."
             self.graph = g
         elif isinstance(g, builtins.str):
-            if g == "eager":
-                self.graph = _hetu_core._internal_context.get_default_eager_graph()
-            elif g == "define_and_run":
-                self.graph = _hetu_core._internal_context.get_default_define_and_run_graph()
-            elif g == "define_by_run":
-                self.graph = _hetu_core._internal_context.get_default_define_by_run_graph()
+            if create_new:
+                if g == "define_and_run":
+                    self.graph = _hetu_core._internal_context.make_new_define_and_run_graph(prefix + '_' + g)
+                else:
+                    raise NotImplementedError("Can only create define_and_run graph for now.")
             else:
-                self.graph = _hetu_core._internal_context.get_graph(g)
+                if prefix == 'default':
+                    if g == "eager":
+                        self.graph = _hetu_core._internal_context.get_default_eager_graph()
+                    elif g == "define_and_run":
+                        self.graph = _hetu_core._internal_context.get_default_define_and_run_graph()
+                    elif g == "define_by_run":
+                        self.graph = _hetu_core._internal_context.get_default_define_by_run_graph()
+                else:
+                     self.graph = _hetu_core._internal_context.get_graph(prefix + '_' + g)
         elif isinstance(g, builtins.int):
+            assert create_new == False, f"Using type {type(g).__name__} to create a hetu.Graph is not allowed, please use a str instead."
             self.graph = _hetu_core._internal_context.get_graph(g)
         else:
             raise ValueError(f"Cannot parse type '{type(g).__name__}' as hetu.Graph")
 
     def __enter__(self):
         if len(cur_graph_contexts) > 0:
+            if str(self.graph) != str(cur_graph_contexts[0].graph):
+                print(f"Caution! You wrap {self.graph} graph in {cur_graph_contexts[0].graph} graph, we just return you the latter!")
             self.wrapped_context = True
             return cur_graph_contexts[0]
         self.wrapped_context = False
@@ -89,8 +100,8 @@ class _GraphContext(object):
         _hetu_core._internal_context.pop_graph_ctx()
         cur_graph_contexts.remove(self)
 
-def graph(g):
-    return _GraphContext(g)
+def graph(g, create_new=False, prefix='default'):
+    return _GraphContext(g, create_new=create_new, prefix=prefix)
 
 class _AutocastContext(object):
     def __init__(self):

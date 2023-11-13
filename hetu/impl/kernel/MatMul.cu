@@ -1,5 +1,6 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
+#include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/cuda/CUDABlas.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
@@ -20,6 +21,7 @@ void MatMulCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
 
   cublasHandle_t cublas_handle = GetCublasHandle(output->device().index());
   hetu::cuda::CUDADeviceGuard guard(output->device().index());
+
   int32_t m = output->shape(1);
   int32_t n = output->shape(0);
   int32_t k = trans_a ? a->shape(0) : a->shape(1);
