@@ -135,7 +135,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       it->second.push_back(filled_grads[i]);
   }
 
-  auto reduce_grad = [](const TensorList& unreduced_grads) -> Tensor {
+  auto reduce_grad = [](const OpId& fw_op_id, const TensorList& unreduced_grads) -> Tensor {
     TensorList filtered;
     filtered.reserve(unreduced_grads.size());
     for (const auto& grad : unreduced_grads)
@@ -173,12 +173,14 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         // then assert error in state deduce process.
         Tensor partial_grad_sum = MakeSumOp(partial_grad_list, OpMeta().set_name("sum_op_for_partial_grad"));
         partial_grad_sum->set_is_grad(true);
+        partial_grad_sum->producer()->set_fw_op_id(fw_op_id);
         DistributedStates ds_dst = filtered[0]->get_distributed_states();
         grad_sum = MakeCommOp(partial_grad_sum, ds_dst, OpMeta().set_name("comm_op_after_partial_grad_sum"));
       } else {
         grad_sum = MakeSumOp(filtered);
       }
       grad_sum->set_is_grad(true);
+      grad_sum->producer()->set_fw_op_id(fw_op_id);
       return grad_sum;
     }
   };
@@ -191,7 +193,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
     if (op->num_outputs() > 0) {
       grad_outputs.reserve(op->num_outputs());
       for (auto& output : op->outputs()) {
-        auto grad = reduce_grad(tensor_to_grads[output->id()]);
+        auto grad = reduce_grad(op->id(), tensor_to_grads[output->id()]);
         tensor_to_reduced_grad[output->id()] = grad;
         grad_outputs.push_back(grad);
       }
@@ -224,6 +226,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
             final_grad = MakeCommOp(grad_inputs[i], ds_dst, 
               OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
             final_grad->set_is_grad(true);
+            final_grad->producer()->set_fw_op_id(op->id());
           }
         } 
 
