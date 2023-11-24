@@ -14,11 +14,11 @@ using namespace hetu::impl::comm;
 template <typename spec_t>
 __global__ void memory_copy_kernel(const spec_t* input, spec_t* output, size_t size);
 
-void AllReduceCuda(const NDArray& input, NDArray& output,
+void AllReduceCuda(const NDArray& input, NDArray& output, ReductionType red_type,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->AllReduce(input, output);
+  comm_group->AllReduce(input, output, red_type);
 }
 
 void AllGatherCuda(const NDArray& input, NDArray& output,
@@ -28,11 +28,11 @@ void AllGatherCuda(const NDArray& input, NDArray& output,
   comm_group->AllGather(input, output);                  
 }
 
-void ReduceScatterCuda(const NDArray& input, NDArray& output,
+void ReduceScatterCuda(const NDArray& input, NDArray& output, ReductionType red_type,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->ReduceScatter(input, output);
+  comm_group->ReduceScatter(input, output, red_type);
 }
 
 void P2PSendCuda(const NDArray& data, const Device& dst, const Stream& stream) {

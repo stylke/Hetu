@@ -7,6 +7,8 @@ if(${HETU_COMPILE_CUDA})
   list(APPEND HETU_SRC ${HETU_CU_SRC})
 endif()
 list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/test/*")
+list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/autograd/*")
+list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/execution/*")
 add_library(hetu_C SHARED ${HETU_SRC})
 target_include_directories(hetu_C PUBLIC ${HETU_SRC_DIR})
 

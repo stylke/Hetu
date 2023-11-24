@@ -19,8 +19,9 @@ class ScatterOpImpl;
 
 class CommOpImpl final: public OpInterface {
  public:
-  CommOpImpl(DistributedStates dst_ds, DeviceGroup dst_group = DeviceGroup())
-  : OpInterface(quote(CommOp)), _dst_ds(dst_ds), _dst_group(dst_group) {}
+  CommOpImpl(DistributedStates dst_ds, DeviceGroup dst_group = DeviceGroup(), 
+    ReductionType red_type = kSUM) : OpInterface(quote(CommOp)), 
+      _dst_ds(dst_ds), _dst_group(dst_group), _red_type(red_type) {}
 
   uint64_t op_indicator() const noexcept override {
     return COMM_OP;
@@ -53,6 +54,10 @@ class CommOpImpl final: public OpInterface {
     return _dst_ds;
   }
 
+  ReductionType reduction_type() const {
+    return _red_type;
+  }
+  
   const DeviceGroup& src_group(Operator& op) const {
     return op->input(0)->placement_group();
   }
@@ -81,7 +86,14 @@ class CommOpImpl final: public OpInterface {
   uint64_t _comm_type{UNKNOWN_OP};
   DistributedStates _dst_ds;
   DeviceGroup _dst_group;
+  ReductionType _red_type{kNONE}; // only used for AllReduce, ReduceScatter
 };
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+                  ReductionType red_type, OpMeta op_meta = OpMeta());
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
+                  const std::string& mode, OpMeta op_meta = OpMeta());
 
 Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
                   DeviceGroup dst_group, OpMeta op_meta = OpMeta());
@@ -91,9 +103,9 @@ Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
 
 class AllReduceOpImpl final : public OpInterface {
  public:
-  AllReduceOpImpl(const DeviceGroup& comm_group,
+  AllReduceOpImpl(const DeviceGroup& comm_group, ReductionType red_type = kSUM,
                   const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(AllReduceOp)), _comm_group(comm_group) {
+  : OpInterface(quote(AllReduceOp)), _comm_group(comm_group), _red_type(red_type) {
     HT_ASSERT(_comm_group.num_devices() >= 2)
              << "AllReduce requires two or more comm devices. Got " << _comm_group;
     if (!device_group.empty()) {
@@ -107,6 +119,10 @@ class AllReduceOpImpl final : public OpInterface {
 
   uint64_t op_indicator() const noexcept override {
     return ALL_REDUCE_OP;
+  }
+
+  ReductionType reduction_type() const {
+    return _red_type;
   }
 
  protected:
@@ -132,10 +148,14 @@ class AllReduceOpImpl final : public OpInterface {
 
  protected:
   DeviceGroup _comm_group;
+  ReductionType _red_type{kNONE};
 };
 
 Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, 
                        OpMeta op_meta = OpMeta());
+
+Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, 
+                       ReductionType red_type, OpMeta op_meta = OpMeta());                       
 
 class P2PSendOpImpl final : public OpInterface {
  public:
@@ -370,8 +390,9 @@ Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group,
 
 class ReduceScatterOpImpl final : public OpInterface {
  public:
-  ReduceScatterOpImpl(const DeviceGroup& comm_group, const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(ReduceScatterOp)), _comm_group(comm_group) {
+  ReduceScatterOpImpl(const DeviceGroup& comm_group, ReductionType red_type = kSUM,
+                      const DeviceGroup& device_group = DeviceGroup())
+  : OpInterface(quote(ReduceScatterOp)), _comm_group(comm_group), _red_type(red_type) {
     HT_ASSERT(comm_group.num_devices() >= 2)
       << "ReduceScatter requires two or more devices. Got " << comm_group;          
     if (!device_group.empty()) {
@@ -385,6 +406,10 @@ class ReduceScatterOpImpl final : public OpInterface {
 
   uint64_t op_indicator() const noexcept override {
     return REDUCE_SCATTER_OP;
+  }
+
+  ReductionType reduction_type() const {
+    return _red_type;
   }
 
  protected:
@@ -405,10 +430,13 @@ class ReduceScatterOpImpl final : public OpInterface {
 
  protected:
   DeviceGroup _comm_group;
+  ReductionType _red_type{kNONE};
 };
 
 Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group,
                            OpMeta op_meta = OpMeta());
 
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group,
+                           ReductionType red_type, OpMeta op_meta = OpMeta());
 }
 }
