@@ -322,7 +322,7 @@ class GPTLMHeadModel(ht.nn.Module):
             device_groups[1],
             dp=config.dp,
             bias=False,
-            gather_output=True, # last dimension(vocab_size) need to do softmax, so cannot be splited
+            gather_output=False,
             name='lm_head'
         )
         self.lm_head.weight = self.transformer.wte.embedding_table # share embedding table
@@ -342,31 +342,25 @@ class GPTLMHeadModel(ht.nn.Module):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
         )
-        # [b, seq_len, n_embd]
-        micro_batch_size, seq_len, n_embd = hidden_states.global_shape
-        # [b*seq_len, n_embd]
-        hidden_states = hidden_states.reshape([-1, n_embd])
-        # column parallel, [b*seq_len, n_embd]->[b*seq_len, vocab_size]
-        lm_logits = self.lm_head(hidden_states)
-        # [b, seq_len, vocab_size]
-        lm_logits = lm_logits.reshape([micro_batch_size, seq_len, -1])
+        # [b, seq_len, n_embd] -> [b, seq_len-1, n_embd]
+        shift_hidden_states = ht.slice(hidden_states, [0,0,0], [hidden_states.shape[0], hidden_states.shape[1] - 1, hidden_states.shape[2]])
+        _,  _, n_embd = hidden_states.global_shape
+        # [b*(seq_len-1), n_embd]
+        shift_hidden_states = shift_hidden_states.reshape([-1, n_embd])
+        # column parallel, [b*(seq_len-1), n_embd]->[b*(seq_len-1), vocab_size], and splited in vocab dimension
+        shift_lm_logits = self.lm_head(shift_hidden_states)
+
         loss = None
         if labels is not None:
             # lm_logits: [b, seq_len-1, vocab_size], labels: [b, seq_len-1]
-            # todo: slice op input local shape, should change into global shape
-            # print(f'before slice, shift_logits.shape: {lm_logits.global_shape}, {lm_logits.shape}; shift_labels.shape: {labels.global_shape}, {labels.shape}')
-            shift_logits = ht.slice(lm_logits, [0,0,0], [lm_logits.shape[0], lm_logits.shape[1] - 1, lm_logits.shape[2]])
             shift_labels = ht.slice(labels, [0,1], [labels.shape[0], labels.shape[1] - 1])
-            # print(f'after slice, shift_logits.shape: {shift_logits.global_shape}, shift_labels.shape: {shift_labels.global_shape}')
             # softmax cross_entropy loss = sum(-log(softmax(vocab[label])))
             # because of ignored_index, so cannot use auto distributed reduce for mean
             # need sum over distributed tensor, and divide the not ignored_index num after by hand
-            loss = ht.softmax_cross_entropy_sparse(shift_logits,  
+            loss = ht.vocab_parallel_cross_entropy(shift_lm_logits,  
                    shift_labels, ignored_index = -1, reduction = "mean")
-        output = (lm_logits,)
+        output = (shift_lm_logits,)
         output = ((loss,) + output) if loss is not None else output
-        return output # ((loss), (lm_logits))
-
-
+        return output # ((loss), (shift_lm_logits))
 
 

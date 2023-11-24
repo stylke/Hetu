@@ -84,8 +84,19 @@ class ContextStore {
     return it != _ctx.end() ? it->second : default_value;
   }
 
+  void put_ndarray(const std::string& key, const NDArray& value) {
+    _ctx_ndarray.insert({key, value});
+  }
+
+  const NDArray& get_ndarray(const std::string& key) const {
+    auto it = _ctx_ndarray.find(key);
+    HT_ASSERT(it != _ctx_ndarray.end()) << "NDArray " << key << " not found";
+    return it->second;
+  }
+
  private:
   std::unordered_map<std::string, std::string> _ctx;
+  std::unordered_map<std::string, NDArray> _ctx_ndarray;
 };
 
 } // namespace hetu
