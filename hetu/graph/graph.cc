@@ -191,6 +191,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         grad_sum = MakeSumOp(filtered);
       }
       grad_sum->set_is_grad(true);
+      grad_sum->producer()->set_fw_op_id(fw_op_id);
       return grad_sum;
     }
   };
@@ -236,6 +237,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
             final_grad = MakeCommOp(grad_inputs[i], ds_dst, 
               OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
             final_grad->set_is_grad(true);
+            final_grad->producer()->set_fw_op_id(op->id());
           }
         } 
 

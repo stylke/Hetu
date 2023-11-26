@@ -89,6 +89,7 @@ def save_checkpoint(model, path, config=None, local_device=None):
                 # print(f"local device = {local_device}: trying to allgather {k}")
                 global_value = allgather_intra_group_param(param, local_state_dict[k])
             global_state_dict[k] = torch.tensor(global_value)
+            # print(f"local device = {local_device}: finish {k}")
             
             # TODO: maybe implement it elsewhere
             # qkv_dense的weight和bias是[num_heads * 3 * hidden_size, :]

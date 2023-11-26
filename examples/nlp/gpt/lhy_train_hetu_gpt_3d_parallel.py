@@ -139,7 +139,7 @@ def pretrain(args):
     save_checkpoint(model, "./checkpoint/temp", config=config, local_device=local_device)
     # print(f"device = {local_device}, test weight = {model.state_dict()['transformer.h.5.mlp.parallel_mlp.dense_4h_to_h.weight']}")
     print(f'device = {local_device}, save model sucessfully!')
-            
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

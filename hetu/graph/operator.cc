@@ -13,7 +13,7 @@ void OpInterface::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   // default: distributed states of output tensor directly copy from input tensor
   // check input states is valid & check distributed states of all input tensor are the same.
   HT_ASSERT(inputs.size() > 0) << op_meta.name << ": distributed states should be manually set when in_degree=0!";
-  HT_LOG_DEBUG << op_meta.name << ": default copy states from inputs";
+  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " " << op_meta.name << ": default copy states from inputs";
   DistributedStates default_ds;
   for (auto& input : inputs) {
     const auto& input_ds = input->get_distributed_states(); 
@@ -79,6 +79,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
   NDArrayList outputs;
   if (op->num_outputs() > 0) {
     outputs.reserve(op->num_outputs());
+    /*
     HTShapeList input_shapes;
     HTShapeList input_dynamic_shapes;
     input_shapes.reserve(op->num_inputs());
@@ -92,21 +93,47 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     }
     // Although we have inferred the meta of tensors,
     // InferShape is still necessary in pipeline parallelism
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " op: " << op->name() << ", DoInferShape...";
     auto output_shapes = DoInferShape(op, input_shapes, runtime_ctx);
     HTShapeList output_dynamic_shapes;
+    // deprecated: only used in gpt inference, before symbolic shape is realized
     if (is_dynamic)
       output_dynamic_shapes = DoInferDynamicShape(op, input_dynamic_shapes, runtime_ctx);
-    for (size_t i = 0; i < output_shapes.size(); i++) {
+    */
+    auto output_size = op->num_outputs();
+    for (size_t i = 0; i < output_size; i++) {
+      // question: when does tensor shape != NDArray shape happen
+      // actually this won't happen
+      /*
+      HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " op: " << op->name() 
+        << ", output tensor shape: " << op->output(i)->shape() 
+        << ", output NDArray shape: " << output_shapes[i];
+      for (size_t j = 0; j < output_shapes[i].size(); j++) {
+        HT_ASSERT(output_shapes[i][j] == op->output(i)->shape(j));
+      }
+      */
+      const auto& output_shape = runtime_ctx.get_runtime_shape(op->output(i)->id());
+      HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " op: " << op->name() 
+        << ", output " << i << " shape = " << output_shape;
+      outputs.push_back(NDArray::empty(output_shape,
+                                       op->instantiation_ctx().placement,
+                                       op->output(i)->dtype(),
+                                       op->instantiation_ctx().stream_index));
+      /*
       outputs.push_back(NDArray::empty(output_shapes[i],
                                        op->instantiation_ctx().placement,
                                        op->output(i)->dtype(),
                                        op->instantiation_ctx().stream_index,
                                        is_dynamic ? output_dynamic_shapes[i] : HTShape()));
+      */
     }
+    // deprecated: only used in gpt inference, before symbolic shape is realized
+    /*
     if (is_dynamic)
       HT_LOG_TRACE_IF(hetu::impl::comm::GetLocalDevice().index() == 0U) << "op: " << op << " input_shapes: " << input_shapes   
         << " input_dynamic_shapes: " << input_dynamic_shapes << " output_shapes: " << output_shapes 
         << " output_dynamic_shapes: " << output_dynamic_shapes;
+    */
   }
   return outputs;
 }
@@ -233,6 +260,10 @@ void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
   // for commom case
   auto& input_op = input->producer();
   if (is_placeholder_op(input_op) || is_variable_op(input_op))
+    return;
+  // p2p ops are all gathered in group start/end, so the start/stop events for p2p ops is invalid, should not be used any more!
+  // another case: shared weight p2p ops will not execute in micro batch i>0, so these ops will not record start/stop events.
+  if (is_peer_to_peer_recv_op(input_op))
     return;
   const auto& input_placement = input_op->instantiation_ctx().placement;
   const auto& current_placement = instantiation_ctx().placement;

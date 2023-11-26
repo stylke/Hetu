@@ -17,9 +17,9 @@ text = ['Hello, I am a',
         "Where can I find the"]
 encoded_input = tokenizer(text, return_tensors='pt')
 encoded_input['labels'] = encoded_input['input_ids']
-opt = SGD(model.parameters(), lr=1e-6)
+opt = SGD(model.parameters(), lr=0.01)
 
-for _ in range(1):
+for _ in range(10):
         output = model(**encoded_input)
         loss = output.loss
         print('loss:', loss, loss.dtype)

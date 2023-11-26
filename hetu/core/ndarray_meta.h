@@ -132,6 +132,7 @@ class NDArrayMeta {
     return *this;
   }
 
+  // deprecated: only used in gpt inference, before symbolic shape is realized
   inline NDArrayMeta& set_dynamic_shape(const HTShape& dynamic_s) {
     if(dynamic_s.empty() || dynamic_s == shape) {
       dynamic_shape = {};
@@ -153,6 +154,7 @@ class NDArrayMeta {
     return *this;
   }
 
+  // deprecated: only used in gpt inference, before symbolic shape is realized
   inline NDArrayMeta& set_dynamic_shape(HTShape&& dynamic_s) {
     if(dynamic_s.empty() || dynamic_s == shape) {
       dynamic_shape = {};
@@ -204,6 +206,8 @@ class NDArrayMeta {
   Device device{kUndeterminedDevice};
   HTShape shape;
   HTStride stride;
+
+  // deprecated: only used in gpt inference, before symbolic shape is realized
   // dynamic_shape is used in LLM inference because of dynamic seq_len.
   HTShape dynamic_shape; // dynamic_shape + padding = shape
 };

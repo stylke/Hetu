@@ -33,7 +33,7 @@ def pretrain(args):
     num_epochs = args.epochs
     lr = args.lr
 
-    config = GPTConfig(vocab_size=args.vocab_size, 
+    config = GPTConfig(vocab_size=vocab_size, 
                        n_positions=args.seq_length,
                        n_ctx=args.seq_length,
                        n_embd=args.hidden_size,

@@ -331,8 +331,7 @@ class GPTLMHeadModel(ht.nn.Module):
             gather_output=True, # last dimension(vocab_size) need to do softmax, so cannot be splited
             name='lm_head'
         )
-        # TODO: weight sharing cause illegal memory access in the new memory pool
-        # self.lm_head.weight = self.transformer.wte.embedding_table
+        self.lm_head.weight = self.transformer.wte.embedding_table # share embedding table
         self.config = config
         self.device_groups = device_groups
     

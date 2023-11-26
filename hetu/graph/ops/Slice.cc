@@ -31,11 +31,18 @@ NDArrayList SliceOpImpl::DoCompute(Operator& op,
   return outputs;
 }
 
+// caution: if the op is symbolic, then the corresponding gradient op should also be symbolic!
 TensorList SliceOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {op->requires_grad(0) ? MakeSliceGradientOp(grad_outputs.at(0), op->output(0), op->input(0), get_begin_pos(),
-                                 get_output_shape(),
-                                 op->grad_op_meta().set_name(op->grad_name()))
-                               : Tensor()};
+  if (symbolic())
+    return {op->requires_grad(0) ? MakeSliceGradientOp(grad_outputs.at(0), op->output(0), op->input(0), get_symbolic_begin_pos(),
+                                  get_symbolic_output_shape(),
+                                  op->grad_op_meta().set_name(op->grad_name()))
+                                : Tensor()};
+  else
+    return {op->requires_grad(0) ? MakeSliceGradientOp(grad_outputs.at(0), op->output(0), op->input(0), get_begin_pos(),
+                                  get_output_shape(),
+                                  op->grad_op_meta().set_name(op->grad_name()))
+                                : Tensor()};
 }
 
 HTShapeList SliceOpImpl::DoInferShape(Operator& op, 
@@ -44,6 +51,7 @@ HTShapeList SliceOpImpl::DoInferShape(Operator& op,
   return {get_output_shape()};
 }
 
+// deprecated: only used in gpt inference, before symbolic shape is realized
 HTShapeList SliceOpImpl::DoInferDynamicShape(Operator& op, 
                                       const HTShapeList& input_shapes, 
                                       RuntimeContext& ctx) const {
@@ -70,15 +78,16 @@ void SliceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   //   << "Input tensor cannot be splited in any dimension!";
   const HTShape& ori_shape = inputs.at(0)->shape();
   int ndim = ori_shape.size();
-  const HTShape& output_shape = get_output_shape();
-  const HTShape& begin_pos = get_begin_pos();
+  const HTShape output_shape = get_output_shape();
+  const HTShape begin_pos = get_begin_pos();
   for (int i = 0; i < ndim; i++) {
     if (!(begin_pos[i] == 0 && begin_pos[i] + output_shape[i] == ori_shape[i])) {
       HT_ASSERT(ds_input.get_dim(i) == 1)
         << "Slice dimension " << i << " shouldn't be splited!"; 
     }
   }
-  outputs.at(0)->set_distributed_states(ds_input);      
+  outputs.at(0)->set_distributed_states(ds_input); 
+  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " splice op DoDeduceStates() finished";     
 }
 
 void SliceGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
@@ -118,6 +127,15 @@ Tensor MakeSliceInplaceOp(Tensor input, const HTShape& begin_pos, const HTShape&
 
 Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
                            const HTShape& begin_pos, const HTShape& output_shape,
+                           OpMeta op_meta) {
+  return Graph::MakeOp(
+    std::make_shared<SliceGradientOpImpl>(begin_pos, output_shape),
+    {std::move(grad_output), std::move(ori_output), std::move(ori_input)},
+    std::move(op_meta))->output(0);
+}
+
+Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
+                           const SyShape& begin_pos, const SyShape& output_shape,
                            OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<SliceGradientOpImpl>(begin_pos, output_shape),

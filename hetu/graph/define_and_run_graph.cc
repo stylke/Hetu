@@ -74,7 +74,7 @@ void DefineAndRunGraph::Instantiate() {
   Graph::push_graph_ctx(_exec_graph->id());
 
   // assign pp stages
-  _exec_graph->set_stages(_device_groups);
+  _exec_graph->SetStages(_device_groups);
 
   auto get_exec_input = [&](const Tensor& input) -> Tensor {
     auto it = _tensor_to_exec_tensor_mapping.find(input->id());
@@ -91,6 +91,11 @@ void DefineAndRunGraph::Instantiate() {
       _add_on_inits.erase(tensor->id());
     }
     exec_tensor->set_is_grad(tensor->is_grad());
+  };
+
+  Tensor2ShapeMap initial_shape_plan;
+  auto record_exec_output_shape = [&](Tensor& exec_tensor) -> void {
+    initial_shape_plan[exec_tensor->id()] = exec_tensor->shape();
   };
 
   OpRefList topo = topo_order();
@@ -114,6 +119,7 @@ void DefineAndRunGraph::Instantiate() {
       Graph::MarkAsParameter(exec_op);
 
     Operator::for_each_output_tensor_pair(op, exec_op, put_exec_output);
+    Operator::for_each_output_tensor(exec_op, record_exec_output_shape);
     if (is_placeholder_op(op) || is_variable_op(op)) {
       if (op->output(0)->has_distributed_states())
         exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
@@ -129,6 +135,10 @@ void DefineAndRunGraph::Instantiate() {
       exec_op->set_fw_op_id(_op_to_exec_op_mapping[op->fw_op_id()]->id());
     } 
   }
+
+  // assign initial shape plan
+  _exec_graph->InitShapePlan(std::move(initial_shape_plan));
+  _exec_graph->SetShapePlan(0);
 
   Graph::pop_graph_ctx();
 }

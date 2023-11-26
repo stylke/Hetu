@@ -261,6 +261,17 @@ Tensor MakeP2PRecvOp(const DeviceGroup& src_group, DataType dtype,
 
 class BatchedISendIRecvOpImpl final : public OpInterface {
  public:
+  // symbolic shape constructor
+  // TODO
+  BatchedISendIRecvOpImpl(const std::vector<Device>& dst_devices, 
+                          const SyShapeList& outputs_shape,
+                          const std::vector<Device>& src_devices, 
+                          const std::vector<Device>& comm_devices,
+                          DataType dtype)
+  : OpInterface(quote(BatchedISendIRecvOp)), _dst_devices(dst_devices), 
+  _outputs_shape({}), _src_devices(src_devices), 
+  _comm_devices(comm_devices), _dtype(dtype) {}
+  // fixed shape constructor
   BatchedISendIRecvOpImpl(const std::vector<Device>& dst_devices, 
                           const HTShapeList& outputs_shape,
                           const std::vector<Device>& src_devices, 

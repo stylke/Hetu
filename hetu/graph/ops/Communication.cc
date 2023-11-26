@@ -3,6 +3,7 @@
 #include "hetu/graph/ops/kernel_links.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
 #include "hetu/impl/communication/comm_group.h"
+#include "hetu/core/symbol.h"
 
 namespace hetu {
 namespace graph {
@@ -158,7 +159,7 @@ HTShapeList CommOpImpl::DoInferShape(Operator& op,
   Tensor& input = op->input(0);
   const auto& src_ds = input->get_distributed_states();
   const auto& dst_ds = get_dst_distributed_states();
-  HTShape shape; shape.reserve(input_shape.size());
+  HTShape shape(input_shape.size());
   for (size_t d = 0; d < input_shape.size(); d++) {
     shape[d] = input_shape[d] * src_ds.get_dim(d) / dst_ds.get_dim(d);
   }
@@ -552,6 +553,22 @@ Tensor MakeP2PRecvOp(const DeviceGroup& src_group, DataType dtype,
                        src_device_index, op_meta.device_group), {}, std::move(op_meta))->output(0);
 }
 
+// symbolic shape
+Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
+                               const std::vector<Device>& dst_devices, 
+                               const SyShapeList& outputs_shape, 
+                               const std::vector<Device>& src_devices, 
+                               const std::vector<Device>& comm_devices, 
+                               DataType dtype, OpMeta op_meta) {
+  if (src_devices.size() == 0)
+    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(dst_devices, outputs_shape,
+                        src_devices, comm_devices, dtype), std::move(inputs), std::move(op_meta))->out_dep_linker();
+  else
+    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(dst_devices, outputs_shape,
+                        src_devices, comm_devices, dtype), inputs, std::move(op_meta))->output(0);  
+}
+
+// fixed shape
 Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
                                const std::vector<Device>& dst_devices, 
                                const HTShapeList& outputs_shape, 

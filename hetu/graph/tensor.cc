@@ -10,10 +10,12 @@ TensorDef::TensorDef(const constrcutor_access_key&, TensorIdentifier ids,
 : _ids(std::move(ids)),
   _name(std::move(name)),
   _requires_grad(requires_grad),
-  _meta(std::move(meta)) {
+  _meta(std::move(meta)),
+  _symbolic(false) {
   auto& graph = Graph::GetGraph(_ids.graph_id);
   _inform_graph_on_destruction = (graph.type() == GraphType::EAGER ||
                                   graph.type() == GraphType::DEFINE_BY_RUN);
+  _symbolic_shape = SyShape(_meta.shape.size());
 }
 
 Tensor::Tensor(TensorIdentifier ids, TensorName name, bool requires_grad,

@@ -14,5 +14,5 @@ mpirun --allow-run-as-root -np 8 python lhy_train_hetu_gpt_3d_parallel.py \
 --num_hidden_layers $NUM_LAYERS \
 --num_attention_heads $NUM_HEADS \
 --seq_length $SEQ_LEN \
---lr 1e-6 \
+--lr 0.01 \
 --dropout_prob 0.1

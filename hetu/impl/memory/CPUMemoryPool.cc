@@ -74,7 +74,7 @@ DataPtr CPUMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
     << "Deleter must not be empty when borrowing storages";
   
   std::lock_guard<std::mutex> lock(_mtx);
-  // Note: The borrowed memory must be ready, so we use blokcing stream here
+  // Note: The borrowed memory must be ready, so we use blocking stream here
   DataPtr data_ptr{ptr, num_bytes, Device(kCPU), next_id()};
   Stream alloc_stream = Stream(Device(kCPU), kBlockingStream);
   auto insertion =
@@ -105,7 +105,7 @@ void CPUMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   // (2) Used by streams other than allocation stream:
   //     --- enqueue an async task in join stream to wait for the events.
   // `FreeDataSpace` would first hold the mutex and determine which case to go,
-  // and then the free fn holds the mutex latex.
+  // and then the free fn holds the mutex later.
   if (dependent_events.empty() ||
       (dependent_events.size() == 1 &&
         dependent_events.begin()->first == alloc_stream)) {

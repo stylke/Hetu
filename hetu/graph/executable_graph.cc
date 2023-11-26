@@ -9,6 +9,7 @@
 #include "hetu/graph/ops/Loss.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
+#include "hetu/core/symbol.h"
 #include "nccl.h"
 #include <ctime>
 
@@ -54,7 +55,7 @@ NDArray ExecutableGraph::GetDetachedVariableDataInner(const Tensor& tensor) {
     }
   }
   HT_LOG_TRACE << "Fetch the data from the executable graph.";
-  return NDArray::to(it_1->second, Device(kCPU), it_1->second->dtype(), kBlockingStream);
+  return NDArray::to(it_1->second, Device(kCPU));
 }
 
 NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
@@ -168,6 +169,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             continue;
           }
           Tensor grad_scale = MakeDivByConstOp(grad, _num_micro_batches * dp, OpMeta().set_name(grad->name() + "_scale"));
+          RecordTensorShape(grad_scale->id(), grad_scale->shape());
           auto& grad_scale_op = grad_scale->producer();
           grad_scale_op->MapToParallelDevices(op->placement_group());
           for (int i = grad->num_consumers() - 1; i >= 0; i--) {
@@ -222,6 +224,9 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
               continue;
 
             p2p_input = MakeCommOp(input_op->input(0), input_op_impl.get_dst_distributed_states(), dst_group);
+            // since comm op will be substitued eventually, recording its shape is unnecessary
+            // but here we still do it to make the code looks more consistent
+            RecordTensorShape(p2p_input->id(), p2p_input->shape());
           }
         } else if (is_comm_op(op)) {
           auto& op_impl = reinterpret_cast<CommOpImpl&>(op->body());
@@ -253,6 +258,9 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             continue;
 
           p2p_input = MakeCommOp(input, input->get_distributed_states(), dst_group);
+          // since comm op will be substitued eventually, recording its shape is unnecessary
+          // but here we still do it to make the code looks more consistent
+          RecordTensorShape(p2p_input->id(), p2p_input->shape());
         }
         auto& p2p_op = p2p_input->producer();
         // will be splited into intra_comm + p2p_send(src_group) and p2p_recv(dst_group)
@@ -317,6 +325,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
           HT_NOT_IMPLEMENTED << "We should use NCCL for P2P communication.";
           __builtin_unreachable();
         }
+        RecordTensorShape(transferred_input->id(), transferred_input->shape());
         auto& transfer_op = transferred_input->producer();
         if (!input_op->placement_group().empty())
           transfer_op->MapToParallelDevices(input_op->placement_group());
@@ -342,6 +351,8 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
       const auto& src_group = comm_op_impl.src_group(comm_op);
       const auto& dst_group = comm_op_impl.dst_group(comm_op);
       Tensor& input = comm_op->input(0);
+      // 标记通信算子的输入具有symbolic shape
+      // input->init_symbolic_shape();
       Tensor result;
 
       if (comm_op_impl.is_intra_group(comm_op) || comm_op_impl.is_inter_group(comm_op) && 
@@ -366,6 +377,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           }
           HT_LOG_DEBUG << local_device << ": keys = " << keys << "; indices = " << indices << "; splits = " << splits;
           Tensor split_output = MakeSplitOp(input, keys, indices, splits, OpMeta().set_is_deduce_states(false));
+          RecordTensorShape(split_output->id(), split_output->shape());
           auto& split_op = split_output->producer();
           split_op->MapToParallelDevices(src_group);
           split_op->Instantiate(local_device, kComputingStream);
@@ -377,6 +389,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             OpMeta().set_device_group(src_group)
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllReduce"));
+          RecordTensorShape(all_reduce_output->id(), all_reduce_output->shape());
           auto& all_reduce_op = all_reduce_output->producer();
           all_reduce_op->MapToParallelDevices(src_group);
           all_reduce_op->Instantiate(local_device, kCollectiveStream);
@@ -389,6 +402,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             OpMeta().set_device_group(src_group)
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllGather"));
+          RecordTensorShape(all_gather_output->id(), all_gather_output->shape());
           auto& all_gather_op = all_gather_output->producer();
           all_gather_op->MapToParallelDevices(src_group);
           all_gather_op->Instantiate(local_device, kCollectiveStream);
@@ -401,6 +415,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             OpMeta().set_device_group(src_group)
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_ReduceScatter"));
+          RecordTensorShape(reduce_scatter_output->id(), reduce_scatter_output->shape());
           auto& reduce_scatter_op = reduce_scatter_output->producer();
           reduce_scatter_op->MapToParallelDevices(src_group);
           reduce_scatter_op->Instantiate(local_device, kCollectiveStream);
@@ -413,6 +428,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           TensorList send_datas_local;
           std::vector<int32_t> dsts_local;
           HTShapeList recv_shapes_local;
+          // SyShapeList recv_shapes_local;
           std::vector<int32_t> srcs_local;
           Tensor self_send_data;
           std::vector<std::pair<int32_t, int32_t>> send_pairs;
@@ -436,6 +452,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
               // local device recv from other devices
               if (used_device_index != local_device_index && dsts[i] == local_device_index) {
                 recv_shapes_local.push_back(send_datas[i]->shape());
+                // recv_shapes_local.push_back(send_datas[i]->symbolic_shape());
                 srcs_local.push_back(used_device_index);              
               }
               // special case: local device send to self
@@ -474,6 +491,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           // when needn't recv, MakeBatchedISendIRecvOp return out_dep_linker
           Tensor batched_isend_irecv_output = MakeBatchedISendIRecvOp(send_datas_local, dst_devices, recv_shapes_local, src_devices, comm_devices, dtype, 
             OpMeta().set_is_deduce_states(false).set_name("BatchedISendIRecvOp_for_" + comm_op->name()));
+          RecordTensorShape(batched_isend_irecv_output->id(), batched_isend_irecv_output->shape());
           auto& batched_isend_irecv_op = batched_isend_irecv_output->producer();
           batched_isend_irecv_op->MapToParallelDevices(src_group);
           batched_isend_irecv_op->Instantiate(local_device, kP2PStream);
@@ -499,6 +517,9 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           HT_LOG_DEBUG << local_device << ": send to stage " << dst_group;
           Tensor send_out_dep_linker = MakeP2PSendOp(result, dst_group, 
             src_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
+          // since send_out_dep_linker has an empty shape and is useless, recording its shape is unnecessary
+          // but here we still do it to make the code looks more consistent
+          RecordTensorShape(send_out_dep_linker->id(), send_out_dep_linker->shape());
           auto& send_op = send_out_dep_linker->producer();
           send_op->MapToParallelDevices(src_group);
           send_op->Instantiate(local_device, kP2PStream);
@@ -513,6 +534,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
         Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->shape(),
           dst_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
+        RecordTensorShape(recv_output->id(), recv_output->shape());
         auto& recv_op = recv_output->producer();
         recv_op->MapToParallelDevices(dst_group);
         recv_op->Instantiate(local_device, kP2PStream);
@@ -591,6 +613,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
         part_result_list.push_back(part_result);
       }
       auto sum_output = MakeSumOp(part_result_list, OpMeta().set_is_deduce_states(false));
+      RecordTensorShape(sum_output->id(), sum_output->shape());
       auto& sum_op = sum_output->producer();
       if (used_device_index == local_device_index) {
         sum_op->MapToParallelDevices(src_group);
@@ -628,6 +651,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
             part_result_list.push_back(part_result);
           }
           auto concatenate_output = MakeConcatenateOp(part_result_list, cur_dim, OpMeta().set_is_deduce_states(false));
+          RecordTensorShape(concatenate_output->id(), concatenate_output->shape());
           auto& concatenate_op = concatenate_output->producer();
           if (used_device_index == local_device_index) {
             concatenate_op->MapToParallelDevices(src_group);
@@ -706,6 +730,7 @@ void ExecutableGraph::CrossSend(std::unordered_map<int32_t, int32_t> split_cur_s
       }
       // split_op: 把tensor在keys这些dimension上按照splits[key]份数切分, 并取出第indices[key]份, 作为要send的数据切片
       auto split_output = MakeSplitOp(comm_op->input(0), keys, indices, splits, OpMeta().set_is_deduce_states(false));
+      RecordTensorShape(split_output->id(), split_output->shape());
       auto& split_op = split_output->producer();
       if (used_device_index == local_device_index) { // 其他device上生成的用于替换comm_op不需要map placement_group和placement
         split_op->MapToParallelDevices(src_group);
@@ -858,6 +883,7 @@ ExecutableGraph::GeneratePipedreamFlushSchedule(
 void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo, RuntimeContext& runtime_ctx, 
                                   Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
                                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
+                                  const TensorIdSet& shared_weight_tensor, const OpIdSet& shared_weight_p2p,
                                   const TensorIdSet& accumulated_tensor, const OpIdSet& accumulated_ops,
                                   const FeedDict& feed_dict, const TensorList& fetches,
                                   const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p) {
@@ -868,7 +894,13 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     });
     if (computed)
       continue;
-    
+
+    // in pipeline(shared_weight_p2p not empty), shared weight p2p ops only execute in micro batch 0
+    if (!shared_weight_p2p.empty() && shared_weight_p2p.find(op->id()) != shared_weight_p2p.end() && micro_batch_id > 0) {
+      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": skip execute shared weight p2p: " << op;
+      continue;
+    }
+
     if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
       continue;
     }
@@ -913,10 +945,13 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
                       op->instantiation_ctx().stream_index);
       }
       input_vals.push_back(tensor2data[input->id()]);
-      // should free memory until op aync compute complete!!!
-      // workaround: erase when the stream of input_op is the same as cur_op 
-      if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end()) {
-        tensor2data.erase(input->id());
+      // should free memory until op async compute complete!!!
+      // recved shared weight should not be erased in first micro batch. but can be multi copied and erased in later micro batches
+      if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end() 
+          && ((micro_batch_id == 0 && shared_weight_tensor.find(input->id()) == shared_weight_tensor.end()) 
+              || micro_batch_id > 0)) {
+        // This will cause random problem
+        // tensor2data.erase(input->id());
       }
     }
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
@@ -958,6 +993,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       return feed_dict.find(tensor->id()) != feed_dict.end();
     });
   };
+
   bool is_execute_plan_changed = false;
   for (auto& fetch : fetches) {
     if (fetch->placement_group().empty() || 
@@ -982,6 +1018,87 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       break;
     }
   }
+
+  // 我们需要global graph的信息来推导新的shape plan（主要是因为comm op在local graph中只有一半信息）
+  HT_LOG_DEBUG << local_device << ": [Execution Plan] obtain shape plan begin...";
+  // tensor data for m micro batches
+  std::vector<Tensor2NDArrayMap> tensor2data_list(num_micro_batches);
+  // get feed in dict & split into m micro batches
+  for (const auto& kv : feed_dict) {
+    if (!kv.second.is_defined()) continue; // only feed placeholder_op in local device group
+    auto micro_batches = NDArray::split(kv.second, num_micro_batches);
+    // 加一个pipeline split的tensor状态
+    for (int i = 0; i < num_micro_batches; i++) {
+      // tensor2data_list[i][kv.first] = NDArray::squeeze(micro_batches[i], 0);
+      tensor2data_list[i][kv.first] = micro_batches[i];
+    }
+  }
+  int active_plan = 0;
+  for (const auto& shape_plan : _shape_plan_pools) {
+    bool plan_matched = true;
+    for (const auto& kv : feed_dict) {
+      if (!kv.second.is_defined()) continue;
+      auto it = shape_plan.find(kv.first);
+      HT_ASSERT(it != shape_plan.end()) << "fetch's shape is not in shape plan";
+      if (it->second != tensor2data_list[0][kv.first]->shape()) {
+        plan_matched = false;
+        break;
+      }
+    }
+    if (plan_matched) break;
+    active_plan++;
+  }
+  // 需要新增shape plan到shape plan pools
+  if (active_plan == _shape_plan_pools.size()) {
+    HT_LOG_DEBUG << local_device << ": adding new shape plan to shape plan pools...";
+    Tensor2ShapeMap shape_plan;
+    // feed_dict中的shape是确定的
+    for (const auto& kv : feed_dict) {
+      shape_plan[kv.first] = tensor2data_list[0][kv.first]->shape(); // copy constructor
+    }
+    OpRefList topo = Graph::TopoSort(fetches, -1, is_op_computed);
+    HT_LOG_DEBUG << local_device << ": global topo before deducing shape plan: " << topo;
+    RuntimeContext runtime_ctx(topo.size());
+    // 扫描global topo并推导新的shape plan
+    for (auto& op_ref : topo) {
+      auto& op = op_ref.get();
+      // 跳过placeholder
+      bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
+        return feed_dict.find(tensor->id()) != feed_dict.end();
+      });
+      if (computed)
+        continue;
+      HTShapeList input_shapes;
+      input_shapes.reserve(op->num_inputs());
+      for (const auto& input : op->inputs()) {
+        auto it = shape_plan.find(input->id());
+        HT_ASSERT(it != shape_plan.end()) 
+          << "Something wrong, can't find the input shape from the current shape plan!";
+        input_shapes.push_back(it->second);
+      }
+      HTShapeList output_shapes = op->InferShape(input_shapes, runtime_ctx);
+      auto output_shapes_size = output_shapes.size();
+      for (size_t i = 0; i < output_shapes_size; i++) {
+        // 设置symbolic shape叶子节点的shape
+        // 其相关联的非叶子的symbolic shape可以直接由计算链条获得新的shape
+        if (op->output(i)->symbolic()) {
+          op->output(i)->set_symbolic_shape(output_shapes[i]);
+        }
+        auto it = shape_plan.find(op->output(i)->id());
+        HT_ASSERT(it == shape_plan.end()) 
+          << "Something wrong, the output shape should't exist in the current shape plan";
+        shape_plan.insert(std::make_pair(op->output(i)->id(), std::move(output_shapes[i]))); // move constructor
+      }
+    }
+    AddShapePlan(std::move(shape_plan));
+  }
+  // 需要切换shape plan
+  if (_active_plan != active_plan) {
+    _active_plan = active_plan;
+    // Question: anything else to do?
+  }
+  HT_LOG_DEBUG << local_device << ": [Execution Plan] obtain shape plan end...";
+
   if (is_execute_plan_changed) {
     // TODO: replace the fetches to the new substitued results after SubstituteCommOp
     for (auto& fetch : fetches) {
@@ -1045,30 +1162,79 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     // HT_LOG_DEBUG << local_device << ": local bw topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo end...";
 
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get shared weights begin...";
+    // todo: get all shared variable op related (send, recv), cached in first micro batch, and used in later micro batches 
+    TensorIdSet shared_weight_tensor;
+    OpIdSet shared_weight_p2p;
+    // (group1) variable op -> send -> (group2) recv -> other ops
+    for (auto& op_ref : local_fw_topo) {
+      auto& op = op_ref.get();
+      // send part
+      if (is_variable_op(op)) {
+        for (auto& consumer_op : op->output(0)->consumers()) {
+          if (is_peer_to_peer_send_op(consumer_op)) {
+            shared_weight_p2p.insert(consumer_op.get()->id());
+          }
+        }
+      }
+      // recv part
+      if (is_peer_to_peer_recv_op(op) && is_variable_op(op->in_dep_linker(0)->producer())) {
+        shared_weight_p2p.insert(op->id());
+        shared_weight_tensor.insert(op->output(0)->id());
+      }
+    }
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get shared weights end...";
+
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get accumulated tensor & ops begin...";
     // some special ops shouldn't be updated before grad accumulation finished
     TensorIdSet accumulated_tensor;
     OpRefDeque accumulated_ops_deque;
     for (auto& op_ref : local_bw_topo) {
       auto& op = op_ref.get();
-      // 1. compute_op -(local_grad)-> update_op (local_group)
-      // 2. compute_op -(local_grad)-> allreduce -> update_op (local_group)
-      // 3. compute_op -(grad_in_group2)-> p2p_send (group1)  p2p_recv -> update_op (group2)
-      // 4. compute_op -(grad_in_group2)-> allreduce -> p2p_send (goup1)  p2p_recv -> update_op (group2)
+      // update op placement group = variable op placement group
+      // care about the placement group binding rules based on fw_op_id in autograd code (graph.cc)
+      // 1. compute_op -> update_op (local_group)
+      // 2. compute_op -> allreduce -> update_op (local_group)
+      // 3. compute_op -> sum_op -> allreduce -> update_op (local_group)
+      // 4. compute_op -> p2p_send (group1)  p2p_recv -> update_op (group2)
+      // 5. compute_op -> allreduce -> p2p_send (group1)  p2p_recv -> update_op (group2)
+      // 6. compute_op -> p2p_send (group1)  p2p_recv -> sum_op -> allreduce -> update_op (group2)
+
+      // local group or group2 cases (1,2,3,4,5,6)
       if (is_optimizer_update_op(op)) {
         Tensor& grad = op->input(1);
         Operator& grad_op = grad->producer();
         if (is_all_reduce_op(grad_op)) {
-          accumulated_tensor.insert(grad_op->input(0)->id());
+          // case 6
+          bool is_weight_share_case = false;
+          if (is_sum_op(grad_op->input(0)->producer())) {
+            for (auto& sum_input : grad_op->input(0)->producer()->inputs()) {
+              if (is_peer_to_peer_recv_op(sum_input->producer())) {
+                accumulated_ops_deque.push_back(std::ref(sum_input->producer()));
+                is_weight_share_case = true;
+              }
+            }
+          }
+          // case 2, 3
+          if (!is_weight_share_case) {
+            accumulated_tensor.insert(grad_op->input(0)->id());
+            accumulated_ops_deque.push_back(std::ref(grad_op));
+          }
+        } 
+        // case 4, 5
+        else if (is_peer_to_peer_recv_op(grad_op)) {
           accumulated_ops_deque.push_back(std::ref(grad_op));
-        } else if (is_peer_to_peer_recv_op(grad_op)) {
-          accumulated_ops_deque.push_back(std::ref(grad_op));
-        } else {
+        } 
+        // case 1
+        else {
           accumulated_tensor.insert(grad->id());
           accumulated_ops_deque.push_back(op_ref);
         }
-      } else if (is_peer_to_peer_send_op(op)) {
+      } 
+      // group1 cases (4,5,6)
+      else if (is_peer_to_peer_send_op(op)) {
         for (auto& consumer_op : op->out_dep_linker()->consumers()) {
+          // case 4,5
           if (is_optimizer_update_op(consumer_op)) {
             Tensor& grad = op->input(0);
             Operator& grad_op = grad->producer();
@@ -1079,7 +1245,18 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
               accumulated_tensor.insert(grad->id());
               accumulated_ops_deque.push_back(op_ref);
             }
-            break;
+          } 
+          // case 6
+          else if (is_sum_op(consumer_op)) {
+            Operator& sum_op = consumer_op.get();
+            if (is_comm_op(sum_op->output(0)->consumer(0))) {
+              Operator& comm_op = sum_op->output(0)->consumer(0);
+              if (reinterpret_cast<CommOpImpl&>(comm_op->body()).get_comm_type(comm_op) == ALL_REDUCE_OP 
+                  && is_optimizer_update_op(comm_op->output(0)->consumer(0))) {
+                accumulated_tensor.insert(op->input(0)->id());
+                accumulated_ops_deque.push_back(op_ref);
+              }
+            }
           }
         }
       }
@@ -1097,11 +1274,16 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         }
       });
     }
+    // HT_LOG_INFO << local_device << ": accumulated ops: " << accumulated_ops << "\nlocal_bw_topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get accumulated tensor & ops end...";
     // update & cached execute plan 
-    _execute_plan.update(local_fw_topo, local_bw_topo, local_topo, accumulated_tensor, accumulated_ops);
-    // sync globally
-    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+    _execute_plan.update(local_fw_topo, local_bw_topo, local_topo, shared_weight_tensor, shared_weight_p2p, accumulated_tensor, accumulated_ops);
+    // sync partially
+    std::vector<int> ranks;
+    for (const auto& stage : _stages)
+      for (const auto& device : stage.devices()) 
+        ranks.push_back(device.index());
+    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
     comm_group->Barrier(true);
   }
   TOK(run);
@@ -1126,9 +1308,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // pipeline compute
   // runtimectx for m micro batches
   std::vector<RuntimeContext> runtime_ctx_list(num_micro_batches, 
-    RuntimeContext(_execute_plan.local_topo.size()));
-  // tensor data for m micro batches
-  std::vector<Tensor2NDArrayMap> tensor2data_list(num_micro_batches);
+    RuntimeContext(_execute_plan.local_topo.size(), _shape_plan_pools[_active_plan]));
   // tensor degrees for m micro batches, if degree=0 && not in fetches, free memory for this tensor
   std::vector<Tensor2IntMap> tensor2degrees_list(num_micro_batches);
   // flush update once for m micro batches
@@ -1137,17 +1317,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   std::unordered_map<TensorId, size_t> fetch_indices;
   for (size_t i = 0; i < fetches.size(); i++)
     fetch_indices[fetches.at(i)->id()] = i;
-    
-  // get feed in dict & split into m micro batches
-  for (const auto& kv : feed_dict) {
-    if (!kv.second.is_defined()) continue; // only feed placeholder_op in local device group
-    auto micro_batches = NDArray::split(kv.second, num_micro_batches);
-    // 加一个pipeline split的tensor状态
-    for (int i = 0; i < num_micro_batches; i++) {
-      // tensor2data_list[i][kv.first] = NDArray::squeeze(micro_batches[i], 0);
-      tensor2data_list[i][kv.first] = micro_batches[i];
-    }
-  }
 
   // get consume times for each tensor
   Tensor2IntMap tensor2degrees;
@@ -1191,6 +1360,13 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     auto& tensor2data = tensor2data_list[micro_batch_id];
     auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
     auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
+    // micro batch i>0 reuse shared weight which was recved in micro batch 0
+    if (micro_batch_id > 0 && !_execute_plan.shared_weight_tensor.empty()) {
+      for (auto& shared_weight_id : _execute_plan.shared_weight_tensor) {
+        tensor2data[shared_weight_id] = tensor2data_list[0][shared_weight_id];
+      }
+    }
+    // micro batch i: execute fw/bw
     if (is_forward) {
       HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward begin]";
     } else {
@@ -1199,12 +1375,14 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (is_forward) {
       ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx, 
                   tensor2data, tensor2degrees, grad_accumulation, false, 
+                  _execute_plan.shared_weight_tensor, _execute_plan.shared_weight_p2p,
                   _execute_plan.accumulated_tensor, _execute_plan.accumulated_ops, 
                   feed_dict, fetches, fetch_indices, is_continuous_p2p);
     } else {
       bool grad_accumulation_finished = (i == tasks.size() - 1);
       ComputeFunc(micro_batch_id, _execute_plan.local_bw_topo, runtime_ctx, 
                   tensor2data, tensor2degrees, grad_accumulation, grad_accumulation_finished, 
+                  _execute_plan.shared_weight_tensor, _execute_plan.shared_weight_p2p,
                   _execute_plan.accumulated_tensor, _execute_plan.accumulated_ops, 
                   feed_dict, fetches, fetch_indices, is_continuous_p2p);
     }

@@ -114,6 +114,10 @@ class RuntimeContext {
   RuntimeContext(size_t init_capacity) {
     _ctxs.reserve(init_capacity);
   }
+  
+  RuntimeContext(size_t init_capacity, const Tensor2ShapeMap& shape_plan): _shape_plan(shape_plan) {
+    _ctxs.reserve(init_capacity);
+  }
 
   ~RuntimeContext() {
     for (auto& kv : _ctxs)
@@ -148,8 +152,16 @@ class RuntimeContext {
     _ctxs.clear();
   }
 
+  const HTShape& get_runtime_shape(const TensorId& tensor_id) const {
+    auto it = _shape_plan.find(tensor_id);
+    HT_ASSERT(it != _shape_plan.end())
+      << "Tensor " << tensor_id << " is not existed in runtime shape plan";
+    return it->second;
+  }
+
  private:
   std::unordered_map<OpId, OpRuntimeContext*> _ctxs;
+  Tensor2ShapeMap _shape_plan;
 };
 
 struct OpInstantiationContext {
@@ -371,7 +383,7 @@ class OpDef : public shared_ptr_target {
     instantiation_ctx().start[micro_batch_id]->Record(stream());
     auto ret = _body->Compute(get_self(), inputs, runtime_ctx);
     instantiation_ctx().stop[micro_batch_id]->Record(stream());
-    stream().Sync();
+    // stream().Sync();
     HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": compute op: " << name()
       << ", the result is (may not sync) " << ret;
     return ret;
@@ -773,6 +785,7 @@ static const uint64_t SCATTER_OP = 1ul << 16;
 static const uint64_t COMM_SPLIT_OP = 1ul << 19;
 static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t UNKNOWN_OP = 1ul << 21;
+static const uint64_t SUM_OP = 1ul << 58;
 static const uint64_t SLICE_OP = 1ul << 59;
 static const uint64_t LOSS_OP = 1ul << 60;
 static const uint64_t LOSS_GRADIENT_OP = 1ul << 61;
@@ -819,6 +832,7 @@ DECLARE_OP_INDICATOR_CHECKER(communucation,
                                BROADCAST_OP | REDUCE_OP |
                                P2P_OP | BATCHED_ISEND_IRECV_OP |
                                GATHER_OP | SCATTER_OP)
+DECLARE_OP_INDICATOR_CHECKER(sum, SUM_OP)                               
 DECLARE_OP_INDICATOR_CHECKER(slice, SLICE_OP)
 DECLARE_OP_INDICATOR_CHECKER(loss, LOSS_OP)
 DECLARE_OP_INDICATOR_CHECKER(loss_gradient, LOSS_GRADIENT_OP)

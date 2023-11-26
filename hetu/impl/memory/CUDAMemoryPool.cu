@@ -121,13 +121,13 @@ void CUDAMemoryPool::FreeDataSpace(DataPtr data_ptr) {
       event.Record(used_stream);
       event.Block(join_stream);
     }
-    CudaFreeAsync(data_ptr.ptr, CUDAStream(join_stream));
+    CUDA_CALL(cudaFreeAsync(data_ptr.ptr, CUDAStream(join_stream)));
     free_stream = join_stream;
   }
 
   // Note: If the stream to free the memory is never going to be used,
   // the driver may reserve the memory and try to find any possibility
-  // to re-use the memory on the same stream, leading to memory leakage
+  // to re-use the memory on the same/other stream, leading to memory leakage
   // (in particular on the join stream). Therefore, we use a background watcher
   // to wait for the streams that are used to free.
   _free_stream_flags[free_stream.stream_index()] = 1;
