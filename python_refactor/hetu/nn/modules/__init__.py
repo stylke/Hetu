@@ -12,6 +12,7 @@ from .dropout import *
 from .sparse import *
 
 from .parallel import *
+from .parallel_ds import *
 
 __all__ = [
     'Module', 
@@ -33,4 +34,6 @@ __all__ = [
     'Embedding',
     # parallel
     'ParallelLayerNorm', 'ParallelEmbedding', 'VocabParallelEmbedding', 'ColumnParallelLinear', 'RowParallelLinear',
+    # parallel_ds
+    'HtParallelLayerNorm', 'HtParallelEmbedding', 'HtVocabParallelEmbedding', 'HtColumnParallelLinear', 'HtRowParallelLinear',    
 ]
