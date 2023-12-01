@@ -1019,86 +1019,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
   }
 
-  // 我们需要global graph的信息来推导新的shape plan（主要是因为comm op在local graph中只有一半信息）
-  HT_LOG_DEBUG << local_device << ": [Execution Plan] obtain shape plan begin...";
-  // tensor data for m micro batches
-  std::vector<Tensor2NDArrayMap> tensor2data_list(num_micro_batches);
-  // get feed in dict & split into m micro batches
-  for (const auto& kv : feed_dict) {
-    if (!kv.second.is_defined()) continue; // only feed placeholder_op in local device group
-    auto micro_batches = NDArray::split(kv.second, num_micro_batches);
-    // 加一个pipeline split的tensor状态
-    for (int i = 0; i < num_micro_batches; i++) {
-      // tensor2data_list[i][kv.first] = NDArray::squeeze(micro_batches[i], 0);
-      tensor2data_list[i][kv.first] = micro_batches[i];
-    }
-  }
-  int active_plan = 0;
-  for (const auto& shape_plan : _shape_plan_pools) {
-    bool plan_matched = true;
-    for (const auto& kv : feed_dict) {
-      if (!kv.second.is_defined()) continue;
-      auto it = shape_plan.find(kv.first);
-      HT_ASSERT(it != shape_plan.end()) << "fetch's shape is not in shape plan";
-      if (it->second != tensor2data_list[0][kv.first]->shape()) {
-        plan_matched = false;
-        break;
-      }
-    }
-    if (plan_matched) break;
-    active_plan++;
-  }
-  // 需要新增shape plan到shape plan pools
-  if (active_plan == _shape_plan_pools.size()) {
-    HT_LOG_DEBUG << local_device << ": adding new shape plan to shape plan pools...";
-    Tensor2ShapeMap shape_plan;
-    // feed_dict中的shape是确定的
-    for (const auto& kv : feed_dict) {
-      shape_plan[kv.first] = tensor2data_list[0][kv.first]->shape(); // copy constructor
-    }
-    OpRefList topo = Graph::TopoSort(fetches, -1, is_op_computed);
-    HT_LOG_DEBUG << local_device << ": global topo before deducing shape plan: " << topo;
-    RuntimeContext runtime_ctx(topo.size());
-    // 扫描global topo并推导新的shape plan
-    for (auto& op_ref : topo) {
-      auto& op = op_ref.get();
-      // 跳过placeholder
-      bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
-        return feed_dict.find(tensor->id()) != feed_dict.end();
-      });
-      if (computed)
-        continue;
-      HTShapeList input_shapes;
-      input_shapes.reserve(op->num_inputs());
-      for (const auto& input : op->inputs()) {
-        auto it = shape_plan.find(input->id());
-        HT_ASSERT(it != shape_plan.end()) 
-          << "Something wrong, can't find the input shape from the current shape plan!";
-        input_shapes.push_back(it->second);
-      }
-      HTShapeList output_shapes = op->InferShape(input_shapes, runtime_ctx);
-      auto output_shapes_size = output_shapes.size();
-      for (size_t i = 0; i < output_shapes_size; i++) {
-        // 设置symbolic shape叶子节点的shape
-        // 其相关联的非叶子的symbolic shape可以直接由计算链条获得新的shape
-        if (op->output(i)->symbolic()) {
-          op->output(i)->set_symbolic_shape(output_shapes[i]);
-        }
-        auto it = shape_plan.find(op->output(i)->id());
-        HT_ASSERT(it == shape_plan.end()) 
-          << "Something wrong, the output shape should't exist in the current shape plan";
-        shape_plan.insert(std::make_pair(op->output(i)->id(), std::move(output_shapes[i]))); // move constructor
-      }
-    }
-    AddShapePlan(std::move(shape_plan));
-  }
-  // 需要切换shape plan
-  if (_active_plan != active_plan) {
-    _active_plan = active_plan;
-    // Question: anything else to do?
-  }
-  HT_LOG_DEBUG << local_device << ": [Execution Plan] obtain shape plan end...";
-
   if (is_execute_plan_changed) {
     // TODO: replace the fetches to the new substitued results after SubstituteCommOp
     for (auto& fetch : fetches) {
@@ -1308,11 +1228,24 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // pipeline compute
   // runtimectx for m micro batches
   std::vector<RuntimeContext> runtime_ctx_list(num_micro_batches, 
-    RuntimeContext(_execute_plan.local_topo.size(), _shape_plan_pools[_active_plan]));
+    RuntimeContext(_execute_plan.local_topo.size(), _shape_plan));
+  // tensor data for m micro batches
+  std::vector<Tensor2NDArrayMap> tensor2data_list(num_micro_batches);
   // tensor degrees for m micro batches, if degree=0 && not in fetches, free memory for this tensor
   std::vector<Tensor2IntMap> tensor2degrees_list(num_micro_batches);
   // flush update once for m micro batches
   Tensor2NDArrayMap grad_accumulation;
+
+  // get feed in dict & split into m micro batches
+  for (const auto& kv : feed_dict) {
+    if (!kv.second.is_defined()) continue; // only feed placeholder_op in local device group
+    auto micro_batches = NDArray::split(kv.second, num_micro_batches);
+    // 加一个pipeline split的tensor状态
+    for (int i = 0; i < num_micro_batches; i++) {
+      // tensor2data_list[i][kv.first] = NDArray::squeeze(micro_batches[i], 0);
+      tensor2data_list[i][kv.first] = micro_batches[i];
+    }
+  }
   
   std::unordered_map<TensorId, size_t> fetch_indices;
   for (size_t i = 0; i < fetches.size(); i++)
@@ -1551,6 +1484,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 // TODO: merge two `Run` func
 NDArrayList ExecutableGraph::Run(const TensorList& fetches,
                                  const FeedDict& feed_dict) {
+  HT_RUNTIME_ERROR << "NotImplementedError";
+  
   // TODO: For each pair of `fetches` and `feed_dict`,
   // deduce the optimal execution plan, and cache it.
   for (auto& fetch : fetches) {

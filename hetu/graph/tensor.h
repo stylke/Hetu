@@ -266,6 +266,12 @@ class TensorDef : public shared_ptr_target {
     HT_ASSERT(_symbolic) << "symbolic_shape() can only work after calling set_symbolic_shape() or init_symbolic_shape()";
     return _symbolic_shape;
   }
+
+  void set_shape(const HTShape& shape) {
+    _meta.set_shape(shape);
+    // no need to set _global_shape
+    // since global_shape() method will automatically calc it
+  }
   
   // (most likely) not a leaf
   void set_symbolic_shape(const SyShape& symbolic_shape) {

@@ -22,8 +22,8 @@ class SliceOpImpl : public OpInterface {
     _padding_axis(padding_axis),
     _inplace(inplace),
     _symbolic(true) {
-    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " splice op begin_pos = " << get_begin_pos();
-    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " splice op begin_pos = " << get_output_shape();
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " splice op begin_pos = " << get_begin_pos();
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " splice op begin_pos = " << get_output_shape();
   }
   // fixed shape constructor
   SliceOpImpl(const HTShape& begin_pos, const HTShape& output_shape, const int64_t& padding_axis = -1, bool inplace = false)
@@ -80,7 +80,7 @@ class SliceOpImpl : public OpInterface {
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(get_output_shape())
                                            .set_device(inputs[0]->device());
-    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " splice op DoInferMeta() finished";
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " splice op DoInferMeta() finished";
     return {output_meta};
   };
 

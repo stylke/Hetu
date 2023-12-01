@@ -9,7 +9,7 @@ namespace graph {
 
 Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
                    const HTShape& splits, OpMeta op_meta) {
-  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << op_meta.name << "type 1: use symbolic method";
+  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << op_meta.name << "type 1: use symbolic method";
   HT_ASSERT(input->has_shape());
   // get begin_pos, output_shape
   HT_ASSERT(axes.size() == splits.size());
@@ -45,7 +45,7 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
   auto output = Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape, -1, false),
                       {std::move(input)}, std::move(op_meta))->output(0);
   output->set_symbolic_shape(std::move(output_shape)); // not leaf
-  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " split op type 1: finish making";
+  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 1: finish making";
   return output;
 }
 
@@ -53,7 +53,7 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
 // 实现与原版不同？这里只能做到在单一的dim上的切分
 TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
                        OpMeta op_meta) {
-  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " split op type 2: " 
+  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 2: " 
     << "input_shape = " << input->shape() << " and num_chunks = " << num_chunks;
   HT_ASSERT(input->has_shape());
   dim = NDArrayMeta::ParseAxis(dim, input->ndim());
@@ -72,15 +72,12 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
                                             : chunk_size;
     begin_pos[dim] = chunk_sum;
     chunk_sum = chunk_sum + chunk_size;
-    HT_LOG_DEBUG << "ckpt1";
     outputs.emplace_back(Graph::MakeOp(
                          std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape, -1, false),
                          {input}, op_meta)->output(0));
-    HT_LOG_DEBUG << "ckpt2";
     outputs[i]->set_symbolic_shape(std::move(output_shape));
-    HT_LOG_DEBUG << "ckpt3";
   }
-  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " split op type 2: finish making";
+  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 2: finish making";
   return outputs;
 }
 

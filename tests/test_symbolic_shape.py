@@ -16,27 +16,51 @@ devices_num = all_device_group.num_devices
 
 def unit_test():
 
-    global_shape = [2, 4, 2]
-    x = ht.parallel_placeholder(ht.float32, global_shape=global_shape, ds=ds_split01, device_group=all_device_group)
-    y = x + 1
+    init_shape = [2, 4, 9]
+    _ = ht.parallel_placeholder(ht.float32, global_shape=init_shape, ds=ds_split01, device_group=all_device_group)
+    _, _, x = ht.split(_, 3, 2)
+    z = x + 3
+    _, _, y = ht.split(z, 3, 2)
 
-    global_shape = [2, 4, 2]
-    x_data = np.zeros(global_shape)
+    x_shape = [2, 4, 3]
+    x_data = np.zeros(x_shape)
     feed_dict = {x: parallel_data_provider(x_data, ds_split01, local_device_index)}
     results = y.graph.run(y, [y], feed_dict)
+    # y_shape should be [1, 2, 1]
     y_data = results[0].numpy(force=True)
     
     if local_device_index == 0:
         print("before:", y_data)
     
-    global_shape = [2, 6, 3]
-    x_data = np.ones(global_shape)
+    x_shape = [4, 6, 6]
+    x_data = np.ones(x_shape)
     feed_dict = {x: parallel_data_provider(x_data, ds_split01, local_device_index)}
     results = y.graph.run(y, [y], feed_dict)
+    # y_shape should be [2, 3, 2]
     y_data = results[0].numpy(force=True)
     
     if local_device_index == 0:
         print("after:", y_data)
+        
+    x_shape = [2, 4, 3]
+    x_data = np.zeros(x_shape)
+    feed_dict = {x: parallel_data_provider(x_data, ds_split01, local_device_index)}
+    results = y.graph.run(y, [y], feed_dict)
+    # y_shape should be [1, 2, 1]
+    y_data = results[0].numpy(force=True)
+    
+    if local_device_index == 0:
+        print("again:", y_data)
+        
+    x_shape = [2, 4, 3]
+    x_data = np.ones(x_shape)
+    feed_dict = {x: parallel_data_provider(x_data, ds_split01, local_device_index)}
+    results = y.graph.run(y, [y], feed_dict)
+    # y_shape should be [1, 2, 1]
+    y_data = results[0].numpy(force=True)
+    
+    if local_device_index == 0:
+        print("again after again:", y_data)
     
 if __name__ == '__main__':
     with ht.graph("define_and_run"):

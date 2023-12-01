@@ -62,23 +62,17 @@ class ExecutableGraph : public Graph {
     _stages = device_groups;
   }
 
-  void SetShapePlan(int num) {
-    _active_plan = num;
+  void InitShapePlan(const Tensor2ShapeMap& shape_plan) {
+    _shape_plan = shape_plan;
   }
 
   void InitShapePlan(Tensor2ShapeMap&& shape_plan) {
-    _shape_plan_pools.clear();
-    _shape_plan_pools.push_back(std::move(shape_plan));
-  }
-
-  void AddShapePlan(Tensor2ShapeMap&& shape_plan) {
-    _shape_plan_pools.push_back(std::move(shape_plan));
+    _shape_plan = std::move(shape_plan);
   }
 
   void RecordTensorShape(const TensorId& key, const HTShape& value) {
-    auto& shape_plan = _shape_plan_pools[_active_plan];
-    auto it = shape_plan.find(key);
-    if (it != shape_plan.end()) {
+    auto it = _shape_plan.find(key);
+    if (it != _shape_plan.end()) {
       // already existed, then must be equal
       HT_ASSERT(it->second.size() == value.size())
         << "Tensor " << key << " is already exited in shape plan but is unequal";
@@ -88,13 +82,12 @@ class ExecutableGraph : public Graph {
       }
       return;
     }
-    shape_plan.insert(std::make_pair(key, value));
+    _shape_plan.insert(std::make_pair(key, value));
   }
 
   void RecordTensorShape(const TensorId& key, HTShape&& value) {
-    auto& shape_plan = _shape_plan_pools[_active_plan];
-    auto it = shape_plan.find(key);
-    if (it != shape_plan.end()) {
+    auto it = _shape_plan.find(key);
+    if (it != _shape_plan.end()) {
       // already existed, then must be equal
       HT_ASSERT(it->second.size() == value.size())
         << "Tensor " << key << " is already existed in shape plan but is unequal";
@@ -104,13 +97,12 @@ class ExecutableGraph : public Graph {
       }
       return;
     } 
-    shape_plan.insert(std::make_pair(key, std::move(value)));
+    _shape_plan.insert(std::make_pair(key, std::move(value)));
   }
 
   const HTShape& GetTensorShape(const TensorId& key) const {
-    auto& shape_plan = _shape_plan_pools[_active_plan];
-    auto it = shape_plan.find(key);
-    HT_ASSERT(it != shape_plan.end())
+    auto it = _shape_plan.find(key);
+    HT_ASSERT(it != _shape_plan.end())
       << "Tensor " << key << " is not existed in current shape plan";
     return it->second;
   }
@@ -188,8 +180,7 @@ class ExecutableGraph : public Graph {
   std::vector<DeviceGroup> _stages;
   int _num_micro_batches;
   ExecutePlan _execute_plan;
-  size_t _active_plan;
-  std::vector<Tensor2ShapeMap> _shape_plan_pools;
+  Tensor2ShapeMap _shape_plan;
   std::vector<std::unique_ptr<Event>> _p2p_events;
 };
 

@@ -34,6 +34,14 @@ T SymbolDef<T>::get_val() const {
   return _val;
 }
 
+bool is_SyShape_leaf(const SyShape& sy_shape) {
+  for (const auto& x : sy_shape) {
+    if (!x->is_leaf())
+      return false;
+  }
+  return true;
+}
+
 HTShape get_HTShape_from_SyShape(const SyShape& sy_shape) {
   HTShape shape;
   for (const auto& x : sy_shape) {

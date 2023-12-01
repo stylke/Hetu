@@ -373,6 +373,7 @@ HTShapeList BatchedISendIRecvOpImpl::DoInferShape(Operator& op,
   return std::move(outputs_shape);
 }  
 
+// deprecated: only used in gpt inference, before symbolic shape is realized
 HTShapeList BatchedISendIRecvOpImpl::DoInferDynamicShape(Operator& op, 
                                                   const HTShapeList& input_shapes,
                                                   RuntimeContext& runtime_ctx) const {                                             
@@ -553,6 +554,7 @@ Tensor MakeP2PRecvOp(const DeviceGroup& src_group, DataType dtype,
                        src_device_index, op_meta.device_group), {}, std::move(op_meta))->output(0);
 }
 
+/*
 // symbolic shape
 Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
                                const std::vector<Device>& dst_devices, 
@@ -567,6 +569,7 @@ Tensor MakeBatchedISendIRecvOp(TensorList inputs,
     return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(dst_devices, outputs_shape,
                         src_devices, comm_devices, dtype), inputs, std::move(op_meta))->output(0);  
 }
+*/
 
 // fixed shape
 Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
