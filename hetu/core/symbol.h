@@ -143,9 +143,12 @@ class Symbol : public shared_ptr_wrapper<SymbolDef<T>> {
         this->_ptr = this->template make_ptr<SymbolDef<T>>(val); 
       return *this;
     }
+
+    std::string symbol_info() const;
 };
 
-using SyShape = std::vector<Symbol<int64_t>>;
+using IntSymbol = Symbol<int64_t>;
+using SyShape = std::vector<IntSymbol>;
 using SyShapeList = std::vector<SyShape>;
 
 bool is_SyShape_leaf(const SyShape& sy_shape);

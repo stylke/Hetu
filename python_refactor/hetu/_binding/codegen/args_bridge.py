@@ -24,8 +24,10 @@ class ArgType:
     OPERATOR = 18; OPERATOR_STR = ("hetu.Operator", "Operator", "hetu.operator", "operator")
     OPERATOR_LIST = 19; OPERATOR_LIST_STR = ("List[hetu.Operator]", "List[Operator]", "List[hetu.operator]", "List[operator]", "OperatorList", "OpList")
     FEED_DICT = 20; FEED_DICT_STR = ("FeedDict", "feed_dict")
-    DISTRIBUTED_STATES = 22; DISTRIBUTED_STATES_STR = ("hetu.DistributedStates", "DistributedStates")
-    INITIALIZER = 23; INITIALIZER_STR = ("hetu.Initializer", "Initializer")
+    DISTRIBUTED_STATES = 21; DISTRIBUTED_STATES_STR = ("hetu.DistributedStates", "DistributedStates")
+    INT_SYMBOL = 22; INT_SYMBOL_STR = ("hetu.IntSymbol", "IntSymbol")
+    SYMBOLIC_SHAPE = 23; SYMBOLIC_SHAPE_STR = ("List[hetu.IntSymbol]", "List[IntSymbol]", "SyShape")
+    INITIALIZER = 24; INITIALIZER_STR = ("hetu.Initializer", "Initializer")
 
     # None is for returning type rather than argument type. 
     # We slightly abuse the notation here.
@@ -60,6 +62,8 @@ class ArgType:
         ArgType.type_to_type_str_mapping[ArgType.OPERATOR_LIST] = ArgType.OPERATOR_LIST_STR
         ArgType.type_to_type_str_mapping[ArgType.FEED_DICT] = ArgType.FEED_DICT_STR
         ArgType.type_to_type_str_mapping[ArgType.DISTRIBUTED_STATES] = ArgType.DISTRIBUTED_STATES_STR
+        ArgType.type_to_type_str_mapping[ArgType.INT_SYMBOL] = ArgType.INT_SYMBOL_STR
+        ArgType.type_to_type_str_mapping[ArgType.SYMBOLIC_SHAPE] = ArgType.SYMBOLIC_SHAPE_STR
         ArgType.type_to_type_str_mapping[ArgType.INITIALIZER] = ArgType.INITIALIZER_STR
         
         for t, ss in ArgType.type_to_type_str_mapping.items():
@@ -334,6 +338,18 @@ def get_arg_getter_fn(arg_type, default_str, has_default, type_str, args):
             return "get_distributed_states_or_empty"
         else:
             return "get_distributed_states"
+    elif arg_type == ArgType.INT_SYMBOL:
+        if has_default:
+            assert_default_is_none(type_str, default_str)
+            return "get_int_symbol_or_empty"
+        else:
+            return "get_int_symbolic"
+    elif arg_type == ArgType.SYMBOLIC_SHAPE:
+        if has_default:
+            assert_default_is_none(type_str, default_str)
+            return "get_symbolic_shape_or_empty"
+        else:
+            return "get_symbolic_shape"
     elif arg_type == ArgType.INITIALIZER:
         return "get_initializer"
     else:

@@ -5,6 +5,7 @@
 #include "hetu/_binding/core/dtype.h"
 #include "hetu/_binding/core/stream.h"
 #include "hetu/_binding/core/ndarray.h"
+#include "hetu/_binding/core/symbol.h"
 #include "hetu/_binding/graph/operator.h"
 #include "hetu/_binding/graph/tensor.h"
 #include "hetu/_binding/graph/distributed_states.h"
@@ -22,6 +23,7 @@ PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::AddPyDataTypeTypeToModule(m);
   hetu::AddPyStreamTypeToModule(m);
   hetu::AddPyNDArrayTypeToModule(m);
+  hetu::AddPyIntSymbolTypeToModule(m);
   hetu::AddPyCommGroupTypeToModule(m);
   hetu::graph::AddPyOperatorTypeToModule(m);
   hetu::graph::AddPyTensorTypeToModule(m);

@@ -14,11 +14,6 @@ class GPTAttention(ht.nn.Module):
         self.device_group = device_group
         self.add_bias = True
 
-        max_positions = config.max_position_embeddings
-        self.bias = np.tril(np.ones((max_positions, max_positions), dtype=np.int64).reshape(
-                    1, 1, max_positions, max_positions))
-        self.masked_value = -1e4
-
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
@@ -58,10 +53,9 @@ class GPTAttention(ht.nn.Module):
         self.resid_dropout = ht.nn.Dropout(config.resid_pdrop)
 
 
-    def _attn(self, query, key_t, value, attention_mask=None):
+    def _attn(self, query, key_t, value, causal_mask, mask, attention_mask=None):
         # q*k^T, shape=[micro_batch_size, num_heads, seq_len, seq_len]
         attn_weights = ht.bmm(query, key_t)
-        micro_batch_size, num_heads, seq_len, seq_len = attn_weights.global_shape
 
         # scale
         if self.scale_attn_weights:
@@ -70,14 +64,6 @@ class GPTAttention(ht.nn.Module):
             attn_weights = attn_weights / float(self.layer_idx + 1)
 
         # mask
-        device_index = get_device_index(self.device_group)
-        causal_mask = ht.from_numpy_parallel(parallel_data_provider(np.tile(self.bias[:, :, :seq_len, :seq_len], 
-                                                                            (micro_batch_size, num_heads, 1, 1)),
-                                                                    attn_weights.distributed_states, device_index),
-                                             attn_weights.distributed_states, device_group=self.device_group, name='causal_mask')
-        mask = ht.from_numpy_parallel(parallel_data_provider(np.full(attn_weights.global_shape, self.masked_value, dtype=np.float32),
-                                                             attn_weights.distributed_states, device_index), 
-                                      attn_weights.distributed_states, device_group=self.device_group, name='mask')
         attn_weights = ht.where(causal_mask, attn_weights, mask)
         if attention_mask is not None:
             # attn_weights: shape=[micro_batch_size, num_heads, seq_len, seq_len]
@@ -99,6 +85,8 @@ class GPTAttention(ht.nn.Module):
     def forward(
         self,
         hidden_states,
+        causal_mask,
+        mask,
         attention_mask=None,
     ):
         micro_batch_size, seq_len, embed_dim = hidden_states.global_shape
@@ -129,7 +117,7 @@ class GPTAttention(ht.nn.Module):
         key_t = key.transpose([0, 2, 3, 1]) # k^T
 
         # self-attn, shape=[micro_batch_size, num_heads, seq_len, head_dim]
-        attn_output, attn_weights = self._attn(query, key_t, value, attention_mask)
+        attn_output, attn_weights = self._attn(query, key_t, value, causal_mask, mask, attention_mask)
 
         # [micro_batch_size, seq_len, num_heads, head_dim]
         attn_output = attn_output.transpose([0, 2, 1, 3])
@@ -200,10 +188,10 @@ class GPTMLP(ht.nn.Module):
     def forward(self, hidden_states):
         origin_shape = hidden_states.global_shape # [b, seq_len, hidden_size]
         if len(origin_shape) != 2: # shape adaptor
-            hidden_states = hidden_states.reshape([-1, origin_shape[-1]])
+            hidden_states = hidden_states.reshape([-1, origin_shape[2]])
         hidden_states = self.parallel_mlp(hidden_states)
         if len(origin_shape) != 2: # shape adaptor
-            hidden_states = hidden_states.reshape(origin_shape)
+            hidden_states = hidden_states.reshape([origin_shape[0], -1, origin_shape[2]])
         return hidden_states
 
 class GPTBlock(ht.nn.Module):
@@ -222,6 +210,8 @@ class GPTBlock(ht.nn.Module):
     def forward(
         self,
         hidden_states,
+        causal_mask,
+        mask,
         attention_mask=None,
     ):
         residual = hidden_states
@@ -229,6 +219,8 @@ class GPTBlock(ht.nn.Module):
         attn_output = self.attn(
             hidden_states, # [b, seq_len, hidden_size]
             attention_mask=attention_mask, # [b, 1, 1, seq_len]
+            causal_mask=causal_mask, # [b, num_heads, seq_len, seq_len]
+            mask=mask # [b, num_heads, seq_len, seq_len]
         )
         # residual connection
         hidden_states = attn_output + residual
@@ -264,6 +256,9 @@ class GPTModel(ht.nn.Module):
     def forward(
         self,
         input_ids,
+        position_ids,
+        causal_mask,
+        mask,
         attention_mask=None,
         token_type_ids=None,
     ):
@@ -277,14 +272,6 @@ class GPTModel(ht.nn.Module):
             assert token_type_ids.global_shape == input_ids.global_shape \
                 and token_type_ids.distributed_states.check_equal(input_ids.distributed_states), \
                 'token_type_ids global_shape and distributed_states should be equal to input_ids'
-
-        # position_ids: [1, seq_len]
-        position_ids = np.arange(0, seq_len, dtype=np.int64) # pos: [0, 1, 2, ..., seq_len-1]
-        position_ids = np.tile(position_ids, [micro_batch_size, 1]) # shape: [b, seq_len]
-        # position_ids = ht.from_numpy(position_ids)
-        device_index = get_device_index(self.device_groups[0])
-        position_ids = ht.from_numpy_parallel(parallel_data_provider(position_ids, input_ids.distributed_states, device_index), 
-                                              input_ids.distributed_states, device_group=self.device_groups[0], name='position_ids')
 
         # attention_mask: [b, 1, 1, seq_len]
         if attention_mask is not None:
@@ -311,6 +298,8 @@ class GPTModel(ht.nn.Module):
         for i, block in enumerate(self.h):
             hidden_states = block(
                 hidden_states, # [b, seq_len, embed_dim]
+                causal_mask=causal_mask[i // (self.config.num_hidden_layers // 2)], # [b, num_heads, seq_len, seq_len]
+                mask=mask[i // (self.config.num_hidden_layers // 2)], # [b, num_heads, seq_len, seq_len]
                 attention_mask=attention_mask, # [b, 1, 1, seq_len]
             )
         # layernorm
@@ -338,6 +327,9 @@ class GPTLMHeadModel(ht.nn.Module):
     def forward(
         self,
         input_ids=None,
+        position_ids=None,
+        causal_mask=None,
+        mask=None,
         attention_mask=None,
         token_type_ids=None,
         labels=None
@@ -345,6 +337,9 @@ class GPTLMHeadModel(ht.nn.Module):
         # [b, seq_len, n_embd]
         hidden_states = self.transformer(
             input_ids,
+            position_ids,
+            causal_mask,
+            mask,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
         )

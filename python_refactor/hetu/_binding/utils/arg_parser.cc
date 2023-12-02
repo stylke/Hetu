@@ -128,6 +128,10 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::SGDOPTIMIZER;
   if (type == "hetu.DistributedStates" || type == "DistributedStates")
     return ArgType::DISTRIBUTED_STATES;
+  if (type == "hetu.IntSymbol" || type == "IntSymbol")
+    return ArgType::INT_SYMBOL;
+  if (type == "List[hetu.IntSymbol]" || type == "List[IntSymbol]" || type == "SyShape")
+    return ArgType::SYMBOLIC_SHAPE;
   if (type == "hetu.Initializer" || type == "Initializer")
     return ArgType::INITIALIZER;
   HT_VALUE_ERROR << "Unknown argument type: " << type;
@@ -315,6 +319,10 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPySGDOptimizer(obj);
     case ArgType::DISTRIBUTED_STATES:
       return CheckPyDistributedStates(obj);
+    case ArgType::INT_SYMBOL:
+      return CheckPyIntSymbol(obj);
+    case ArgType::SYMBOLIC_SHAPE:
+      return CheckPySyShape(obj);
     case ArgType::INITIALIZER:
       return CheckPyInitializer(obj);
     default:

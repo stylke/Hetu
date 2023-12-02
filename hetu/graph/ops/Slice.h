@@ -14,7 +14,7 @@ class SliceGradientOp;
 
 class SliceOpImpl : public OpInterface {
  public:
-  // symbolic shape constructor, _ori_shape is crucial
+  // symbolic shape constructor
   SliceOpImpl(const SyShape& begin_pos, const SyShape& output_shape, const int64_t& padding_axis = -1, bool inplace = false)
   : OpInterface(quote(SliceOp)),
     _begin_pos(begin_pos),
@@ -121,9 +121,16 @@ class SliceOpImpl : public OpInterface {
   }
 };
 
+// fixed shape
 Tensor MakeSliceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
                    OpMeta op_meta = OpMeta());
 Tensor MakeSliceInplaceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
+                          OpMeta op_meta = OpMeta());
+
+// symbolic shape
+Tensor MakeSliceOp(Tensor input, const SyShape& begin_pos, const SyShape& output_shape,
+                   OpMeta op_meta = OpMeta());
+Tensor MakeSliceInplaceOp(Tensor input, const SyShape& begin_pos, const SyShape& output_shape,
                           OpMeta op_meta = OpMeta());
 
 class SliceGradientOpImpl : public OpInterface {
@@ -195,10 +202,12 @@ class SliceGradientOpImpl : public OpInterface {
   }
 };
 
+// fixed shape
 Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
                            const HTShape& begin_pos, const HTShape& output_shape,
                            OpMeta op_meta = OpMeta());
 
+// symbolic shape
 Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
                            const SyShape& begin_pos, const SyShape& output_shape,
                            OpMeta op_meta = OpMeta());

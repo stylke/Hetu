@@ -109,6 +109,7 @@ void SliceGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& o
   outputs.at(0)->set_distributed_states(inputs.at(2)->get_distributed_states());  
 }
 
+// fixed shape
 Tensor MakeSliceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
                    OpMeta op_meta) {
   return Graph::MakeOp(
@@ -117,6 +118,16 @@ Tensor MakeSliceOp(Tensor input, const HTShape& begin_pos, const HTShape& output
     std::move(op_meta))->output(0);
 }
 
+// symbolic shape
+Tensor MakeSliceOp(Tensor input, const SyShape& begin_pos, const SyShape& output_shape,
+                   OpMeta op_meta) {
+  return Graph::MakeOp(
+    std::make_shared<SliceOpImpl>(begin_pos, output_shape, -1, false),
+    {std::move(input)},
+    std::move(op_meta))->output(0);
+}
+
+// fixed shape
 Tensor MakeSliceInplaceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
                           OpMeta op_meta) {
   return Graph::MakeOp(
@@ -125,6 +136,16 @@ Tensor MakeSliceInplaceOp(Tensor input, const HTShape& begin_pos, const HTShape&
     std::move(op_meta))->output(0);
 }
 
+// symbolic shape
+Tensor MakeSliceInplaceOp(Tensor input, const SyShape& begin_pos, const SyShape& output_shape,
+                          OpMeta op_meta) {
+  return Graph::MakeOp(
+    std::make_shared<SliceOpImpl>(begin_pos, output_shape, -1, true),
+    {std::move(input)},
+    std::move(op_meta))->output(0);
+}
+
+// fixed shape
 Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
                            const HTShape& begin_pos, const HTShape& output_shape,
                            OpMeta op_meta) {
@@ -134,6 +155,7 @@ Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_inp
     std::move(op_meta))->output(0);
 }
 
+// symbolic shape
 Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
                            const SyShape& begin_pos, const SyShape& output_shape,
                            OpMeta op_meta) {

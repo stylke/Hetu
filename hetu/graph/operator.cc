@@ -133,7 +133,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     for (size_t i = 0; i < output_size; i++) {
       // question: will tensor shape != NDArray shape happen in any situation
       const auto& output_shape = runtime_ctx.get_runtime_shape(op->output(i)->id());
-      HT_LOG_TRACE << local_device << ": exec op " << op
+      HT_LOG_DEBUG << local_device << ": exec op " << op
         << " output " << i << " shape = " << output_shape;
       outputs.push_back(NDArray::empty(output_shape,
                                        op->instantiation_ctx().placement,

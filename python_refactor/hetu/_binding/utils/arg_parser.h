@@ -7,6 +7,7 @@
 #include "hetu/_binding/core/device.h"
 #include "hetu/_binding/core/stream.h"
 #include "hetu/_binding/core/ndarray.h"
+#include "hetu/_binding/core/symbol.h"
 #include "hetu/_binding/graph/operator.h"
 #include "hetu/_binding/graph/tensor.h"
 #include "hetu/_binding/graph/graph.h"
@@ -52,6 +53,8 @@ enum class ArgType : uint8_t {
   OPERATOR_LIST,
   FEED_DICT,
   DISTRIBUTED_STATES,
+  INT_SYMBOL,
+  SYMBOLIC_SHAPE,
   INITIALIZER,
   SGDOPTIMIZER
 };
@@ -385,6 +388,22 @@ class ParsedPyArgs {
 
   inline DistributedStates get_distributed_states(size_t i) {
     return DistributedStates_FromPyObject(_args[i]);
+  }
+
+  inline IntSymbol get_int_symbol_or_empty(size_t i) {
+    return has(i) ? IntSymbol_FromPyObject(_args[i]) : IntSymbol();
+  }
+
+  inline IntSymbol get_int_symbol(size_t i) {
+    return IntSymbol_FromPyObject(_args[i]);
+  }
+
+  inline SyShape get_symbolic_shape_or_empty(size_t i) {
+    return has(i) ? SyShape_FromPyObject(_args[i]) : SyShape();
+  }
+
+  inline SyShape get_symbolic_shape(size_t i) {
+    return SyShape_FromPyObject(_args[i]);
   }
 
   inline std::shared_ptr<Initializer> get_initializer(size_t i) {

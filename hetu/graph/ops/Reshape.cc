@@ -56,9 +56,14 @@ HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op,
   int64_t output_size = 1;
   HTShape output_shape = get_output_shape();
   if (op->input(0)->has_distributed_states()) {
-    output_shape = get_local_output_shape(op->input(0)->global_shape(), 
-                                          op->input(0)->get_distributed_states());
+    HTShape global_shape(input_shape.size());
+    const auto& input_ds = op->input(0)->get_distributed_states();
+    for (size_t d = 0; d < input_shape.size(); d++) {
+      global_shape[d] = input_shape[d] * input_ds.get_dim(d);
+    }
+    output_shape = get_local_output_shape(global_shape, input_ds);
   }  
+  // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": DoInferShape op " << op << " output shape is " << output_shape;
   int64_t output_len = output_shape.size();
   for (size_t i = 0; i < input_len; ++i) {
     if (input_shape[i] == -1) {
@@ -87,6 +92,7 @@ HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op,
   return {output_shape};
 }
 
+// deprecated: only used in gpt inference, before symbolic shape is realized
 HTShapeList ArrayReshapeOpImpl::DoInferDynamicShape(Operator& op, 
                                              const HTShapeList& input_shapes, 
                                              RuntimeContext& ctx) const {
@@ -167,6 +173,7 @@ Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
       std::move(op_meta))->output(0);
 }
 
+// deprecated: only used in gpt inference, before symbolic shape is realized
 Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
                           int64_t padding_axis, OpMeta op_meta) {
   padding_axis = NDArrayMeta::ParseAxis(padding_axis, output_shape.size());

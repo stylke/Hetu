@@ -2,6 +2,7 @@
 #include "hetu/_binding/graph/tensor_ctor.h"
 #include "hetu/_binding/graph/graph.h"
 #include "hetu/_binding/core/ndarray.h"
+#include "hetu/_binding/core/symbol.h"
 #include "hetu/_binding/constants.h"
 #include "hetu/_binding/utils/function_registry.h"
 #include "hetu/_binding/utils/pybind_common.h"
@@ -145,6 +146,17 @@ PyObject* PyTensor_global_shape(PyTensor* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_symbolic_shape(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  if (!self->tensor->symbolic()) {
+    HT_LOG_DEBUG << "You are using symbolic_shape attribute of " << self->tensor
+      << ", so we turn this tensor to a symbolic tensor on the fly";
+    self->tensor->init_symbolic_shape(); 
+  }
+  return PySyShape_New(self->tensor->symbolic_shape());
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_size(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -233,6 +245,13 @@ PyObject* PyTensor_graph(PyTensor* self) {
 PyObject* PyTensor_get_or_compute(PyTensor* self) {
   HT_PY_FUNC_BEGIN
   return PyNDArray_New(self->tensor->get_or_compute());
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_symbolic(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  self->tensor->init_symbolic_shape();
+  Py_RETURN_NONE;
   HT_PY_FUNC_END
 }
 
@@ -395,6 +414,7 @@ PyGetSetDef PyTensor_properties[] = {
   {PY_GET_SET_DEF_NAME("device"), (getter) PyTensor_device, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("dtype"), (getter) PyTensor_dtype, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("global_shape"), (getter) PyTensor_global_shape, nullptr, nullptr, nullptr},  
+  {PY_GET_SET_DEF_NAME("symbolic_shape"), (getter) PyTensor_symbolic_shape, nullptr, nullptr, nullptr},  
   {PY_GET_SET_DEF_NAME("is_variable"), (getter) PyTensor_is_variable, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("is_parameter"), (getter) PyTensor_is_parameter, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("requires_grad"), (getter) PyTensor_requires_grad, nullptr, nullptr, nullptr},
@@ -458,6 +478,7 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"get_data", (PyCFunction) PyTensor_get_data, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_device_group", (PyCFunction) PyTensor_get_device_group, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
+    {"symbolic", (PyCFunction) PyTensor_symbolic, METH_NOARGS, nullptr }, 
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {nullptr}
   });

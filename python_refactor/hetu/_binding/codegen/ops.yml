@@ -215,6 +215,11 @@
   args: Tensor input, HTShape begin_pos, HTShape output_shape
   self: input
 
+- name: slice
+  op: SliceOp
+  args: Tensor input, SyShape begin_pos, SyShape output_shape
+  self: input
+
 - name: slice_
   op: SliceInplaceOp
   args: Tensor input, HTShape begin_pos, HTShape output_shape

@@ -139,12 +139,12 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
   };
 
   auto topo = topo_order();
-  HT_LOG_TRACE << "Instantiating a " << type() << " graph with topo " << topo;
+  HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << topo;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
     if (op_to_exec_op_mapping.find(op->id()) != op_to_exec_op_mapping.end())
       continue;
-    HT_LOG_TRACE << "Creating an executable version of op " << op;
+    HT_LOG_DEBUG << "Creating an executable version of op " << op;
 
     TensorList exec_inputs, exec_in_deps;
     std::tie(exec_inputs, exec_in_deps) =
@@ -271,7 +271,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     // 扫描global topo并推导新的shape plan
     for (auto& op_ref : topo) {
       auto& op = op_ref.get();
-      HT_LOG_DEBUG << local_device << ": " << op << " deducing shape...";
+      // HT_LOG_DEBUG << local_device << ": " << op << " deducing shape...";
       // 设置placeholder（也有可能是中间的算子——具体要看feed_dict喂的是什么算子）的symbolic shape
       bool handle_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
         auto it = feed_dict.find(tensor->id());
@@ -315,7 +315,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         }
         // 不需要给DefineAndRun graph中的tensor设置shape
         // 有效的shape信息都在shape plan中
-        // HT_LOG_DEBUG << local_device << ": " << op->output(i) << " set shape " << output_shapes[i];
+        // HT_LOG_DEBUG << local_device << ": " << op->output(i) << " shape " << output_shapes[i];
         // op->output(i)->set_shape(output_shapes[i]);
         auto it = shape_plan.find(op->output(i)->id());
         HT_ASSERT(it == shape_plan.end()) 

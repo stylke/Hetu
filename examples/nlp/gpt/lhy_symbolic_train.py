@@ -3,7 +3,7 @@ import os
 import math
 import logging
 import hetu as ht
-from hetu_gpt_3d_parallel import GPTLMHeadModel
+from hetu_gpt_3d_parallel_symbolic import GPTLMHeadModel
 from gpt_config import GPTConfig
 from load_data import DataLoaderForGPT
 import numpy as np
@@ -38,6 +38,27 @@ devices_num = device_groups[0].num_devices
 # used for debug
 # ptvsd.enable_attach(address =('127.0.0.1', 4000 + local_group_index * devices_num + local_device_index))
 # ptvsd.wait_for_attach()
+
+
+def get_position_ids(begin, end, global_batch_size, ds):
+    
+    # position_ids: [1, seq_len]
+    position_ids = np.arange(begin, end, dtype=np.int64) # pos: [idx, ]
+    position_ids = np.tile(position_ids, [global_batch_size, 1]) # shape: [b, seq_len]
+    return parallel_data_provider(position_ids, ds, local_device_index)
+
+def get_causal_mask(begin, end, max_len, global_batch_size, num_heads, ds):
+    
+    bias = np.tril(np.ones((max_len, max_len), dtype=np.int64).reshape(
+                    1, 1, max_len, max_len))
+    bias = np.tile(bias[:, :, begin:end, :], (global_batch_size, num_heads, 1, 1))
+    return parallel_data_provider(bias, ds, local_device_index)
+
+def get_mask(seq_len, global_batch_size, num_heads, ds):
+    
+    masked_value = -1e4
+    mask = np.full((global_batch_size, num_heads, seq_len, seq_len), masked_value, dtype=np.float32)
+    return parallel_data_provider(mask, ds, local_device_index)
 
 def pretrain(args):
     
@@ -89,13 +110,22 @@ def pretrain(args):
         
         # return
         input_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[0], name='input_ids')
+        position_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[0], name='position_ids')
+        causal_mask = (ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.n_head, max_len, max_len], ds=ds_split01, device_group=device_groups[0], name='causal_mask0'),
+                        ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.n_head, max_len, max_len], ds=ds_split01, device_group=device_groups[1], name='causal_mask1'))    
+        mask = (ht.parallel_placeholder(ht.float32, global_shape=[micro_batch_size, config.n_head, max_len, max_len], ds=ds_split01, device_group=device_groups[0], name='mask0'),
+                ht.parallel_placeholder(ht.float32, global_shape=[micro_batch_size, config.n_head, max_len, max_len], ds=ds_split01, device_group=device_groups[1], name='mask1'))    
         # token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=ds_split0_dup, device_group=device_groups[0], name='token_type_ids')
+        # attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[0], name='attention_mask')
         token_type_ids = None
-        attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[0], name='attention_mask')
+        attention_mask = None
         masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[1], name='masked_lm_labels')
 
         print(f'{local_device}: build model begin...')
         loss, lm_logits = model(input_ids=input_ids,
+                                position_ids=position_ids,
+                                causal_mask=causal_mask,
+                                mask=mask,
                                 attention_mask=attention_mask,
                                 token_type_ids=token_type_ids,
                                 labels=masked_lm_labels)
@@ -108,13 +138,24 @@ def pretrain(args):
         train_op = opt.minimize(loss_mean)
         print(f'{local_device}: optimizer minimize end...')
         
+        encoded_inputs = []
+        seq_lens = []
         input = ['Hello, I am a',
                 "Good morning! Today is",
                 "There is a question about",
                 "Where can I find the"]
-        encoded_input = tokenizer(input, return_tensors='np')
+        encoded_inputs.append(tokenizer(input, return_tensors='np'))
+        seq_lens.append(5)
+        input = ['Hello, I am',
+                "Good morning! Today",
+                "There is a question",
+                "Where can I find"]
+        encoded_inputs.append(tokenizer(input, return_tensors='np'))
+        seq_lens.append(4)
 
-        for _ in range(10):
+        for round in range(2):
+            encoded_input = encoded_inputs[round]
+            seq_len = seq_lens[round]
             for i in range(len(input) // dp_size):
                 # device 0, 1 读取第偶数个batch; device 2, 3 读取第奇数个batch
                 if local_device_index < devices_num / 2 and i % 2 != 0:
@@ -126,9 +167,13 @@ def pretrain(args):
                 end = dp_size * (i + 1)
                 feed_dict = {
                     input_ids: encoded_input['input_ids'][start:end,:].astype(np.int64),
-                    attention_mask: np.ones((dp_size, max_len)).astype(np.float32),
+                    position_ids: get_position_ids(0, seq_len, config.global_batch_size, ds_split0_dup), # [batch_size, seq_len]
+                    # attention_mask: np.ones((dp_size, seq_len)).astype(np.float32),
                     masked_lm_labels: encoded_input['input_ids'][start:end,:].astype(np.int64),
-                }                                                                                                            
+                }    
+                for device_group_num in range(2):
+                   feed_dict[causal_mask[device_group_num]] = get_causal_mask(0, seq_len, seq_len, config.global_batch_size, config.n_head, ds_split01) # [batch_size, num_heads, seq_len, seq_len]    
+                   feed_dict[mask[device_group_num]] = get_mask(seq_len, config.global_batch_size, config.n_head, ds_split01) # [batch_size, num_heads, seq_len, seq_len]                                                                                                    
                 results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
                 # end_time = time.time()
                 if device_groups[1].contains(local_device):

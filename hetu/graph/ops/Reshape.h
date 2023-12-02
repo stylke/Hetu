@@ -11,12 +11,15 @@ class ArrayReshapeOp;
 class ArrayReshapeGradientOpImpl;
 class ArrayReshapeGradientOp;
 
+// reshape算子虽然依赖shape，但不需要symbolic方法
+// 原因是其可以通过-1去推断维度的大小
 class ArrayReshapeOpImpl : public OpInterface {
  private:
   friend class ArrayReshapeOp;
   struct constrcutor_access_key {};
 
  public:
+  // fixed shape constructor
   ArrayReshapeOpImpl(const HTShape& output_shape, int64_t padding_axis = -1, bool is_inplace = false)
   : OpInterface(quote(ArrayReshapeOp)),
      _global_output_shape(output_shape), 
