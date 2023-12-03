@@ -7,10 +7,10 @@ import ptvsd
 # ptvsd.wait_for_attach()
 tokenizer = GPT2Tokenizer.from_pretrained('./checkpoint/HuggingFace')
 model = GPT2LMHeadModel.from_pretrained('./checkpoint/HuggingFace')
-text = ['Hello, I am a little',
-        "Good morning! Today is my",
-        "There is a question about whether",
-        "Where can I find the best"]
+text = ['Hello, I am',
+        "Good morning! Today",
+        "There is a question",
+        "Where can I find"]
 text = ['Hello, I am a',
         "Good morning! Today is",
         "There is a question about",

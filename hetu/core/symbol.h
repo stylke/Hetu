@@ -144,7 +144,20 @@ class Symbol : public shared_ptr_wrapper<SymbolDef<T>> {
       return *this;
     }
 
-    std::string symbol_info() const;
+    std::string symbol_info() const {
+      std::ostringstream os;
+      os << "Symbol(";
+      if (this->_ptr != nullptr) {
+        if (this->_ptr->is_leaf())
+          os << "LEAF";
+        else
+          os << this->_ptr->get_op_name();
+      } else {
+        os << "NULL";
+      }
+      os << ")";
+      return os.str(); 
+    }
 };
 
 using IntSymbol = Symbol<int64_t>;

@@ -140,20 +140,26 @@ def pretrain(args):
         
         encoded_inputs = []
         seq_lens = []
-        input = ['Hello, I am a',
-                "Good morning! Today is",
-                "There is a question about",
-                "Where can I find the"]
-        encoded_inputs.append(tokenizer(input, return_tensors='np'))
-        seq_lens.append(5)
         input = ['Hello, I am',
                 "Good morning! Today",
                 "There is a question",
                 "Where can I find"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
         seq_lens.append(4)
+        input = ['Hello, I am a',
+                "Good morning! Today is",
+                "There is a question about",
+                "Where can I find the"]
+        encoded_inputs.append(tokenizer(input, return_tensors='np'))
+        seq_lens.append(5)
+        input = ['Hello, I am a',
+                "Good morning! Today is",
+                "There is a question about",
+                "Where can I find the"]
+        encoded_inputs.append(tokenizer(input, return_tensors='np'))
+        seq_lens.append(5)
 
-        for round in range(2):
+        for round in range(3):
             encoded_input = encoded_inputs[round]
             seq_len = seq_lens[round]
             for i in range(len(input) // dp_size):

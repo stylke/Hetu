@@ -150,7 +150,7 @@ PyObject* PyTensor_symbolic_shape(PyTensor* self) {
   HT_PY_FUNC_BEGIN
   if (!self->tensor->symbolic()) {
     HT_LOG_DEBUG << "You are using symbolic_shape attribute of " << self->tensor
-      << ", so we turn this tensor to a symbolic tensor on the fly";
+      << ", so we turn this tensor to a symbolic tensor on the fly!";
     self->tensor->init_symbolic_shape(); 
   }
   return PySyShape_New(self->tensor->symbolic_shape());
@@ -318,12 +318,11 @@ PyObject* PyTensor_reset_data(PyTensor* self, PyObject* args, PyObject* kwargs) 
     auto* array_obj = parsed_args.get_numpy_array(0);
     ResetVariableData(self->tensor, NDArrayFromNumpy(array_obj));
     // HT_LOG_TRACE << "ResetVariableData successfully.";
-    Py_RETURN_BOOLEAN_COND(true);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
   }
-  Py_RETURN_BOOLEAN_COND(false);
+  Py_RETURN_NONE;
   HT_PY_FUNC_END
 }
 

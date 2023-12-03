@@ -58,22 +58,6 @@ void set_HTShape_to_SyShape(const HTShape& ht_shape, SyShape& sy_shape) {
   }
 }
 
-template <typename T>
-std::string Symbol<T>::symbol_info() const {
-  std::ostringstream os;
-  os << "Symbol(";
-  if (this->_ptr != nullptr) {
-    if (this->_ptr->is_leaf())
-      os << "LEAF";
-    else
-      os << this->_ptr->get_op_name();
-  } else {
-    os << "NULL";
-  }
-  os << ")";
-  return os.str();    
-}
-
 std::ostream& operator << (std::ostream& os, const SyShape& sy_shape) {
   os << "SyShape";
   os << "(size=" << sy_shape.size();

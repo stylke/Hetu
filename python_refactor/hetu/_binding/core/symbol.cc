@@ -75,13 +75,67 @@ PyObject* PyIntSymbol_is_leaf(PyIntSymbol* self) {
 
 PyObject* PyIntSymbol_get_data(PyIntSymbol* self) {
   HT_PY_FUNC_BEGIN
+  if (!self->int_symbol.is_defined()) {
+    HT_LOG_WARN << "You are getting the data from a nullptr symbol, "
+      << "please attach that symbol to some other symbol or a specific data in advance.";
+    Py_RETURN_NONE;
+  }
   return PyLong_FromInteger(self->int_symbol->get_val());
+  HT_PY_FUNC_END
+}
+
+PyObject* PyIntSymbol_set_data(PyIntSymbol* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "set_data(int data)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    auto data = parsed_args.get_int64(0);
+    if (self->int_symbol.is_defined() && !self->int_symbol->is_leaf()) {
+      HT_RUNTIME_ERROR << "You can't set the data of a non-leaf symbol. " 
+        << "You may use reset_data method to attach the symbol to a new data "
+        << "and turn it into a leaf.";
+    }
+    self->int_symbol = data;
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  Py_RETURN_NONE;
+  HT_PY_FUNC_END
+}
+
+PyObject* PyIntSymbol_reset_data(PyIntSymbol* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "reset_data(int data)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    auto data = parsed_args.get_int64(0);
+    self->int_symbol.reset();
+    self->int_symbol = data;
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  Py_RETURN_NONE;
   HT_PY_FUNC_END
 }
 
 // NOLINTNEXTLINE
 PyGetSetDef PyIntSymbol_properties[] = {
   {PY_GET_SET_DEF_NAME("is_leaf"), (getter) PyIntSymbol_is_leaf, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("data"), (getter) PyIntSymbol_get_data, nullptr, nullptr, nullptr},
+  {nullptr}
+};
+
+// NOLINTNEXTLINE
+PyMethodDef PyIntSymbol_methods[] = {
+  {"get_data", (PyCFunction) PyIntSymbol_get_data, METH_NOARGS, nullptr },
+  {"set_data", (PyCFunction) PyIntSymbol_set_data, METH_VARARGS | METH_KEYWORDS, nullptr },  
+  {"reset_data", (PyCFunction) PyIntSymbol_reset_data, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {nullptr}
 };
 
@@ -114,7 +168,7 @@ PyTypeObject PyIntSymbol_Type_obj = {
   0, /* tp_weaklistoffset */
   nullptr, /* tp_iter */
   nullptr, /* tp_iternext */
-  nullptr, /* tp_methods */
+  PyIntSymbol_methods, /* tp_methods */
   nullptr, /* tp_members */
   PyIntSymbol_properties, /* tp_getset */
   nullptr, /* tp_base */
@@ -127,31 +181,6 @@ PyTypeObject PyIntSymbol_Type_obj = {
   PyIntSymbol_pynew, /* tp_new */
 };
 PyTypeObject* PyIntSymbol_Type = &PyIntSymbol_Type_obj;
-
-std::vector<PyMethodDef> InitIntSymbolPyClassMethodDefs() {
-  std::vector<PyMethodDef> ret = {{nullptr}};
-  AddPyMethodDefs(ret, {
-    {"get_data", (PyCFunction) PyIntSymbol_get_data, METH_NOARGS, nullptr }, 
-    {nullptr}
-  });
-  AddPyMethodDefs(ret, hetu::graph::get_registered_tensor_class_methods());
-  return ret;
-}
-
-void AddPyIntSymbolTypeToModule(py::module_& module) {
-  HT_RUNTIME_ERROR_IF(PyType_Ready(PyIntSymbol_Type) < 0) 
-    << "PyIntSymbol_Type not ready";
-  Py_INCREF(PyIntSymbol_Type);
-  HT_RUNTIME_ERROR_IF(0 != PyModule_AddObject(
-      module.ptr(), "IntSymbol", 
-      reinterpret_cast<PyObject*>(PyIntSymbol_Type)))
-    << "Failed to add PyIntSymbol_Type";
-
-  static auto int_symbol_class_methods = InitIntSymbolPyClassMethodDefs();
-  HT_RUNTIME_ERROR_IF(0 != PyModule_AddFunctions(
-      module.ptr(), int_symbol_class_methods.data()))
-    << "Failed to add IntSymbol class methods";     
-}
 
 /******************************************************
  * Arithmetics
@@ -209,8 +238,8 @@ PyObject* PyIntSymbol_sub(PyObject* x, PyObject* y) {
     );
   } else if (parsed_args.signature_index() == 2) {
     return PyIntSymbol_New(
-      IntSymbol(Int64_FromPyLong(y)) -
-      reinterpret_cast<PyIntSymbol*>(x)->int_symbol
+      IntSymbol(Int64_FromPyLong(x)) -
+      reinterpret_cast<PyIntSymbol*>(y)->int_symbol
     );
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -291,8 +320,8 @@ PyObject* PyIntSymbol_div(PyObject* x, PyObject* y) {
     );
   } else if (parsed_args.signature_index() == 2) {
     return PyIntSymbol_New(
-      IntSymbol(Int64_FromPyLong(y)) /
-      reinterpret_cast<PyIntSymbol*>(x)->int_symbol
+      IntSymbol(Int64_FromPyLong(x)) /
+      reinterpret_cast<PyIntSymbol*>(y)->int_symbol
     );
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -334,5 +363,20 @@ PyObject* PyIntSymbol_rem(PyObject* x, PyObject* y) {
 }
 
 REGISTER_INT_SYMBOL_NUMBER_METHOD(nb_remainder, (binaryfunc) PyIntSymbol_rem);
+
+/******************************************************
+ * Wrap It Up
+ ******************************************************/
+
+void AddPyIntSymbolTypeToModule(py::module_& module) {
+  PyIntSymbol_Type->tp_as_number = &(get_registered_int_symbol_number_methods());
+  HT_RUNTIME_ERROR_IF(PyType_Ready(PyIntSymbol_Type) < 0) 
+    << "PyIntSymbol_Type not ready";
+  Py_INCREF(PyIntSymbol_Type);
+  HT_RUNTIME_ERROR_IF(0 != PyModule_AddObject(
+      module.ptr(), "IntSymbol", 
+      reinterpret_cast<PyObject*>(PyIntSymbol_Type)))
+    << "Failed to add PyIntSymbol_Type";
+}
 
 } // namespace hetu

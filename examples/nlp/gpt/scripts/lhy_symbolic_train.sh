@@ -4,7 +4,7 @@ HIDDEN_SIZE=${2:-768}
 NUM_HEADS=${3:-12}
 SEQ_LEN=${4:-1024}
 
-export HETU_INTERNAL_LOG_LEVEL=DEBUG
+export HETU_INTERNAL_LOG_LEVEL=INFO
 mpirun --allow-run-as-root -np 8 python lhy_symbolic_train.py \
 --global_batch_size 4 \
 --num_micro_batches 2 \

@@ -356,8 +356,14 @@ class GPTLMHeadModel(ht.nn.Module):
             # lm_logits: [b, seq_len-1, vocab_size], labels: [b, seq_len-1]
             # todo: slice op input local shape, should change into global shape
             # print(f'before slice, shift_logits.shape: {lm_logits.global_shape}, {lm_logits.shape}; shift_labels.shape: {labels.global_shape}, {labels.shape}')
+            '''
+            # using a fixed shape to do the slice doesn't work when seq_len changes
             shift_logits = ht.slice(lm_logits, [0,0,0], [lm_logits.shape[0], lm_logits.shape[1] - 1, lm_logits.shape[2]])
             shift_labels = ht.slice(labels, [0,1], [labels.shape[0], labels.shape[1] - 1])
+            '''
+            # we should use symbolic shape here
+            shift_logits = ht.slice(lm_logits, [ht.IntSymbol(0), ht.IntSymbol(0), ht.IntSymbol(0)], [lm_logits.symbolic_shape[0], lm_logits.symbolic_shape[1] - 1, lm_logits.symbolic_shape[2]])
+            shift_labels = ht.slice(labels, [ht.IntSymbol(0), ht.IntSymbol(1)], [labels.symbolic_shape[0], labels.symbolic_shape[1] - 1])
             # print(f'after slice, shift_logits.shape: {shift_logits.global_shape}, shift_labels.shape: {shift_labels.global_shape}')
             # softmax cross_entropy loss = sum(-log(softmax(vocab[label])))
             # because of ignored_index, so cannot use auto distributed reduce for mean
