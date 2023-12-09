@@ -3,6 +3,9 @@
 
 namespace hetu {
 
+template class SymbolDef<int64_t>;
+template class Symbol<int64_t>;
+
 template <typename T>
 T SymbolDef<T>::get_val() const {
   if (_input_1 != nullptr && _input_2 != nullptr) {
@@ -72,5 +75,21 @@ std::ostream& operator << (std::ostream& os, const SyShape& sy_shape) {
   os << ")";
   return os;
 }
+
+template <typename T>
+std::string Symbol<T>::symbol_info() const {
+      std::ostringstream os;
+      os << "Symbol(";
+      if (this->_ptr != nullptr) {
+        if (this->_ptr->is_leaf())
+          os << "LEAF";
+        else
+          os << this->_ptr->get_op_name();
+      } else {
+        os << "NULL";
+      }
+      os << ")";
+      return os.str(); 
+    }
 
 } // namespace hetu

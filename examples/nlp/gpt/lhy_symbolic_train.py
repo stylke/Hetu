@@ -84,31 +84,21 @@ def pretrain(args):
                         embd_pdrop=args.dropout_prob,
                         attn_pdrop=args.dropout_prob,
                         activation_function=args.hidden_act,
-                        global_batch_size=args.global_batch_size,
                         num_micro_batches=args.num_micro_batches,
                         dp=args.dp
                         )
-        
-        max_len = 5
-        
-        # ---- Hetu model definition ----
-        model = GPTLMHeadModel(config=config, device_groups=device_groups)
-        
-        # ---- Load tokenizer ----
-        tokenizer = GPT2Tokenizer.from_pretrained('./checkpoint/HuggingFace')
-        
-        # ---- Load checkpoint ----
-        load_checkpoint(model, "./checkpoint/HuggingFace", config=config, local_device=local_device)
-        # print("Load the model successfully, the components are:", model.state_dict().keys())
-        # You could also see the values by model.state_dict().values()
 
-        micro_batch_size = config.global_batch_size // config.num_micro_batches
-        dp_size = config.global_batch_size // config.dp
         print(f'''{local_device}: 3d parallel config: 
-            global_batch_size={config.global_batch_size}, num_micro_batches={config.num_micro_batches}, micro_batch_size={micro_batch_size}, 
+            num_micro_batches={config.num_micro_batches}, 
             dp={config.dp}, num_layers={config.num_hidden_layers}, hidden_size={config.hidden_size}, num_heads={config.num_attention_heads}, seq_length={config.n_positions}''')
         
-        # return
+        # 一个暂时的设置，之后会根据数据自动更改
+        max_len = 5
+        global_batch_size = 4
+        micro_batch_size = global_batch_size // config.num_micro_batches
+        dp_size = global_batch_size // config.dp
+        
+        # ---- Placeholder ----
         input_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[0], name='input_ids')
         position_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[0], name='position_ids')
         causal_mask = (ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.n_head, max_len, max_len], ds=ds_split01, device_group=device_groups[0], name='causal_mask0'),
@@ -120,6 +110,21 @@ def pretrain(args):
         token_type_ids = None
         attention_mask = None
         masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[1], name='masked_lm_labels')
+        
+        # ---- Bind symbolic shape ----
+        config.micro_batch_size_symbol = input_ids.symbolic_shape[0] * dp_size
+        config.seq_len_symbol = input_ids.symbolic_shape[1]
+        
+        # ---- Hetu model definition ----
+        model = GPTLMHeadModel(config=config, device_groups=device_groups)
+        
+        # ---- Load tokenizer ----
+        tokenizer = GPT2Tokenizer.from_pretrained('./checkpoint/HuggingFace')
+        
+        # ---- Load checkpoint ----
+        load_checkpoint(model, "./checkpoint/HuggingFace", config=config, local_device=local_device)
+        # print("Load the model successfully, the components are:", model.state_dict().keys())
+        # You could also see the values by model.state_dict().values()
 
         print(f'{local_device}: build model begin...')
         loss, lm_logits = model(input_ids=input_ids,
@@ -146,23 +151,35 @@ def pretrain(args):
                 "Where can I find"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
         seq_lens.append(4)
+        input = ['Hello, I am a good',
+                "Good morning! Today is a",
+                "There is a question about whether",
+                "Where can I find the best"]
+        encoded_inputs.append(tokenizer(input, return_tensors='np'))
+        seq_lens.append(6)
         input = ['Hello, I am a',
+                "Good morning! Today is",
+                "There is a question about",
+                "Where can I find the",
+                'Hello, I am a',
                 "Good morning! Today is",
                 "There is a question about",
                 "Where can I find the"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
         seq_lens.append(5)
-        input = ['Hello, I am a',
-                "Good morning! Today is",
-                "There is a question about",
-                "Where can I find the"]
+        input = ['Hello, I am',
+                "Good morning! Today",
+                "There is a question",
+                "Where can I find"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
-        seq_lens.append(5)
+        seq_lens.append(4)
 
-        for round in range(3):
+        for round in range(4):
             encoded_input = encoded_inputs[round]
+            global_batch_size = len(encoded_input['input_ids'])
             seq_len = seq_lens[round]
-            for i in range(len(input) // dp_size):
+            dp_size = global_batch_size // config.dp
+            for i in range(config.dp):
                 # device 0, 1 读取第偶数个batch; device 2, 3 读取第奇数个batch
                 if local_device_index < devices_num / 2 and i % 2 != 0:
                     continue
@@ -173,19 +190,19 @@ def pretrain(args):
                 end = dp_size * (i + 1)
                 feed_dict = {
                     input_ids: encoded_input['input_ids'][start:end,:].astype(np.int64),
-                    position_ids: get_position_ids(0, seq_len, config.global_batch_size, ds_split0_dup), # [batch_size, seq_len]
+                    position_ids: get_position_ids(0, seq_len, global_batch_size, ds_split0_dup), # [batch_size, seq_len]
                     # attention_mask: np.ones((dp_size, seq_len)).astype(np.float32),
                     masked_lm_labels: encoded_input['input_ids'][start:end,:].astype(np.int64),
                 }    
                 for device_group_num in range(2):
-                   feed_dict[causal_mask[device_group_num]] = get_causal_mask(0, seq_len, seq_len, config.global_batch_size, config.n_head, ds_split01) # [batch_size, num_heads, seq_len, seq_len]    
-                   feed_dict[mask[device_group_num]] = get_mask(seq_len, config.global_batch_size, config.n_head, ds_split01) # [batch_size, num_heads, seq_len, seq_len]                                                                                                    
+                   feed_dict[causal_mask[device_group_num]] = get_causal_mask(0, seq_len, seq_len, global_batch_size, config.n_head, ds_split01) # [batch_size, num_heads, seq_len, seq_len]    
+                   feed_dict[mask[device_group_num]] = get_mask(seq_len, global_batch_size, config.n_head, ds_split01) # [batch_size, num_heads, seq_len, seq_len]                                                                                                    
                 results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
                 # end_time = time.time()
                 if device_groups[1].contains(local_device):
                     loss_out = results[0].numpy(force=True).mean()
                     # print(f'device = {local_device}, lm_logits = {results[1].numpy(force=True)[:, -1, :]}, loss = {loss_out}')
-                    print(f'device = {local_device}, loss = {loss_out}')
+                    print(f'device = {local_device}, round = {round}, loss = {loss_out}')
             
     save_checkpoint(model, "./checkpoint/temp", config=config, local_device=local_device)
     # print(f"device = {local_device}, test weight = {model.state_dict()['transformer.h.5.mlp.parallel_mlp.dense_4h_to_h.weight']}")
@@ -196,9 +213,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'
-    )
-    parser.add_argument(
-        "--global_batch_size", type=int, default=64, help="Training batch size global"
     )
     parser.add_argument(
         "--num_micro_batches", type=int, default=1, help="Training micro batches num for pipeline parallel"

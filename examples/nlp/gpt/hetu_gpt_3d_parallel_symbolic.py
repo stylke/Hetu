@@ -89,10 +89,7 @@ class GPTAttention(ht.nn.Module):
         mask,
         attention_mask=None,
     ):
-        micro_batch_size, seq_len, embed_dim = hidden_states.global_shape
-        assert micro_batch_size == self.config.global_batch_size // self.config.num_micro_batches and embed_dim == self.embed_dim, \
-            f"GPTAttention input shape should be equal to ({micro_batch_size, seq_len, embed_dim})"
-        
+        embed_dim = hidden_states.global_shape[-1]
         # [micro_batch_size*seq_len, embed_dim]
         hidden_states = hidden_states.reshape([-1, embed_dim])
         # print(f'hidden_states.global_shape={hidden_states.global_shape}, hidden_states.shape={hidden_states.shape}, hidden_states.distributed_states={hidden_states.distributed_states}')        
@@ -100,7 +97,8 @@ class GPTAttention(ht.nn.Module):
         qkv = self.qkv_dense(hidden_states)
         # print(f'qkv.global_shape={qkv.global_shape}, qkv.shape={qkv.shape}, qkv.distributed_states={qkv.distributed_states}')        
         # [micro_batch_size, seq_len, num_heads, 3*head_dim]
-        qkv = qkv.reshape([micro_batch_size, -1, self.num_heads, 3 * self.head_dim])
+        # two undetermined dim, we therefore should use symbolic shape here
+        qkv = qkv.reshape([self.config.micro_batch_size_symbol, self.config.seq_len_symbol, ht.IntSymbol(self.num_heads), ht.IntSymbol(3 * self.head_dim)])
         # q,k,v shape=[micro_batch_size, seq_len, num_heads, head_dim]
         query, key, value = ht.split(qkv, 3, qkv.ndim - 1)
 
@@ -126,7 +124,8 @@ class GPTAttention(ht.nn.Module):
         # row parallel, shape=[micro_batch_size*seq_len, num_heads*head_dim]
         attn_output = self.dense(attn_output)
         # [micro_batch_size, seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([micro_batch_size, -1, self.num_heads * self.head_dim])
+        # two undetermined dim, we therefore should use symbolic shape here
+        attn_output = attn_output.reshape([self.config.micro_batch_size_symbol, self.config.seq_len_symbol, ht.IntSymbol(self.num_heads * self.head_dim)])
         # dropout
         # attn_output = self.resid_dropout(attn_output)
 
@@ -188,10 +187,11 @@ class GPTMLP(ht.nn.Module):
     def forward(self, hidden_states):
         origin_shape = hidden_states.global_shape # [b, seq_len, hidden_size]
         if len(origin_shape) != 2: # shape adaptor
-            hidden_states = hidden_states.reshape([-1, origin_shape[2]])
+            hidden_states = hidden_states.reshape([-1, origin_shape[-1]])
         hidden_states = self.parallel_mlp(hidden_states)
         if len(origin_shape) != 2: # shape adaptor
-            hidden_states = hidden_states.reshape([origin_shape[0], -1, origin_shape[2]])
+            # two undetermined dim, we therefore should use symbolic shape here
+            hidden_states = hidden_states.reshape([self.config.micro_batch_size_symbol, self.config.seq_len_symbol, ht.IntSymbol(origin_shape[2])])
         return hidden_states
 
 class GPTBlock(ht.nn.Module):
@@ -262,11 +262,7 @@ class GPTModel(ht.nn.Module):
         attention_mask=None,
         token_type_ids=None,
     ):
-        # input_ids: [b, seq_len]
-        micro_batch_size, seq_len = input_ids.global_shape
-        assert self.config.global_batch_size // self.config.num_micro_batches == micro_batch_size, \
-            'input_ids parallel batch_size should be equal to config'
-        
+        # input_ids: [b, seq_len]        
         # token_type_ids: [b, seq_len]
         if token_type_ids is not None:
             assert token_type_ids.global_shape == input_ids.global_shape \
@@ -278,7 +274,8 @@ class GPTModel(ht.nn.Module):
             assert attention_mask.global_shape == input_ids.global_shape \
                 and attention_mask.distributed_states.check_equal(attention_mask.distributed_states), \
                 'attention_mask global_shape and distributed_states should be equal to input_ids!'
-            attention_mask = attention_mask.reshape([micro_batch_size, 1, 1, -1])
+            # two undetermined dim, we therefore should use symbolic shape here
+            attention_mask = attention_mask.reshape([self.config.micro_batch_size_symbol, ht.IntSymbol(1), ht.IntSymbol(1), self.config.seq_len_symbol])
             # 原attention_mask: 1为使用的值, 0为mask的值
             # attention_mask = attention_mask.to(dtype=self.dtype)  # fp16 compatibility
             attention_mask = (1.0 - attention_mask) * -10000.0 # 0为使用的值, -10000为mask的值
@@ -343,14 +340,14 @@ class GPTLMHeadModel(ht.nn.Module):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
         )
-        # [b, seq_len, n_embd]
-        micro_batch_size, seq_len, n_embd = hidden_states.global_shape
+        n_embd = hidden_states.global_shape[-1]
         # [b*seq_len, n_embd]
         hidden_states = hidden_states.reshape([-1, n_embd])
         # column parallel, [b*seq_len, n_embd]->[b*seq_len, vocab_size]
         lm_logits = self.lm_head(hidden_states)
         # [b, seq_len, vocab_size]
-        lm_logits = lm_logits.reshape([micro_batch_size, -1, self.config.vocab_size])
+        # two undetermined dim, we therefore should use symbolic shape here
+        lm_logits = lm_logits.reshape([self.config.micro_batch_size_symbol, self.config.seq_len_symbol, ht.IntSymbol(self.config.vocab_size)])
         loss = None
         if labels is not None:
             # lm_logits: [b, seq_len-1, vocab_size], labels: [b, seq_len-1]

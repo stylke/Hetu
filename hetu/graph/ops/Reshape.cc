@@ -114,10 +114,10 @@ HTShapeList ArrayReshapeOpImpl::DoInferDynamicShape(Operator& op,
     HT_ASSERT(input_shape[i] != -1) << "The shape of output shouldn't consist of -1 when having paddings.";
     output_size *= output_shape[i];
   }
-  int64_t fixed_output_size = output_size / output_shape[padding_axis()];
+  int64_t fixed_output_size = output_size / output_shape[get_padding_axis()];
   HT_ASSERT(input_size % fixed_output_size == 0) << "The dynamic shape: " << input_shape << " can't support reshape.";
   int64_t padding_output_size = input_size / fixed_output_size;
-  output_shape[padding_axis()] = padding_output_size;
+  output_shape[get_padding_axis()] = padding_output_size;
   return {output_shape};
 }
 
@@ -165,7 +165,17 @@ void ArrayReshapeGradientOpImpl::DoDeduceStates(const TensorList& inputs, Tensor
   outputs.at(0)->set_distributed_states(inputs.at(1)->get_distributed_states());    
 }
 
+// fixed shape
 Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
+                          OpMeta op_meta) {
+  return Graph::MakeOp(
+      std::make_shared<ArrayReshapeOpImpl>(output_shape),
+      {std::move(input)},
+      std::move(op_meta))->output(0);
+}
+
+// sumbolic shape
+Tensor MakeArrayReshapeOp(Tensor input, const SyShape& output_shape,
                           OpMeta op_meta) {
   return Graph::MakeOp(
       std::make_shared<ArrayReshapeOpImpl>(output_shape),

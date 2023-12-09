@@ -133,8 +133,11 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
     auto it = _add_on_inits.find(tensor->id());
     if (it != _add_on_inits.end()) {
       Graph::ResetVariableData(exec_tensor, *it->second);
+      /*
       // 所有的exec graph pool都需要共享，不能删除
       // _add_on_inits.erase(tensor->id());
+      */
+      // 2023.12.9修改：之后考虑要切换plan，仅第一次使用_add_on_init
     }
   };
 

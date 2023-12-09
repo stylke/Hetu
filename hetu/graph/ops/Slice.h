@@ -55,6 +55,7 @@ class SliceOpImpl : public OpInterface {
     return _output_shape;
   }
 
+  // deprecated: only used in gpt inference, before symbolic shape is realized
   int64_t get_padding_axis() const {
     return _padding_axis;
   }

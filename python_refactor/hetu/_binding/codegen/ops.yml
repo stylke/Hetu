@@ -171,6 +171,7 @@
   op: ConcatenateOp
   args: TensorList inputs, int64_t axis=0
 
+# deprecated: only used in gpt inference, before symbolic shape is realized
 - name: dynamic_concat
   op: DynamicConcatenateOp
   args: TensorList inputs, int64_t axis=0
@@ -202,6 +203,12 @@
 
 - name: reshape
   op: ArrayReshapeOp
+  args: Tensor input, SyShape output_shape
+  self: input
+
+# deprecated: only used in gpt inference, before symbolic shape is realized
+- name: reshape
+  op: ArrayReshapeOp
   args: Tensor input, HTShape output_shape, int64_t padding_axis
   self: input
 
@@ -230,6 +237,7 @@
   args: Tensor input, int64_t num_chunks, int64_t dim
   self: input
 
+# deprecated: only used in gpt inference, before symbolic shape is realized
 - name: split
   op: SplitOp
   args: Tensor input, int64_t num_chunks, int64_t dim, int64_t padding_axis
