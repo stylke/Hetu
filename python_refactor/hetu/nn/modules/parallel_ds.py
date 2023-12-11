@@ -35,11 +35,14 @@ def get_device_index(device_group):
 # walkaround: just give order by type(placeholder/varibale), may not include all cases
 def config2ds(config):
     num_devices = len(config['device_group'])
-    states = {-1: config['dup'], **config['split']}
+    split = {}
+    for key, value in config['split'].items():
+        split[int(key)] = value
+    states = {-1: config['dup'], **split}
     if config['type'] == 'placeholder':
-        order = sorted(config['split'].keys()) + [-1]
+        order = sorted(split.keys()) + [-1]
     elif config['type'] == 'variable':
-        order = [-1] + sorted(config['split'].keys())
+        order = [-1] + sorted(split.keys())
     else:
         raise RuntimeError(f"unsupported type {config['type']}!")
     ds = hetu.DistributedStates(num_devices, states, order)
@@ -96,7 +99,7 @@ class HtVocabParallelEmbedding(Module):
         self.name = name
 
         ds_dup_split0, self.device_group = config2ds(ds_parallel_config) # for embedding table
-        dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get(0, 1), len(ds_parallel_config['device_group'])
+        dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get('0', 1), len(ds_parallel_config['device_group'])
         assert dp * tp == num_devices, f'VocabParallelEmbedding get wrong ds_parallel_config: {ds_parallel_config}!'
         device_index = get_device_index(self.device_group)
         ds_split0_dup = hetu.DistributedStates(num_devices, {-1: tp, 0: dp}, [0, -1]) # for data
@@ -142,7 +145,7 @@ class HtColumnParallelLinear(Module):
         self.name = name
 
         ds_dup_split1, self.device_group = config2ds(ds_parallel_config)
-        dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get(1, 1), len(ds_parallel_config['device_group'])
+        dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get('1', 1), len(ds_parallel_config['device_group'])
         assert dp * tp == num_devices, f'ColumnParallelLinear get wrong ds_parallel_config: {ds_parallel_config}!'        
         device_index = get_device_index(self.device_group)
         # assume num_devices=8, there exists 4 cases: dp=1 tp=8, dp=2 tp=4, dp=4 tp=2, dp=8 tp=1
@@ -205,7 +208,7 @@ class HtRowParallelLinear(Module):
         self.name = name
 
         ds_dup_split0, self.device_group = config2ds(ds_parallel_config)
-        dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get(0, 1), len(ds_parallel_config['device_group'])
+        dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get('0', 1), len(ds_parallel_config['device_group'])
         assert dp * tp == num_devices, f'RowParallelLinear get wrong ds_parallel_config: {ds_parallel_config}!'        
         device_index = get_device_index(self.device_group)
         # assume num_devices=8, there exists 4 cases: dp=1 tp=8, dp=2 tp=4, dp=4 tp=2, dp=8 tp=1

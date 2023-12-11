@@ -9,149 +9,23 @@ from load_data import DataLoaderForGPT
 import numpy as np
 import time
 import argparse
+import json
 
 ht.init_comm_group()
 local_device = ht.local_device()
 all_devices = ht.global_device_group()
 
-ds_parallel_config = {
-    'devices': [0,1,2,3,4,5,6,7],
-    'input': {
-        'split': {0: 2},
-        'dup': 2,
-        'device_group': [0,1,2,3],
-        'type': 'placeholder'
-    },
-    'gpt': {
-        'wte': {
-            'split': {0: 2},
-            'dup': 2,
-            'device_group': [0,1,2,3],
-            'type': 'variable'
-        },
-        'wpe': {
-            'split': {},
-            'dup': 4,
-            'device_group': [0,1,2,3],
-            'type': 'variable'
-        },
-        'blocks': {
-            'blocks0-11': {
-                'range': [0,11],
-                'layernorm1': {
-                    'split': {},
-                    'dup': 4,
-                    'device_group': [0,1,2,3],
-                    'type': 'variable'
-                },
-                'attn': {
-                    'qkv': {
-                        'split': {1: 2},
-                        'dup': 2,
-                        'device_group': [0,1,2,3],
-                        'type': 'variable'
-                    }, # column parallel
-                    'dense': {
-                        'split': {0: 2},
-                        'dup': 2,
-                        'device_group': [0,1,2,3],
-                        'type': 'variable'
-                    }, # row parallel
-                },
-                'layernorm2': {
-                    'split': {},
-                    'dup': 4,
-                    'device_group': [0,1,2,3],
-                    'type': 'variable'
-                },
-                'mlp': {
-                    'dense_h_to_4h': {
-                        'split': {1: 2},
-                        'dup': 2,
-                        'device_group': [0,1,2,3],
-                        'type': 'variable'
-                    }, # column parallel
-                    'dense_4h_to_h': {
-                        'split': {0: 2},
-                        'dup': 2,
-                        'device_group': [0,1,2,3],
-                        'type': 'variable'
-                    }, # row parallel
-                },
-            },
-            'blocks12-23': {
-                'range': [12,23],
-                'layernorm1': {
-                    'split': {},
-                    'dup': 4,
-                    'device_group': [4,5,6,7],
-                    'type': 'variable'
-                },
-                'attn': {
-                    'qkv': {
-                        'split': {1: 2},
-                        'dup': 2,
-                        'device_group': [4,5,6,7],
-                        'type': 'variable'
-                    }, # column parallel
-                    'dense': {
-                        'split': {0: 2},
-                        'dup': 2,
-                        'device_group': [4,5,6,7],
-                        'type': 'variable'
-                    }, # row parallel
-                },
-                'layernorm2': {
-                    'split': {},
-                    'dup': 4,
-                    'device_group': [4,5,6,7],
-                    'type': 'variable'
-                },
-                'mlp': {
-                    'dense_h_to_4h': {
-                        'split': {1: 2},
-                        'dup': 2,
-                        'device_group': [4,5,6,7],
-                        'type': 'variable'
-                    }, # column parallel
-                    'dense_4h_to_h': {
-                        'split': {0: 2},
-                        'dup': 2,
-                        'device_group': [4,5,6,7],
-                        'type': 'variable'
-                    }, # row parallel
-                },
-            }            
-        },
-        'layernorm_final': {
-            'split': {},
-            'dup': 4,
-            'device_group': [4,5,6,7],
-            'type': 'variable'
-        }
-    },
-    'lm_head': {
-        'split': {1: 2},
-        'dup': 2,
-        'device_group': [4,5,6,7],
-        'type': 'variable'
-    },
-    'label': {
-        'split': {0: 2},
-        'dup': 2,
-        'device_group': [4,5,6,7],
-        'type': 'placeholder'
-    },    
-}
-
 # walkaround: just give order by type(placeholder/varibale), may not include all cases
 def config2ds(config):
     num_devices = len(config['device_group'])
-    states = {-1: config['dup'], **config['split']}
+    split = {}
+    for key, value in config['split'].items():
+        split[int(key)] = value
+    states = {-1: config['dup'], **split}
     if config['type'] == 'placeholder':
-        order = sorted(config['split'].keys()) + [-1]
+        order = sorted(split.keys()) + [-1]
     elif config['type'] == 'variable':
-        order = [-1] + sorted(config['split'].keys())
+        order = [-1] + sorted(split.keys())
     else:
         raise RuntimeError(f"unsupported type {config['type']}!")
     ds = ht.DistributedStates(num_devices, states, order)
@@ -161,6 +35,12 @@ def config2ds(config):
     return ds, device_group
 
 def pretrain(args):
+    # read ds_parallel_config from json file
+    ds_parallel_config = json.load(open(args.ds_parallel_config, 'r'))
+    # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp2_pp2.json', 'r'))
+    # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp4.json', 'r'))
+    print(f'{local_device}: load ds_parallel_config from: {args.ds_parallel_config}')
+    
     num_epochs = args.epochs
     lr = args.lr
 
@@ -282,6 +162,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'
+    )
+    parser.add_argument(
+        "--ds_parallel_config", default="ds_parallel_config/dp2_tp2_pp2.json", type=str, help="ds parallel config json file"
     )
     parser.add_argument(
         "--global_batch_size", type=int, default=64, help="Training batch size global"

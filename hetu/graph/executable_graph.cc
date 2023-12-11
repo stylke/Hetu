@@ -1291,7 +1291,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   HT_LOG_DEBUG << local_device << ": num_stages = " << num_stages 
     << ", num_micro_batches = " << num_micro_batches << ", is_inference = " 
     << is_inference;
-  // get task schedule table for pipedream-flush
+  // get task schedule table for pipedream-flush, also suitable for non-pipeline cases
   auto schedule = GeneratePipedreamFlushSchedule(
     num_stages, num_micro_batches, is_inference);
   // // get task schedule table for gpipe    
