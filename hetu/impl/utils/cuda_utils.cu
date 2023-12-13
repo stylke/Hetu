@@ -3,6 +3,21 @@
 namespace hetu {
 namespace cuda {
 
+namespace {
+thread_local int current_device_id = -1;
+} // namespace
+
+void CudaTryGetDevice(int* device_id) {
+  *device_id = current_device_id;
+}
+
+void CudaSetDevice(int device_id) {
+  if (current_device_id != device_id) {
+    CUDA_CALL(cudaSetDevice(device_id));
+    current_device_id = device_id;
+  }
+}
+
 NDArray to_int64_ndarray(const std::vector<int64_t>& vec,
                          DeviceIndex device_id) {
   auto ret = NDArray::empty({static_cast<int64_t>(vec.size())},

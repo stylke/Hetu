@@ -81,6 +81,10 @@ class CUDAEvent final : public Event {
     CudaStreamWaitEvent(CUDAStream(stream), _event, 0);
   }
 
+  inline cudaError_t Query() const {
+    return cudaEventQuery(_event);
+  }
+
   inline int64_t TimeSince(const Event& event) const {
     HT_VALUE_ERROR_IF(!enable_timing() || !event.enable_timing())
       << "Cannot measure time when timing is disabled";

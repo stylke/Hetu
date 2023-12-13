@@ -31,8 +31,6 @@ DECLARE_HT_EXCEPTION(cuda_error);
  * Some useful wrappers for CUDA functions
  ******************************************************/
 // device
-#define CudaSetDevice(device) CUDA_CALL(cudaSetDevice(device))
-#define CudaGetDevice(ptr) CUDA_CALL(cudaGetDevice(ptr))
 #define CudaGetDeviceCount(ptr) CUDA_CALL(cudaGetDeviceCount(ptr))
 #define CudaDeviceGetAttribute(ptr, attr, stream)                              \
   CUDA_CALL(cudaDeviceGetAttribute(ptr, attr, stream))
@@ -78,11 +76,31 @@ DECLARE_HT_EXCEPTION(cuda_error);
 namespace hetu {
 namespace cuda {
 
+__forceinline__ void CudaGetDevice(int* device_id) {
+  CUDA_CALL(cudaGetDevice(device_id));
+}
+
+// Since CUDA 12, `cudaSetDevice` allocates context, 
+// which leads to useless memory consumption on device 0 
+// at the exit of `CUDADeviceGuard`.
+// Here is a walkaround to avoid unnecessary `cudaSetDevice`.
+#if CUDA_VERSION >= 12000
+void CudaSetDevice(int device_id);
+void CudaTryGetDevice(int* device_id);
+#else
+__forceinline__ void CudaSetDevice(int device_id) {
+  CUDA_CALL(cudaSetDevice(device_id));
+}
+__forceinline__ void CudaTryGetDevice(int* device_id) {
+  CudaGetDevice(device_id);
+}
+#endif
+
 class CUDADeviceGuard final {
  public:
   CUDADeviceGuard(int32_t device_id) : _cur_device_id(device_id) {
     if (_cur_device_id != -1) {
-      CudaGetDevice(&_prev_device_id);
+      CudaTryGetDevice(&_prev_device_id);
       if (_prev_device_id != _cur_device_id)
         CudaSetDevice(_cur_device_id);
     }

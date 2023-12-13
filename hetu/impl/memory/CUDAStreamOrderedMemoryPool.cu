@@ -1,4 +1,4 @@
-#include "hetu/impl/memory/CUDAMemoryPool.cuh"
+#include "hetu/impl/memory/CUDAStreamOrderedMemoryPool.cuh"
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "hetu/impl/utils/cuda_utils.h"
@@ -37,30 +37,34 @@ inline static void InitDeviceMemoryPoolOnce(int32_t device_id) {
 }
 
 inline static std::string _make_name(DeviceIndex device_id) {
-  return "CUDAMemPool(" + std::to_string(static_cast<int>(device_id)) + ")";
+  return "CUDAStreamOrderedMemoryPool(" +
+    std::to_string(static_cast<int>(device_id)) + ")";
 }
 
 } // namespace
 
-CUDAMemoryPool::CUDAMemoryPool(DeviceIndex device_id)
-: MemoryPool(Device(kCUDA, device_id), _make_name(device_id)) {
+CUDAStreamOrderedMemoryPool::CUDAStreamOrderedMemoryPool(DeviceIndex device_id)
+: CUDAMemoryPool(device_id, _make_name(device_id)) {
   _data_ptr_info.reserve(8192);
   _free_stream_watcher.reset(
     new TaskQueue("free_stream_watcher_of_" + name(), 8));
 }
 
-CUDAMemoryPool::~CUDAMemoryPool() {
+CUDAStreamOrderedMemoryPool::~CUDAStreamOrderedMemoryPool() {
   _free_stream_watcher->Shutdown();
   _free_stream_watcher = nullptr;
 }
 
-DataPtr CUDAMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
+DataPtr CUDAStreamOrderedMemoryPool::AllocDataSpace(size_t num_bytes,
+                                                    const Stream& stream) {
   HT_VALUE_ERROR_IF(!stream.device().is_cuda())
     << "Cuda arrays must be allocated on cuda streams. Got " << stream;
   if (num_bytes == 0)
     return DataPtr{nullptr, 0, device(), static_cast<uint64_t>(-1)};
   
+  std::lock_guard<std::mutex> lock(_mtx);
   InitDeviceMemoryPoolOnce(device().index());
+  mempool_clock_t alloc_at = next_clock();
   
   auto alignment = get_data_alignment();
   size_t aligned_num_bytes = DIVUP(num_bytes, alignment) * alignment;
@@ -71,18 +75,19 @@ DataPtr CUDAMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   DataPtr data_ptr{ptr, aligned_num_bytes, device(), next_id()};
   _allocated += aligned_num_bytes;
   _peak_allocated = MAX(_peak_allocated, _allocated);
+  _alloc_cnt++;
   
-  std::lock_guard<std::mutex> lock(_mtx);
   auto insertion = _data_ptr_info.emplace(
     data_ptr.id, 
-    CudaDataPtrInfo(data_ptr.ptr, aligned_num_bytes, stream));
+    CudaDataPtrInfo(data_ptr.ptr, aligned_num_bytes, stream, alloc_at));
   HT_RUNTIME_ERROR_IF(!insertion.second)
     << "Failed to insert data " << data_ptr << " to info";
   
   return data_ptr;
 }
 
-DataPtr CUDAMemoryPool::BorrowDataSpace(void*, size_t, DataPtrDeleter) {
+DataPtr CUDAStreamOrderedMemoryPool::BorrowDataSpace(void*, size_t,
+                                                     DataPtrDeleter) {
   // TODO: support customized deleter when freeing the memory 
   // so that we can support borrowing on CUDA devices
   HT_NOT_IMPLEMENTED << name()
@@ -90,10 +95,11 @@ DataPtr CUDAMemoryPool::BorrowDataSpace(void*, size_t, DataPtrDeleter) {
   __builtin_unreachable();
 }
 
-void CUDAMemoryPool::FreeDataSpace(DataPtr data_ptr) {
+void CUDAStreamOrderedMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   if (data_ptr.ptr == nullptr || data_ptr.size == 0)
     return;
   std::lock_guard<std::mutex> lock(_mtx);
+  mempool_clock_t free_at = next_clock();
 
   auto it = _data_ptr_info.find(data_ptr.id);
   HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
@@ -101,12 +107,13 @@ void CUDAMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   auto& alloc_stream = it->second.alloc_stream;
   auto& used_streams = it->second.used_streams;
 
+  it->second.free_at = free_at;
   // TODO: support customized deleter when freeing the memory
   CUDADeviceGuard guard(device().index());
   Stream free_stream = alloc_stream;
   if (used_streams.empty() ||
       (used_streams.size() == 1 && *used_streams.begin() == alloc_stream)) {
-    CUDA_CALL(cudaFreeAsync(data_ptr.ptr, CUDAStream(alloc_stream)));
+    CudaFreeAsync(data_ptr.ptr, CUDAStream(alloc_stream));
   } else {
     // Note: In case we forget to mark the data used by the allocation stream,
     // which is unlikely though.
@@ -145,10 +152,11 @@ void CUDAMemoryPool::FreeDataSpace(DataPtr data_ptr) {
 
   _allocated -= data_ptr.size;
   _data_ptr_info.erase(it);
+  _free_cnt++;
 }
 
-void CUDAMemoryPool::MarkDataSpaceUsedByStream(DataPtr data_ptr,
-                                               const Stream& stream) {
+void CUDAStreamOrderedMemoryPool::MarkDataSpaceUsedByStream(
+  DataPtr data_ptr, const Stream& stream) {
   if (data_ptr.ptr == nullptr || data_ptr.size == 0 || stream.is_blocking())
     return;
   HT_VALUE_ERROR_IF(!stream.device().is_cuda())
@@ -159,10 +167,11 @@ void CUDAMemoryPool::MarkDataSpaceUsedByStream(DataPtr data_ptr,
   HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
     << "Cannot find data " << data_ptr << " from info";
   it->second.used_streams.insert(stream);
+  _mark_cnt++;
 }
 
-void CUDAMemoryPool::MarkDataSpacesUsedByStream(DataPtrList& data_ptrs,
-                                                const Stream& stream) {
+void CUDAStreamOrderedMemoryPool::MarkDataSpacesUsedByStream(
+  DataPtrList& data_ptrs, const Stream& stream) {
   if (stream.is_blocking())
     return;
   HT_VALUE_ERROR_IF(!stream.device().is_cuda())
@@ -176,10 +185,12 @@ void CUDAMemoryPool::MarkDataSpacesUsedByStream(DataPtrList& data_ptrs,
     HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
       << "Cannot find data " << data_ptr << " from info";
     it->second.used_streams.insert(stream);
+    _mark_cnt++;
   }
 }
 
-std::future<void> CUDAMemoryPool::WaitDataSpace(DataPtr data_ptr, bool async) {
+std::future<void> CUDAStreamOrderedMemoryPool::WaitDataSpace(DataPtr data_ptr,
+                                                             bool async) {
   if (data_ptr.ptr == nullptr || data_ptr.size == 0)
     return async ? std::async([]() {}) : std::future<void>();
 
@@ -225,25 +236,34 @@ std::future<void> CUDAMemoryPool::WaitDataSpace(DataPtr data_ptr, bool async) {
   }
 }
 
+void CUDAStreamOrderedMemoryPool::PrintSummary() {
+  HT_LOG_INFO << name() << ": alloc=" << _allocated << " bytes, "
+    << "peak_alloc=" << _peak_allocated << " bytes, "
+    << "alloc_cnt=" << _alloc_cnt << ", "
+    << "free_cnt=" << _free_cnt << ", "
+    << "mark_cnt=" << _mark_cnt;
+}
+
 namespace {
 
 static std::once_flag cuda_memory_pool_register_flag;
 
-struct CUDAMemoryPoolRegister {
-  CUDAMemoryPoolRegister() {
+struct CUDAStreamOrderedMemoryPoolRegister {
+  CUDAStreamOrderedMemoryPoolRegister() {
     std::call_once(cuda_memory_pool_register_flag, []() {
-      int32_t num_devices;
-      CudaGetDeviceCount(&num_devices);
-      for (int32_t i = 0; i < num_devices; i++) {
-        auto pool =
-          std::make_shared<CUDAMemoryPool>(static_cast<DeviceIndex>(i));
-        RegisterMemoryPool(pool);
+      // Memory pools are lazily constructed, so we do not need to
+      // get device count here.
+      for (int32_t i = 0; i < HT_MAX_DEVICE_INDEX; i++) {
+        RegisterMemoryPoolCtor(
+          Device(kCUDA, i), [i]() -> std::shared_ptr<MemoryPool> {
+            return std::make_shared<CUDAStreamOrderedMemoryPool>(i);
+          });
       }
     });
   }
 };
 
-static CUDAMemoryPoolRegister cudu_memory_pool_register;
+// static CUDAStreamOrderedMemoryPoolRegister cudu_memory_pool_register;
 
 } // namespace
 

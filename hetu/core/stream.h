@@ -15,13 +15,16 @@ constexpr StreamIndex kP2PStream = 4;
 constexpr StreamIndex kCollectiveStream = 5;
 constexpr StreamIndex kJoinStream = HT_NUM_STREAMS_PER_DEVICE - 1;
 
+using PackedStreamId = uint16_t;
+
 class Stream {
  public:
   Stream(Device device = Device(), StreamIndex id = kBlockingStream)
   : _device(device), _id(id) {
     HT_ASSERT(_device.local())
       << "Cannot create stream for remote device: " << _device;
-    HT_ASSERT(_id >= kBlockingStream) << "Invalid stream index: " << _id;
+    HT_ASSERT(_id >= kBlockingStream && _id < HT_NUM_STREAMS_PER_DEVICE)
+      << "Invalid stream index: " << _id;
   }
 
   Stream(const Stream&) = default;
@@ -30,6 +33,26 @@ class Stream {
   Stream& operator=(Stream&&) = default;
 
   void Sync() const;
+
+  inline PackedStreamId pack() const noexcept {
+    // pack: stream id (8 bits) || device type (4 bits) || device id (4 bits)
+    static_assert(HT_NUM_STREAMS_PER_DEVICE <= 256,
+                  "Device index cannot be packed into 8 bits");
+    static_assert(NUM_DEVICE_TYPES <= 16,
+                  "Device type cannot be packed into 4 bits");
+    static_assert(HT_MAX_DEVICE_INDEX <= 16,
+                  "Device index cannot be packed into 4 bits");
+    return ((static_cast<uint16_t>(stream_index()) & 0xFF) << 8) |
+      ((static_cast<uint16_t>(device_type()) & 0xF) << 4) |
+      ((static_cast<uint16_t>(device_index()) & 0xF));
+  }
+
+  static Stream unpack(PackedStreamId packed) {
+    auto device_type = static_cast<DeviceType>((packed & 0xF0) >> 4);
+    auto device_index = static_cast<DeviceIndex>(packed & 0xF);
+    auto stream_index = static_cast<StreamIndex>((packed & 0xFF00) >> 8);
+    return Stream(Device(device_type, device_index), stream_index);
+  }
 
   inline const Device& device() const noexcept {
     return _device;
