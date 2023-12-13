@@ -4,17 +4,24 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
 
+extern NDArray prepare_for_cublas(const NDArray& a, bool& transpose, const Stream& stream);
+
 template <typename spec_t>
 __global__ void bias_set_kernel(const spec_t* input, spec_t* output,
-                                size_t input_size, size_t size) {
+                                size_t input_size, size_t size,
+                                const OffsetCalculator* in_offset_calculator,
+                                const OffsetCalculator* out_offset_calculator) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  output[idx] = input[idx % input_size];
+  auto in_offset = in_offset_calculator->get(idx % input_size);
+  auto out_offset = out_offset_calculator->get(idx);
+  output[out_offset] = input[in_offset];
 }
 
 void LinearCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
@@ -42,27 +49,55 @@ void LinearCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
     HT_ASSERT_NDIM(bias, 1);
     HT_ASSERT_SAME_DTYPE(a, bias);
     size_t input_size = bias->numel();
+    NDArray bias_offset_calculator_arr, out_offset_calculator_arr;
+    OffsetCalculator *bias_offset_calculator, *out_offset_calculator;
+    std::tie(bias_offset_calculator_arr, bias_offset_calculator) =
+      AllocOffsetCalculator(bias, stream);
+    std::tie(out_offset_calculator_arr, out_offset_calculator) = 
+      AllocOffsetCalculator(output, stream);
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       bias->dtype(), spec_t, "BiasSetCuda", [&]() {
         bias_set_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-          bias->data_ptr<spec_t>(), output->data_ptr<spec_t>(), input_size, size);
+          bias->data_ptr<spec_t>(), output->data_ptr<spec_t>(), input_size, size,
+          bias_offset_calculator, out_offset_calculator);
       });
+    NDArray::MarkUsedBy({bias_offset_calculator_arr, out_offset_calculator_arr}, stream);
   }
+  HTAxes trans_axes = {1, 0};
+  NDArray a_trans = trans_a ? NDArray::permute(a, trans_axes, stream.stream_index())
+                            : a;
+  NDArray b_trans = trans_b ? NDArray::permute(b, trans_axes, stream.stream_index())
+                            : b;
+  bool trans_a_;
+  bool trans_b_;
+  NDArray a_ = prepare_for_cublas(b_trans, trans_a_, stream);
+  NDArray b_ = prepare_for_cublas(a_trans, trans_b_, stream);
 
-  int32_t m = output->shape(1);
-  int32_t n = output->shape(0);
-  int32_t k = trans_a ? a->shape(0) : a->shape(1);
+  int64_t m = a_->shape(1);
+  int64_t n = b_->shape(0);
+  int64_t k = a_->shape(0);
+  int64_t lda = a_->stride(!trans_a_ ? 1 : 0);
+  int64_t ldb = b_->stride(!trans_b_ ? 1 : 0);
+  int64_t ldc = output->stride(0);
 
   HT_DISPATCH_FLOATING_TYPES(output->dtype(), spec_t, "MatMul", [&]() {
-    spec_t alpha = 1;
-    spec_t beta = bias_exist ? 1 : 0;
-    cublas_gemm<spec_t>(cublas_handle, trans_b ? CUBLAS_OP_T : CUBLAS_OP_N,
-                        trans_a ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, &alpha,
-                        b->data_ptr<spec_t>(), trans_b ? k : m,
-                        a->data_ptr<spec_t>(), trans_a ? n : k, &beta,
-                        output->data_ptr<spec_t>(), m);
+    spec_t alpha = 1, beta = bias_exist ? 1 : 0;
+    float alpha_f = 1, beta_f = bias_exist ? 1 : 0;
+    if (output->dtype() == DataType::FLOAT16 || output->dtype() == DataType::BFLOAT16) {
+      cublas_gemm<spec_t>(cublas_handle, !trans_a_ ? CUBLAS_OP_T : CUBLAS_OP_N,
+                          !trans_b_ ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, static_cast<const void*>(&alpha_f),
+                          a_->data_ptr<spec_t>(), lda,
+                          b_->data_ptr<spec_t>(), ldb, static_cast<const void*>(&beta_f),
+                          output->data_ptr<spec_t>(), ldc);
+    } else {
+      cublas_gemm<spec_t>(cublas_handle, !trans_a_ ? CUBLAS_OP_T : CUBLAS_OP_N,
+                          !trans_b_ ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, static_cast<const void*>(&alpha),
+                          a_->data_ptr<spec_t>(), lda,
+                          b_->data_ptr<spec_t>(), ldb, static_cast<const void*>(&beta),
+                          output->data_ptr<spec_t>(), ldc);
+    }
   });
-  NDArray::MarkUsedBy({a, b, bias, output}, stream);
+  NDArray::MarkUsedBy({a_trans, b_trans, a_, b_, bias, output}, stream);
 }
 
 } // namespace impl

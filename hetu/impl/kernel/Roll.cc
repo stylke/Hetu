@@ -39,7 +39,7 @@ void RollCpu(const NDArray& input, const HTShape& shift, const HTAxes& axis,
   int64_t nums = shift.size();
   int64_t n_dims = input->ndim();
 
-  int *stride_dim = new int[n_dims];
+  HTAxes stride_dim(n_dims);
   stride_dim[n_dims - 1] = 1;
   for (int i = 0; i < n_dims; i++) {
     if (i > 0)

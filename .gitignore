@@ -62,4 +62,4 @@ python_refactor/hetu/_binding/autograd/ops/generated/
 python_refactor/hetu/_binding/graph/generated
 
 # third party
-hetu/flash_attn
+# hetu/flash_attn

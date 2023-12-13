@@ -15,7 +15,7 @@ class Conv2dGradientofDataOp;
 class Conv2dAddBiasOpImpl;
 class Conv2dAddBiasOp;
 
-class Conv2dOpImpl : public OpInterface {
+class Conv2dOpImpl final : public OpInterface {
  public:
   Conv2dOpImpl(int64_t padding, int64_t stride, OpMeta op_meta = OpMeta())
   : OpInterface(quote(Conv2dOp)) {
@@ -99,7 +99,7 @@ Tensor MakeConv2dOp(Tensor input, Tensor filter, int64_t padding, int64_t stride
 
 /*——————————————————————Conv2dGradientofFilter————————————————————————*/
 
-class Conv2dGradientofFilterOpImpl : public OpInterface {
+class Conv2dGradientofFilterOpImpl final : public OpInterface {
  public:
   Conv2dGradientofFilterOpImpl(const HTShape& padding, const HTStride& stride,
                                OpMeta op_meta = OpMeta())
@@ -155,7 +155,7 @@ Tensor MakeConv2dGradientofFilterOp(Tensor input, Tensor grad_output, Tensor fil
 
 /*——————————————————————Conv2dGradientofData————————————————————————*/
 
-class Conv2dGradientofDataOpImpl : public OpInterface {
+class Conv2dGradientofDataOpImpl final : public OpInterface {
  public:
   Conv2dGradientofDataOpImpl(const HTShape& padding, const HTStride& stride,
                             OpMeta op_meta = OpMeta())
@@ -211,7 +211,7 @@ Tensor MakeConv2dGradientofDataOp(Tensor filter, Tensor grad_output, Tensor inpu
 
 /*——————————————————————Conv2dAddBias————————————————————————*/
 
-class Conv2dAddBiasOpImpl : public OpInterface {
+class Conv2dAddBiasOpImpl final : public OpInterface {
  public:
   Conv2dAddBiasOpImpl(int64_t padding, int64_t stride,
                       OpMeta op_meta = OpMeta())

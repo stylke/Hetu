@@ -4,6 +4,7 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/kernel/Binary.cuh"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
@@ -11,17 +12,27 @@ namespace impl {
 template <typename spec_a_t, typename spec_b_t, typename Operator>
 __global__ void binary_elewise_kernel(const spec_a_t* inputA,
                                       const spec_b_t* inputB, size_t size,
-                                      Operator op, spec_a_t* output) {
+                                      Operator op, spec_a_t* output,
+                                      const OffsetCalculator* A_offset_calculator,
+                                      const OffsetCalculator* B_offset_calculator,
+                                      const OffsetCalculator* out_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < size)
-    output[idx] = op(inputA[idx], inputB[idx]);
+  if (idx < size) {
+    auto A_offset = A_offset_calculator->get(idx);
+    auto B_offset = B_offset_calculator->get(idx);
+    auto out_offset = out_offset_calculator->get(idx);
+    output[out_offset] = op(inputA[A_offset], inputB[B_offset]);
+  }
 }
 
 template <typename spec_a_t, typename spec_b_t, typename Operator>
 __global__ void binary_elewise_broadcast_kernel(
   const spec_a_t* inputA, const spec_b_t* inputB, size_t size, Operator op,
   spec_a_t* output, const int64_t* A_dims, const int64_t* B_dims,
-  size_t A_ndims, size_t B_ndims, const int64_t* out_strides, size_t out_dims) {
+  size_t A_ndims, size_t B_ndims, const int64_t* out_strides, size_t out_dims,
+  const OffsetCalculator* A_offset_calculator,
+  const OffsetCalculator* B_offset_calculator,
+  const OffsetCalculator* out_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -39,7 +50,10 @@ __global__ void binary_elewise_broadcast_kernel(
     B_ind += (B_dims[i] > 1) * temp / out_strides[i];
     temp %= out_strides[i];
   }
-  output[idx] = op(inputA[A_ind], inputB[B_ind]);
+  auto A_offset = A_offset_calculator->get(A_ind);
+  auto B_offset = B_offset_calculator->get(B_ind);
+  auto out_offset = out_offset_calculator->get(idx);
+  output[out_offset] = op(inputA[A_offset], inputB[B_offset]);
 }
 
 #define BinaryElewiseCudaHelper(inputA, inputB, output, op, stream, name)      \
@@ -56,15 +70,29 @@ __global__ void binary_elewise_broadcast_kernel(
       blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);                \
       CUDAStream cuda_stream(stream);                                          \
       hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());              \
+      NDArray A_offset_calculator_arr, B_offset_calculator_arr,                \
+              out_offset_calculator_arr;                                       \
+      OffsetCalculator *A_offset_calculator, *B_offset_calculator,             \
+                       *out_offset_calculator;                                 \
+      std::tie(A_offset_calculator_arr, A_offset_calculator) =                 \
+        AllocOffsetCalculator(inputA, stream);                                 \
+      std::tie(B_offset_calculator_arr, B_offset_calculator) =                 \
+        AllocOffsetCalculator(inputB, stream);                                 \
+      std::tie(out_offset_calculator_arr, out_offset_calculator) =             \
+        AllocOffsetCalculator(output, stream);                                 \
       if (inputA->dtype() == inputB->dtype()) {                                \
         HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(                                \
           inputA->dtype(), spec_t, name, [&]() {                               \
             binary_elewise_kernel<spec_t, spec_t>                              \
               <<<blocks, threads, 0, cuda_stream>>>(                           \
                 inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size,  \
-                op<spec_t, spec_t>(), output->data_ptr<spec_t>());             \
+                op<spec_t, spec_t>(), output->data_ptr<spec_t>(),              \
+                A_offset_calculator, B_offset_calculator,                      \
+                out_offset_calculator);                                        \
           });                                                                  \
-        NDArray::MarkUsedBy({inputA, inputB, output}, stream);                 \
+        NDArray::MarkUsedBy({inputA, inputB, output,                           \
+                            A_offset_calculator_arr, B_offset_calculator_arr,  \
+                            out_offset_calculator_arr}, stream);               \
       } else {                                                                 \
         HT_NOT_IMPLEMENTED                                                     \
           << name << " across different data types is not supported yet";      \
@@ -86,6 +114,16 @@ __global__ void binary_elewise_broadcast_kernel(
       }                                                                        \
       auto device_id = output->device().index();                               \
       hetu::cuda::CUDADeviceGuard guard(device_id);                            \
+      NDArray A_offset_calculator_arr, B_offset_calculator_arr,                \
+              out_offset_calculator_arr;                                       \
+      OffsetCalculator *A_offset_calculator, *B_offset_calculator,             \
+                       *out_offset_calculator;                                 \
+      std::tie(A_offset_calculator_arr, A_offset_calculator) =                 \
+        AllocOffsetCalculator(inputA, stream);                                 \
+      std::tie(B_offset_calculator_arr, B_offset_calculator) =                 \
+        AllocOffsetCalculator(inputB, stream);                                 \
+      std::tie(out_offset_calculator_arr, out_offset_calculator) =             \
+        AllocOffsetCalculator(output, stream);                                 \
       CUDAStream cuda_stream(stream);                                          \
       auto A_dims_arr = hetu::cuda::to_int64_ndarray(A_dims, device_id);       \
       auto B_dims_arr = hetu::cuda::to_int64_ndarray(B_dims, device_id);       \
@@ -104,11 +142,13 @@ __global__ void binary_elewise_broadcast_kernel(
                 A_dims_arr->data_ptr<int64_t>(),                               \
                 B_dims_arr->data_ptr<int64_t>(), inputA->ndim(),               \
                 inputB->ndim(), out_strides_arr->data_ptr<int64_t>(),          \
-                output_dim);                                                   \
+                output_dim, A_offset_calculator, B_offset_calculator,          \
+                out_offset_calculator);                                        \
           });                                                                  \
         NDArray::MarkUsedBy(                                                   \
-          {inputA, inputB, output, A_dims_arr, B_dims_arr, out_strides_arr},   \
-          stream);                                                             \
+          {inputA, inputB, output, A_dims_arr, B_dims_arr, out_strides_arr,    \
+          A_offset_calculator_arr, B_offset_calculator_arr,                    \
+          out_offset_calculator_arr}, stream);                                 \
       } else {                                                                 \
         HT_NOT_IMPLEMENTED                                                     \
           << name << " across different data types is not supported yet";      \

@@ -3,8 +3,10 @@
 #include "hetu/graph/define_and_run_graph.h"
 #include "hetu/graph/eager_graph.h"
 #include "hetu/graph/executable_graph.h"
+#include "hetu/graph/ops/Contiguous.h"
 #include "hetu/graph/ops/ones_like.h"
 #include "hetu/graph/ops/sum.h"
+#include "hetu/graph/ops/Contiguous.h"
 #include "hetu/impl/communication/comm_group.h"
 #include <thread>
 
@@ -96,6 +98,32 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
 Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta, Graph& graph) {
   Graph::InitOnce();
+  if (body->require_contig_inputs()) {
+    for (auto& input : inputs) {
+      auto& input_graph = Graph::GetGraph(input->graph_id());
+      if (!input->is_contiguous()) {
+        if (input->maybe_have_contiguous_op()) {
+          HT_LOG_TRACE << "Tensor " << input->name()
+                       << " is not contiguous for op " << body->type()
+                       << ". But it may have a contiguous copy, use it instead";
+          auto op_id = input->get_contiguous_op_id();
+          // NOTE: Contiguous copy is created in the same graph as input.
+          auto op = input_graph.GetOp(op_id);
+          if (op.is_defined()) {
+            input = op->output(0);
+          } else {
+            HT_LOG_TRACE << "Contiguous copy is not found, make a new one";
+            input = MakeContiguousOp(input);
+          }
+        } else {
+          HT_LOG_TRACE << "Make Contiguous op for Tensor " << input->name()
+                       << " while making " << body->type() << " op";
+          input = MakeContiguousOp(input);
+        }
+      }
+    }
+  }
+  AutoCast::Graph_AutoCast(inputs, body);
   return graph.MakeOpInner(std::move(body), std::move(inputs),
                            std::move(op_meta));
 }
@@ -209,7 +237,6 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         grad_outputs.push_back(grad);
       }
     }
-
     if (op->num_inputs() > 0) {
       auto grad_inputs = op->Gradient(grad_outputs);
       for (size_t i = 0; i < op->num_inputs(); i++) {

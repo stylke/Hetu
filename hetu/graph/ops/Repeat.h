@@ -11,7 +11,7 @@ class RepeatOp;
 class RepeatGradientOpImpl;
 class RepeatGradientOp;
 
-class RepeatOpImpl : public OpInterface {
+class RepeatOpImpl final : public OpInterface {
  public:
   RepeatOpImpl(HTShape repeats)
   : OpInterface(quote(RepeatOp)),
@@ -52,6 +52,10 @@ class RepeatOpImpl : public OpInterface {
   HTShape _repeats;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const RepeatOpImpl&>(rhs);
@@ -63,7 +67,7 @@ class RepeatOpImpl : public OpInterface {
 
 Tensor MakeRepeatOp(Tensor input, HTShape repeats, OpMeta op_meta = OpMeta());
 
-class RepeatGradientOpImpl : public OpInterface {
+class RepeatGradientOpImpl final : public OpInterface {
 
  public:
   RepeatGradientOpImpl()
@@ -86,6 +90,10 @@ class RepeatGradientOpImpl : public OpInterface {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     return OpInterface::operator==(rhs);
   }

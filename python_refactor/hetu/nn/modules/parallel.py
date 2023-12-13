@@ -34,7 +34,7 @@ def get_device_index(device_group):
 
 
 class ParallelLayerNorm(Module):
-    def __init__(self, normalized_shape, device_group, eps=1e-5, name='ln'):
+    def __init__(self, normalized_shape, device_group, eps=1e-5, dtype=hetu.float32, name='ln'):
         super(ParallelLayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
@@ -48,17 +48,17 @@ class ParallelLayerNorm(Module):
         device_index = get_device_index(device_group)
         self.weight = hetu.parallel_parameter(eval(f'hetu.ones_initializer()'), 
                                               self.normalized_shape, ds_dup, device_index, 
-                                              dtype=hetu.float32, requires_grad=True, 
+                                              dtype=dtype, requires_grad=True, 
                                               device_group=device_group, name=f'{name}_weight')
         self.bias = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
                                               self.normalized_shape, ds_dup, device_index, 
-                                              dtype=hetu.float32, requires_grad=True, device_group=device_group, name=f'{name}_bias')
+                                              dtype=dtype, requires_grad=True, device_group=device_group, name=f'{name}_bias')
 
     def forward(self, input_p):
         return hetu.layer_norm(input_p, self.weight, self.bias, self.normalized_shape, self.eps, device_group=self.device_group, name=self.name)[0]
 
 class ParallelEmbedding(Module):
-    def __init__(self, num_embeddings, embedding_dim, device_group, init_method='xavier_normal_', name='embedding'):
+    def __init__(self, num_embeddings, embedding_dim, device_group, init_method='xavier_normal_', dtype=hetu.float32, name='embedding'):
         super(ParallelEmbedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -70,14 +70,14 @@ class ParallelEmbedding(Module):
         # embedding_table should not be splited in any dimension!
         self.embedding_table = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
                                                        [num_embeddings, embedding_dim], ds_dup, device_index, 
-                                                       dtype=hetu.float32, requires_grad=True, 
+                                                       dtype=dtype, requires_grad=True, 
                                                        device_group=device_group, name=f'{name}_table')
     
     def forward(self, input_p):
         return hetu.embedding_lookup(self.embedding_table, input_p, device_group=self.device_group, name=self.name)
     
 class VocabParallelEmbedding(Module):
-    def __init__(self, num_embeddings, embedding_dim, device_group, dp=1, init_method='xavier_normal_', name='vocab_embedding'):
+    def __init__(self, num_embeddings, embedding_dim, device_group, dp=1, init_method='xavier_normal_', dtype=hetu.float32, name='vocab_embedding'):
         super(VocabParallelEmbedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -96,7 +96,7 @@ class VocabParallelEmbedding(Module):
         # embedding_table was splited in vocab dimension
         self.embedding_table = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
                                                        [num_embeddings, embedding_dim], ds_dup_split0, device_index, 
-                                                       dtype=hetu.float32, requires_grad=True, 
+                                                       dtype=dtype, requires_grad=True, 
                                                        device_group=device_group, name=f'{name}_table')
     
     def forward(self, input_p):
@@ -121,7 +121,7 @@ class ColumnParallelLinear(Module):
     its second dimension as A = [A_1, ..., A_p].
     """
     def __init__(self, in_features, out_features, device_group, dp=1,
-                 bias=True, gather_output=True, init_method='xavier_normal_', name='colp'):
+                 bias=True, gather_output=True, init_method='xavier_normal_', dtype=hetu.float32, name='colp'):
         super(ColumnParallelLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -139,12 +139,12 @@ class ColumnParallelLinear(Module):
         self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
                                               [out_features, in_features], 
                                               ds_dup_split0, device_index, 
-                                              dtype=hetu.float32, requires_grad=True, 
+                                              dtype=dtype, requires_grad=True, 
                                               device_group=device_group, name=f'{name}_weight')
         if bias:
             self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], 
                                                 ds_dup_split0, device_index,
-                                                dtype=hetu.float32, requires_grad=True, 
+                                                dtype=dtype, requires_grad=True, 
                                                 device_group=device_group, name=f'{name}_bias')
         else:
             self.bias = None
@@ -181,7 +181,7 @@ class RowParallelLinear(Module):
                -   -
     """
     def __init__(self, in_features, out_features, device_group, dp=1,
-                 bias=True, init_method='xavier_normal_', name='rowp'):
+                 bias=True, init_method='xavier_normal_', dtype=hetu.float32, name='rowp'):
         super(RowParallelLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -202,12 +202,12 @@ class RowParallelLinear(Module):
         self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
                                               [out_features, in_features], 
                                               ds_dup_split1, device_index, 
-                                              dtype=hetu.float32, requires_grad=True, 
+                                              dtype=dtype, requires_grad=True, 
                                               device_group=device_group, name=f'{name}_weight')        
         if bias:
             self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], 
                                                 ds_dup, device_index,
-                                                dtype=hetu.float32, requires_grad=True, 
+                                                dtype=dtype, requires_grad=True, 
                                                 device_group=device_group, name=f'{name}_bias')
         else:
             self.bias = None

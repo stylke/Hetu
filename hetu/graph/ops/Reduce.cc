@@ -10,36 +10,8 @@ namespace graph {
 void ReduceOpImpl::DoCompute(Operator& op,
                              const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) const {
-  HTAxes reduce_axes = get_axes();
-  if (reduce_axes.size() <= 1)
-    NDArray::reduce(inputs.at(0), reduction(), get_axes(), false,
-                    op->instantiation_ctx().stream_index, outputs.at(0));
-  else {
-    NDArray tmp = inputs.at(0);
-    while(reduce_axes.size() > 0) {
-      int max_index, max_size = 0;
-      for (int i = 0; i < reduce_axes.size(); ++i) {
-        if (tmp->shape(reduce_axes[i]) > max_size) {
-          max_size = tmp->shape(reduce_axes[i]);
-          max_index = i;
-        }
-      }
-      if (reduce_axes.size() == 1)
-        NDArray::reduce(tmp, reduction(), {reduce_axes[max_index]}, false,
-                        op->instantiation_ctx().stream_index, outputs.at(0));
-      else 
-        tmp = NDArray::reduce(tmp, reduction(), {reduce_axes[max_index]}, false,
-                              op->instantiation_ctx().stream_index);
-      for (int i = max_index + 1; i < reduce_axes.size(); ++i) {
-        reduce_axes[i - 1] = reduce_axes[i];
-      }
-      reduce_axes.pop_back();
-      for (int i = 0; i < reduce_axes.size(); ++i) {
-        if (reduce_axes[i] > max_index)
-          reduce_axes[i] -= 1;
-      }
-    }
-  }
+  NDArray::reduce(inputs.at(0), reduction(), get_axes(), false,
+                  op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList ReduceOpImpl::DoGradient(Operator& op,

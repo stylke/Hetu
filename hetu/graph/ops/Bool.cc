@@ -16,13 +16,6 @@ TensorList BoolOpImpl::DoGradient(Operator& op,const TensorList& grad_outputs) c
   return {Tensor()};
 }
 
-
-HTShapeList BoolOpImpl::DoInferShape(Operator& op,
-                                     const HTShapeList& input_shapes,
-                                     RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
-}
-
 Tensor MakeBoolOp(Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<BoolOpImpl>(),

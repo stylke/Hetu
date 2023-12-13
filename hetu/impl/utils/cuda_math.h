@@ -417,16 +417,12 @@ __forceinline__ __device__ T cuda_tanh(T x) {
 
 template <>
 __forceinline__ __device__ hetu::float16 cuda_tanh<hetu::float16>(hetu::float16 x) {
-  return (hexp(x) - hexp(-x)) / (hexp(x) + hexp(-x));
+  return static_cast<hetu::float16>(tanhf(float(x)));
 }
 
 template <>
 __forceinline__ __device__ hetu::bfloat16 cuda_tanh<hetu::bfloat16>(hetu::bfloat16 x) {
-  #if(__CUDA_ARCH__ >= 800)
-  return (hexp(x) - hexp(-x)) / (hexp(x) + hexp(-x));
-  #else
-  return static_cast<hetu::bfloat16>((expf(float(x)) - expf(float(-x))) / (expf(float(x)) + expf(float(-x))));
-  #endif
+  return static_cast<hetu::bfloat16>(tanhf(float(x)));
 }
 
 template <>

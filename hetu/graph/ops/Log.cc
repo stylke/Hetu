@@ -22,16 +22,8 @@ TensorList LogOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) c
                                : Tensor()};
 }
 
-HTShapeList LogOpImpl::DoInferShape(Operator& op, 
-                                     const HTShapeList& input_shapes, 
-                                     RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
-}
-
 Tensor MakeLogOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<LogOpImpl>(false),
         std::move(inputs),
@@ -39,8 +31,6 @@ Tensor MakeLogOp(Tensor input, OpMeta op_meta) {
 }
 Tensor MakeLogInplaceOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<LogOpImpl>(true),
         std::move(inputs),

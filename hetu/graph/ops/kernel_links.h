@@ -22,6 +22,8 @@ namespace impl {
 
 DECLARE_KERNEL_CPU_AND_CUDA(Abs, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AbsGradient, const NDArray&, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(Adam, const NDArray&, NDArray&, NDArray&, NDArray&, NDArray&,
+                            float, float, float, float, float, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Arange, double, double, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ArraySet, NDArray&, double, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AddConst, const NDArray&, double, NDArray&,
@@ -32,6 +34,8 @@ DECLARE_KERNEL_CPU_AND_CUDA(AsStrided, const NDArray&, NDArray&,
                             const HTStride&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AsStridedGradient, const NDArray&, NDArray&,
                             const HTStride&, const Stream&);
+DECLARE_KERNEL_CUDA(AsStridedGradient, const NDArray&, NDArray&, const HTShape&, const HTStride&,
+                    const HTShape&, const HTStride&, int64_t, int64_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AvgPool, const NDArray&, const size_t, const size_t,
                             NDArray&, const size_t, const size_t,
                             const Stream&);

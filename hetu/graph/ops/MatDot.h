@@ -9,7 +9,7 @@ namespace graph {
 class MatDotOpImpl;
 class MatDotOp;
 
-class MatDotOpImpl : public OpInterface {
+class MatDotOpImpl final : public OpInterface {
  public:
   MatDotOpImpl(int64_t axes = 0)
   : OpInterface(quote(MatDotOp)) {
@@ -40,6 +40,10 @@ protected:
   int64_t _axes;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const MatDotOpImpl&>(rhs);

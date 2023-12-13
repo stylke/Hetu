@@ -101,7 +101,12 @@ __global__ void interpolate_kernel(const spec_t *input, int64_t n, int64_t c,
 }
 
 template <typename spec_t>
-extern __global__ void array_zero_set_kernel(spec_t* input, size_t size);
+__global__ static void array_zero_set_kernel(spec_t* input, size_t size) {
+  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= size)
+    return;
+  input[idx] = 0;
+}
 
 template <typename spec_t>
 __global__ void interpolate_gradient_kernel(const spec_t *output, int64_t n, int64_t c,

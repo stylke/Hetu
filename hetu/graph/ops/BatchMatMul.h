@@ -40,7 +40,8 @@ protected:
       int64_t ndims = a->ndim();
       int64_t dim_a = a->shape(trans_a() ? ndims - 2 : ndims - 1);
       int64_t dim_b = b->shape(trans_b() ? ndims - 1 : ndims - 2);
-      HT_ASSERT(dim_a == -1 || dim_b == -1 || dim_a == dim_b);
+      HT_ASSERT(dim_a == -1 || dim_b == -1 || dim_a == dim_b)
+      << "Incompatible batch dimensions: " << dim_a << " and " << dim_b;
     }
     HTShape shape = {};
     if (a->has_shape() && b->has_shape()) {
@@ -74,6 +75,10 @@ protected:
 
   bool _trans_b;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const BatchMatMulOpImpl&>(rhs);

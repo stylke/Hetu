@@ -11,7 +11,7 @@ class ContiguousOp;
 class ContiguousGradientOpImpl;
 class ContiguousGradientOp;
 
-class ContiguousOpImpl : public OpInterface {
+class ContiguousOpImpl final : public OpInterface {
  public:
   ContiguousOpImpl()
   : OpInterface(quote(ContiguousOp)) {
@@ -25,9 +25,6 @@ class ContiguousOpImpl : public OpInterface {
                                            .set_device(inputs[0]->device());
     return {output_meta};       
   };
-
-  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
-                      const OpMeta& op_meta) const override;
   
   NDArrayList DoCompute(Operator& op,
                         const NDArrayList& inputs,
@@ -40,7 +37,11 @@ class ContiguousOpImpl : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
- public:
+ public:  
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     return OpInterface::operator==(rhs); 
   }
@@ -48,7 +49,7 @@ class ContiguousOpImpl : public OpInterface {
 
 Tensor MakeContiguousOp(Tensor input, OpMeta op_meta = OpMeta());
 
-class ContiguousGradientOpImpl : public OpInterface {
+class ContiguousGradientOpImpl final : public OpInterface {
  public:
   ContiguousGradientOpImpl(HTStride stride)
   : OpInterface(quote(ContiguousGradientOp)), _stride(stride) {
@@ -67,9 +68,6 @@ class ContiguousGradientOpImpl : public OpInterface {
                                            .set_device(inputs[0]->device());
     return {output_meta};       
   };
-
-  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
-                      const OpMeta& op_meta) const override;
   
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
@@ -79,6 +77,10 @@ class ContiguousGradientOpImpl : public OpInterface {
   HTStride _stride;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ContiguousGradientOpImpl&>(rhs);
@@ -88,7 +90,7 @@ class ContiguousGradientOpImpl : public OpInterface {
   }
 };
 
-Tensor MakeContiguousGradientOp(Tensor input, const HTStride& stride, OpMeta op_meta);
+Tensor MakeContiguousGradientOp(Tensor input, const HTStride& stride, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

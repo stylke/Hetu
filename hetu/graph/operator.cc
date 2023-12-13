@@ -193,8 +193,10 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
   // Deduce requires grad
   bool requires_grad = false;
   if (is_variable_op(*_body)) {
-    requires_grad = reinterpret_cast<VariableOpImpl&>(*_body).requires_grad() | 
-                    reinterpret_cast<ParallelVariableOpImpl&>(*_body).requires_grad();
+    if (_body->type() == "VariableOp")
+      requires_grad = reinterpret_cast<VariableOpImpl&>(*_body).requires_grad();
+    else
+      requires_grad = reinterpret_cast<ParallelVariableOpImpl&>(*_body).requires_grad();
   } else {
     requires_grad =
       std::any_of(_inputs.begin(), _inputs.end(),

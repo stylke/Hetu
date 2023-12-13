@@ -1,6 +1,8 @@
 #include "hetu/graph/optim/optimizer.h"
 #include "hetu/graph/ops/group.h"
 #include "hetu/graph/ops/variable.h"
+#include "hetu/graph/ops/Arithmetics.h"
+#include "hetu/graph/ops/ones_like.h"
 #include "hetu/graph/ops/optimizer_update.h"
 
 namespace hetu {
@@ -33,8 +35,8 @@ Tensor Optimizer::MakeStates(const Tensor& variable, const OpName& state_name) {
   HT_VALUE_ERROR_IF(!producer->is_parameter());
   // special case: Varibale States should be set distributed_states
   const DistributedStates& ds_variable = variable->get_distributed_states(); 
-  HT_ASSERT (ds_variable.is_valid()) 
-    << "Diastributed States for varibale " << variable << " must be valid!";  
+  // HT_ASSERT (ds_variable.is_valid()) 
+  //   << "Diastributed States for varibale " << variable << " must be valid!";  
   Tensor states = MakeVariableOp(ZerosInitializer(), variable->shape(),
                                  variable->dtype(), false, ds_variable, 
                                  OpMeta()
@@ -78,6 +80,28 @@ Tensor SGDOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& in
                                 learning_rate(), momentum(), nesterov(),
                                 update_op_meta);
   }
+}
+
+Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& infinite_count) {
+  const Tensor& grad = grad_and_var.first;
+  const Tensor& var = grad_and_var.second;
+  auto update_op_meta = OpMeta()
+                          .set_device_group(var->producer()->device_group())
+                          .set_name("Update_" + var->name());
+  NDArray step = NDArray::ones({1}, kCPU, kInt64, kBlockingStream);
+  std::vector<Device> cpus = {kCPU};
+  DeviceGroup cpu_group = DeviceGroup(cpus);
+  HTShape step_shape = {1};
+  Tensor step1 = MakeVariableOp(OnesInitializer(), step_shape, kInt64,
+                                false, var->get_distributed_states(), 
+                                OpMeta()
+                                  .set_device_group(var->producer()->device_group())
+                                  .set_eager_device(kCPU)
+                                  .set_name(var->name() + "_step"));
+  return MakeAdamOp(var, grad, MakeStates(var, "mean"),
+                    MakeStates(var, "variance"),
+                    learning_rate(), step1, beta1(), beta2(),
+                    eps(), weight_decay(), update_op_meta);
 }
 
 } // namespace graph

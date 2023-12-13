@@ -153,8 +153,6 @@ void LayerNormGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorLis
 TensorList MakeLayerNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias, HTShape normalized_shape, 
                            double eps, OpMeta op_meta) {
   TensorList inputs = {std::move(input), std::move(bn_scale), std::move(bn_bias)};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<LayerNormOpImpl>(normalized_shape, eps),
           std::move(inputs),

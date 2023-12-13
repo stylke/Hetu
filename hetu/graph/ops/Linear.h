@@ -9,7 +9,7 @@ namespace graph {
 class LinearOpImpl;
 class LinearOp;
 
-class LinearOpImpl : public OpInterface {
+class LinearOpImpl final : public OpInterface {
 
  public:
   LinearOpImpl(bool trans_a = false, bool trans_b = true,
@@ -70,6 +70,10 @@ class LinearOpImpl : public OpInterface {
   bool _trans_b;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const LinearOpImpl&>(rhs);

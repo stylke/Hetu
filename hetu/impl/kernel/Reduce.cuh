@@ -62,8 +62,8 @@ static inline int last_pow2(int n) {
 }
 
 template <typename spec_t>
-int get_output_vec_size(size_t reduce_ndim, size_t* in_shape,
-                        size_t* in_strides, spec_t* input) {
+int get_output_vec_size(size_t reduce_ndim, size_t ndim, const HTShape& in_shape,
+                        const HTStride& in_strides, spec_t* input) {
   int vec_size = 4;
   auto update_vec_size = [&vec_size](uint64_t n) {
     while (n % vec_size != 0) {
@@ -77,8 +77,10 @@ int get_output_vec_size(size_t reduce_ndim, size_t* in_shape,
   const int output_idx = reduce_ndim;
   update_vec_size(in_shape[output_idx]);
 
-  for (int i = 0; i < output_idx; i++) {
-    update_vec_size(in_strides[i]);
+  for (int i = 0; i < ndim; i++) {
+    if (i != output_idx) {
+      update_vec_size(in_strides[i]);
+    }
   }
   return vec_size;
 }
@@ -108,7 +110,6 @@ struct ReduceConfig {
   int num_threads;
 
   int output_vec_size = 1;
-  bool is_contiguous = false;
   bool vectorize_input = false;
 
   void set_block_dimension(int64_t dim0, int64_t dim1) {
@@ -229,9 +230,8 @@ struct ReduceConfig {
 };
 
 template <typename arg_t, typename spec_t>
-static ReduceConfig setReduceConfig(size_t reduce_ndim, size_t ndim, size_t* in_shape, size_t* in_strides,
-                                    size_t* out_strides, spec_t* input, const Stream& stream) {
-  CUDAStream cuda_stream(stream);
+static ReduceConfig setReduceConfig(size_t reduce_ndim, size_t ndim, const HTShape& in_shape,
+                                    const HTStride& in_strides, spec_t* input, const CUDAStream& cuda_stream) {
   int maxThreadsPerMultiProcessor;
   int multiProcessorCount;
   CudaDeviceGetAttribute(&maxThreadsPerMultiProcessor,
@@ -262,9 +262,6 @@ static ReduceConfig setReduceConfig(size_t reduce_ndim, size_t ndim, size_t* in_
     contiguous_reduction = 
       (reduce_ndim == ndim) ||
       (in_strides[0] < in_strides[reduce_ndim]);
-    if (reduce_ndim == 1 && contiguous_reduction) {
-      config.is_contiguous = true;
-    }
     if (contiguous_reduction) {
       // Map block.y to every output
       // block_x_reduce is required
@@ -277,7 +274,6 @@ static ReduceConfig setReduceConfig(size_t reduce_ndim, size_t ndim, size_t* in_
     }
   } else {
     contiguous_reduction = true;
-    config.is_contiguous = true;
     dim0 = 1;
     dim1 = 1;
   }
@@ -287,7 +283,7 @@ static ReduceConfig setReduceConfig(size_t reduce_ndim, size_t ndim, size_t* in_
     config.vectorize_input = true;
     dim0 /= config.input_vec_size;
   } else if (!contiguous_reduction) {
-    config.output_vec_size = get_output_vec_size<spec_t>(reduce_ndim, in_shape,
+    config.output_vec_size = get_output_vec_size<spec_t>(reduce_ndim, ndim, in_shape,
                                                          in_strides, input);
     dim0 /= config.output_vec_size;
   }
@@ -343,7 +339,8 @@ __device__ static bool mark_block_finished(int* semaphores) {
   return is_last_block_done_shared;
 }
 
-__device__ static int64_t calc_offset(int64_t index, size_t* strides, size_t* shape, size_t start_dim, size_t end_dim) {
+__device__ static int64_t calc_offset(int64_t index, const int64_t* strides, const int64_t* shape,
+                                      size_t start_dim, size_t end_dim) {
   int64_t offset = 0;
   for (int i = start_dim; i < end_dim; i++) {
     offset += (index % shape[i]) * strides[i];
@@ -353,10 +350,10 @@ __device__ static int64_t calc_offset(int64_t index, size_t* strides, size_t* sh
 }
 
 template <typename spec_t, typename arg_t, typename op_t, typename ident_t=double>
-__device__ void input_vectorized_thread_reduce_impl(const spec_t* data, arg_t* value, ReduceConfig* config,
+__device__ void input_vectorized_thread_reduce_impl(const spec_t* data, arg_t* value, ReduceConfig config,
                                                     const op_t& ops, ident_t ident) {
-  int64_t end = config->num_inputs;
-  constexpr int input_vec_size = config->input_vec_size;
+  int64_t end = config.num_inputs;
+  constexpr int input_vec_size = config.input_vec_size;
 
   arg_t acc_value = ident;
   constexpr int align_bytes = alignof(aligned_vector<spec_t, input_vec_size>);
@@ -365,7 +362,7 @@ __device__ void input_vectorized_thread_reduce_impl(const spec_t* data, arg_t* v
   if (shift > 0) {
     data -= shift;
     end += shift;
-    if (threadIdx.x >= shift && threadIdx.x < align_elements && config->should_reduce_tail()) {
+    if (threadIdx.x >= shift && threadIdx.x < align_elements && config.should_reduce_tail()) {
       acc_value = ops.reduce(acc_value, static_cast<arg_t>(data[threadIdx.x]));
     }
     end -= align_elements;
@@ -373,8 +370,8 @@ __device__ void input_vectorized_thread_reduce_impl(const spec_t* data, arg_t* v
     shift = align_elements - shift;
   }
 
-  int64_t idx = config->input_idx();
-  const int64_t stride = config->step_input;
+  int64_t idx = config.input_idx();
+  const int64_t stride = config.step_input;
 
   arg_t value_list[input_vec_size];
   value_list[0] = acc_value;
@@ -397,7 +394,7 @@ __device__ void input_vectorized_thread_reduce_impl(const spec_t* data, arg_t* v
 
   // tail
   int64_t tail_start = end - end % input_vec_size;
-  if (config->should_reduce_tail()) {
+  if (config.should_reduce_tail()) {
     int idx = tail_start + threadIdx.x;
     if (idx < end) {
       value_list[0] = ops.reduce(value_list[0], static_cast<arg_t>(data[idx]));
@@ -414,11 +411,11 @@ __device__ void input_vectorized_thread_reduce_impl(const spec_t* data, arg_t* v
 
 template <typename spec_t, typename arg_t, int output_vec_size, typename op_t,
           typename ident_t, typename offset_calc_t, int list_size=4>
-__device__ void thread_reduce_impl(const spec_t* data, arg_t* value, ReduceConfig* config,
+__device__ void thread_reduce_impl(const spec_t* data, arg_t* value, ReduceConfig config,
                                    const op_t& ops, ident_t ident, offset_calc_t offset_calc) {
-  int64_t idx = config->input_idx();
-  const int64_t end = config->num_inputs;
-  const int64_t stride = config->step_input;
+  int64_t idx = config.input_idx();
+  const int64_t end = config.num_inputs;
+  const int64_t stride = config.step_input;
 
   // multiple accumulators to remove dependency between unrolled loops
   arg_t value_list[list_size][output_vec_size];
@@ -493,15 +490,16 @@ __device__ void thread_reduce_impl(const spec_t* data, arg_t* value, ReduceConfi
 }
 
 template <typename spec_t, typename arg_t, int output_vec_size, typename op_t, typename ident_t=double>
-__device__ void thread_reduce(const spec_t* data, size_t* in_strides, size_t* in_shape,
-                              size_t reduce_ndim, arg_t* value, ReduceConfig* config,
+__device__ void thread_reduce(const spec_t* data, const int64_t* in_strides, const int64_t* in_shape,
+                              size_t reduce_ndim, arg_t* value, ReduceConfig config,
                               const op_t& ops, ident_t ident) {
-  if (config->vectorize_input) {
+  if (config.vectorize_input) {
     assert(output_vec_size == 1);
     input_vectorized_thread_reduce_impl<spec_t, arg_t>(data, value, config, ops, ident);
   } else {
     int64_t element_stride = in_strides[0];
-    if (config->is_contiguous) {
+    bool is_contiguous = (reduce_ndim == 1 && element_stride == 1);
+    if (is_contiguous) {
       thread_reduce_impl<spec_t, arg_t, output_vec_size>(data, value, config, ops, ident,
                                                                         [](int64_t idx) { return idx; });
     } else if (reduce_ndim == 1) {
@@ -553,35 +551,35 @@ __device__ void block_x_reduce(arg_t* value, char* shared_memory, const op_t& op
 }
 
 template <typename spec_t, typename arg_t, int output_vec_size, typename op_t>
-__device__ void block_y_reduce(arg_t* value, char* shared_memory, ReduceConfig* config,
+__device__ void block_y_reduce(arg_t* value, char* shared_memory, ReduceConfig config,
                                const op_t& ops) {
   using args_vec_t = arg_t[output_vec_size];
   args_vec_t* shared = reinterpret_cast<args_vec_t*>(shared_memory);
   #pragma unroll
   for (int i = 0; i < output_vec_size; i++) {
-    shared[config->shared_memory_offset(0)][i] = value[i];
+    shared[config.shared_memory_offset(0)][i] = value[i];
   }
   for (int offset = blockDim.y / 2; offset > 0; offset >>= 1) {
     __syncthreads();
     if (threadIdx.y < offset && threadIdx.y + offset < blockDim.y) {
-      arg_t* other = shared[config->shared_memory_offset(offset)];
+      arg_t* other = shared[config.shared_memory_offset(offset)];
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         value[i] = ops.reduce(value[i], other[i]);
-        shared[config->shared_memory_offset(0)][i] = value[i];
+        shared[config.shared_memory_offset(0)][i] = value[i];
       }
     }
   }
 }
 
 template <typename spec_t, typename arg_t, int output_vec_size, typename op_t, typename ident_t=double>
-__device__ void global_reduce(arg_t* value, char* shared_memory, void* cta_buf, size_t* out_strides,
-                              size_t* in_shape, size_t reduce_ndim, size_t ndim,
-                              spec_t* output, int* semaphores, ReduceConfig* config,
+__device__ void global_reduce(arg_t* value, char* shared_memory, void* cta_buf, const int64_t* out_strides,
+                              const int64_t* in_shape, size_t reduce_ndim, size_t ndim,
+                              spec_t* output, int* semaphores, ReduceConfig config,
                               const op_t& ops, ident_t ident) {
   using args_vec_t = arg_t[output_vec_size];
   args_vec_t* reduce_buffer = reinterpret_cast<args_vec_t*>(cta_buf);
-  int64_t output_idx = config->output_idx<output_vec_size>();
+  int64_t output_idx = config.output_idx<output_vec_size>();
   int64_t out_base_offsets[output_vec_size];
   spec_t* out_addr[output_vec_size];
 
@@ -592,9 +590,9 @@ __device__ void global_reduce(arg_t* value, char* shared_memory, void* cta_buf, 
     out_addr[i] = reinterpret_cast<spec_t*>((char*)output + out_base_offsets[i] * sizeof(spec_t));
   }
 
-  bool should_store = config->should_store(output_idx);
+  bool should_store = config.should_store(output_idx);
   if (should_store) {
-    int64_t offset = config->staging_memory_offset(blockIdx.y);
+    int64_t offset = config.staging_memory_offset(blockIdx.y);
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
       reduce_buffer[offset][i] = value[i];
@@ -612,7 +610,7 @@ __device__ void global_reduce(arg_t* value, char* shared_memory, void* cta_buf, 
     }
     
     int64_t input_offset, step;
-    if (config->should_block_x_reduce()) {
+    if (config.should_block_x_reduce()) {
       input_offset = threadIdx.x + threadIdx.y * blockDim.x;
       step = blockDim.x * blockDim.y;
     } else {
@@ -620,21 +618,20 @@ __device__ void global_reduce(arg_t* value, char* shared_memory, void* cta_buf, 
       step = blockDim.y;
     }
 
-    for (; input_offset < config->ctas_per_output; input_offset += step) {
-      int64_t idx = config->staging_memory_offset(input_offset);
+    for (; input_offset < config.ctas_per_output; input_offset += step) {
+      int64_t idx = config.staging_memory_offset(input_offset);
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         value[i] = ops.reduce(value[i], reduce_buffer[idx][i]);
       }
     }
     block_y_reduce<spec_t, arg_t, output_vec_size>(value, shared_memory, config, ops);
-    if (config->should_block_x_reduce()) {
+    if (config.should_block_x_reduce()) {
       block_x_reduce<spec_t, arg_t, output_vec_size>(value, shared_memory, ops);
     }
     if (should_store) {
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
-        // *(out_addr[i]) = static_cast<spec_t>(value[i]);
         *(out_addr[i]) = ops.project(value[i]);
       }
     }
@@ -642,47 +639,61 @@ __device__ void global_reduce(arg_t* value, char* shared_memory, void* cta_buf, 
 }
 
 static void setReduceMeta(const NDArray& in_arr, size_t in_ndim, int64_t num_ax,
-                   int64_t* reduce_axes, size_t reduce_ndim, size_t merge_ndim,
-                   size_t* in_merge_shape, size_t* in_strides, size_t* out_strides) {
-  int reduce_dim = 0, rest_dim = 0;
-  size_t merge_size, stride = 1;
+                          int64_t* reduce_axes, size_t& reduce_ndim, size_t& merge_ndim,
+                          HTShape& in_merge_shape, HTStride& in_strides, HTStride& out_strides) {
+  size_t rest_ndim = 0;
+  int64_t merge_size, stride = in_arr->stride(in_ndim - 1);
+  HTShape in_rest_shape;
+  HTStride in_rest_strides;
 
   for (int i = in_ndim - 1, j = num_ax - 1; i >= 0;) {
     if (j >= 0 && reduce_axes[j] < i) {
-      merge_size = 1;
-      while (i > reduce_axes[j]) {
-        merge_size *= in_arr->shape(i--);
+      merge_size = in_arr->shape(i);
+      i--;
+      while (i > reduce_axes[j] && in_arr->stride(i) == in_arr->stride(i + 1) * in_arr->shape(i + 1)) {
+        merge_size *= in_arr->shape(i);
+        i--;
       }
-      in_merge_shape[reduce_ndim + rest_dim] = merge_size;
-      in_strides[reduce_ndim + rest_dim] = stride;
-      stride *= merge_size;
-      rest_dim++;
+      in_rest_shape.emplace_back(merge_size);
+      in_rest_strides.emplace_back(stride);
+      stride = in_arr->stride(i);
+      rest_ndim++;
     }
     else if (j >= 0 && reduce_axes[j] == i) {
       merge_size = in_arr->shape(i);
-      while (j >= 1 && reduce_axes[j] == reduce_axes[j - 1] + 1) {
-        merge_size *= in_arr->shape(--i);
-        j--;
-      }
       i--;
       j--;
-      in_merge_shape[reduce_dim] = merge_size;
-      in_strides[reduce_dim] = stride;
-      stride *= merge_size;
-      reduce_dim++;
+      while (j >= 0 && reduce_axes[j + 1] == reduce_axes[j] + 1 && i >= 0 &&
+             in_arr->stride(i) == in_arr->stride(i + 1) * in_arr->shape(i + 1)) {
+        merge_size *= in_arr->shape(i);
+        i--;
+        j--;
+      }
+      in_merge_shape.emplace_back(merge_size);
+      in_strides.emplace_back(stride);
+      stride = in_arr->stride(i);
+      reduce_ndim++;
     }
     else {
-      merge_size = 1;
-      while (i >= 0) {
-        merge_size *= in_arr->shape(i--);
+      merge_size = in_arr->shape(i);
+      i--;
+      while (i >= 0 && in_arr->stride(i) == in_arr->stride(i + 1) * in_arr->shape(i + 1)) {
+        merge_size *= in_arr->shape(i);
+        i--;
       }
-      in_merge_shape[reduce_ndim + rest_dim] = merge_size;
-      in_strides[reduce_ndim + rest_dim] = stride;
-      stride *= merge_size;
-      rest_dim++;
+      in_rest_shape.emplace_back(merge_size);
+      in_rest_strides.emplace_back(stride);
+      stride = in_arr->stride(i);
+      rest_ndim++;
     }
   }
+  merge_ndim = reduce_ndim + rest_ndim;
 
+  // Merge reduce dims and rest dims
+  in_merge_shape.insert(in_merge_shape.end(), in_rest_shape.begin(), in_rest_shape.end());
+  in_strides.insert(in_strides.end(), in_rest_strides.begin(), in_rest_strides.end());
+  
+  out_strides = HTShape(merge_ndim, 0);
   stride = 1;
   for (int i = reduce_ndim; i < merge_ndim; i++) {
     out_strides[i] = stride;
@@ -691,28 +702,28 @@ static void setReduceMeta(const NDArray& in_arr, size_t in_ndim, int64_t num_ax,
 }
 
 template <typename spec_t, typename arg_t, int output_vec_size, typename op_t, typename ident_t=double>
-__global__ void reduce_kernel(size_t* in_strides, size_t* out_strides, size_t* in_shape, const op_t& ops,
+__global__ void reduce_kernel(const int64_t* in_strides, const int64_t* out_strides, const int64_t* in_shape, const op_t& ops,
                               size_t reduce_ndim, size_t ndim, ident_t ident, const spec_t* input,
-                              spec_t* output, void* cta_buf, int* semaphores, ReduceConfig* config) {
+                              spec_t* output, void* cta_buf, int* semaphores, ReduceConfig config) {
   extern __shared__ char shared_memory[];
 
-  int64_t output_idx = config->output_idx<output_vec_size>();
-  int64_t input_idx = config->input_idx();
+  int64_t output_idx = config.output_idx<output_vec_size>();
+  int64_t input_idx = config.input_idx();
   int64_t in_base_offset = calc_offset(output_idx, in_strides, in_shape,
                                     reduce_ndim, ndim);
   arg_t value[output_vec_size];
 
-  if (output_idx < config->num_outputs && input_idx < config->num_inputs) {
+  if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
     const spec_t* input_slice = reinterpret_cast<const spec_t*>((const char*)input + in_base_offset * sizeof(spec_t));
     thread_reduce<spec_t, arg_t, output_vec_size>(input_slice, in_strides, in_shape,
                                                                  reduce_ndim, value, config, ops, ident);
   }
 
-  if (config->should_block_y_reduce()) {
+  if (config.should_block_y_reduce()) {
     block_y_reduce<spec_t, arg_t, output_vec_size>(value, shared_memory, config, ops);
   }
 
-  if (config->should_block_x_reduce()) {
+  if (config.should_block_x_reduce()) {
     block_x_reduce<spec_t, arg_t, output_vec_size>(value, shared_memory, ops);
   }
 
@@ -726,12 +737,12 @@ __global__ void reduce_kernel(size_t* in_strides, size_t* out_strides, size_t* i
     out_addr[i] = reinterpret_cast<spec_t*>((char*)output + out_base_offsets[i] * sizeof(spec_t));
   }
 
-  if (config->should_global_reduce()) {
+  if (config.should_global_reduce()) {
     // global_reduce will write back to output
     global_reduce<spec_t, arg_t, output_vec_size, op_t, ident_t>(value, shared_memory, cta_buf, out_strides,
                                                                  in_shape, reduce_ndim, ndim, output,
                                                                  semaphores, config, ops, ident);
-  } else if (config->should_store(output_idx)) {
+  } else if (config.should_store(output_idx)) {
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
       *(out_addr[i]) = ops.project(value[i]);
@@ -753,95 +764,89 @@ void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t
   num_ax = std::unique(reduce_axes, reduce_axes + num_ax) - reduce_axes;
 
   // Merge contiguous reduce / rest dims
-  size_t reduce_ndim = 1;
-  size_t rest_ndim = reduce_axes[0] > 0 ? 1 : 0;
-  for (int i = 1; i < num_ax; i++) {
-    if (reduce_axes[i] == reduce_axes[i - 1] + 1)
-      continue;
-    reduce_ndim++;
-    rest_ndim++;
-  }
-  if (reduce_axes[num_ax - 1] < in_arr->ndim() - 1) {
-    rest_ndim++;
-  }
-
   size_t in_ndim = in_arr->ndim();
-  size_t merge_ndim = reduce_ndim + rest_ndim;
-  size_t reduce_meta_size = sizeof(ReduceConfig) + merge_ndim * sizeof(size_t) * 3;
-  
-  // To reduce the number of `AllocFromMemoryPool` and `cudaMemcpy` calls,
-  // reduce config, strides and shape are packed and allocated once.
-  // TODO: How to make it cleaner or more elegant?
-  size_t reduce_meta_offset = sizeof(ReduceConfig);
-  int8_t* reduce_meta = (int8_t*) malloc(reduce_meta_size);
-  DataPtr reduce_meta_cu_ptr = AllocFromMemoryPool(in_arr->device(), reduce_meta_size);
-  int8_t* reduce_meta_cu = reinterpret_cast<int8_t*>(reduce_meta_cu_ptr.ptr);
-  ReduceConfig* config = reinterpret_cast<ReduceConfig*>(reduce_meta);
-  ReduceConfig* config_cu = reinterpret_cast<ReduceConfig*>(reduce_meta_cu);
-  size_t* in_merge_shape = reinterpret_cast<size_t*>(reduce_meta + reduce_meta_offset);
-  size_t* in_merge_shape_cu = reinterpret_cast<size_t*>(reduce_meta_cu + reduce_meta_offset);
-  reduce_meta_offset += merge_ndim * sizeof(size_t);
-  size_t* in_strides = reinterpret_cast<size_t*>(reduce_meta + reduce_meta_offset);
-  size_t* in_strides_cu = reinterpret_cast<size_t*>(reduce_meta_cu + reduce_meta_offset);
-  reduce_meta_offset += merge_ndim * sizeof(size_t);
-  size_t* out_strides = reinterpret_cast<size_t*>(reduce_meta + reduce_meta_offset);
-  size_t* out_strides_cu = reinterpret_cast<size_t*>(reduce_meta_cu + reduce_meta_offset);
+  size_t reduce_ndim = 0;
+  size_t merge_ndim = 0;
+  HTShape in_merge_shape;
+  HTStride in_strides, out_strides;
 
   setReduceMeta(in_arr, in_ndim, num_ax, reduce_axes, reduce_ndim, merge_ndim,
                 in_merge_shape, in_strides, out_strides);
-
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-
-  *config = setReduceConfig<arg_t, spec_t>(reduce_ndim, merge_ndim, in_merge_shape,
-                                            in_strides, out_strides, in_arr->data_ptr<spec_t>(), stream);
-
-  CudaMemcpyAsync(reduce_meta_cu, reduce_meta, reduce_meta_size, cudaMemcpyHostToDevice, cuda_stream);
   
-  // Used for accumulation between blocks during global reduction
-  void* cta_buf_cu = nullptr;
-  int* semaphores_cu = nullptr;
-  DataPtr global_meta_cu_ptr;
-  int8_t* global_meta_cu = nullptr;
-  if (config->should_global_reduce()) {
-    global_meta_cu_ptr = AllocFromMemoryPool(in_arr->device(), config->global_memory_size() + config->semaphore_size());
-    global_meta_cu = (int8_t*) global_meta_cu_ptr.ptr;
-    cta_buf_cu = (void*) global_meta_cu;
-    semaphores_cu = (int*) (global_meta_cu + config->global_memory_size());
-    CudaMemsetAsync(semaphores_cu, 0, config->semaphore_size(), cuda_stream);
+  auto device_id = in_arr->device().index();
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CUDAStream cuda_stream(stream);
+
+  ReduceConfig config;
+  auto in_merge_shape_arr =
+    hetu::cuda::to_int64_ndarray(in_merge_shape, device_id);
+  auto in_strides_arr = 
+    hetu::cuda::to_int64_ndarray(in_strides, device_id);
+  auto out_strides_arr = 
+    hetu::cuda::to_int64_ndarray(out_strides, device_id);
+
+  config = setReduceConfig<arg_t, spec_t>(reduce_ndim, merge_ndim, in_merge_shape,
+                                          in_strides, in_arr->data_ptr<spec_t>(), cuda_stream);
+
+  uint8_t* cta_buf = nullptr;
+  uint8_t* semaphores = nullptr;
+  void* cta_buf_ptr = nullptr;
+  int* semaphores_ptr = nullptr;
+  NDArray cta_buf_arr, semaphores_arr;
+  if (config.should_global_reduce()) {
+    auto cta_buf_size = config.global_memory_size();
+    auto semaphores_size = config.semaphore_size();
+    cta_buf = new uint8_t[cta_buf_size];
+    semaphores = new uint8_t[semaphores_size];
+    memset(semaphores, 0, semaphores_size);
+    cta_buf_arr = 
+      hetu::cuda::to_byte_ndarray(cta_buf, cta_buf_size, device_id);
+    semaphores_arr = 
+      hetu::cuda::to_byte_ndarray(semaphores, semaphores_size, device_id);
+    cta_buf_ptr = cta_buf_arr->raw_data_ptr();
+    semaphores_ptr = semaphores_arr->data_ptr<int>();
   }
 
-  dim3 block = config->block();
-  dim3 grid = config->grid();
-  int shared_memory = config->shared_memory_size();
+  dim3 block = config.block();
+  dim3 grid = config.grid();
+  int shared_memory = config.shared_memory_size();
 
-  switch(config->output_vec_size) {
+  switch(config.output_vec_size) {
     case 4:
       reduce_kernel<spec_t, arg_t, 4><<<grid, block, shared_memory, cuda_stream>>>(
-        in_strides_cu, out_strides_cu, in_merge_shape_cu,
+        in_strides_arr->data_ptr<int64_t>(),
+        out_strides_arr->data_ptr<int64_t>(),
+        in_merge_shape_arr->data_ptr<int64_t>(),
         ops, reduce_ndim, merge_ndim, ident,
         in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
-        cta_buf_cu, semaphores_cu, config_cu);
+        cta_buf_ptr, semaphores_ptr, config);
       break;
     case 2:
       reduce_kernel<spec_t, arg_t, 2><<<grid, block, shared_memory, cuda_stream>>>(
-        in_strides_cu, out_strides_cu, in_merge_shape_cu,
+        in_strides_arr->data_ptr<int64_t>(),
+        out_strides_arr->data_ptr<int64_t>(),
+        in_merge_shape_arr->data_ptr<int64_t>(),
         ops, reduce_ndim, merge_ndim, ident,
         in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
-        cta_buf_cu, semaphores_cu, config_cu);
+        cta_buf_ptr, semaphores_ptr, config);
       break;
     default:
       reduce_kernel<spec_t, arg_t, 1><<<grid, block, shared_memory, cuda_stream>>>(
-        in_strides_cu, out_strides_cu, in_merge_shape_cu,
+        in_strides_arr->data_ptr<int64_t>(),
+        out_strides_arr->data_ptr<int64_t>(),
+        in_merge_shape_arr->data_ptr<int64_t>(),
         ops, reduce_ndim, merge_ndim, ident,
         in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
-        cta_buf_cu, semaphores_cu, config_cu);
+        cta_buf_ptr, semaphores_ptr, config);
   }
 
-  if (config->should_global_reduce()) {
-    FreeToMemoryPool(global_meta_cu_ptr);
+  free(reduce_axes);
+  if (config.should_global_reduce()) {
+    NDArray::MarkUsedBy({cta_buf_arr, semaphores_arr}, stream);
+    delete[] semaphores;
+    delete[] cta_buf;
   }
-  FreeToMemoryPool(reduce_meta_cu_ptr);
+  NDArray::MarkUsedBy({in_arr, out_arr, in_strides_arr, out_strides_arr, in_merge_shape_arr}, stream);
   return;
 }
 

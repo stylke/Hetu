@@ -47,7 +47,7 @@ struct EinsumParameters {
 
 bool operator==(const EinsumParameters& l, const EinsumParameters& r);
 
-class EinsumOpImpl : public OpInterface {
+class EinsumOpImpl final : public OpInterface {
  public:
   EinsumOpImpl(const EinsumParameters& params)
   : OpInterface(quote(EinsumOp)),
@@ -137,6 +137,10 @@ class EinsumOpImpl : public OpInterface {
   EinsumParameters _params;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const EinsumOpImpl&>(rhs);
@@ -153,7 +157,7 @@ EinsumParameters EinsumParseMsg(const TensorList& inputs,
 Tensor MakeEinsumOp(const std::string& msg, TensorList inputs,
                     OpMeta op_meta = OpMeta());
 
-class EinsumGradientOpImpl : public OpInterface {
+class EinsumGradientOpImpl final : public OpInterface {
 
  public:
   EinsumGradientOpImpl(EinsumParameters params)
@@ -190,6 +194,10 @@ class EinsumGradientOpImpl : public OpInterface {
   EinsumParameters _params;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const EinsumGradientOpImpl&>(rhs);

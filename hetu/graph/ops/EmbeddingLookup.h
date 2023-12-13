@@ -44,6 +44,10 @@ protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     return OpInterface::operator==(rhs);
   }
@@ -74,6 +78,10 @@ protected:
                  RuntimeContext& runtime_ctx) const override;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     return OpInterface::operator==(rhs);
   }

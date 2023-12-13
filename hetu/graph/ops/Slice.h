@@ -3,6 +3,7 @@
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
 #include "hetu/core/symbol.h"
+#include "hetu/graph/ops/Views.h"
 
 namespace hetu {
 namespace graph {
@@ -12,30 +13,28 @@ class SliceOp;
 class SliceGradientOpImpl;
 class SliceGradientOp;
 
-class SliceOpImpl : public OpInterface {
+class SliceOpImpl final : public ViewsOpImpl {
  public:
   // symbolic shape constructor
-  SliceOpImpl(const SyShape& begin_pos, const SyShape& output_shape, const int64_t& padding_axis = -1, bool inplace = false)
-  : OpInterface(quote(SliceOp)),
+  SliceOpImpl(const SyShape& begin_pos, const SyShape& output_shape, const int64_t& padding_axis = -1)
+  : ViewsOpImpl(quote(SliceOp)),
     _begin_pos(begin_pos),
     _output_shape(output_shape),
     _padding_axis(padding_axis),
-    _inplace(inplace),
     _symbolic(true) {
     HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " splice op begin_pos = " << get_begin_pos();
     HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " splice op begin_pos = " << get_output_shape();
   }
   // fixed shape constructor
-  SliceOpImpl(const HTShape& begin_pos, const HTShape& output_shape, const int64_t& padding_axis = -1, bool inplace = false)
-  : OpInterface(quote(SliceOp)),
+  SliceOpImpl(const HTShape& begin_pos, const HTShape& output_shape, const int64_t& padding_axis = -1)
+  : ViewsOpImpl(quote(SliceOp)),
     _begin_pos(begin_pos.begin(), begin_pos.end()),
     _output_shape(output_shape.begin(), output_shape.end()),
     _padding_axis(padding_axis),
-    _inplace(inplace),
     _symbolic(false) {
   }
   
-  uint64_t op_indicator() const noexcept override {
+  inline uint64_t op_indicator() const noexcept override {
     return SLICE_OP;
   }
 
@@ -58,10 +57,6 @@ class SliceOpImpl : public OpInterface {
   // deprecated: only used in gpt inference, before symbolic shape is realized
   int64_t get_padding_axis() const {
     return _padding_axis;
-  }
-
-  bool inplace() const {
-    return _inplace;
   }
 
   bool symbolic() const {
@@ -88,12 +83,11 @@ class SliceOpImpl : public OpInterface {
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;
 
-  NDArrayList DoCompute(Operator& op,
-                        const NDArrayList& inputs,
-                        RuntimeContext& ctx) const override;
-
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const {};
+
+  NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
 
   TensorList DoGradient(Operator& op, const TensorList& grad_outputs) const override;
 
@@ -108,15 +102,12 @@ class SliceOpImpl : public OpInterface {
 
   int64_t _padding_axis;
 
-  bool _inplace;
-
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (ViewsOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const SliceOpImpl&>(rhs);
-      return (get_begin_pos() == rhs_.get_begin_pos()
-              && get_output_shape() == rhs_.get_output_shape()
-              && inplace() == rhs_.inplace());
+      return (get_begin_pos() == rhs_.get_begin_pos() &&
+              get_output_shape() == rhs_.get_output_shape());
     }
     return false;
   }
@@ -125,22 +116,19 @@ class SliceOpImpl : public OpInterface {
 // fixed shape
 Tensor MakeSliceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
                    OpMeta op_meta = OpMeta());
-Tensor MakeSliceInplaceOp(Tensor input, const HTShape& begin_pos, const HTShape& output_shape,
-                          OpMeta op_meta = OpMeta());
 
 // symbolic shape
 Tensor MakeSliceOp(Tensor input, const SyShape& begin_pos, const SyShape& output_shape,
                    OpMeta op_meta = OpMeta());
-Tensor MakeSliceInplaceOp(Tensor input, const SyShape& begin_pos, const SyShape& output_shape,
-                          OpMeta op_meta = OpMeta());
 
-class SliceGradientOpImpl : public OpInterface {
+
+class SliceGradientOpImpl : public ViewsOpImpl {
 
  public:
   // symbolic shape constructor
   SliceGradientOpImpl(const SyShape& begin_pos,
                       const SyShape& output_shape)
-  : OpInterface(quote(SliceGradientOp)),
+  : ViewsOpImpl(quote(SliceGradientOp)),
     _begin_pos(begin_pos),
     _output_shape(output_shape),
     _symbolic(true) {
@@ -148,7 +136,7 @@ class SliceGradientOpImpl : public OpInterface {
   // fixed shape constructor
   SliceGradientOpImpl(const HTShape& begin_pos,
                       const HTShape& output_shape)
-  : OpInterface(quote(SliceGradientOp)),
+  : ViewsOpImpl(quote(SliceGradientOp)),
     _begin_pos(begin_pos.begin(), begin_pos.end()),
     _output_shape(output_shape.begin(), output_shape.end()),
     _symbolic(false) {
@@ -177,7 +165,7 @@ class SliceGradientOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    return {inputs[2]->meta()};
+    return {inputs[1]->meta()};
   };
 
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
@@ -194,22 +182,21 @@ class SliceGradientOpImpl : public OpInterface {
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const SliceOpImpl&>(rhs);
-      return (get_begin_pos() == rhs_.get_begin_pos()
-              && get_output_shape() == rhs_.get_output_shape());
+    if (ViewsOpImpl::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const SliceGradientOpImpl&>(rhs);
+      return (get_begin_pos() == rhs_.get_begin_pos() &&
+              get_output_shape() == rhs_.get_output_shape());
     }
     return false;
   }
 };
 
-// fixed shape
-Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
+Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_input,
                            const HTShape& begin_pos, const HTShape& output_shape,
                            OpMeta op_meta = OpMeta());
 
 // symbolic shape
-Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_output, Tensor ori_input,
+Tensor MakeSliceGradientOp(Tensor grad_output, Tensor ori_input,
                            const SyShape& begin_pos, const SyShape& output_shape,
                            OpMeta op_meta = OpMeta());
 

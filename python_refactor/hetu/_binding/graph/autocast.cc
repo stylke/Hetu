@@ -67,12 +67,12 @@ PyObject* PyAutoCast_make_new_autocast(PyObject*, PyObject* args,
                                    PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "make_new_autocast(bool enable=True)",
+    "make_new_autocast(bool enable=True, DataType cast_type=None)",
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     return PyAutoCast_New(
-      AutoCast::MakeAutoCast(parsed_args.get_bool_or_default(0))->id());
+      AutoCast::MakeAutoCast(parsed_args.get_bool_or_default(0), parsed_args.get_dtype_or_else(1, DataType::UNDETERMINED))->id());
     Py_RETURN_NONE;
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);

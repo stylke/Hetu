@@ -21,12 +21,24 @@ class LossOpImpl : public OpInterface {
   ReductionType _reduction;  
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   uint64_t op_indicator() const noexcept override {
     return LOSS_OP;
   }
   
   ReductionType reduction() const {
     return _reduction;
+  }
+
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const LossOpImpl&>(rhs);
+      return reduction() == rhs_.reduction();
+    }
+    return false;
   }
 };
 
@@ -36,9 +48,21 @@ class LossGradientOpImpl : public LossOpImpl {
   : LossOpImpl(std::move(type), reduction) {}
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   uint64_t op_indicator() const noexcept override {
     return LOSS_GRADIENT_OP;
   } 
+
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const LossGradientOpImpl&>(rhs);
+      return reduction() == rhs_.reduction();
+    }
+    return false;
+  }
 };
 
 } // namespace graph

@@ -12,6 +12,7 @@
 #include "hetu/_binding/graph/tensor.h"
 #include "hetu/_binding/graph/graph.h"
 #include "hetu/_binding/graph/sgdoptimizer.h"
+#include "hetu/_binding/graph/adamoptimizer.h"
 #include "hetu/_binding/graph/distributed_states.h"
 #include "hetu/_binding/graph/init/initializer.h"
 
@@ -56,7 +57,8 @@ enum class ArgType : uint8_t {
   INT_SYMBOL,
   SYMBOLIC_SHAPE,
   INITIALIZER,
-  SGDOPTIMIZER
+  SGDOPTIMIZER,
+  ADAMOPTIMIZER
 };
 
 std::string ArgType2Str(ArgType);
@@ -380,6 +382,10 @@ class ParsedPyArgs {
 
   inline SGDOptimizer get_sgdoptimizer(size_t i) const {
     return SGDOptimizer_FromPyObject(_args[i]);
+  }  
+
+  inline AdamOptimizer get_adamoptimizer(size_t i) const {
+    return AdamOptimizer_FromPyObject(_args[i]);
   }  
 
   inline DistributedStates get_distributed_states_or_empty(size_t i) {

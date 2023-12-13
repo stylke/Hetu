@@ -63,8 +63,6 @@ void SoftmaxGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList&
 Tensor MakeSoftmaxOp(Tensor input, int64_t dim, OpMeta op_meta) {
   TensorList inputs = {input};
   if (input->device() == kCUDA) {
-    DataType input_type = DataType::FLOAT32;
-    AutoCast::Tensor_AutoCast(inputs, input_type);
   }
   return Graph::MakeOp(
     std::make_shared<SoftmaxOpImpl>(dim),

@@ -2,6 +2,7 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
@@ -9,7 +10,10 @@ namespace impl {
 template <typename spec_t>
 __global__ void Concat_kernel(const spec_t* inputA, const spec_t* inputB,
                               size_t size, size_t concat_size, size_t offset1,
-                              size_t offset2, spec_t* output) {
+                              size_t offset2, spec_t* output,
+                              const OffsetCalculator* A_offset_calculator,
+                              const OffsetCalculator* B_offset_calculator,
+                              const OffsetCalculator* out_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -21,20 +25,25 @@ __global__ void Concat_kernel(const spec_t* inputA, const spec_t* inputB,
   spec_t val;
   if (mid_ind < offset1) {
     int x_ind = (pre_ind * offset1 + mid_ind) * concat_size + post_ind;
-    val = inputA[x_ind];
+    auto A_offset = A_offset_calculator->get(x_ind);
+    val = inputA[A_offset];
   } else {
     int y_ind =
       (pre_ind * offset2 + mid_ind - offset1) * concat_size + post_ind;
-    val = inputB[y_ind];
+    auto B_offset = B_offset_calculator->get(y_ind);
+    val = inputB[B_offset];
   }
-  output[idx] = val;
+  auto out_offset = out_offset_calculator->get(idx);
+  output[out_offset] = val;
 }
 
 template <typename spec_t>
 __global__ void Concat_gradient_kernel(const spec_t* output_grad, size_t size,
                                        size_t concat_size, size_t concat_offset,
                                        size_t small_offset, size_t big_offset,
-                                       spec_t* input_grad) {
+                                       spec_t* input_grad,
+                                       const OffsetCalculator* out_grad_offset_calculator,
+                                       const OffsetCalculator* in_grad_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -43,7 +52,9 @@ __global__ void Concat_gradient_kernel(const spec_t* output_grad, size_t size,
   int mid_ind = temp % small_offset + concat_offset;
   int pre_ind = temp / small_offset;
   int o_idx = (pre_ind * big_offset + mid_ind) * concat_size + post_ind;
-  input_grad[idx] = output_grad[o_idx];
+  auto out_grad_offset = out_grad_offset_calculator->get(o_idx);
+  auto in_grad_offset = in_grad_offset_calculator->get(idx);
+  input_grad[in_grad_offset] = output_grad[out_grad_offset];
 }
 
 void ConcatCuda(const NDArray& inputA, const NDArray& inputB, NDArray& output,
@@ -68,13 +79,26 @@ void ConcatCuda(const NDArray& inputA, const NDArray& inputB, NDArray& output,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  NDArray A_offset_calculator_arr, B_offset_calculator_arr,
+          out_offset_calculator_arr;
+  OffsetCalculator *A_offset_calculator, *B_offset_calculator,
+                   *out_offset_calculator;
+  std::tie(A_offset_calculator_arr, A_offset_calculator) =
+    AllocOffsetCalculator(inputA, stream);
+  std::tie(B_offset_calculator_arr, B_offset_calculator) =
+    AllocOffsetCalculator(inputB, stream);
+  std::tie(out_offset_calculator_arr, out_offset_calculator) =
+    AllocOffsetCalculator(output, stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     inputA->dtype(), spec_t, "ConcatCuda", [&]() {
       Concat_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         inputA->data_ptr<spec_t>(), inputB->data_ptr<spec_t>(), size,
-        concat_size, offset1, offset2, output->data_ptr<spec_t>());
+        concat_size, offset1, offset2, output->data_ptr<spec_t>(),
+        A_offset_calculator, B_offset_calculator,
+        out_offset_calculator);
     });
-  NDArray::MarkUsedBy({inputA, inputB, output}, stream);
+  NDArray::MarkUsedBy({inputA, inputB, output, A_offset_calculator_arr,
+                      B_offset_calculator_arr, out_offset_calculator_arr}, stream);
 }
 
 void ConcatGradientCuda(const NDArray& output_grad, NDArray& input_grad,
@@ -99,13 +123,21 @@ void ConcatGradientCuda(const NDArray& output_grad, NDArray& input_grad,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  NDArray out_grad_offset_calculator_arr, in_grad_offset_calculator_arr;
+  OffsetCalculator *out_grad_offset_calculator, *in_grad_offset_calculator;
+  std::tie(out_grad_offset_calculator_arr, out_grad_offset_calculator) =
+    AllocOffsetCalculator(output_grad, stream);
+  std::tie(in_grad_offset_calculator_arr, in_grad_offset_calculator) = 
+    AllocOffsetCalculator(input_grad, stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_grad->dtype(), spec_t, "ConcatGradientCuda", [&]() {
       Concat_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         output_grad->data_ptr<spec_t>(), size, concat_size, concat_offset,
-        small_offset, big_offset, input_grad->data_ptr<spec_t>());
+        small_offset, big_offset, input_grad->data_ptr<spec_t>(),
+        out_grad_offset_calculator, in_grad_offset_calculator);
     });
-  NDArray::MarkUsedBy({output_grad, input_grad}, stream);
+  NDArray::MarkUsedBy({output_grad, input_grad, out_grad_offset_calculator_arr,
+                      in_grad_offset_calculator_arr}, stream);
 }
 
 } // namespace impl

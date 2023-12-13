@@ -16,12 +16,18 @@ using AutoCastId = uint64_t;
 
 class AutoCast {
 public:
-  AutoCast(bool enabled = true) : _enabled(enabled) {
+  AutoCast(bool enabled = true, DataType cast_type = DataType::UNDETERMINED) 
+  : _enabled(enabled),
+    _cast_type(cast_type) {
     _id =  AutoCast::_next_autocast_id();
   }
 
   bool enabled() const {
     return _enabled;
+  }
+
+  DataType cast_type() const {
+    return _cast_type;
   }
 
   AutoCastId id() const {
@@ -35,8 +41,8 @@ public:
   }
 
 public:
-  static std::shared_ptr<AutoCast>& MakeAutoCast(bool enabled = true) {
-    auto autocast_ = std::make_shared<AutoCast>(enabled);
+  static std::shared_ptr<AutoCast>& MakeAutoCast(bool enabled = true, DataType cast_type = DataType::UNDETERMINED) {
+    auto autocast_ = std::make_shared<AutoCast>(enabled, cast_type);
     AutoCast::_autocasts.push_back(autocast_);
     return reinterpret_cast<std::shared_ptr<AutoCast>&>(AutoCast::_autocasts.back());
   }
@@ -70,12 +76,19 @@ public:
 
   static DataType WidestType(const TensorList& inputs);
 
-  static void Tensor_AutoCast(TensorList& inputs, DataType datatype);
+  static void Tensor_AutoCast(TensorList& inputs, DataType datatype = DataType::UNDETERMINED);
+
+  static void Graph_AutoCast(TensorList& inputs, Operator op);
+
+  static void Graph_AutoCast(TensorList& inputs, std::shared_ptr<OpInterface> body);
 
 private:
   AutoCastId _id;
 
   bool _enabled;
+
+  DataType _cast_type;
+
 //TODO:currently we only support autocast on GPU.
   bool _gpu_enabled;
 

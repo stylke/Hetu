@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Unary.h"
 
 namespace hetu {
 namespace graph {
@@ -13,15 +14,13 @@ class DropoutGradientOp;
 class DropoutGradientWithRecomputationOpImpl;
 class DropoutGradientWithRecomputationOp;
 
-class DropoutOpImpl : public OpInterface {
+class DropoutOpImpl final : public UnaryOpImpl {
  public:
   DropoutOpImpl(double keep_prob,
                 bool recompute = false, bool inplace = false)
-  : OpInterface(quote(DropoutOp)),
+  : UnaryOpImpl(quote(DropoutOp), inplace),
     _keep_prob(keep_prob),
-    _recompute(recompute || inplace),
-    _inplace(inplace) {
-  }
+    _recompute(recompute || inplace) {}
 
   double keep_prob() const {
     return _keep_prob;
@@ -29,10 +28,6 @@ class DropoutOpImpl : public OpInterface {
 
   bool recompute() const {
     return _recompute;
-  }
-
-  bool inplace() const{
-    return _inplace;
   }
 
 protected:
@@ -46,40 +41,37 @@ protected:
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
-                           RuntimeContext& runtime_ctx) const override;
-
   void DoCompute(Operator& op, const NDArrayList& inputs,
                  NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const {};
+                 RuntimeContext& runtime_ctx) const override;
 
   NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
                         RuntimeContext& runtime_ctx) const override;
 
   double _keep_prob;
   bool _recompute;
-  bool _inplace;
-
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (UnaryOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const DropoutOpImpl&>(rhs);
-      return (keep_prob() == rhs_.keep_prob()
-              && recompute() == rhs_.recompute()
-              && inplace() == rhs_.inplace());
+      return (keep_prob() == rhs_.keep_prob() &&
+              recompute() == rhs_.recompute());
     }
     return false;
   }
 };
 
-Tensor MakeDropoutOp(Tensor input, double keep_prob, bool recompute = false,
-                     bool inplace = false, OpMeta op_meta = OpMeta());
+Tensor MakeDropoutOp(Tensor input, double keep_prob,
+                     bool recompute = false, OpMeta op_meta = OpMeta());
 
-class DropoutGradientOpImpl : public OpInterface {
+Tensor MakeDropoutInplaceOp(Tensor input, double keep_prob,
+                            bool recompute = false, OpMeta op_meta = OpMeta());
+
+class DropoutGradientOpImpl final : public UnaryGradientOpImpl {
  public:
   DropoutGradientOpImpl(double keep_prob)
-  : OpInterface(quote(DropoutGradientOp)),
+  : UnaryGradientOpImpl(quote(DropoutGradientOp)),
     _keep_prob(keep_prob) {
   }
 
@@ -95,9 +87,6 @@ protected:
     return {output_meta};
   }
 
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
-                           RuntimeContext& runtime_ctx) const override;
-
   void DoCompute(Operator& op, const NDArrayList& inputs,
                  NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
@@ -109,7 +98,7 @@ protected:
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (UnaryGradientOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const DropoutGradientOpImpl&>(rhs);
       return (keep_prob() == rhs_.keep_prob());
     }
@@ -120,7 +109,7 @@ protected:
 Tensor MakeDropoutGradientOp(Tensor grad_output, Tensor output, double keep_prob,
                              OpMeta op_meta = OpMeta());
 
-class DropoutGradientWithRecomputationOpImpl : public OpInterface {
+class DropoutGradientWithRecomputationOpImpl final : public UnaryGradientOpImpl {
  private:
   friend class DropoutGradientWithRecomputationOp;
   struct constrcutor_access_key {};
@@ -128,20 +117,20 @@ class DropoutGradientWithRecomputationOpImpl : public OpInterface {
  public:
   DropoutGradientWithRecomputationOpImpl(OpId forward_op,
                                          double keep_prob,
-                                         bool inplace,
+                                         bool fw_inplace,
                                          OpMeta op_meta = OpMeta())
-  : OpInterface(quote(DropoutGradientWithRecomputationOp)),
+  : UnaryGradientOpImpl(quote(DropoutGradientWithRecomputationOp)),
     _forward_op(forward_op),
     _keep_prob(keep_prob),
-    _inplace(inplace) {
+    _fw_inplace(fw_inplace) {
   }
 
   double keep_prob() const {
     return _keep_prob;
   }
 
-  bool inplace() const{
-    return _inplace;
+  bool fw_inplace() const{
+    return _fw_inplace;
   }
 
 protected:
@@ -151,9 +140,6 @@ protected:
     NDArrayMeta output_meta = inputs[0]->meta();
     return {output_meta};
   }
-
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
-                           RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs,
                  NDArrayList& outputs,
@@ -166,15 +152,15 @@ protected:
 
   double _keep_prob;
 
-  bool _inplace;
+  bool _fw_inplace;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (UnaryGradientOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const DropoutGradientWithRecomputationOpImpl&>(rhs);
-      return (keep_prob() == rhs_.keep_prob()
-              && _forward_op == rhs_._forward_op
-              && inplace() == rhs_.inplace());
+      return (keep_prob() == rhs_.keep_prob() &&
+              _forward_op == rhs_._forward_op &&
+              fw_inplace() == rhs_.fw_inplace());
     }
     return false;
   }

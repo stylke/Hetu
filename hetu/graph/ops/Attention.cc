@@ -10,24 +10,20 @@ void AttentionOpImpl::DoCompute(Operator& op,
                                 RuntimeContext& ctx) const {
   
   double softmax_scale_ = softmax_scale() >= 0 ? softmax_scale() : std::pow(inputs.at(0)->shape(3), -0.5);
-  // std::chrono::system_clock::time_point t0 = std::chrono::system_clock::now();
   HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::FlashAttn,
                                inputs.at(0), inputs.at(1), inputs.at(2), outputs.at(0), outputs.at(1),
                                outputs.at(2), outputs.at(3), outputs.at(4), outputs.at(5),
                                outputs.at(6), outputs.at(7), p_dropout(), softmax_scale_,
                                is_causal(), return_softmax(), op->instantiation_ctx().stream());
-  // std::chrono::system_clock::time_point t1 = std::chrono::system_clock::now();
-  // HT_LOG_INFO << "ATTN with shape " << inputs.at(0)->shape() << ":" << 
-  // float(std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()) / 1000.0 << "ms.";
 }
 
 TensorList AttentionOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   TensorList empty = {Tensor(), Tensor(), Tensor()};
   return op->requires_grad(0) ? MakeAttentionGradientOp(grad_outputs.at(0), op->input(0), op->input(1), 
-                                                         op->input(2), op->output(0), op->output(5),
-                                                         op->output(7), p_dropout(), softmax_scale(),
-                                                         is_causal(), op->grad_op_meta().set_name(op->grad_name()))
-                               : empty;
+                                                        op->input(2), op->output(0), op->output(5),
+                                                        op->output(7), p_dropout(), softmax_scale(),
+                                                        is_causal(), op->grad_op_meta().set_name(op->grad_name()))
+                              : empty;
 }
 
 HTShapeList AttentionOpImpl::DoInferShape(Operator& op, 
@@ -85,8 +81,6 @@ HTShapeList AttentionGradientOpImpl::DoInferShape(Operator& op,
 TensorList MakeAttentionOp(Tensor q, Tensor k, Tensor v, double p_dropout, double softmax_scale, 
                            bool is_causal, bool return_softmax, OpMeta op_meta) {
   TensorList inputs = {std::move(q), std::move(k), std::move(v)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<AttentionOpImpl>(p_dropout, softmax_scale, is_causal, return_softmax),
         std::move(inputs),

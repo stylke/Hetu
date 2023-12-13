@@ -11,7 +11,7 @@ class ReduceOp;
 class ReduceGradientOpImpl;
 class ReduceGradientOp;
 
-class ReduceOpImpl : public OpInterface {
+class ReduceOpImpl final : public OpInterface {
 protected:
   ReduceOpImpl(OpType&& op_type, ReductionType reduction = kMEAN, 
                const HTAxes& axes = {},
@@ -108,6 +108,10 @@ protected:
 
   ReductionType _reduction;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ReduceOpImpl&>(rhs);
@@ -146,7 +150,7 @@ Tensor MakeReduceProdOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
                        OpMeta op_meta);
 
-class ReduceGradientOpImpl : public OpInterface {
+class ReduceGradientOpImpl final : public OpInterface {
  public:
   ReduceGradientOpImpl(const HTShape& shape,
                        ReductionType reduction = kMEAN,
@@ -235,6 +239,10 @@ class ReduceGradientOpImpl : public OpInterface {
 
   ReductionType _reduction;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ReduceGradientOpImpl&>(rhs);

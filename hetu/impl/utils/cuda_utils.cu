@@ -21,5 +21,23 @@ NDArray to_int64_ndarray(const int64_t* from, size_t n, DeviceIndex device_id) {
   return ret;
 }
 
+NDArray to_byte_ndarray(const std::vector<uint8_t>& vec,
+                        DeviceIndex device_id) {
+  auto ret = NDArray::empty({static_cast<int64_t>(vec.size())},
+                            Device(kCUDA, device_id), kByte, kBlockingStream);
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CudaMemcpy(ret->raw_data_ptr(), vec.data(), vec.size() * sizeof(uint8_t),
+             cudaMemcpyHostToDevice);
+  return ret;
+}
+
+NDArray to_byte_ndarray(const uint8_t* from, size_t n, DeviceIndex device_id) {
+  auto ret = NDArray::empty({static_cast<int64_t>(n)}, Device(kCUDA, device_id),
+                            kByte, kBlockingStream);
+  CudaMemcpy(ret->raw_data_ptr(), from, n * sizeof(uint8_t),
+             cudaMemcpyHostToDevice);
+  return ret;
+}
+
 } // namespace cuda
 } // namespace hetu

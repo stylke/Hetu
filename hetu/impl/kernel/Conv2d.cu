@@ -402,8 +402,8 @@ __global__ void conv2d_add_bias_kernel(const spec_t* input, spec_t* output,
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  size_t input_idx = idx % input_size / output_size;
-  output[idx] = output[idx] + input[input_idx];
+  size_t input_idx = (idx % input_size) / output_size;
+  output[idx] = input[input_idx];
 }
 
 void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
@@ -520,10 +520,14 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
         workspace.is_defined() ? workspace->raw_data_ptr() : nullptr;
 
       spec_t alpha = 1.0f;
-      spec_t beta = 0.0f;
+      spec_t beta = 1.0f;
 
       float alpha_f = 1.0f;
-      float beta_f = 0.0f;
+      float beta_f = 1.0f;
+
+      conv2d_add_bias_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
+        bias->data_ptr<spec_t>(), output->data_ptr<spec_t>(), bias_input_size,
+        bias_output_size, size);
 
       if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16) {
         CUDNN_CALL(cudnnConvolutionForward(handle, &alpha_f, input_desc, input_x->data_ptr<spec_t>(),
@@ -540,10 +544,6 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
       CUDNN_CALL(cudnnDestroyFilterDescriptor(filter_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
-      
-      conv2d_add_bias_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        bias->data_ptr<spec_t>(), output->data_ptr<spec_t>(), bias_input_size,
-        bias_output_size, size);
     });
   NDArray::MarkUsedBy({input_x, input_f, bias, output, workspace}, stream);
 }

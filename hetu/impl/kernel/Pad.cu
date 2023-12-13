@@ -2,6 +2,7 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
@@ -10,8 +11,10 @@ template <typename spec_t>
 __global__ void
 pad_kernel(const spec_t* input_data, spec_t* output_data, size_t begin_N,
            size_t end_N, size_t N, size_t begin_C, size_t end_C, size_t C,
-           size_t begin_H, size_t end_H, size_t H, size_t begin_W, size_t end_W,
-           size_t W, spec_t constant_value) {
+           size_t begin_H, size_t end_H, size_t H, size_t begin_W,
+           size_t end_W, size_t W, spec_t constant_value,
+           const OffsetCalculator* in_offset_calculator,
+           const OffsetCalculator* out_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= N * C * H * W)
     return;
@@ -19,16 +22,15 @@ pad_kernel(const spec_t* input_data, spec_t* output_data, size_t begin_N,
   size_t idx_C = idx % (C * H * W) / (H * W);
   size_t idx_H = idx % (H * W) / W;
   size_t idx_W = idx % W;
+  auto out_offset = out_offset_calculator->get(idx);
   if (idx_N >= begin_N && idx_N < end_N && idx_C >= begin_C && idx_C < end_C &&
       idx_H >= begin_H && idx_H < end_H && idx_W >= begin_W && idx_W < end_W) {
-    output_data[idx] =
-      input_data[(((idx_N - begin_N) * (end_C - begin_C) + idx_C - begin_C) *
-                    (end_H - begin_H) +
-                  idx_H - begin_H) *
-                   (end_W - begin_W) +
-                 idx_W - begin_W];
+    auto in_offset = in_offset_calculator->get(
+      (((idx_N - begin_N) * (end_C - begin_C) + idx_C - begin_C)
+      * (end_H - begin_H) + idx_H - begin_H) * (end_W - begin_W) + idx_W - begin_W);
+    output_data[out_offset] = input_data[in_offset];
   } else {
-    output_data[idx] = constant_value;
+    output_data[out_offset] = constant_value;
   }
 }
 
@@ -37,7 +39,9 @@ __global__ void
 pad_gradient_kernel(const spec_t* output_grad, spec_t* input_grad, size_t N,
                     size_t C, size_t H, size_t W, size_t begin_N,
                     size_t begin_C, size_t begin_H, size_t begin_W,
-                    size_t out_N, size_t out_C, size_t out_H, size_t out_W) {
+                    size_t out_N, size_t out_C, size_t out_H, size_t out_W,
+                    const OffsetCalculator* out_grad_offset_calculator,
+                    const OffsetCalculator* in_grad_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= N * C * H * W)
     return;
@@ -45,10 +49,11 @@ pad_gradient_kernel(const spec_t* output_grad, spec_t* input_grad, size_t N,
   size_t idx_C = idx % (C * H * W) / (H * W);
   size_t idx_H = idx % (H * W) / W;
   size_t idx_W = idx % W;
-  input_grad[idx] = output_grad[(
-    (((idx_N + begin_N) * out_C + idx_C + begin_C) * out_H + idx_H + begin_H) *
-      out_W +
-    idx_W + begin_W)];
+  auto in_grad_offset = in_grad_offset_calculator->get(idx);
+  auto out_grad_offset = out_grad_offset_calculator->get(
+    (((idx_N + begin_N) * out_C + idx_C + begin_C) * out_H + idx_H + begin_H) * out_W +
+    idx_W + begin_W);
+  input_grad[in_grad_offset] = output_grad[out_grad_offset];
 }
 
 void PadCuda(const NDArray& input, NDArray& output, const HTShape& paddings,
@@ -66,8 +71,6 @@ void PadCuda(const NDArray& input, NDArray& output, const HTShape& paddings,
   for (int i = 0; i < 4; i++) {
     if (i < (4 - len / 2)) {
       HT_ASSERT((input->shape(i)) == (output->shape(i)));
-      // endpoint[i * 2] = input->shape(i) - 1;
-      // endpoint[i * 2 + 1] = endpoint[i * 2] + 1;
       endpoint[i * 2] = 0;
       endpoint[i * 2 + 1] = input->shape(i);
     } else {
@@ -83,6 +86,12 @@ void PadCuda(const NDArray& input, NDArray& output, const HTShape& paddings,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  NDArray in_offset_calculator_arr, out_offset_calculator_arr;
+  OffsetCalculator *in_offset_calculator, *out_offset_calculator;
+  std::tie(in_offset_calculator_arr, in_offset_calculator) =
+    AllocOffsetCalculator(input, stream);
+  std::tie(out_offset_calculator_arr, out_offset_calculator) = 
+    AllocOffsetCalculator(output, stream);
   if (mode == "constant") {
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       input->dtype(), spec_t, "PadCuda", [&]() {
@@ -90,10 +99,12 @@ void PadCuda(const NDArray& input, NDArray& output, const HTShape& paddings,
           input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), endpoint[0],
           endpoint[1], output->shape(0), endpoint[2], endpoint[3],
           output->shape(1), endpoint[4], endpoint[5], output->shape(2),
-          endpoint[6], endpoint[7], output->shape(3), constant_values);
+          endpoint[6], endpoint[7], output->shape(3), constant_values,
+          in_offset_calculator, out_offset_calculator);
       });
   }
-  NDArray::MarkUsedBy({input, output}, stream);
+  NDArray::MarkUsedBy({input, output, in_offset_calculator_arr,
+                      out_offset_calculator_arr}, stream);
 }
 
 void PadGradientCuda(const NDArray& output_grad, NDArray& input_grad,
@@ -131,16 +142,23 @@ void PadGradientCuda(const NDArray& output_grad, NDArray& input_grad,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  NDArray out_grad_offset_calculator_arr, in_grad_offset_calculator_arr;
+  OffsetCalculator *out_grad_offset_calculator, *in_grad_offset_calculator;
+  std::tie(out_grad_offset_calculator_arr, out_grad_offset_calculator) =
+    AllocOffsetCalculator(output_grad, stream);
+  std::tie(in_grad_offset_calculator_arr, in_grad_offset_calculator) = 
+    AllocOffsetCalculator(input_grad, stream);
   if (mode == "constant") {
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       input_grad->dtype(), spec_t, "PadGradientCuda", [&]() {
         pad_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
           output_grad->data_ptr<spec_t>(), input_grad->data_ptr<spec_t>(), N, C,
           H, W, begin_p[0], begin_p[1], begin_p[2], begin_p[3], out_N, out_C,
-          out_H, out_W);
+          out_H, out_W, out_grad_offset_calculator, in_grad_offset_calculator);
       });
   }
-  NDArray::MarkUsedBy({input_grad, output_grad}, stream);
+  NDArray::MarkUsedBy({input_grad, output_grad, out_grad_offset_calculator_arr,
+                      in_grad_offset_calculator_arr}, stream);
 }
 
 } // namespace impl

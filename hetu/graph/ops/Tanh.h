@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Unary.h"
 
 namespace hetu {
 namespace graph {
@@ -11,54 +12,47 @@ class TanhOp;
 class TanhGradientOpImpl;
 class TanhGradientOp;
 
-class TanhOpImpl : public OpInterface {
+class TanhOpImpl final : public UnaryOpImpl {
 
  public:
-  TanhOpImpl()
-  : OpInterface(quote(TanhOp)) {
+  TanhOpImpl(bool inplace)
+  : UnaryOpImpl(quote(TanhOp), inplace) {
   }
 
  protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    return {inputs[0]->meta()};
-  };
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
   TensorList DoGradient(Operator& op, const TensorList& grad_outputs) const override;
 
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
-
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return UnaryOpImpl::operator==(rhs);
   }
 };
 
 Tensor MakeTanhOp(Tensor input, OpMeta op_meta = OpMeta());
 
-class TanhGradientOpImpl : public OpInterface {
+Tensor MakeTanhInplaceOp(Tensor input, OpMeta op_meta = OpMeta());
+
+class TanhGradientOpImpl final : public UnaryGradientOpImpl {
 
  public:
   TanhGradientOpImpl()
-  : OpInterface(quote(TanhGradientOp)) {
+  : UnaryGradientOpImpl(quote(TanhGradientOp)) {
   }
 
  protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    return {inputs[0]->meta()};
-  };
-
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return UnaryGradientOpImpl::operator==(rhs);
   }
 };
 

@@ -22,23 +22,11 @@ TensorList SinOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) c
                                : Tensor()};
 }
 
-HTShapeList SinOpImpl::DoInferShape(Operator& op, 
-                                    const HTShapeList& input_shapes, 
-                                    RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
-}
-
 void SinGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                   NDArrayList& outputs, RuntimeContext& ctx) const {
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::SinGradient, inputs.at(0),
                                   inputs.at(1), outputs.at(0), op->instantiation_ctx().stream());
-}
-
-HTShapeList SinGradientOpImpl::DoInferShape(Operator& op, 
-                                            const HTShapeList& input_shapes, 
-                                            RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
 }
 
 NDArrayList CosOpImpl::DoCompute(Operator& op,
@@ -57,12 +45,6 @@ TensorList CosOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) c
                                : Tensor()};
 }
 
-HTShapeList CosOpImpl::DoInferShape(Operator& op, 
-                                    const HTShapeList& input_shapes, 
-                                    RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
-}
-
 void CosGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                   NDArrayList& outputs, RuntimeContext& ctx) const {
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
@@ -70,16 +52,8 @@ void CosGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                   inputs.at(1), outputs.at(0), op->instantiation_ctx().stream());
 }
 
-HTShapeList CosGradientOpImpl::DoInferShape(Operator& op, 
-                                            const HTShapeList& input_shapes, 
-                                            RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
-}
-
 Tensor MakeSinOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
     std::make_shared<SinOpImpl>(false),
     std::move(inputs),
@@ -88,8 +62,6 @@ Tensor MakeSinOp(Tensor input, OpMeta op_meta) {
 
 Tensor MakeSinInplaceOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
     std::make_shared<SinOpImpl>(true),
     std::move(inputs),

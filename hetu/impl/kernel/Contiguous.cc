@@ -44,7 +44,7 @@ void contiguous_gradient_cpu(const spec_t* input, spec_t* output,
 
 void ContiguousCpu(const NDArray& input, NDArray& output,
                     const Stream& stream) {
-  HT_ASSERT_CUDA_DEVICE(input);
+  HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT(input->numel() == output->numel());
 

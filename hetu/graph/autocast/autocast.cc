@@ -32,22 +32,66 @@ DataType AutoCast::WidestType(const TensorList& inputs) {
 }
 
 void AutoCast::Tensor_AutoCast(TensorList& inputs, DataType datatype) {
+}
+
+void AutoCast::Graph_AutoCast(TensorList& inputs, Operator op) {
+  auto optype = op->type();
+  if (is_optimizer_update_op(op) || optype == "DataTransfer" ||
+      optype == "DataTransferOp" || optype == "DataH2DOp" ||
+      optype == "DataD2HOp") 
+    return;
   auto autocast_id = AutoCast::cur_autocast_ctx();
   if (autocast_id == UINT64_MAX)
     return;
   auto autocast = AutoCast::GetAutoCast(autocast_id);
   if (!autocast.enabled())
     return;
-  if (datatype == DataType::UNDETERMINED) {
-    datatype = AutoCast::WidestType(inputs);
+  DataType datatype = DataType::UNDETERMINED;
+  if (autocast.cast_type() != DataType::UNDETERMINED)
+    datatype = autocast.cast_type();
+  else {
   }
-  for (auto& input: inputs) {
-    if (input->dtype() != datatype && 
-        (input->dtype() == DataType::BFLOAT16 ||
-         input->dtype() == DataType::FLOAT16 ||
-         input->dtype() == DataType::FLOAT32 ||
-         input->dtype() == DataType::FLOAT64)) {
-      input = MakeDataTransferOp(datatype ,input);
+  if (datatype != DataType::UNDETERMINED) {
+    for (auto& input: inputs) {
+      if (input->dtype() != datatype && 
+          (input->dtype() == DataType::BFLOAT16 ||
+          input->dtype() == DataType::FLOAT16 ||
+          input->dtype() == DataType::FLOAT32 ||
+          input->dtype() == DataType::FLOAT64)) {
+        auto& input_graph = Graph::GetGraph(input->graph_id());
+        HT_LOG_DEBUG << input->producer()->type() << " " << input->dtype();
+        input = MakeDataTransferOp(datatype, input);
+      }
+    }
+  }
+}
+
+void AutoCast::Graph_AutoCast(TensorList& inputs, std::shared_ptr<OpInterface> body) {
+  auto optype = body->type();
+  if (is_optimizer_update_op(*body) || optype == "DataTransfer" || optype == "DataTransferOp" || optype == "DataH2DOp" || optype == "DataD2HOp") 
+    return;
+  auto autocast_id = AutoCast::cur_autocast_ctx();
+  if (autocast_id == UINT64_MAX)
+    return;
+  auto autocast = AutoCast::GetAutoCast(autocast_id);
+  if (!autocast.enabled())
+    return;
+  DataType datatype = DataType::UNDETERMINED;
+  if (autocast.cast_type() != DataType::UNDETERMINED)
+    datatype = autocast.cast_type();
+  if (datatype != DataType::UNDETERMINED) {
+    for (auto& input: inputs) {
+      if (input->dtype() != datatype && 
+          (input->dtype() == DataType::BFLOAT16 ||
+          input->dtype() == DataType::FLOAT16 ||
+          input->dtype() == DataType::FLOAT32 ||
+          input->dtype() == DataType::FLOAT64)) {
+        auto& input_graph = Graph::GetGraph(input->graph_id());
+        if (input_graph.type() == GraphType::EXECUTABLE ||
+            input_graph.type() == GraphType::EAGER) {
+          input = MakeDataTransferOp(datatype, input);
+        }
+      }
     }
   }
 }

@@ -20,18 +20,6 @@ TensorList MaxPoolOpImpl::DoGradient(Operator& op,
                               : Tensor()};
 }
 
-HTShapeList MaxPoolOpImpl::DoInferShape(Operator& op,
-                                        const HTShapeList& input_shapes,
-                                        RuntimeContext& ctx) const {
-  int64_t N = input_shapes.at(0)[0];
-  int64_t C = input_shapes.at(0)[1];
-  int64_t H = input_shapes.at(0)[2];
-  int64_t W = input_shapes.at(0)[3];
-  int64_t p_H = (H + 2 * get_padding() - get_kernel_H()) / get_stride() + 1;
-  int64_t p_W = (W + 2 * get_padding() - get_kernel_W()) / get_stride() + 1;
-  return {{N, C, p_H, p_W}};
-}
-
 void MaxPoolOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                    const OpMeta& op_meta) const {
   const DistributedStates& ds = inputs.at(0)->get_distributed_states();
@@ -53,13 +41,6 @@ void MaxPoolGradientOpImpl::DoCompute(Operator& op,
     op->instantiation_ctx().placement.type(), type(), hetu::impl::MaxPoolGradient, inputs.at(0),
     inputs.at(1), inputs.at(2), get_kernel_H(), get_kernel_W(), outputs.at(0),
     get_padding(), get_stride(), op->instantiation_ctx().stream());
-}
-
-HTShapeList
-MaxPoolGradientOpImpl::DoInferShape(Operator& op,
-                                    const HTShapeList& input_shapes,
-                                    RuntimeContext& ctx) const {
-  return {input_shapes.at(2)};
 }
 
 void MaxPoolGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 

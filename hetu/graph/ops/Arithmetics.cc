@@ -93,13 +93,11 @@ DistributedStates ElewiseDeduceStates(Tensor a, Tensor b) {
   }  
 }
 
-NDArrayList AddElewiseOpImpl::DoCompute(Operator& op,
-                                        const NDArrayList& inputs,
-                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void AddElewiseOpImpl::DoCompute(Operator& op,
+                                 const NDArrayList& inputs, NDArrayList& outputs,
+                                 RuntimeContext& ctx) const {
   NDArray::add(inputs.at(0), inputs.at(1), 
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
 
 TensorList AddElewiseOpImpl::DoGradient(Operator& op,
@@ -128,13 +126,11 @@ void AddElewiseOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outp
   outputs.at(0)->set_distributed_states(ElewiseDeduceStates(inputs.at(0), inputs.at(1)));
 }
 
-NDArrayList AddByConstOpImpl::DoCompute(Operator& op,
-                                        const NDArrayList& inputs,
-                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void AddByConstOpImpl::DoCompute(Operator& op,
+                                 const NDArrayList& inputs, NDArrayList& outputs,
+                                 RuntimeContext& ctx) const {
   NDArray::add(inputs.at(0), const_value(), 
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
 
 TensorList AddByConstOpImpl::DoGradient(Operator& op,
@@ -148,13 +144,11 @@ HTShapeList AddByConstOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-NDArrayList SubElewiseOpImpl::DoCompute(Operator& op,
-                                        const NDArrayList& inputs,
-                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void SubElewiseOpImpl::DoCompute(Operator& op,
+                                 const NDArrayList& inputs, NDArrayList& outputs,
+                                 RuntimeContext& ctx) const {
   NDArray::sub(inputs.at(0), inputs.at(1), 
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
 
 TensorList SubElewiseOpImpl::DoGradient(Operator& op,
@@ -183,13 +177,11 @@ void SubElewiseOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outp
   outputs.at(0)->set_distributed_states(ElewiseDeduceStates(inputs.at(0), inputs.at(1)));
 }
 
-NDArrayList SubByConstOpImpl::DoCompute(Operator& op,
-                                        const NDArrayList& inputs,
-                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void SubByConstOpImpl::DoCompute(Operator& op,
+                                 const NDArrayList& inputs, NDArrayList& outputs,
+                                 RuntimeContext& ctx) const {
   NDArray::sub(inputs.at(0), const_value(), 
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
 
 TensorList SubByConstOpImpl::DoGradient(Operator& op,
@@ -203,19 +195,17 @@ HTShapeList SubByConstOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-NDArrayList SubFromConstOpImpl::DoCompute(Operator& op,
-                                          const NDArrayList& inputs,
-                                          RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void SubFromConstOpImpl::DoCompute(Operator& op,
+                                   const NDArrayList& inputs, NDArrayList& outputs,
+                                   RuntimeContext& ctx) const {
   NDArray::sub(const_value(), inputs.at(0),
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
 
 TensorList SubFromConstOpImpl::DoGradient(Operator& op,
                                           const TensorList& grad_outputs) const {
-  auto grad_input =  op->requires_grad(0) ? MakeNegateOp(grad_outputs.at(0), 
-                                           op->grad_op_meta().set_name(op->grad_name()))
+  auto grad_input =  op->requires_grad(0) ? MakeNegateOp(grad_outputs.at(0),
+                                            op->grad_op_meta().set_name(op->grad_name()))
                                          : Tensor();
   return {grad_input};
 }
@@ -226,33 +216,33 @@ HTShapeList SubFromConstOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
+NDArrayList NegateOpImpl::DoCompute(Operator& op,
+                                    const NDArrayList& inputs,
+                                    RuntimeContext& ctx) const {
+  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  DoCompute(op, inputs, outputs, ctx);
+  return outputs;
+}
+
 void NegateOpImpl::DoCompute(Operator& op,
-                            const NDArrayList& inputs, NDArrayList& outputs,
-                            RuntimeContext& ctx) const {
+                             const NDArrayList& inputs, NDArrayList& outputs,
+                             RuntimeContext& ctx) const {
   NDArray::neg(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList NegateOpImpl::DoGradient(Operator& op,
                                     const TensorList& grad_outputs) const {
-  auto grad_input = op->requires_grad(0) ? MakeNegateOp(grad_outputs.at(0), 
+  auto grad_input = op->requires_grad(0) ? MakeNegateOp(grad_outputs.at(0),
                                           op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
   return {grad_input};
 }
 
-HTShapeList NegateOpImpl::DoInferShape(Operator& op,
-                                             const HTShapeList& input_shapes,
-                                             RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
-}
-
-NDArrayList MulElewiseOpImpl::DoCompute(Operator& op,
-                                        const NDArrayList& inputs,
-                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void MulElewiseOpImpl::DoCompute(Operator& op,
+                                 const NDArrayList& inputs, NDArrayList& outputs,
+                                 RuntimeContext& ctx) const {
   NDArray::mul(inputs.at(0), inputs.at(1), 
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
 
 TensorList MulElewiseOpImpl::DoGradient(Operator& op,
@@ -283,21 +273,12 @@ void MulElewiseOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outp
   outputs.at(0)->set_distributed_states(ElewiseDeduceStates(inputs.at(0), inputs.at(1)));
 }
 
-NDArrayList MulByConstOpImpl::DoCompute(Operator& op,
-                                        const NDArrayList& inputs,
-                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void MulByConstOpImpl::DoCompute(Operator& op,
+                                 const NDArrayList& inputs, NDArrayList& outputs,
+                                 RuntimeContext& ctx) const {
   NDArray::mul(inputs.at(0), const_value(), 
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
-
-// void MulByConstOpImpl::DoCompute(Operator& op,
-//                                  const NDArrayList& inputs, NDArrayList& outputs,
-//                                  RuntimeContext& ctx) const {
-//   NDArray::mul(inputs.at(0), const_value(), 
-//                op->instantiation_ctx().stream_index, outputs.at(0));
-// }
 
 TensorList MulByConstOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
@@ -312,13 +293,11 @@ HTShapeList MulByConstOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-NDArrayList DivElewiseOpImpl::DoCompute(Operator& op,
-                                        const NDArrayList& inputs,
-                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void DivElewiseOpImpl::DoCompute(Operator& op,
+                                 const NDArrayList& inputs, NDArrayList& outputs,
+                                 RuntimeContext& ctx) const {
   NDArray::div(inputs.at(0), inputs.at(1), 
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
 
 TensorList DivElewiseOpImpl::DoGradient(Operator& op,
@@ -347,13 +326,11 @@ void DivElewiseOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outp
   outputs.at(0)->set_distributed_states(ElewiseDeduceStates(inputs.at(0), inputs.at(1)));
 }
 
-NDArrayList DivByConstOpImpl::DoCompute(Operator& op,
-                                        const NDArrayList& inputs,
-                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void DivByConstOpImpl::DoCompute(Operator& op,
+                                 const NDArrayList& inputs, NDArrayList& outputs,
+                                 RuntimeContext& ctx) const {
   NDArray::div(inputs.at(0), const_value(), 
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
 
 TensorList DivByConstOpImpl::DoGradient(Operator& op,
@@ -369,23 +346,16 @@ HTShapeList DivByConstOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-NDArrayList DivFromConstOpImpl::DoCompute(Operator& op,
-                                          const NDArrayList& inputs,
-                                          RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+void DivFromConstOpImpl::DoCompute(Operator& op,
+                                   const NDArrayList& inputs, NDArrayList& outputs,
+                                   RuntimeContext& ctx) const {
   NDArray::div(const_value(), inputs.at(0),
                op->instantiation_ctx().stream_index, outputs.at(0));
-  return outputs;
 }
 
 TensorList DivFromConstOpImpl::DoGradient(Operator& op,
                                           const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  // auto grad_input = op->requires_grad(0) ? MakeMulElewiseOp(MakeNegateOp(MakeDivElewiseOp(
-  //                                         op->output(0), op->input(0), false, g_op_meta),
-  //                                         g_op_meta), grad_outputs.at(0), false,
-  //                                         g_op_meta.set_name(op->grad_name(1)))
-  //                                       : Tensor();
   auto grad_input = op->requires_grad(0) ? MakeMulElewiseOp(MakeDivByConstOp(MakeMulElewiseOp(
                                            op->output(0), op->output(0), g_op_meta), -const_value(),
                                            g_op_meta), grad_outputs.at(0),
@@ -398,6 +368,14 @@ HTShapeList DivFromConstOpImpl::DoInferShape(Operator& op,
                                              const HTShapeList& input_shapes,
                                              RuntimeContext& ctx) const {
   return {input_shapes.at(0)};
+}
+
+NDArrayList ReciprocalOpImpl::DoCompute(Operator& op,
+                                        const NDArrayList& inputs,
+                                        RuntimeContext& ctx) const {
+  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  DoCompute(op, inputs, outputs, ctx);
+  return outputs;
 }
 
 void ReciprocalOpImpl::DoCompute(Operator& op,
@@ -416,12 +394,6 @@ TensorList ReciprocalOpImpl::DoGradient(Operator& op,
   ret = MakeNegateOp(ret, g_op_meta);
   ret = MakeMulElewiseOp(ret, grad_outputs.at(0), g_op_meta.set_name(op->grad_name()));
   return {ret};
-}
-
-HTShapeList ReciprocalOpImpl::DoInferShape(Operator& op,
-                                           const HTShapeList& input_shapes,
-                                           RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
 }
 
 void AddElewiseGradientOpImpl::DoCompute(Operator& op,
@@ -537,8 +509,6 @@ void DivElewiseGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorLi
 Tensor MakeAddElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
 
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::UNDETERMINED;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<AddElewiseOpImpl>(false),
            std::move(inputs),
@@ -547,8 +517,6 @@ Tensor MakeAddElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
 
 Tensor MakeSubElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::UNDETERMINED;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<SubElewiseOpImpl>(false),
            std::move(inputs),
@@ -557,8 +525,6 @@ Tensor MakeSubElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
 
 Tensor MakeMulElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::UNDETERMINED;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<MulElewiseOpImpl>(false),
            std::move(inputs),
@@ -567,8 +533,6 @@ Tensor MakeMulElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
 
 Tensor MakeDivElewiseOp(Tensor a, Tensor b, OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::UNDETERMINED;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<DivElewiseOpImpl>(false),
            std::move(inputs),
@@ -632,10 +596,7 @@ Tensor MakeDivFromConstOp(double value, Tensor input, OpMeta op_meta) {
 }
 
 Tensor MakeAddElewiseInplaceOp(Tensor a, Tensor b, OpMeta op_meta) {
-
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::UNDETERMINED;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<AddElewiseOpImpl>(true),
            std::move(inputs),
@@ -644,8 +605,6 @@ Tensor MakeAddElewiseInplaceOp(Tensor a, Tensor b, OpMeta op_meta) {
 
 Tensor MakeSubElewiseInplaceOp(Tensor a, Tensor b, OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::UNDETERMINED;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<SubElewiseOpImpl>(true),
            std::move(inputs),
@@ -654,8 +613,6 @@ Tensor MakeSubElewiseInplaceOp(Tensor a, Tensor b, OpMeta op_meta) {
 
 Tensor MakeMulElewiseInplaceOp(Tensor a, Tensor b, OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::UNDETERMINED;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<MulElewiseOpImpl>(true),
            std::move(inputs),
@@ -664,8 +621,6 @@ Tensor MakeMulElewiseInplaceOp(Tensor a, Tensor b, OpMeta op_meta) {
 
 Tensor MakeDivElewiseInplaceOp(Tensor a, Tensor b, OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::UNDETERMINED;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
            std::make_shared<DivElewiseOpImpl>(true),
            std::move(inputs),
@@ -766,14 +721,28 @@ Tensor MakeDivElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output,
 
 Tensor MakeNegateOp(Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
-           std::make_shared<NegateOpImpl>(),
+           std::make_shared<NegateOpImpl>(false),
+           {std::move(input)},
+           std::move(op_meta))->output(0);
+}
+
+Tensor MakeNegateInplaceOp(Tensor input, OpMeta op_meta) {
+  return Graph::MakeOp(
+           std::make_shared<NegateOpImpl>(true),
            {std::move(input)},
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeReciprocalOp(Tensor input, OpMeta op_meta) {
   return Graph::MakeOp(
-           std::make_shared<ReciprocalOpImpl>(),
+           std::make_shared<ReciprocalOpImpl>(false),
+           {std::move(input)},
+           std::move(op_meta))->output(0);
+}
+
+Tensor MakeReciprocalInplaceOp(Tensor input, OpMeta op_meta) {
+  return Graph::MakeOp(
+           std::make_shared<ReciprocalOpImpl>(true),
            {std::move(input)},
            std::move(op_meta))->output(0);
 }

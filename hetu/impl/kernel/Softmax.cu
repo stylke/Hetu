@@ -6,6 +6,7 @@
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
 #include "hetu/impl/utils/numeric_limits.h"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
@@ -145,9 +146,10 @@ __forceinline__ __device__ void BlockReduceSumExp(spec_t& val,
 
 template <typename spec_t>
 __global__ void softmax_kernel(const spec_t* input, spec_t* output,
-                               size_t before_dim_size,
-                               size_t reduce_dim_size,
-                               size_t after_dim_size) {
+                               size_t before_dim_size, size_t reduce_dim_size,
+                               size_t after_dim_size,
+                               const OffsetCalculator* in_offset_calculator,
+                               const OffsetCalculator* out_offset_calculator) {
 
   size_t pos_per_block = blockDim.x;
   size_t total_idx = blockIdx.x * pos_per_block + threadIdx.x;
@@ -176,23 +178,29 @@ __global__ void softmax_kernel(const spec_t* input, spec_t* output,
 
   spec_t max_thread = numeric_limits<spec_t>::lowest();
   spec_t sum_thread = 0;
-  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) 
-    max_thread = hetu::cuda::cuda_max(input[ptr], max_thread);
+  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) {
+    auto in_offset = in_offset_calculator->get(ptr);
+    max_thread = hetu::cuda::cuda_max(input[in_offset], max_thread);
+  }
 
+  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) {
+    auto in_offset = in_offset_calculator->get(ptr);
+    sum_thread += hetu::cuda::cuda_exp(input[in_offset] - max_thread);
+  }
 
-  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) 
-    sum_thread += hetu::cuda::cuda_exp(input[ptr] - max_thread);
-
-  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) 
-    output[ptr] = hetu::cuda::cuda_exp(input[ptr] - max_thread) / sum_thread;
+  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) {
+    auto in_offset = in_offset_calculator->get(ptr);
+    auto out_offset = out_offset_calculator->get(ptr);
+    output[out_offset] = hetu::cuda::cuda_exp(input[in_offset] - max_thread) / sum_thread;
+  }
 }
 
 template <typename spec_t>
 __global__ void softmax_kernel2(const spec_t* input, spec_t* output,
-                               size_t before_dim_size,
-                               size_t reduce_dim_size,
-                               size_t after_dim_size,
-                               size_t threads_per_pos) {
+                               size_t before_dim_size, size_t reduce_dim_size,
+                               size_t after_dim_size, size_t threads_per_pos,
+                               const OffsetCalculator* in_offset_calculator,
+                               const OffsetCalculator* out_offset_calculator) {
   __shared__ spec_t shared_sum[1024];
   __shared__ spec_t wrap_max[1024];
   __shared__ spec_t wrap_sum[1024];
@@ -218,17 +226,24 @@ __global__ void softmax_kernel2(const spec_t* input, spec_t* output,
 
   spec_t max_thread = numeric_limits<spec_t>::lowest();
   spec_t sum_thread = 0;
-  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) 
-    max_thread = hetu::cuda::cuda_max(input[ptr], max_thread);
+  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) {
+    auto in_offset = in_offset_calculator->get(ptr);
+    max_thread = hetu::cuda::cuda_max(input[in_offset], max_thread);
+  }
   
   BlockReduceArgmax(max_thread, shared_sum, wrap_max, pos_idx, threads_per_pos, used_threads_per_pos);
 
-  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) 
-    sum_thread += hetu::cuda::cuda_exp(input[ptr] - wrap_max[pos_idx]);
+  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) {
+    auto in_offset = in_offset_calculator->get(ptr);
+    sum_thread += hetu::cuda::cuda_exp(input[in_offset] - wrap_max[pos_idx]);
+  }
 
   BlockReduceSumExp(sum_thread, shared_sum, wrap_sum, pos_idx, threads_per_pos, used_threads_per_pos);
-  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) 
-    output[ptr] = hetu::cuda::cuda_exp(input[ptr] - wrap_max[pos_idx]) / wrap_sum[pos_idx];
+  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) {
+    auto in_offset = in_offset_calculator->get(ptr);
+    auto out_offset = out_offset_calculator->get(ptr);
+    output[out_offset] = hetu::cuda::cuda_exp(input[in_offset] - wrap_max[pos_idx]) / wrap_sum[pos_idx];
+  }
 }
 
 void SoftmaxCuda(const NDArray& input, NDArray& output, int64_t dim, const Stream& stream) {
@@ -250,6 +265,12 @@ void SoftmaxCuda(const NDArray& input, NDArray& output, int64_t dim, const Strea
 
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  NDArray in_offset_calculator_arr, out_offset_calculator_arr;
+  OffsetCalculator *in_offset_calculator, *out_offset_calculator;
+  std::tie(in_offset_calculator_arr, in_offset_calculator) =
+    AllocOffsetCalculator(input, stream);
+  std::tie(out_offset_calculator_arr, out_offset_calculator) = 
+    AllocOffsetCalculator(output, stream);
   if (dim != input->ndim() - 1) {
     int blocks = before_dim_size * after_dim_size;
     int threads_per_pos = 1;
@@ -262,7 +283,8 @@ void SoftmaxCuda(const NDArray& input, NDArray& output, int64_t dim, const Strea
       input->dtype(), spec_t, "SoftMaxCuda", [&]() {
         softmax_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
           input->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
-          before_dim_size, reduce_dim_size, after_dim_size);
+          before_dim_size, reduce_dim_size, after_dim_size,
+          in_offset_calculator, out_offset_calculator);
       });
   }
   else {
@@ -278,19 +300,21 @@ void SoftmaxCuda(const NDArray& input, NDArray& output, int64_t dim, const Strea
       input->dtype(), spec_t, "SoftMaxCuda", [&]() {
         softmax_kernel2<spec_t><<<blocks, threads, 0, cuda_stream>>>(
           input->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
-          before_dim_size, reduce_dim_size, after_dim_size, threads_per_pos
-          );
+          before_dim_size, reduce_dim_size, after_dim_size, threads_per_pos,
+          in_offset_calculator, out_offset_calculator);
       }); 
   }
-  NDArray::MarkUsedBy({input, output}, stream);
+  NDArray::MarkUsedBy({input, output, in_offset_calculator_arr,
+                      out_offset_calculator_arr}, stream);
 }
 
 template <typename spec_t>
 __global__ void softmax_grad_kernel(const spec_t* output, const spec_t* output_grad,
-                                    spec_t* input_grad,
-                                    size_t before_dim_size,
-                                    size_t reduce_dim_size,
-                                    size_t after_dim_size) {
+                                    spec_t* input_grad, size_t before_dim_size,
+                                    size_t reduce_dim_size, size_t after_dim_size,
+                                    const OffsetCalculator* out_offset_calculator,
+                                    const OffsetCalculator* out_grad_offset_calculator,
+                                    const OffsetCalculator* in_grad_offset_calculator) {
   __shared__ spec_t shared_sum[32];
   __shared__ spec_t wrap_sum[1];
 
@@ -320,12 +344,20 @@ __global__ void softmax_grad_kernel(const spec_t* output, const spec_t* output_g
     return;
 
   spec_t sum_thread = 0;
-  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride)
-    sum_thread += output_grad[ptr] * output[ptr];
+  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) {
+    auto out_offset = out_offset_calculator->get(ptr);
+    auto out_grad_offset = out_grad_offset_calculator->get(ptr);
+    sum_thread += output_grad[out_grad_offset] * output[out_offset];
+  }
 
   BlockReduceSumExp(sum_thread, shared_sum, wrap_sum, 0, blockDim.x, used_threads_per_pos);
-  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) 
-    input_grad[ptr] = output_grad[ptr] * output[ptr] - output[ptr] * wrap_sum[0];
+  for (size_t ptr = start_ptr; ptr < end_ptr; ptr += stride) {
+    auto out_grad_offset = out_grad_offset_calculator->get(ptr);
+    auto out_offset = out_offset_calculator->get(ptr);
+    auto in_grad_offset = in_grad_offset_calculator->get(ptr);
+    input_grad[in_grad_offset] = output_grad[out_grad_offset] * output[out_offset]
+                               - output[out_offset] * wrap_sum[0];
+  }
 }
 
 void SoftmaxGradientCuda(const NDArray& input_Y, const NDArray& output_grad,
@@ -347,14 +379,27 @@ void SoftmaxGradientCuda(const NDArray& input_Y, const NDArray& output_grad,
   int threads = hetu::impl::GetThreadNum(reduce_dim_size);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  NDArray in_offset_calculator_arr, out_grad_offset_calculator_arr,
+          in_grad_offset_calculator_arr;
+  OffsetCalculator *in_offset_calculator, *out_grad_offset_calculator,
+                   *in_grad_offset_calculator;
+  std::tie(in_offset_calculator_arr, in_offset_calculator) =
+    AllocOffsetCalculator(input_Y, stream);
+  std::tie(out_grad_offset_calculator_arr, out_grad_offset_calculator) = 
+    AllocOffsetCalculator(output_grad, stream);
+  std::tie(in_grad_offset_calculator_arr, in_grad_offset_calculator) = 
+    AllocOffsetCalculator(input_grad, stream);
   HT_DISPATCH_FLOATING_TYPES(
     input_Y->dtype(), spec_t, "SoftMaxCuda", [&]() {
       softmax_grad_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input_Y->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(),
         input_grad->data_ptr<spec_t>(),
-        before_dim_size, reduce_dim_size, after_dim_size);
+        before_dim_size, reduce_dim_size, after_dim_size,
+        in_offset_calculator, out_grad_offset_calculator,
+        in_grad_offset_calculator);
     });
-  NDArray::MarkUsedBy({input_Y, output_grad, input_grad}, stream);
+  NDArray::MarkUsedBy({input_Y, output_grad, input_grad, in_offset_calculator_arr,
+                      out_grad_offset_calculator_arr, in_grad_offset_calculator_arr}, stream);
 }
 
 } // namespace impl

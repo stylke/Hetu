@@ -105,8 +105,8 @@ class AllReduceOpImpl final : public OpInterface {
     }
   }
 
-  uint64_t op_indicator() const noexcept override {
-    return ALL_REDUCE_OP;
+  inline uint64_t op_indicator() const noexcept override {
+    return _inplace ? ALL_REDUCE_OP | INPLACE_OP : ALL_REDUCE_OP;
   }
 
   inline bool inplace() const {
@@ -406,12 +406,20 @@ class ReduceScatterOpImpl final : public OpInterface {
     }    
   }
 
-  uint64_t op_indicator() const noexcept override {
-    return REDUCE_SCATTER_OP;
-  }
-
   inline bool inplace() const {
     return _inplace;
+  }
+
+  inline uint64_t inplace_pos() const {
+    return 0;
+  }
+
+  inline bool inplace_at(size_t input_position) const override {
+    return inplace() && input_position == inplace_pos();
+  }
+
+  inline uint64_t op_indicator() const noexcept override {
+    return _inplace ? REDUCE_SCATTER_OP | INPLACE_OP : REDUCE_SCATTER_OP;
   }
 
  protected:

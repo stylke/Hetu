@@ -19,7 +19,7 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
   NDArray() = default;
   NDArray(const NDArrayMeta& meta,
           std::shared_ptr<NDArrayStorage> storage,
-          size_t storage_offset = 0)
+          int64_t storage_offset = 0)
   : shared_ptr_wrapper<NDArrayDef>() {
     _ptr = make_ptr<NDArrayDef>(meta, storage, storage_offset);
   }
@@ -273,26 +273,25 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
   static NDArray flatten(const NDArray& input, int64_t start_dim = 0,
                          int64_t end_dim = -1);
 
-  static NDArray permute(const NDArray& input, HTAxes& dims,
-                         StreamIndex stream_id = DEFAULT_STREAM,
-                         NDArray& output = EMPTY);
+  static NDArray permute(const NDArray& input, const HTAxes& dims,
+                         StreamIndex stream_id = DEFAULT_STREAM);
 
   static NDArray movedim(const NDArray& input, int64_t src, int64_t dst,
-                         StreamIndex stream_id = DEFAULT_STREAM,
-                         NDArray& output = EMPTY);
+                         StreamIndex stream_id = DEFAULT_STREAM);
 
   static NDArray adddim(const NDArray& input, int64_t dim, int64_t size,
                         StreamIndex stream_id = DEFAULT_STREAM,
                         NDArray& output = EMPTY);
 
   static NDArray diagonal(const NDArray& input, int64_t dim1, int64_t dim2,
-                          int64_t offset = 0,
-                          StreamIndex stream_id = DEFAULT_STREAM,
-                          NDArray& output = EMPTY);
+                          int64_t offset, StreamIndex stream_id = DEFAULT_STREAM);
 
   static NDArray diagonal_grad(const NDArray& input, int64_t dim1, int64_t dim2,
                                StreamIndex stream_id = DEFAULT_STREAM,
                                NDArray& output = EMPTY);
+  
+  static NDArray as_strided(const NDArray& input, const HTShape& outshape, const HTStride& stride,
+                            int64_t storage_offset = 0, StreamIndex stream_id = DEFAULT_STREAM);
 
   static NDArrayList split(const NDArray& input, size_t num_chunks,
                            int64_t axis = 0,
@@ -417,9 +416,9 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                      StreamIndex stream_id = DEFAULT_STREAM,
                      NDArray& output = EMPTY);
 
-  static NDArray slice(const NDArray& input, const HTShape& begin_pos, const HTShape& output_shape,
-                       StreamIndex stream_id = DEFAULT_STREAM,
-                       NDArray& output = EMPTY);
+  static NDArray slice(const NDArray& input, const HTShape& begin_pos,
+                       const HTShape& output_shape,
+                       StreamIndex stream_id = DEFAULT_STREAM);
 
   static NDArray softmax(const NDArray& input, int64_t dim,
                          StreamIndex stream_id = DEFAULT_STREAM,
@@ -509,6 +508,10 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                       StreamIndex stream_id = DEFAULT_STREAM,
                       NDArray& output = EMPTY);
 
+  static NDArray contiguous(const NDArray& input,
+                            StreamIndex stream_id = DEFAULT_STREAM,
+                            NDArray& output = EMPTY);
+
   static NDArray rand(const HTShape& shape, const Device& device = Device(kCPU),
                       DataType dtype = kFloat32, double lb = 0.0,
                       double ub = 1.0, uint64_t seed = 0,
@@ -577,15 +580,16 @@ class NDArrayDef : public shared_ptr_target {
  public:
   NDArrayDef(const NDArrayMeta& meta,
              std::shared_ptr<NDArrayStorage> storage,
-             size_t storage_offset = 0)
+             int64_t storage_offset = 0)
   : _meta(meta), _storage(storage) {
     HT_ASSERT(_meta.dtype != kUndeterminedDataType &&
               _meta.device != kUndeterminedDevice && meta.numel() > 0)
       << "Invalid meta: " << _meta;
     HT_VALUE_ERROR_IF(_storage == nullptr) << "Storage is not provided";
     size_t bytes_per_value = DataType2Size(meta.dtype);
-    HT_ASSERT_GE(_storage->size() - storage_offset * bytes_per_value,
-                 meta.numel() * bytes_per_value)
+    HT_ASSERT_GE(storage_offset, 0)
+        << "Storage offset should be greater or equal to 0";
+    HT_ASSERT_GE(_storage->size(), min_storage_size(storage_offset))
       << "Storage size is not sufficient";
     _storage_offset = storage_offset;
   }
@@ -672,7 +676,7 @@ class NDArrayDef : public shared_ptr_target {
     return _meta.stride;
   }
 
-  const int64_t stride(int64_t axis) const {
+  int64_t stride(int64_t axis) const {
     int64_t ndim_ = ndim();
     HT_ASSERT(axis >= -ndim_ && axis < ndim_)
     << "stride should in range [" << -ndim_ << ","
@@ -682,9 +686,10 @@ class NDArrayDef : public shared_ptr_target {
   }
 
   bool is_contiguous() const {
+    if (ndim() < 1 || numel() <= 1) { return true; }
     int64_t ndim_ = ndim();
     int64_t contiguous_stride = 1;
-    for (int i = ndim_ - 1; i >= 0; i--) {
+    for (int64_t i = ndim_ - 1; i >= 0; i--) {
       if (stride(i) != contiguous_stride)
         return false;
       contiguous_stride *= shape(i);
@@ -717,7 +722,24 @@ class NDArrayDef : public shared_ptr_target {
     return _storage;
   }
 
-  size_t storage_offset() const {
+  size_t storage_size() const {
+    return _storage->size();
+  }
+
+  size_t min_storage_size(int64_t storage_offset) const {
+    int64_t storage_size = storage_offset + 1;
+    int64_t dim = ndim();
+    for (int64_t i = 0; i < dim; i++) {
+      const auto& size_i = shape(i);
+      if (size_i == 0) {
+        return storage_offset * DataType2Size(dtype());
+      }
+      storage_size += (size_i - 1) * stride(i);
+    }
+    return storage_size * DataType2Size(dtype());
+  }
+
+  int64_t storage_offset() const {
     return _storage_offset;
   }
 
@@ -736,7 +758,7 @@ class NDArrayDef : public shared_ptr_target {
 
   NDArrayMeta _meta;
   std::shared_ptr<NDArrayStorage> _storage;
-  size_t _storage_offset;
+  int64_t _storage_offset;
 };
 
 std::ostream& operator<<(std::ostream&, const NDArray&);

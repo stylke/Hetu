@@ -9,7 +9,7 @@ namespace graph {
 class TriuTrilOpImpl;
 class TriuTrilOp;
 
-class TriuTrilOpImpl : public OpInterface {
+class TriuTrilOpImpl final : public OpInterface {
  private:
   friend class TriuTrilOp;
   struct constrcutor_access_key {};
@@ -50,6 +50,10 @@ class TriuTrilOpImpl : public OpInterface {
   int64_t _diagonal;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const TriuTrilOpImpl&>(rhs);

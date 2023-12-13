@@ -9,7 +9,7 @@ namespace graph {
 class BroadcastOpImpl;
 class BroadcastOp;
 
-class BroadcastOpImpl : public OpInterface {
+class BroadcastOpImpl final : public OpInterface {
  private:
   friend class BroadcastOp;
   struct constrcutor_access_key {};
@@ -82,6 +82,10 @@ class BroadcastOpImpl : public OpInterface {
 
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const BroadcastOpImpl&>(rhs);
@@ -103,7 +107,7 @@ Tensor MakeBroadcastOp(Tensor input, const HTShape& shape,
                        const HTShape& add_axes = HTShape(),
                        OpMeta op_meta = OpMeta());
 
-class BroadcastGradientOpImpl : public OpInterface {
+class BroadcastGradientOpImpl final : public OpInterface {
  public:
   BroadcastGradientOpImpl(const HTShape& axes,
                           const HTKeepDims& keepdims,
@@ -150,6 +154,10 @@ class BroadcastGradientOpImpl : public OpInterface {
   HTKeepDims _keepdims;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const BroadcastGradientOpImpl&>(rhs);

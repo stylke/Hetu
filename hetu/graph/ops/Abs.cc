@@ -22,12 +22,6 @@ TensorList AbsOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) c
                                 : Tensor()};
 }
 
-HTShapeList AbsOpImpl::DoInferShape(Operator& op, 
-                                    const HTShapeList& input_shapes, 
-                                    RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
-}
-
 void AbsGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                   NDArrayList& outputs, RuntimeContext& ctx) const {
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
@@ -35,16 +29,8 @@ void AbsGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                   inputs.at(1), outputs.at(0), op->instantiation_ctx().stream());
 }
 
-HTShapeList AbsGradientOpImpl::DoInferShape(Operator& op, 
-                                             const HTShapeList& input_shapes, 
-                                             RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
-}
-
 Tensor MakeAbsOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<AbsOpImpl>(false),
         std::move(inputs),
@@ -53,8 +39,6 @@ Tensor MakeAbsOp(Tensor input, OpMeta op_meta) {
 
 Tensor MakeAbsInplaceOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<AbsOpImpl>(true),
         std::move(inputs),

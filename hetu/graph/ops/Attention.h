@@ -11,7 +11,7 @@ class AttentionOp;
 class AttentionGradientOpImpl;
 class AttentionGradientOp;
 
-class AttentionOpImpl : public OpInterface {
+class AttentionOpImpl final : public OpInterface {
  private:
   friend class AttentionOp;
   struct constrcutor_access_key {};
@@ -70,7 +70,7 @@ class AttentionOpImpl : public OpInterface {
     out_metas.emplace_back(base.set_shape({batch_size, num_heads, seqlen_q}).set_dtype(kFloat)); //softmax_lse
     out_metas.emplace_back(base.set_shape({batch_size, num_heads, seqlen_q + pad_len, seqlen_k + pad_len})
                                .set_dtype(inputs.at(0)->dtype())); //p
-    out_metas.emplace_back(base.set_shape({2}).set_device(kCUDA).set_dtype(kInt64)); //rng_state
+    out_metas.emplace_back(base.set_shape({2}).set_device(kCPU).set_dtype(kInt64)); //rng_state
     return out_metas;
   };
 
@@ -103,7 +103,7 @@ class AttentionOpImpl : public OpInterface {
 TensorList MakeAttentionOp(Tensor q, Tensor k, Tensor v, double p_dropout = 0.0, double softmax_scale = -1.0, 
                            bool is_causal = false, bool return_softmax = false, OpMeta op_meta = OpMeta());
 
-class AttentionGradientOpImpl : public OpInterface {
+class AttentionGradientOpImpl final : public OpInterface {
 
  public:
   AttentionGradientOpImpl(double p_dropout, double softmax_scale, bool is_causal)

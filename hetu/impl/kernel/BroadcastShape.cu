@@ -3,15 +3,17 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
 
 template <typename spec_t>
 __global__ void broadcast_shape_kernel(const spec_t* input, spec_t* output,
-                                       const int64_t* out_strides,
-                                       const int64_t* in_dims, size_t ndims,
-                                       size_t size) {
+                                       const int64_t* out_strides, const int64_t* in_dims,
+                                       size_t ndims, size_t size,
+                                       const OffsetCalculator* in_offset_calculator,
+                                       const OffsetCalculator* out_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -22,7 +24,9 @@ __global__ void broadcast_shape_kernel(const spec_t* input, spec_t* output,
     i_ind += (in_dims[i] > 1) * temp / out_strides[i];
     temp %= out_strides[i];
   }
-  output[idx] = input[i_ind];
+  auto in_offset = in_offset_calculator->get(i_ind);
+  auto out_offset = out_offset_calculator->get(idx);
+  output[out_offset] = input[in_offset];
 }
 
 void BroadcastShapeCuda(const NDArray& input, NDArray& output,
@@ -66,6 +70,12 @@ void BroadcastShapeCuda(const NDArray& input, NDArray& output,
   auto device_id = input->device().index();
   hetu::cuda::CUDADeviceGuard guard(device_id);
   CUDAStream cuda_stream(stream);
+  NDArray in_offset_calculator_arr, out_offset_calculator_arr;
+  OffsetCalculator *in_offset_calculator, *out_offset_calculator;
+  std::tie(in_offset_calculator_arr, in_offset_calculator) =
+    AllocOffsetCalculator(input, stream);
+  std::tie(out_offset_calculator_arr, out_offset_calculator) = 
+    AllocOffsetCalculator(output, stream);
   auto in_dims_arr = hetu::cuda::to_int64_ndarray(in_dims, device_id);
   auto out_strides_arr = hetu::cuda::to_int64_ndarray(out_strides, device_id);
   dim3 blocks, threads;
@@ -77,16 +87,20 @@ void BroadcastShapeCuda(const NDArray& input, NDArray& output,
         input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
         out_strides_arr->data_ptr<int64_t>(),
         in_dims_arr->data_ptr<int64_t>(), 
-        output_dim, size);
+        output_dim, size, in_offset_calculator,
+        out_offset_calculator);
     });
-  NDArray::MarkUsedBy({input, output, in_dims_arr, out_strides_arr}, stream);
+  NDArray::MarkUsedBy({input, output, in_dims_arr, out_strides_arr,
+                      in_offset_calculator_arr, out_offset_calculator_arr}, stream);
 }
 
 template <typename spec_t>
 __global__ void
 broadcast_shape_mul_kernel(const spec_t* input, spec_t const_value,
                            spec_t* output, const int64_t* out_strides,
-                           const int64_t* in_dims, size_t ndims, size_t size) {
+                           const int64_t* in_dims, size_t ndims, size_t size,
+                           const OffsetCalculator* in_offset_calculator,
+                           const OffsetCalculator* out_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -97,7 +111,9 @@ broadcast_shape_mul_kernel(const spec_t* input, spec_t const_value,
     i_ind += (in_dims[i] > 1) * temp / out_strides[i];
     temp %= out_strides[i];
   }
-  output[idx] = input[i_ind] * const_value;
+  auto in_offset = in_offset_calculator->get(i_ind);
+  auto out_offset = out_offset_calculator->get(idx);
+  output[out_offset] = input[in_offset] * const_value;
 }
 
 void BroadcastShapeMulCuda(const NDArray& input, double const_value,
@@ -141,6 +157,12 @@ void BroadcastShapeMulCuda(const NDArray& input, double const_value,
   auto device_id = input->device().index();
   hetu::cuda::CUDADeviceGuard guard(device_id);
   CUDAStream cuda_stream(stream);
+  NDArray in_offset_calculator_arr, out_offset_calculator_arr;
+  OffsetCalculator *in_offset_calculator, *out_offset_calculator;
+  std::tie(in_offset_calculator_arr, in_offset_calculator) =
+    AllocOffsetCalculator(input, stream);
+  std::tie(out_offset_calculator_arr, out_offset_calculator) = 
+    AllocOffsetCalculator(output, stream);
   auto in_dims_arr = hetu::cuda::to_int64_ndarray(in_dims, device_id);
   auto out_strides_arr = hetu::cuda::to_int64_ndarray(out_strides, device_id);
   dim3 blocks, threads;
@@ -153,10 +175,12 @@ void BroadcastShapeMulCuda(const NDArray& input, double const_value,
         output->data_ptr<spec_t>(), 
         out_strides_arr->data_ptr<int64_t>(), 
         in_dims_arr->data_ptr<int64_t>(), 
-        output_dim, size);
+        output_dim, size, in_offset_calculator,
+        out_offset_calculator);
     });
 
-  NDArray::MarkUsedBy({input, output, in_dims_arr, out_strides_arr}, stream);
+  NDArray::MarkUsedBy({input, output, in_dims_arr, out_strides_arr,
+                      in_offset_calculator_arr, out_offset_calculator_arr}, stream);
 }
 
 } // namespace impl

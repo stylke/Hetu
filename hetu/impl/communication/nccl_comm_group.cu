@@ -69,6 +69,7 @@ inline ncclDataType_t to_NCCL_Datatype(DataType dtype) {
     case kFloat16: return ncclFloat16;
     case kFloat32: return ncclFloat32;
     case kFloat64: return ncclFloat64;
+    case kBFloat16: return ncclBfloat16;
     default:
       HT_NOT_IMPLEMENTED << "Data type " << dtype
                          << " is not supported for NCCL.";
@@ -85,6 +86,7 @@ inline int to_num_bytes(DataType dtype) {
     case kFloat16: return 2;
     case kFloat32: return 4;
     case kFloat64: return 8;
+    case kBFloat16: return 2;
     default:
       HT_NOT_IMPLEMENTED << "Data type " << dtype
                          << " is not supported for NCCL.";

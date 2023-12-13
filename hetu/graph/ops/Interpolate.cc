@@ -74,8 +74,6 @@ Tensor MakeInterpolateOp(Tensor input, const HTShape& outshape,
                          bool align_corners, double scale_factor,
                          OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::UNDETERMINED;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<InterpolateOpImpl>(outshape, align_corners, scale_factor),
           std::move(inputs),

@@ -47,7 +47,7 @@ void sin_cpu(const spec_t* input, size_t size, spec_t* output,
 void SinCpu(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
-  HT_ASSERT_EXCHANGABLE(input, output);
+  HT_ASSERT_SAME_SHAPE(input, output);
 
   CPUStream cpu_stream(stream);
 

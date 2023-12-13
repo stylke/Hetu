@@ -20,16 +20,16 @@ class Identity(Module):
 
 class Linear(Module):
     
-    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, device_group = None) -> None:
         with hetu.graph("define_and_run"):
             super(Linear, self).__init__()
             self.in_features = in_features
             self.out_features = out_features
-            self.weight = hetu.nn.functional.kaiming_uniform_([out_features, in_features], a = math.sqrt(5), requires_grad=True)
+            self.weight = hetu.nn.functional.kaiming_uniform_([out_features, in_features], a = math.sqrt(5), requires_grad=True, device_group = device_group)
             if bias:
                 fan_in, _ = hetu.nn.functional._calculate_fan_in_and_fan_out(self.weight.shape)
                 bound = 1. / math.sqrt(fan_in) if fan_in > 0 else 0
-                self.bias = hetu.rand([out_features], -bound, bound, requires_grad=True)
+                self.bias = hetu.rand([out_features], -bound, bound, requires_grad=True, device_group = device_group)
             else:
                 self.register_parameter('bias', None)
             # self.reset_parameters()

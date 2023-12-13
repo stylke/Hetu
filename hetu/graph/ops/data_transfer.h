@@ -36,6 +36,10 @@ class DataH2DOpImpl final : public OpInterface {
                  RuntimeContext& runtime_ctx) const override;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const DataH2DOpImpl&>(rhs);
@@ -82,6 +86,10 @@ class DataD2HOpImpl final : public OpInterface {
                  RuntimeContext& runtime_ctx) const override;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const DataD2HOpImpl&>(rhs);
@@ -130,6 +138,10 @@ class DataTransferOpImpl final : public OpInterface {
                         RuntimeContext& runtime_ctx) const override;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const DataTransferOpImpl&>(rhs);

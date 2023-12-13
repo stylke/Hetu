@@ -4,18 +4,24 @@
 #include "hetu/impl/cuda/CUDADnn.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-__global__ void softmax_cross_entropy_kernel(const spec_t* logsoftmax,
-                                             const spec_t* label,
-                                             spec_t* output, size_t size) {
+__global__ void softmax_cross_entropy_kernel(const spec_t* logsoftmax, const spec_t* label,
+                                             spec_t* output, size_t size,
+                                             const OffsetCalculator* logsoftmax_offset_calculator,
+                                             const OffsetCalculator* label_offset_calculator,
+                                             const OffsetCalculator* out_offset_calculator) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  output[idx] = -logsoftmax[idx] * label[idx];
+  auto logsoftmax_offset = logsoftmax_offset_calculator->get(idx);
+  auto label_offset = label_offset_calculator->get(idx);
+  auto out_offset = out_offset_calculator->get(idx);
+  output[out_offset] = -logsoftmax[logsoftmax_offset] * label[label_offset];
 }
 
 void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
@@ -43,6 +49,7 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
+  OffsetCalculator *label_offset_calculator, *temp_offset_calculator;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
       spec_t alpha = 1.0;
@@ -55,24 +62,31 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
       CUDNN_CALL(cudnnCreateTensorDescriptor(&desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(desc, CUDNN_TENSOR_NCHW, datatype,
                                             n_, c_, 1, 1));
+      NDArray contig_input = NDArray::contiguous(input, stream.stream_index());
       NDArray temp_ = NDArray::empty_like(input);
 
-      if (input->dtype() == DataType::FLOAT16 || input->dtype() == DataType::BFLOAT16) {
+      if (contig_input->dtype() == DataType::FLOAT16 || contig_input->dtype() == DataType::BFLOAT16) {
       CUDNN_CALL(cudnnSoftmaxForward(
           handle, CUDNN_SOFTMAX_LOG, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha_f, desc,
-          (const void*) input->data_ptr<spec_t>(), &beta_f, desc, (void*)temp_->data_ptr<spec_t>()));     
+          (const void*) contig_input->data_ptr<spec_t>(), &beta_f, desc, (void*)temp_->data_ptr<spec_t>()));     
       }
       else {
       CUDNN_CALL(cudnnSoftmaxForward(
           handle, CUDNN_SOFTMAX_LOG, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha, desc,
-          (const void*) input->data_ptr<spec_t>(), &beta, desc, (void*)temp_->data_ptr<spec_t>()));             
+          (const void*) contig_input->data_ptr<spec_t>(), &beta, desc, (void*)temp_->data_ptr<spec_t>()));             
       }   
 
-
+      NDArray label_offset_calculator_arr, temp_offset_calculator_arr;
+      std::tie(label_offset_calculator_arr, label_offset_calculator) =
+        AllocOffsetCalculator(label, stream);
+      std::tie(temp_offset_calculator_arr, temp_offset_calculator) =
+        AllocOffsetCalculator(temp_, stream);
       softmax_cross_entropy_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         temp_->data_ptr<spec_t>(), label->data_ptr<spec_t>(),
-        temp_->data_ptr<spec_t>(), size);
+        temp_->data_ptr<spec_t>(), size, temp_offset_calculator,
+        label_offset_calculator, temp_offset_calculator);
       NDArray::sum(temp_, {1}, false, stream.stream_index(), output);
+      NDArray::MarkUsedBy({contig_input, label_offset_calculator_arr, temp_offset_calculator_arr}, stream);
     });
   NDArray::MarkUsedBy({input, label, output}, stream);
 }
@@ -80,11 +94,17 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
 template <typename spec_t>
 __global__ void softmax_cross_entropy_gradient_kernel(
   const spec_t* pred, const spec_t* y_, const spec_t* grad_data,
-  spec_t* output_data, int last_dim, size_t size) {
+  spec_t* output_data, int last_dim, size_t size,
+  const OffsetCalculator* y_offset_calculator,
+  const OffsetCalculator* grad_offset_calculator,
+  const OffsetCalculator* out_offset_calculator) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  output_data[idx] = (pred[idx] - y_[idx]) * grad_data[idx / last_dim];
+  auto out_offset = out_offset_calculator->get(idx);
+  auto y_offset = y_offset_calculator->get(idx);
+  auto grad_offset = grad_offset_calculator->get(idx / last_dim);
+  output_data[out_offset] = (pred[idx] - y_[y_offset]) * grad_data[grad_offset];
 }
 
 void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
@@ -120,6 +140,8 @@ void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
   auto workspace_arr =
     NDArray::empty({workspace_size}, grad->device(), kInt8, stream.stream_index());
 
+  OffsetCalculator *label_offset_calculator, *grad_offset_calculator,
+                   *out_offset_calculator;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_y->dtype(), spec_t, "SoftmaxCrossEntropyCuda", [&]() {
       spec_t alpha = 1.0;
@@ -132,24 +154,37 @@ void SoftmaxCrossEntropyGradientCuda(const NDArray& input_y,
       CUDNN_CALL(cudnnCreateTensorDescriptor(&desc));
       CUDNN_CALL(cudnnSetTensor4dDescriptor(desc, CUDNN_TENSOR_NCHW, datatype,
                                             n_, c_, 1, 1));
-      if (input_y->dtype() == DataType::FLOAT16 || input_y->dtype() == DataType::BFLOAT16) {
+      NDArray contig_input_y = NDArray::contiguous(input_y, stream.stream_index());
+      if (contig_input_y->dtype() == DataType::FLOAT16 || contig_input_y->dtype() == DataType::BFLOAT16) {
       CUDNN_CALL(cudnnSoftmaxForward(
         handle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha_f,
-        desc, input_y->data_ptr<spec_t>(), &beta_f, desc, 
+        desc, contig_input_y->data_ptr<spec_t>(), &beta_f, desc, 
         workspace_arr->raw_data_ptr()));
       } else {
       CUDNN_CALL(cudnnSoftmaxForward(
         handle, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha,
-        desc, input_y->data_ptr<spec_t>(), &beta, desc, 
+        desc, contig_input_y->data_ptr<spec_t>(), &beta, desc, 
         workspace_arr->raw_data_ptr()));        
       }
 
+      NDArray label_offset_calculator_arr, grad_offset_calculator_arr,
+               out_offset_calculator_arr;
+      std::tie(label_offset_calculator_arr, label_offset_calculator) =
+        AllocOffsetCalculator(label, stream);
+      std::tie(grad_offset_calculator_arr, grad_offset_calculator) =
+        AllocOffsetCalculator(grad, stream);
+      std::tie(out_offset_calculator_arr, out_offset_calculator) =
+        AllocOffsetCalculator(output, stream);
       softmax_cross_entropy_gradient_kernel<spec_t>
         <<<blocks, threads, 0, cuda_stream>>>(
           (const spec_t*) workspace_arr->raw_data_ptr(), label->data_ptr<spec_t>(),
-          grad->data_ptr<spec_t>(), output->data_ptr<spec_t>(), c_, size);
+          grad->data_ptr<spec_t>(), output->data_ptr<spec_t>(), c_, size,
+          label_offset_calculator, grad_offset_calculator, out_offset_calculator);
 
       CUDNN_CALL(cudnnDestroyTensorDescriptor(desc));
+      NDArray::MarkUsedBy({contig_input_y, label_offset_calculator_arr,
+                           grad_offset_calculator_arr, out_offset_calculator_arr},
+                           stream);
     });
   NDArray::MarkUsedBy({input_y, label, grad, workspace_arr}, stream);
 }

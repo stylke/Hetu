@@ -11,7 +11,7 @@ class InstanceNormOp;
 class InstanceNormGradientOpImpl;
 class InstanceNormGradientOp;
 
-class InstanceNormOpImpl : public OpInterface {
+class InstanceNormOpImpl final : public OpInterface {
  public:
   InstanceNormOpImpl(double eps = 1e-7)
   : OpInterface(quote(InstanceNormOp)), _eps(eps) {
@@ -48,6 +48,10 @@ protected:
 
   double _eps;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const InstanceNormOpImpl&>(rhs);
@@ -60,7 +64,7 @@ protected:
 TensorList MakeInstanceNormOp(Tensor input, double eps = 1e-7,
                               OpMeta op_meta = OpMeta());
 
-class InstanceNormGradientOpImpl : public OpInterface {
+class InstanceNormGradientOpImpl final : public OpInterface {
 
  public:
   InstanceNormGradientOpImpl(double eps = 1e-7)
@@ -89,6 +93,10 @@ protected:
 
   double _eps;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const InstanceNormOpImpl&>(rhs);

@@ -11,7 +11,7 @@ class GatherOp;
 class GatherGradientOpImpl;
 class GatherGradientOp;
 
-class GatherOpImpl : public OpInterface {
+class GatherOpImpl final : public OpInterface {
 
  public:
   GatherOpImpl(int64_t dim)
@@ -45,6 +45,10 @@ protected:
 
   int64_t _dim;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const GatherOpImpl&>(rhs);
@@ -56,7 +60,7 @@ protected:
 
 Tensor MakeGatherOp(Tensor input, int64_t dim, Tensor id, OpMeta op_meta = OpMeta());
 
-class GatherGradientOpImpl : public OpInterface {
+class GatherGradientOpImpl final : public OpInterface {
 
  public:
   GatherGradientOpImpl(int64_t dim)
@@ -86,6 +90,10 @@ protected:
 
   int64_t _dim;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const GatherGradientOpImpl&>(rhs);

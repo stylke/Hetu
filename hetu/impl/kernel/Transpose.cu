@@ -8,6 +8,8 @@
 namespace hetu {
 namespace impl {
 
+// Out-of-place version of transpose and its gradient
+/* It is replaced with in-place version. */
 template <typename spec_t>
 __global__ void transpose_kernel(const spec_t* input, spec_t* output,
                                  const int64_t* buf, uint32_t ndims,

@@ -9,7 +9,7 @@ namespace graph {
 class CheckFiniteOpImpl;
 class CheckFiniteOp;
 
-class CheckFiniteOpImpl : public OpInterface {
+class CheckFiniteOpImpl final : public OpInterface {
  private:
   friend class CheckFiniteOp;
   struct constrcutor_access_key {};
@@ -35,6 +35,10 @@ class CheckFiniteOpImpl : public OpInterface {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     return OpInterface::operator==(rhs); 
   }

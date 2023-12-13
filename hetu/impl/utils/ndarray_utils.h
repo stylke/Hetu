@@ -37,3 +37,7 @@
   HT_ASSERT(IsExchangable(x, y)) << "Data are not exchangable: "               \
                                  << "(" << #x << ") " << x->meta() << " vs. (" \
                                  << #y << ") " << y->meta() << "."
+#define HT_ASSERT_CONTIGUOUS(x)                                                \
+  HT_ASSERT(x->is_contiguous())  << "Data " << #x << " is not contiguous."     \
+                                 << " Shape: " << x->shape() << "."            \
+                                 << " Strides: " << x->stride() << "."

@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Unary.h"
 
 namespace hetu {
 namespace graph {
@@ -9,11 +10,11 @@ namespace graph {
 class BoolOpImpl;
 class BoolOp;
 
-class BoolOpImpl : public OpInterface {
+class BoolOpImpl final : public UnaryOpImpl {
 
  public:
   BoolOpImpl()
-  : OpInterface(quote(BoolOp)) {
+  : UnaryOpImpl(quote(BoolOp)) {
   }
 
 protected:
@@ -27,15 +28,12 @@ protected:
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
-                           RuntimeContext& runtime_ctx) const override;
-
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
   
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return (OpInterface::operator==(rhs));
+    return UnaryOpImpl::operator==(rhs);
   }
 };
 

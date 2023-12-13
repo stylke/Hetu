@@ -23,9 +23,9 @@ inline int GetThreadNum(int cnt) {
 inline int64_t get_index(int64_t idx, int64_t ndims, const int64_t* stride, const int64_t* c_shape) {
   int64_t i_idx = 0;
   int64_t t = idx;
-  for (int i = 0; i < ndims; ++i) {
-    int64_t ratio = t / c_shape[i];
-    t -= ratio * c_shape[i];
+  for (int i = ndims - 1; i >= 0; --i) {
+    int64_t ratio = t % c_shape[i];
+    t /= c_shape[i];
     i_idx += ratio * stride[i];
   }
   return i_idx;

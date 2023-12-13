@@ -12,7 +12,7 @@ class SoftmaxCrossEntropyOp;
 class SoftmaxCrossEntropyGradientOpImpl;
 class SoftmaxCrossEntropyGradientOp;
 
-class SoftmaxCrossEntropyOpImpl : public LossOpImpl {
+class SoftmaxCrossEntropyOpImpl final : public LossOpImpl {
 
  public:
   SoftmaxCrossEntropyOpImpl(ReductionType reduction = kMEAN)
@@ -44,12 +44,12 @@ class SoftmaxCrossEntropyOpImpl : public LossOpImpl {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
  public:
-  bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const SoftmaxCrossEntropyOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction());
-    }
+  inline bool require_contig_inputs() const override {
     return false;
+  }
+
+  bool operator==(const OpInterface& rhs) const override {
+    return LossOpImpl::operator==(rhs);
   }
 };
 
@@ -61,7 +61,7 @@ Tensor MakeSoftmaxCrossEntropyOp(Tensor preds, Tensor labels,
                                  const std::string& reduction = "mean",
                                  OpMeta op_meta = OpMeta());
 
-class SoftmaxCrossEntropyGradientOpImpl : public LossGradientOpImpl {
+class SoftmaxCrossEntropyGradientOpImpl final : public LossGradientOpImpl {
  public:
   SoftmaxCrossEntropyGradientOpImpl(ReductionType reduction = kMEAN)
   : LossGradientOpImpl(quote(SoftmaxCrossEntropyGradientOp), reduction) {}
@@ -84,12 +84,12 @@ class SoftmaxCrossEntropyGradientOpImpl : public LossGradientOpImpl {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
  public:
-  bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const SoftmaxCrossEntropyGradientOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction());
-    }
+  inline bool require_contig_inputs() const override {
     return false;
+  }
+
+  bool operator==(const OpInterface& rhs) const override {
+    return LossGradientOpImpl::operator==(rhs);
   }
 };
 

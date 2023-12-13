@@ -12,7 +12,7 @@ class NLLLossOp;
 class NLLLossGradientOpImpl;
 class NLLLossGradientOp;
 
-class NLLLossOpImpl : public LossOpImpl {
+class NLLLossOpImpl final : public LossOpImpl {
  public:
   NLLLossOpImpl(ReductionType reduction = kMEAN)
   : LossOpImpl(quote(NLLLossOp), reduction) {}
@@ -48,11 +48,7 @@ class NLLLossOpImpl : public LossOpImpl {
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const NLLLossOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction());
-    }
-    return false;
+    return LossOpImpl::operator==(rhs);
   }
 };
 
@@ -64,7 +60,7 @@ Tensor MakeNLLLossOp(Tensor preds, Tensor labels,
                      const std::string& reduction = "mean",
                      OpMeta op_meta = OpMeta());
 
-class NLLLossGradientOpImpl : public LossGradientOpImpl {
+class NLLLossGradientOpImpl final : public LossGradientOpImpl {
  public:
   NLLLossGradientOpImpl(ReductionType reduction = kMEAN)
   : LossGradientOpImpl(quote(NLLLossGradientOp), reduction) {}
@@ -88,11 +84,7 @@ class NLLLossGradientOpImpl : public LossGradientOpImpl {
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const NLLLossGradientOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction());
-    }
-    return false;
+    return LossGradientOpImpl::operator==(rhs);
   }
 };
 

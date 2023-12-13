@@ -12,18 +12,20 @@ void SigmoidOpImpl::DoCompute(Operator& op,
   NDArray::sigmoid(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
+NDArrayList SigmoidOpImpl::DoCompute(Operator& op,
+                                     const NDArrayList& inputs,
+                                     RuntimeContext& ctx) const {
+  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  DoCompute(op, inputs, outputs, ctx);
+  return outputs;
+}
+
 TensorList SigmoidOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
   auto grad_input = op->requires_grad(0) ? MakeSigmoidGradientOp(grad_outputs.at(0), op->output(0), 
                                                                  g_op_meta.set_name(op->grad_name(0)))
                                          : Tensor();
   return {grad_input};
-}
-
-HTShapeList SigmoidOpImpl::DoInferShape(Operator& op, 
-                                        const HTShapeList& input_shapes, 
-                                        RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
 }
 
 void SigmoidGradientOpImpl::DoCompute(Operator& op, 
@@ -34,26 +36,26 @@ void SigmoidGradientOpImpl::DoCompute(Operator& op,
                                   outputs.at(0), op->instantiation_ctx().stream());
 }
 
-HTShapeList SigmoidGradientOpImpl::DoInferShape(Operator& op, 
-                                        const HTShapeList& input_shapes, 
-                                        RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
+Tensor MakeSigmoidOp(Tensor input, OpMeta op_meta) {
+  TensorList inputs = {std::move(input)};
+  return Graph::MakeOp(
+    std::make_shared<SigmoidOpImpl>(false),
+    std::move(inputs),
+    std::move(op_meta))->output(0);
 }
 
-Tensor MakeSigmoidOp(Tensor input, OpMeta op_meta) {
+Tensor MakeSigmoidInplaceOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
   DataType input_type = DataType::FLOAT32;
   AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
-    std::make_shared<SigmoidOpImpl>(),
+    std::make_shared<SigmoidOpImpl>(true),
     std::move(inputs),
     std::move(op_meta))->output(0);
 }
 
 Tensor MakeSigmoidGradientOp(Tensor out_grad, Tensor output, OpMeta op_meta) {
   TensorList inputs = {std::move(out_grad), std::move(output)};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
     std::make_shared<SigmoidGradientOpImpl>(),
     std::move(inputs),

@@ -143,7 +143,7 @@ void MatMulGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, ND
       auto ndims_a_ = HTAxes(dim_a);
       std::iota(ndims_a_.begin(), ndims_a_.end(), 0);
       std::iter_swap(ndims_a_.end() - 2, ndims_a_.end() - 1);
-      a_ = NDArray::permute(a, ndims_a_, op->instantiation_ctx().stream_index, a_);
+      a_ = NDArray::permute(a, ndims_a_, op->instantiation_ctx().stream_index);
     }
     NDArray::matmul(NDArray::unsqueeze(a_, dim_a), NDArray::unsqueeze(b, 0), false, false,
                     op->instantiation_ctx().stream_index, outputs.front());
@@ -179,8 +179,6 @@ void MatMulGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& 
 Tensor MakeMatMulOp(Tensor a, Tensor b, bool trans_a, bool trans_b,
                     OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(std::make_shared<MatMulOpImpl>(trans_a, trans_b),
                        std::move(inputs), std::move(op_meta))
     ->output(0);

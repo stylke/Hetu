@@ -20,16 +20,8 @@ TensorList ExpOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) c
                                : Tensor()};
 }
 
-HTShapeList ExpOpImpl::DoInferShape(Operator& op, 
-                                     const HTShapeList& input_shapes, 
-                                     RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
-}
-
 Tensor MakeExpOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<ExpOpImpl>(false),
         std::move(inputs),
@@ -38,8 +30,6 @@ Tensor MakeExpOp(Tensor input, OpMeta op_meta) {
 
 Tensor MakeExpInplaceOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<ExpOpImpl>(true),
         std::move(inputs),

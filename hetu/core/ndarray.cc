@@ -37,8 +37,8 @@ void NDArrayDef::Serialize(std::ostream& os, size_t n_print) const {
         }
       });
   }
-  os << "], dtype=" << dtype() << ", shape=" << shape() << ", dynamic_shape=" 
-    << dynamic_shape() << ", device=" << device() << ")";
+  os << "], dtype=" << dtype() << ", shape=" << shape() << ", stride=" << stride()
+     << ", dynamic_shape=" << dynamic_shape() << ", device=" << device() << ")";
 }
 
 std::ostream& operator<<(std::ostream& os, const NDArray& data) {
@@ -161,7 +161,8 @@ NDArray NDArray::to(const NDArray& input, const Device& device, DataType dtype,
     if (output.is_defined()) {
       // Unlike many other kernels, the DataTransfer kernel cannot check
       // whether the devices and dtypes are valid. Hence we check them here.
-      HT_ASSERT(output->device() == target_device);
+      HT_ASSERT(output->device() == target_device)
+      << output->device() << "," << target_device; 
       HT_ASSERT(output->dtype() == target_dtype);
     }
     Stream stream(input->is_cuda() ? input->device() : target_device,
@@ -515,8 +516,7 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
       auto ndims_x_ = HTAxes(dim_x_);
       std::iota(ndims_x_.begin(), ndims_x_.end(), 0);
       std::iter_swap(ndims_x_.end() - 2, ndims_x_.end() - 1);
-      x_trans = NDArray::empty(x_shape, x->device(), x->dtype(), stream_id);
-      x_trans = NDArray::permute(x_, ndims_x_, stream_id, x_trans);
+      x_trans = NDArray::permute(x_, ndims_x_, stream_id);
     }
     
     auto output_shape = HTShape(x_shape.begin(), x_shape.end() - 1);
@@ -544,7 +544,8 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
       auto ndims_out = HTAxes(dim_out);
       std::iota(ndims_out.begin(), ndims_out.end(), 0);
       std::iter_swap(ndims_out.end() - 2, ndims_out.end() - 1);
-      out = NDArray::permute(out_trans, ndims_out, stream_id, out);
+      NDArray::contiguous(NDArray::permute(out_trans, ndims_out, stream_id),
+                          stream_id, out);
     } else {
       out_folded = NDArray::matmul(x_folded, y_, false, trans_right, stream_id, out_folded);
       if (output.is_defined()) {
@@ -673,10 +674,8 @@ NDArray NDArray::index_add(const NDArray& x, const NDArray& ids,
 
 NDArray NDArray::reshape(const NDArray& input, const HTShape& new_shape,
                          StreamIndex stream_id) {
-  // Currently we require storage to be contiguous,
-  // so `reshape` will be replaced with `view`.
-  (void) stream_id; // suppress un-used warning
-  return NDArray::view(input, new_shape);
+  NDArray out = NDArray::contiguous(input, stream_id);
+  return NDArray::view(out, new_shape);
 }
 
 NDArray NDArray::view(const NDArray& input, const HTShape& view_shape) {
@@ -710,21 +709,19 @@ NDArray NDArray::flatten(const NDArray& input, int64_t start_dim,
   return NDArray(output_meta, input->storage(), input->storage_offset());
 }
 
-NDArray NDArray::permute(const NDArray& input, HTAxes& dims,
-                         StreamIndex stream_id, NDArray& output) {
-  HTShape output_shape = NDArrayMeta::Permute(input->shape(), dims);
-  NDArray out = output.is_defined()
-    ? output
-    : NDArray::empty(output_shape, input->device(), input->dtype(), stream_id);
-  Stream stream(input->device(), stream_id);
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
-                                  hetu::impl::Transpose, input, out,
-                                  dims, stream);
+NDArray NDArray::permute(const NDArray& input, const HTAxes& dims,
+                         StreamIndex stream_id) {
+  auto output_meta = NDArrayMeta().set_dtype(input->dtype())
+                                  .set_shape(input->shape())
+                                  .set_stride(input->stride())
+                                  .set_device(input->device());
+  output_meta.permute(dims);
+  NDArray out = NDArray(output_meta, input->storage(), input->storage_offset());
   return out;
 }
 
 NDArray NDArray::movedim(const NDArray& input, int64_t src, int64_t dst,
-                         StreamIndex stream_id, NDArray& output) {
+                         StreamIndex stream_id) {
   int64_t len = input->ndim();
   src = NDArrayMeta::ParseAxis(src, len);
   dst = NDArrayMeta::ParseAxis(dst, len);
@@ -756,7 +753,7 @@ NDArray NDArray::movedim(const NDArray& input, int64_t src, int64_t dst,
       dims[i] = i;
     }
   }
-  return NDArray::permute(input, dims, stream_id, output);
+  return NDArray::permute(input, dims, stream_id);
 }
 
 NDArray NDArray::adddim(const NDArray& input, int64_t dim, int64_t size,
@@ -784,26 +781,43 @@ NDArray NDArray::adddim(const NDArray& input, int64_t dim, int64_t size,
 }
 
 NDArray NDArray::diagonal(const NDArray& input, int64_t dim1, int64_t dim2,
-                          int64_t offset, StreamIndex stream_id,
-                          NDArray& output) {
-  HTShape output_shape = {};
-  int64_t len = input->ndim();
-  dim1 = NDArrayMeta::ParseAxis(dim1, len);
-  dim2 = NDArrayMeta::ParseAxis(dim2, len);
-  for (int i = 0; i < len; ++i) {
-    if (i != dim1 && i != dim2) {
-      output_shape.emplace_back(input->shape(i));
-    }
+                          int64_t offset, StreamIndex stream_id) {
+  int64_t ndim = input->ndim();
+  int64_t dim1_ = NDArrayMeta::ParseAxis(dim1, ndim);
+  int64_t dim2_ = NDArrayMeta::ParseAxis(dim2, ndim);
+  HT_ASSERT(dim1_ != dim2_)
+  << "diagonal dimensions cannot be identical. dim1: " << dim1 << ", dim2: " << dim2;
+
+  int64_t diag_size;
+  int64_t storage_offset = input->storage_offset();
+  if (offset >= 0) {
+    diag_size = std::min(input->shape(dim1_), input->shape(dim2_) - offset);
+  } else {
+    diag_size = std::min(input->shape(dim1_) + offset, input->shape(dim2_));
   }
-  output_shape.emplace_back(
-    std::min(input->shape(dim1), input->shape(dim2) - offset));
-  NDArray out = output.is_defined()
-    ? output
-    : NDArray::empty(output_shape, input->device(), input->dtype(), stream_id);
-  Stream stream(input->device(), stream_id);
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
-                                  hetu::impl::Diagonal, input, out, dim1, dim2,
-                                  offset, stream);
+
+  HT_ASSERT(diag_size > 0);
+  
+  if (offset >= 0) {
+    storage_offset += offset * input->stride(dim2_);
+  } else if (offset < 0) {
+    storage_offset -= offset * input->stride(dim1_);
+  }
+
+  HTShape output_shape(input->shape().begin(), input->shape().end());
+  HTStride output_stride(input->stride().begin(), input->stride().end());
+  output_shape.erase(output_shape.begin() + std::max(dim1_, dim2_));
+  output_stride.erase(output_stride.begin() + std::max(dim1_, dim2_));
+  output_shape.erase(output_shape.begin() + std::min(dim1_, dim2_));
+  output_stride.erase(output_stride.begin() + std::min(dim1_, dim2_));
+  output_shape.emplace_back(diag_size);
+  output_stride.emplace_back(input->stride(dim1_) + input->stride(dim2_));
+
+  auto output_meta = NDArrayMeta().set_dtype(input->dtype())
+                                  .set_shape(output_shape)
+                                  .set_stride(output_stride)
+                                  .set_device(input->device());
+  NDArray out = NDArray(output_meta, input->storage(), storage_offset);
   return out;
 }
 
@@ -828,6 +842,17 @@ NDArray NDArray::diagonal_grad(const NDArray& input, int64_t dim1, int64_t dim2,
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), input->dtype(),
                                   hetu::impl::DiagonalGradient, input, out,
                                   dim1, dim2, stream);
+  return out;
+}
+
+NDArray NDArray::as_strided(const NDArray& input, const HTShape& outshape,
+                            const HTStride& stride, int64_t storage_offset,
+                            StreamIndex stream_id) {
+  auto output_meta = NDArrayMeta().set_dtype(input->dtype())
+                                  .set_shape(outshape)
+                                  .set_stride(stride)
+                                  .set_device(input->device());
+  NDArray out = NDArray(output_meta, input->storage(), storage_offset);
   return out;
 }
 
@@ -1279,17 +1304,48 @@ NDArray NDArray::sin(const NDArray& input,
   return out;
 }
 
-NDArray NDArray::slice(const NDArray& input, 
-                       const HTShape& begin_pos, const HTShape& output_shape,
-                       StreamIndex stream_id,
-                       NDArray& output) {
-  NDArray out = output.is_defined()
-    ? output
-    : NDArray::empty(output_shape, input->device(), input->dtype(), stream_id);
-  Stream stream(input->device(), stream_id);
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(
-    input->device().type(), __FUNCTION__, hetu::impl::Slice, input, out,
-    begin_pos, stream);
+NDArray NDArray::slice(const NDArray& input, const HTShape& begin_pos,
+                       const HTShape& output_shape, StreamIndex stream_id) {
+  HT_ASSERT(!input->is_dynamic())
+  << "Output definition doesn't support dynamic input in NDArray::slice.";
+
+  const auto& in_shape = input->shape();
+  const auto& in_stride = input->stride();
+  HTShape out_shape = output_shape;
+  
+  HT_ASSERT(begin_pos.size() == in_shape.size()
+         && output_shape.size() == in_shape.size());
+
+  size_t ndim = in_shape.size();
+  auto storage_offset = input->storage_offset();
+  for (int64_t i = 0; i < ndim; i++) {
+    int64_t start_val = begin_pos[i];
+    int64_t end_val = begin_pos[i] + out_shape[i];
+    if (start_val < 0) {
+      start_val += in_shape[i];
+    }
+    if (end_val < 0) {
+      end_val += in_shape[i];
+    }
+    if (start_val < 0) {
+      start_val = 0;
+    } else if (start_val >= in_shape[i]) {
+      start_val = in_shape[i];
+    }
+    if (end_val < start_val) {
+      end_val = start_val;
+    } else if (end_val >= in_shape[i]) {
+      end_val = in_shape[i];
+    }
+    storage_offset += start_val * in_stride[i];
+    out_shape[i] = end_val - start_val;
+  }
+  
+  auto output_meta = NDArrayMeta().set_dtype(input->dtype())
+                                  .set_shape(out_shape)
+                                  .set_stride(in_stride)
+                                  .set_device(input->device());
+  auto out = NDArray(output_meta, input->storage(), storage_offset);
   return out;
 }
 
@@ -1492,6 +1548,30 @@ NDArray NDArray::copy(const NDArray& input, StreamIndex stream_id,
     out_device = out->device();
   Stream stream(out_device, stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(out_device.type(), __FUNCTION__,
+                                  hetu::impl::DataTransfer, input, out, stream);
+  return out;
+}
+
+NDArray NDArray::contiguous(const NDArray& input, StreamIndex stream_id,
+                            NDArray& output) {
+  if (input->is_contiguous()) {
+    if (output.is_defined()) {
+      HT_ASSERT(input->shape() == output->shape())
+        << "Input and output shape mismatch in NDArray::contiguous. "
+        << "input shape: " << input->shape() << ", output shape: "
+        << output->shape();
+      HT_ASSERT(output->is_contiguous())
+        << "Output should be contiguous in NDArray::contiguous.";
+      NDArray::copy(input, stream_id, output);
+      return output;
+    }
+    else {
+      return input;
+    }
+  }
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
                                   hetu::impl::DataTransfer, input, out, stream);
   return out;
 }

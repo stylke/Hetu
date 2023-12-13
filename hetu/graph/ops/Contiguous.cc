@@ -16,8 +16,6 @@ NDArrayList ContiguousOpImpl::DoCompute(Operator& op,
 }
 
 TensorList ContiguousOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  if (op->input(0)->is_contiguous())
-    return {op->requires_grad(0) ? grad_outputs.at(0) : Tensor()};
   return {op->requires_grad(0) ? MakeContiguousGradientOp(grad_outputs.at(0), op->input(0)->stride(),
                                  op->grad_op_meta().set_name(op->grad_name()))
                                : Tensor()};
@@ -29,16 +27,13 @@ HTShapeList ContiguousOpImpl::DoInferShape(Operator& op,
   return {input_shapes.at(0)};
 }
 
-void ContiguousOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
-                                     const OpMeta& op_meta) const {
-  // TODO:deduce need to be rewrite
-}
-
 Tensor MakeContiguousOp(Tensor input, OpMeta op_meta) {
-  return Graph::MakeOp(
+  auto contig_op = Graph::MakeOp(
     std::make_shared<ContiguousOpImpl>(),
     {std::move(input)},
-    std::move(op_meta))->output(0);
+    std::move(op_meta));
+  input->set_contiguous_op_id(contig_op->id());
+  return contig_op->output(0);
 }
 
 void ContiguousGradientOpImpl::DoCompute(Operator& op, 
@@ -53,11 +48,6 @@ HTShapeList ContiguousGradientOpImpl::DoInferShape(Operator& op,
                                                    const HTShapeList& input_shapes, 
                                                    RuntimeContext& ctx) const {
   return {input_shapes.at(0)};
-}
-
-void ContiguousGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
-                                              const OpMeta& op_meta) const {
-  // TODO:deduce need to be rewrite
 }
 
 Tensor MakeContiguousGradientOp(Tensor input, const HTStride& stride, OpMeta op_meta) {

@@ -167,8 +167,6 @@ void LinearOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
 Tensor MakeLinearOp(Tensor a, Tensor b, Tensor bias, bool trans_a,
                     bool trans_b, OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b), std::move(bias)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<LinearOpImpl>(trans_a, trans_b),
         std::move(inputs),

@@ -11,7 +11,7 @@ class LayerNormOp;
 class LayerNormGradientOpImpl;
 class LayerNormGradientOp;
 
-class LayerNormOpImpl : public OpInterface {
+class LayerNormOpImpl final : public OpInterface {
  private:
   friend class LayerNormOp;
   struct constrcutor_access_key {};
@@ -68,6 +68,10 @@ protected:
   double _eps;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const LayerNormOpImpl&>(rhs);
@@ -81,7 +85,7 @@ protected:
 TensorList MakeLayerNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias, HTShape normalized_shape, 
                            double eps = 0.01, OpMeta op_meta = OpMeta());
 
-class LayerNormGradientOpImpl : public OpInterface {
+class LayerNormGradientOpImpl final : public OpInterface {
  public:
   LayerNormGradientOpImpl(HTShape normalized_shape, double eps)
   : OpInterface(quote(LayerNormGradientOp)),
@@ -117,6 +121,10 @@ protected:
   double _eps;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const LayerNormGradientOpImpl&>(rhs);

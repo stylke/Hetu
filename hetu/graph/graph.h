@@ -489,6 +489,8 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
                                  std::function<bool(const Operator&)> stop_at) {
   std::unordered_map<OpId, int32_t> in_degrees;
   std::unordered_set<OpId> visited;
+  std::unordered_map<OpId, OpIdSet> extra_edges;
+  OpRefList inplace_ops;
   OpRefDeque traverse_queue;
   OpRefDeque topo_queue;
   OpRefList ret;
@@ -531,16 +533,64 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
     topo_queue.pop_front();
     ret.push_back(op_ref);
     Operator::for_each_output_tensor(op_ref.get(), [&](Tensor& tensor) {
+      // Place inplace ops after other ops
+      // Step 1. Find all inplace ops.
+      int64_t num_inplace_consumers = 0;
+      int64_t num_consumers = tensor->num_consumers();
+      OpIdSet inplace_ids;
       Tensor::for_each_consumer(tensor, [&](Operator& consumer_op) {
         if (in_degrees.find(consumer_op->id()) == in_degrees.end())
           return;
-        if ((--in_degrees[consumer_op->id()]) == 0)
+        // NOTE: Only inplace ops that do operation on `tensor` directly
+        // are considered.
+        // For example, for `where` op, its inplace tensor is the 1st
+        // input tensor, not the 2nd input tensor. So for the 2nd input,
+        // we should not consider `where` as its inplace op.
+        if (is_inplace_op(std::ref(consumer_op)) &&
+            tensor->id() == consumer_op->inplace_tensor_id()) {
+          inplace_ids.insert(consumer_op->id());
+          inplace_ops.push_back(std::ref(consumer_op));
+          num_inplace_consumers++;
+          return;
+        }
+      });
+      bool has_extra_edge = num_inplace_consumers > 0 &&
+                            num_inplace_consumers < num_consumers;
+      // Step 2. If there are both inplace and other ops,
+      // add extra edges from others to inplace ops and add in_degrees.
+      if (has_extra_edge) {
+        Tensor::for_each_consumer(tensor, [&](Operator& consumer_op) {
+          if (in_degrees.find(consumer_op->id()) == in_degrees.end() ||
+              is_inplace_op(std::ref(consumer_op)))
+            return;
+          // NOTE: Check if the extra edge already exists.
+          for (auto inplace_id : inplace_ids) {
+            if (extra_edges[consumer_op->id()].insert(inplace_id).second)
+              in_degrees[inplace_id]++;
+          }
+        });
+      }
+      // Step 3. Check extra_edges and decrease in_degrees of inplace ops.
+      Tensor::for_each_consumer(tensor, [&](Operator& consumer_op) {
+        if (in_degrees.find(consumer_op->id()) == in_degrees.end())
+          return;
+        if ((--in_degrees[consumer_op->id()]) == 0) {
           topo_queue.push_back(std::ref(consumer_op));
+          if (has_extra_edge && !is_inplace_op(std::ref(consumer_op))) {
+            for (auto inplace_id : extra_edges[consumer_op->id()]) {
+              if (--in_degrees[inplace_id] == 0) {
+                auto inplace_op = std::find_if(inplace_ops.begin(), inplace_ops.end(),
+                  [&](const OpRef& op_ref) { return op_ref.get()->id() == inplace_id; });
+                if (inplace_op != inplace_ops.end())
+                  topo_queue.push_back(*inplace_op);
+              }
+            }
+          }
+        }
       });
     });
   }
 
-  // TODO: support all in place ops
   visited.clear();
   for (size_t i = 0; i < ret.size(); i++) {
     // BatchISendIRecvOp must be directly after nearest SplitOp

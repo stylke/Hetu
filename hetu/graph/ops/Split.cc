@@ -42,7 +42,7 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
   }
 
   // 将输出的tensor设置成symbolic的（主要是因为其后可能跟着另一个symbolic算子）
-  auto output = Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape, -1, false),
+  auto output = Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape),
                       {std::move(input)}, std::move(op_meta))->output(0);
   output->set_symbolic_shape(std::move(output_shape)); // not leaf
   HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 1: finish making";
@@ -73,7 +73,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
     begin_pos[dim] = chunk_sum;
     chunk_sum = chunk_sum + chunk_size;
     outputs.emplace_back(Graph::MakeOp(
-                         std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape, -1, false),
+                         std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape),
                          {input}, op_meta)->output(0));
     outputs[i]->set_symbolic_shape(std::move(output_shape));
   }
@@ -101,7 +101,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
     begin_pos[dim] = chunk_sum;
     chunk_sum += chunk_size;
     outputs.emplace_back(Graph::MakeOp(
-                         std::make_shared<SliceOpImpl>(begin_pos, output_shape, padding_axis, false),
+                         std::make_shared<SliceOpImpl>(begin_pos, output_shape, padding_axis),
                          {input}, op_meta)->output(0));
   }
   return std::move(outputs);
@@ -128,7 +128,7 @@ TensorList MakeSplitOp(Tensor input, const HTShape& chunks, int64_t dim,
     begin_pos[dim] = chunk_sum;
     chunk_sum += chunks[i];
     outputs.emplace_back(Graph::MakeOp(
-                         std::make_shared<SliceOpImpl>(begin_pos, output_shape, -1, false),
+                         std::make_shared<SliceOpImpl>(begin_pos, output_shape),
                          {input}, op_meta)->output(0));
   }
   return std::move(outputs);

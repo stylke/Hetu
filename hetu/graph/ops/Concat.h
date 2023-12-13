@@ -11,7 +11,7 @@ class ConcatOp;
 class ConcatGradientOpImpl;
 class ConcatGradientOp;
 
-class ConcatOpImpl : public OpInterface {
+class ConcatOpImpl final : public OpInterface {
  public:
   ConcatOpImpl(size_t axis, OpMeta op_meta = OpMeta())
   : OpInterface(quote(ConcatOp)), _axis(axis) {
@@ -60,6 +60,10 @@ class ConcatOpImpl : public OpInterface {
 
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ConcatOpImpl&>(rhs);
@@ -73,7 +77,7 @@ class ConcatOpImpl : public OpInterface {
 Tensor MakeConcatOp(Tensor inputA, Tensor inputB, size_t axis,
                     OpMeta op_meta = OpMeta());
 
-class ConcatGradientOpImpl : public OpInterface {
+class ConcatGradientOpImpl final : public OpInterface {
  public:
   ConcatGradientOpImpl(size_t axis, size_t id,
                        OpMeta op_meta = OpMeta())
@@ -112,6 +116,10 @@ class ConcatGradientOpImpl : public OpInterface {
   size_t _id;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ConcatGradientOpImpl&>(rhs);

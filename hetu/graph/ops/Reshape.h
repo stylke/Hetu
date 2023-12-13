@@ -16,7 +16,7 @@ class ArrayReshapeGradientOp;
 // 原因是其可以通过-1去推断维度的大小
 // 2023.12.9修正：依然是需要symbolic shape的
 // 因为可能会有seq_len以及batch_size同时发生变化的情况
-class ArrayReshapeOpImpl : public OpInterface {
+class ArrayReshapeOpImpl final : public OpInterface {
  private:
   friend class ArrayReshapeOp;
   struct constrcutor_access_key {};
@@ -192,6 +192,10 @@ class ArrayReshapeOpImpl : public OpInterface {
   bool _inplace;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ArrayReshapeOpImpl&>(rhs);
@@ -217,7 +221,7 @@ Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
 Tensor MakeViewOp(Tensor input, const HTShape& output_shape,
                   OpMeta op_meta = OpMeta());
 
-class ArrayReshapeGradientOpImpl : public OpInterface {
+class ArrayReshapeGradientOpImpl final : public OpInterface {
 
  public:
   ArrayReshapeGradientOpImpl(bool is_inplace = false, const HTShape& in_shape = {})
@@ -254,6 +258,10 @@ class ArrayReshapeGradientOpImpl : public OpInterface {
   HTShape _input_shape;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ArrayReshapeGradientOpImpl&>(rhs);

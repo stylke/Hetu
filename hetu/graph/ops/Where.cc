@@ -8,11 +8,16 @@ namespace graph {
 
 void WhereOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                            RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), hetu::impl::Where,
-  //                                 inputs.at(0), inputs.at(1), inputs.at(2),
-  //                                 outputs.at(0), op->instantiation_ctx().stream());
   NDArray::where(inputs.at(0), inputs.at(1), inputs.at(2),
                  op->instantiation_ctx().stream_index, outputs.at(0));
+}
+
+NDArrayList WhereOpImpl::DoCompute(Operator& op,
+                                   const NDArrayList& inputs,
+                                   RuntimeContext& ctx) const {
+  NDArrayList outputs = inplace() ? NDArrayList{inputs.at(1)} : DoAllocOutputs(op, inputs, ctx);
+  DoCompute(op, inputs, outputs, ctx);
+  return outputs;
 }
 
 TensorList WhereOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
@@ -51,7 +56,15 @@ HTShapeList WhereOpImpl::DoInferDynamicShape(Operator& op,
 Tensor MakeWhereOp(Tensor cond, Tensor inputA, Tensor inputB,
                    OpMeta op_meta) {
   return Graph::MakeOp(
-    std::make_shared<WhereOpImpl>(),
+    std::make_shared<WhereOpImpl>(false),
+    {std::move(cond), std::move(inputA), std::move(inputB)},
+    std::move(op_meta))->output(0);
+}
+
+Tensor MakeWhereInplaceOp(Tensor cond, Tensor inputA, Tensor inputB,
+                          OpMeta op_meta) {
+  return Graph::MakeOp(
+    std::make_shared<WhereOpImpl>(true),
     {std::move(cond), std::move(inputA), std::move(inputB)},
     std::move(op_meta))->output(0);
 }

@@ -112,6 +112,9 @@ def pretrain(args):
         masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[1], name='masked_lm_labels')
         
         # ---- Bind symbolic shape ----
+        # config.micro_batch_size_symbol = ht.IntSymbol(2)
+        # config.seq_len_symbol = ht.IntSymbol(5)
+        # 下面这种bind方法更好
         config.micro_batch_size_symbol = input_ids.symbolic_shape[0] * dp_size
         config.seq_len_symbol = input_ids.symbolic_shape[1]
         
@@ -179,6 +182,9 @@ def pretrain(args):
             global_batch_size = len(encoded_input['input_ids'])
             seq_len = seq_lens[round]
             dp_size = global_batch_size // config.dp
+            # 不需要再在这里bind了
+            # config.micro_batch_size_symbol.set_data(dp_size)
+            # config.seq_len_symbol.set_data(seq_len)
             for i in range(config.dp):
                 # device 0, 1 读取第偶数个batch; device 2, 3 读取第奇数个batch
                 if local_device_index < devices_num / 2 and i % 2 != 0:

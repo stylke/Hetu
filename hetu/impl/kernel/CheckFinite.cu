@@ -2,19 +2,23 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
 
 template <typename spec_t>
-extern  __global__ void array_set_kernel(spec_t* arr, spec_t value, size_t size);
+extern __global__ void array_set_kernel(spec_t* arr, spec_t value, size_t size,
+                                        const OffsetCalculator* arr_offset_calculator);
 
 template <typename spec_t>
-__global__ void check_finite_kernel(const spec_t* input, size_t size, float* output) {
+__global__ void check_finite_kernel(const spec_t* input, size_t size, float* output,
+                                    const OffsetCalculator* in_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
-  if (!isfinite(float(input[idx])))
+  auto in_offset = in_offset_calculator->get(idx);
+  if (!isfinite(float(input[in_offset])))
     output[0] = 1.f;
 }
 
@@ -30,14 +34,22 @@ void CheckFiniteCuda(const NDArray& input, NDArray& output, const Stream& stream
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  NDArray in_offset_calculator_arr, out_offset_calculator_arr;
+  OffsetCalculator *in_offset_calculator, *out_offset_calculator;
+  std::tie(in_offset_calculator_arr, in_offset_calculator) =
+    AllocOffsetCalculator(input, stream);
+  std::tie(out_offset_calculator_arr, out_offset_calculator) = 
+    AllocOffsetCalculator(output, stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "CheckFiniteCuda", [&]() {
       array_set_kernel<float><<<blocks, threads, 0, cuda_stream>>>(
-        output->data_ptr<float>(), 0, 1);
+        output->data_ptr<float>(), 0, 1, out_offset_calculator);
       check_finite_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), size, output->data_ptr<float>());
+        input->data_ptr<spec_t>(), size, output->data_ptr<float>(),
+        in_offset_calculator);
     });
-  NDArray::MarkUsedBy({input, output}, stream);
+  NDArray::MarkUsedBy({input, output, in_offset_calculator_arr,
+                      out_offset_calculator_arr}, stream);
 }
 
 } // namespace impl

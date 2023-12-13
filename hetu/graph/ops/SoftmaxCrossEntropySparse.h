@@ -12,7 +12,7 @@ class SoftmaxCrossEntropySparseOp;
 class SoftmaxCrossEntropySparseGradientOpImpl;
 class SoftmaxCrossEntropySparseGradientOp;
 
-class SoftmaxCrossEntropySparseOpImpl : public LossOpImpl {
+class SoftmaxCrossEntropySparseOpImpl final : public LossOpImpl {
  public:
   SoftmaxCrossEntropySparseOpImpl(const int64_t ignored_index = -1, 
                           ReductionType reduction = kMEAN)
@@ -52,11 +52,14 @@ class SoftmaxCrossEntropySparseOpImpl : public LossOpImpl {
   int64_t _ignored_index;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (LossOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const SoftmaxCrossEntropySparseOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction()
-              && ignored_index() == rhs_.ignored_index());
+      return ignored_index() == rhs_.ignored_index();
     }
     return false;
   }
@@ -70,7 +73,7 @@ Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_
                                        const std::string& reduction = "mean",
                                        OpMeta op_meta = OpMeta());
 
-class SoftmaxCrossEntropySparseGradientOpImpl : public LossGradientOpImpl {
+class SoftmaxCrossEntropySparseGradientOpImpl final : public LossGradientOpImpl {
 
  public:
   SoftmaxCrossEntropySparseGradientOpImpl(const int64_t ignored_index = -1, 
@@ -102,11 +105,14 @@ class SoftmaxCrossEntropySparseGradientOpImpl : public LossGradientOpImpl {
   int64_t _ignored_index; 
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (LossGradientOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const SoftmaxCrossEntropySparseGradientOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction()
-              && ignored_index() == rhs_.ignored_index());
+      return ignored_index() == rhs_.ignored_index();
     }
     return false;
   }

@@ -1,6 +1,6 @@
 #include "cutlass/numeric_types.h"
-#include "hetu/flash_attn/src/flash.h"
-#include "hetu/flash_attn/src/static_switch.h"
+#include "flash.h"
+#include "static_switch.h"
 #include "hetu/core/ndarray.h"
 #include "hetu/core/memory_pool.h"
 #include "hetu/impl/stream/CUDAStream.h"
@@ -317,7 +317,8 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
     if (out_.is_defined()) {
         out = out_;
         HT_ASSERT(out->dtype() == q_dtype)
-        << "Output must have the same dtype as inputs";
+        << "Output must have the same dtype as inputs"
+        << out->dtype() << " " << q_dtype;
         HT_ASSERT(out->device().is_cuda()) 
         << "Output tensor must be on CUDA device";
         HT_ASSERT(out->stride(-1) == 1) 
@@ -388,7 +389,7 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
     params.rng_state = reinterpret_cast<uint64_t*>(rng_state->raw_data_ptr());
 
     if (p_dropout > 0.0)  {
-        params.philox_args = CUDARandomState(hetu::impl::GenNextRandomSeed(), counter_offset);
+        params.philox_args = std::pair<uint64_t, uint64_t>(hetu::impl::GenNextRandomSeed(), counter_offset);
     }
 
     run_mha_fwd(params, cuda_stream);
@@ -644,9 +645,9 @@ FlashAttnGradientCuda(const NDArray& dout,  // batch_size x seqlen_q x num_heads
     } else if( is_dropout ) {
         // See Note [Acquire lock when using random generators]
         // std::lock_guard<std::mutex> lock(gen->mutex_);
-        params.philox_args = CUDARandomState(hetu::impl::GenNextRandomSeed(), counter_offset);
-        params.rng_state[0] = params.philox_args.seed;
-        params.rng_state[1] = params.philox_args.offset;
+        params.philox_args = std::pair<uint64_t, uint64_t>(hetu::impl::GenNextRandomSeed(), counter_offset);
+        params.rng_state[0] = params.philox_args.first;
+        params.rng_state[1] = params.philox_args.second;
     }
 
     launch(params, cuda_stream, /*configure=*/false);
@@ -665,7 +666,7 @@ FlashAttnGradientCuda(const NDArray& dout,  // batch_size x seqlen_q x num_heads
     //     dk = dk.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
     //     dv = dv.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
     // }
-
+    
     NDArray::MarkUsedBy({dout, q, k, v, out,           
                          softmax_lse, rng_state, 
                          dq_, dk_, dv_}, stream);

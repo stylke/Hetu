@@ -43,10 +43,12 @@ inline HTStride Shape2Stride(const HTShape& shape) {
 class NDArrayMeta {
  public:
   NDArrayMeta() = default;
-  NDArrayMeta(const HTShape& shape, DataType dtype, const Device& device, const HTShape& dynamic_shape = {}) {
+  NDArrayMeta(const HTShape& shape, DataType dtype, const Device& device,
+              const HTStride& stride = {}, const HTShape& dynamic_shape = {}) {
     set_shape(shape);
     set_dtype(dtype);
     set_device(device);
+    set_stride(stride);
     set_dynamic_shape(dynamic_shape);
   }
   NDArrayMeta(const NDArrayMeta&) = default;
@@ -116,10 +118,13 @@ class NDArrayMeta {
     return *this;
   }
 
+  // NOTE: Set strides after shape because contiguous strides are set in `set_shape`.
   inline NDArrayMeta& set_stride(const HTStride& s) {
     HT_ASSERT(s.size() <= HT_MAX_NDIM)
       << "Currently we only support shape up to " << HT_MAX_NDIM
       << " dimensions. Got " << s.size() << ".";
+    if (s.size() == 0)
+      return *this;
     stride = s;
     return *this;
   }
@@ -128,6 +133,8 @@ class NDArrayMeta {
     HT_ASSERT(s.size() <= HT_MAX_NDIM)
       << "Currently we only support shape up to " << HT_MAX_NDIM
       << " dimensions. Got " << s.size() << ".";
+    if (s.size() == 0)
+      return *this;
     stride = std::move(s);
     return *this;
   }

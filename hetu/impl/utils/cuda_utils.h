@@ -144,5 +144,10 @@ NDArray to_int64_ndarray(const std::vector<int64_t>& vec,
                          DeviceIndex device_id);
 NDArray to_int64_ndarray(const int64_t* from, size_t n, DeviceIndex device_id);
 
+// Helper functions to copy bytes into NDArrays (blocking)
+NDArray to_byte_ndarray(const std::vector<uint8_t>& vec,
+                        DeviceIndex device_id);
+NDArray to_byte_ndarray(const uint8_t* from, size_t n, DeviceIndex device_id);
+
 } // namespace cuda
 } // namespace hetu

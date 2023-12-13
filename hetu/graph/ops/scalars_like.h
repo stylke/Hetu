@@ -38,6 +38,10 @@ class ScalarsLikeOpImpl : public OpInterface {
   }
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ScalarsLikeOpImpl&>(rhs);

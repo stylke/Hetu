@@ -210,14 +210,32 @@ class TensorDef : public shared_ptr_target {
   }
 
   bool is_contiguous() const {
+    if (ndim() < 1 || numel() <= 1) { return true; }
     int64_t ndim_ = ndim();
     int64_t contiguous_stride = 1;
-    for (int i = ndim_ - 1; i >= 0; i--) {
+    for (int64_t i = ndim_ - 1; i >= 0; i--) {
       if (stride(i) != contiguous_stride)
         return false;
       contiguous_stride *= shape(i);
     }
     return true;
+  }
+
+  // NOTE: Contiguous copy maybe removed in eager mode,
+  // so we need to further check if the contiguous copy
+  // is still there before using it.
+  bool maybe_have_contiguous_op() const {
+    return _contiguous_op_id != std::numeric_limits<OpId>::max();
+  }
+
+  OpId get_contiguous_op_id() const {
+    HT_ASSERT(maybe_have_contiguous_op())
+    << "Missing contiguous op of tensor " << name();
+    return _contiguous_op_id;
+  }
+
+  void set_contiguous_op_id(OpId contiguous_op_id) {
+    _contiguous_op_id = contiguous_op_id;
   }
 
   NDArray get_or_compute();
@@ -327,6 +345,7 @@ class TensorDef : public shared_ptr_target {
   bool _symbolic;
   SyShape _symbolic_shape;
 
+  OpId _contiguous_op_id{std::numeric_limits<OpId>::max()};
 };
 
 class Tensor : public shared_ptr_wrapper<TensorDef> {

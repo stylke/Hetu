@@ -12,7 +12,7 @@ class KLDivLossOp;
 class KLDivLossGradientOpImpl;
 class KLDivLossGradientOp;
 
-class KLDivLossOpImpl : public LossOpImpl {
+class KLDivLossOpImpl final : public LossOpImpl {
 
  public:
   KLDivLossOpImpl(ReductionType reduction = kMEAN)
@@ -44,11 +44,7 @@ protected:
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const KLDivLossOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction());
-    }
-    return false;
+    return LossOpImpl::operator==(rhs);
   }
 };
 
@@ -60,7 +56,7 @@ Tensor MakeKLDivLossOp(Tensor preds, Tensor labels,
                        const std::string& reduction = "mean",
                        OpMeta op_meta = OpMeta());
 
-class KLDivLossGradientOpImpl : public LossGradientOpImpl {
+class KLDivLossGradientOpImpl final : public LossGradientOpImpl {
 
  public:
   KLDivLossGradientOpImpl(ReductionType reduction = kMEAN)
@@ -83,11 +79,7 @@ class KLDivLossGradientOpImpl : public LossGradientOpImpl {
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const KLDivLossOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction());
-    }
-    return false;
+    return LossGradientOpImpl::operator==(rhs);
   }
 };
 

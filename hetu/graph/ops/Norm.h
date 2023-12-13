@@ -11,7 +11,7 @@ class NormOp;
 class NormGradientOpImpl;
 class NormGradientOp;
 
-class NormOpImpl : public OpInterface {
+class NormOpImpl final : public OpInterface {
  public:
   NormOpImpl(int64_t p = 1, int64_t dim = 0, bool keepdim = false)
   : OpInterface(quote(NormOp)),
@@ -71,6 +71,10 @@ class NormOpImpl : public OpInterface {
   bool _keepdim;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const NormOpImpl&>(rhs);
@@ -85,7 +89,7 @@ class NormOpImpl : public OpInterface {
 Tensor MakeNormOp(Tensor input, int64_t p = 1, int64_t dim = 0, 
                   bool keepdim = false, OpMeta op_meta = OpMeta());
 
-class NormGradientOpImpl : public OpInterface {
+class NormGradientOpImpl final : public OpInterface {
  public:
   NormGradientOpImpl(int64_t p, int64_t dim)
   : OpInterface(quote(NormGradientOp)),
@@ -120,6 +124,10 @@ class NormGradientOpImpl : public OpInterface {
   int64_t _dim;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const NormGradientOpImpl&>(rhs);

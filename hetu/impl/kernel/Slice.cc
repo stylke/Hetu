@@ -7,6 +7,8 @@
 namespace hetu {
 namespace impl {
 
+// Out-of-place version of slice and its gradient
+/* It is replaced with in-place version. */
 template <typename spec_t>
 void slice_cpu(const spec_t* input, spec_t* output, const int64_t* output_shape,
                const int64_t* input_shape, const int64_t* begin_pos,

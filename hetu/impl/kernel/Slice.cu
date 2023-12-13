@@ -7,6 +7,8 @@
 namespace hetu {
 namespace impl {
 
+// Out-of-place version of slice and its gradient
+/* It is replaced with in-place version. */
 template <typename spec_t>
 __global__ void slice_kernel(const spec_t* input, spec_t* output,
                              const int64_t* output_shape,
@@ -70,7 +72,8 @@ void SliceCuda(const NDArray& input, NDArray& output, const HTShape& begin_pos,
   size_t o_size = 1;
   for (int i = 0; i < ndim; ++i) {
     HT_ASSERT(begin_pos[i] >= 0);
-    HT_ASSERT(begin_pos[i] + output->shape(i) <= input->shape(i));
+    HT_ASSERT(begin_pos[i] + output->shape(i) <= input->shape(i))
+    << begin_pos[i] << "," << output->shape(i) << "," << input->shape(i);
     o_size *= output->shape(i);
   }
   

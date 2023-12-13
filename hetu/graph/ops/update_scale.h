@@ -8,7 +8,7 @@ namespace graph {
 class UpdateScaleOpImpl;
 class UpdateScaleOp;
 
-class UpdateScaleOpImpl : public OpInterface {
+class UpdateScaleOpImpl final : public OpInterface {
  private:
   friend class UpdateScaleOp;
   struct constrcutor_access_key {};

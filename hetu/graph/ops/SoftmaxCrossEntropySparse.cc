@@ -96,8 +96,6 @@ Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_
                                        ReductionType reduction,
                                        OpMeta op_meta) {
   TensorList inputs = {preds, labels};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
     std::make_shared<SoftmaxCrossEntropySparseOpImpl>(ignored_index, reduction),
     std::move(inputs),
@@ -108,8 +106,6 @@ Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_
                                        const std::string& reduction,
                                        OpMeta op_meta) {
   TensorList inputs = {preds, labels};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
     std::make_shared<SoftmaxCrossEntropySparseOpImpl>(ignored_index, Str2ReductionType(reduction)),
     std::move(inputs),

@@ -3,6 +3,7 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
@@ -10,7 +11,9 @@ namespace impl {
 template <typename spec_t>
 __global__ void roll_kernel(const spec_t* input, spec_t* output, size_t size,
                             int rank, const int64_t* shifts,
-                            const int64_t* strides, const int64_t* sizes) {
+                            const int64_t* strides, const int64_t* sizes,
+                            const OffsetCalculator* in_offset_calculator,
+                            const OffsetCalculator* out_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -26,7 +29,9 @@ __global__ void roll_kernel(const spec_t* input, spec_t* output, size_t size,
     else
       output_idx += shifts[i] * strides[i];
   }
-  output[output_idx] = input[idx];
+  auto in_offset = in_offset_calculator->get(idx);
+  auto out_offset = out_offset_calculator->get(output_idx);
+  output[out_offset] = input[in_offset];
 }
 
 void RollCuda(const NDArray& input, const HTShape& shift, const HTAxes& axis,
@@ -73,6 +78,12 @@ void RollCuda(const NDArray& input, const HTShape& shift, const HTAxes& axis,
   dim3 blocks, threads;
   threads.x = MIN(len, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(len, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
+  NDArray in_offset_calculator_arr, out_offset_calculator_arr;
+  OffsetCalculator *in_offset_calculator, *out_offset_calculator;
+  std::tie(in_offset_calculator_arr, in_offset_calculator) =
+    AllocOffsetCalculator(input, stream);
+  std::tie(out_offset_calculator_arr, out_offset_calculator) = 
+    AllocOffsetCalculator(output, stream);
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "RollCuda", [&]() {
       roll_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
@@ -80,10 +91,11 @@ void RollCuda(const NDArray& input, const HTShape& shift, const HTAxes& axis,
         len, nums, 
         shifts_arr->data_ptr<int64_t>(), 
         strides_arr->data_ptr<int64_t>(), 
-        sizes_arr->data_ptr<int64_t>());
+        sizes_arr->data_ptr<int64_t>(),
+        in_offset_calculator, out_offset_calculator);
     });
-  NDArray::MarkUsedBy({input, output, shifts_arr, strides_arr, sizes_arr},
-                      stream);
+  NDArray::MarkUsedBy({input, output, shifts_arr, strides_arr, sizes_arr,
+                       in_offset_calculator_arr, out_offset_calculator_arr}, stream);
 }
 
 } // namespace impl

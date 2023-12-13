@@ -88,8 +88,6 @@ Tensor MakeKLDivLossOp(Tensor preds, Tensor labels,
                        ReductionType reduction,
                        OpMeta op_meta) {
   TensorList inputs = {preds, labels};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<KLDivLossOpImpl>(reduction),
           std::move(inputs),
@@ -100,8 +98,6 @@ Tensor MakeKLDivLossOp(Tensor preds, Tensor labels,
                        const std::string& reduction,
                        OpMeta op_meta) {
   TensorList inputs = {preds, labels};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<KLDivLossOpImpl>(Str2ReductionType(reduction)),
           std::move(inputs),
