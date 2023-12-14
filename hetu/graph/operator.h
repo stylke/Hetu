@@ -362,15 +362,29 @@ class OpDef : public shared_ptr_target {
       << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
       << ", got micro batch id: " << micro_batch_id;
     BlockOrSyncAllInputs(micro_batch_id);
-    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
-      << ", the input vals are (may not sync) " << inputs;
+    // precision debug
+    /*
+    NDArrayList input_sums;
+    for (auto& input : inputs) {
+      input_sums.push_back(NDArray::sum(input));
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
+      << ", the input vals are (may not sync) " << input_sums;
+    */
     instantiation_ctx().start[micro_batch_id]->Record(stream());
-    auto ret = _body->Compute(get_self(), inputs, runtime_ctx);
+    auto rets = _body->Compute(get_self(), inputs, runtime_ctx);
     instantiation_ctx().stop[micro_batch_id]->Record(stream());
+    // precision debug
+    /*
     // stream().Sync();
-    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": compute op: " << name()
-      << ", the result is (may not sync) " << ret;
-    return ret;
+    NDArrayList ret_sums;
+    for (auto& ret : rets) {
+      ret_sums.push_back(NDArray::sum(ret));
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": compute op: " << name()
+      << ", the result is (may not sync) " << ret_sums;
+    */
+    return rets;
   }
 
   void Sync(size_t micro_batch_id = 0) {

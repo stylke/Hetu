@@ -76,6 +76,16 @@ void LayerNormCuda(const NDArray& in_arr, const NDArray& ln_scale,
 
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+
+  int ndim = in_arr->ndim();
+  int base_dim = 1, last_dim = 1;
+  for (int i = 0; i < ndim - reduce_dims; ++i)
+    base_dim *= in_arr->shape(i);
+  for (int i = ndim - reduce_dims; i < ndim; ++i)
+    last_dim *= in_arr->shape(i);
+  dim3 blocks, threads;
+  threads.x = (last_dim >= 1024 ? 1024 : 64);
+  blocks.x = base_dim;
   NDArray in_offset_calculator_arr, scale_offset_calculator_arr,
           bias_offset_calculator_arr, mean_offset_calculator_arr,
           var_offset_calculator_arr, out_offset_calculator_arr;
@@ -94,16 +104,6 @@ void LayerNormCuda(const NDArray& in_arr, const NDArray& ln_scale,
     AllocOffsetCalculator(var_arr, stream);
   std::tie(out_offset_calculator_arr, out_offset_calculator) = 
     AllocOffsetCalculator(out_arr, stream);
-
-  int ndim = in_arr->ndim();
-  int base_dim = 1, last_dim = 1;
-  for (int i = 0; i < ndim - reduce_dims; ++i)
-    base_dim *= in_arr->shape(i);
-  for (int i = ndim - reduce_dims; i < ndim; ++i)
-    last_dim *= in_arr->shape(i);
-  dim3 blocks, threads;
-  threads.x = (last_dim >= 1024 ? 1024 : 64);
-  blocks.x = base_dim;
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "LayerNormCuda", [&]() {
       layer_norm_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
@@ -111,8 +111,8 @@ void LayerNormCuda(const NDArray& in_arr, const NDArray& ln_scale,
         ln_bias->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(), eps,
         last_dim, in_offset_calculator, scale_offset_calculator,
-        bias_offset_calculator, mean_offset_calculator,
-        var_offset_calculator, out_offset_calculator);
+        bias_offset_calculator, out_offset_calculator,
+        mean_offset_calculator, var_offset_calculator);
     });
   NDArray::MarkUsedBy({in_arr, ln_scale, ln_bias, mean_arr, var_arr, out_arr,
                       in_offset_calculator_arr, scale_offset_calculator_arr,
@@ -248,8 +248,10 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
 
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
   int ndim = out_grads->ndim();
+  // HT_ASSERT(ndim == 4);
   size_t total_elements = 1;
 
   int last_2dim = in_arr->shape(ndim - 1) * in_arr->shape(ndim - 2);
@@ -274,6 +276,7 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
     return;
   NDArray::sum(out_grads, reduce_axes_before, true, stream.stream_index(), grad_bias);
   NDArray gscale_ = NDArray::empty_like(in_arr);
+
   NDArray out_grad_offset_calculator_arr, in_offset_calculator_arr,
           mean_offset_calculator_arr, var_offset_calculator_arr,
           gscale_offset_calculator_arr, scale_offset_calculator_arr,
@@ -300,7 +303,7 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   HT_DISPATCH_FLOATING_TYPES(
-    in_arr->dtype(), spec_t, "CalculateGScaleCuda", [&]() {
+    in_arr->dtype(), spec_t, "CalculateGradCuda", [&]() {
       calculate_gscale<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
@@ -308,14 +311,13 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
         out_grad_offset_calculator, in_offset_calculator,
         mean_offset_calculator, var_offset_calculator,
         gscale_offset_calculator);
-    });
-  NDArray::sum(gscale_, reduce_axes_before, true, stream.stream_index(), grad_scale);
-  NDArray scale_out_grads_ = NDArray::mul(out_grads, ln_scale, stream.stream_index());
-  NDArray db_ = NDArray::sum(scale_out_grads_, reduce_axes_after, true, stream.stream_index());
-  NDArray dy_mul_x_ = NDArray::mul(scale_out_grads_, in_arr, stream.stream_index());
-  NDArray ds_ = NDArray::sum(dy_mul_x_, reduce_axes_after, true, stream.stream_index());
-  HT_DISPATCH_FLOATING_TYPES(
-    in_arr->dtype(), spec_t, "LayerNormGradCuda", [&]() {
+      
+      NDArray::sum(gscale_, reduce_axes_before, true, stream.stream_index(), grad_scale);
+      NDArray scale_out_grads_ = NDArray::mul(out_grads, ln_scale, stream.stream_index());
+      NDArray db_ = NDArray::sum(scale_out_grads_, reduce_axes_after, true, stream.stream_index());
+      NDArray dy_mul_x_ = NDArray::mul(scale_out_grads_, in_arr, stream.stream_index());
+      NDArray ds_ = NDArray::sum(dy_mul_x_, reduce_axes_after, true, stream.stream_index());
+
       calculate_grad_kernel_layer<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(), ln_scale->data_ptr<spec_t>(),
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
