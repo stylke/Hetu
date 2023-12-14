@@ -391,9 +391,17 @@ void BatchedISendIRecvOpImpl::DoCompute(Operator& op,
       << "Data type mismatched for ISend communication: " << input->dtype()
       << " vs. " << op->input(i)->dtype();
   }
+  // NOTE: For communication ops, we insert Contiguous op during `MakeOp()`
+  // to ensure inputs are contiguous. But for BatchedISendIRecv, we found
+  // that inputs may be non-contiguous, which is weird. So we make them
+  // contiguous again here.
+  NDArrayList contig_inputs;
+  std::transform(inputs.begin(), inputs.end(), std::back_inserter(contig_inputs), [&](const NDArray& input) {
+    return input->is_contiguous() ? input : NDArray::contiguous(input, op->instantiation_ctx().stream_index);
+  });
 
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), 
-                                  hetu::impl::BatchedISendIRecv, inputs, _dst_devices, outputs, 
+                                  hetu::impl::BatchedISendIRecv, contig_inputs, _dst_devices, outputs, 
                                   _src_devices, _comm_devices, op->instantiation_ctx().stream());
 }
 
