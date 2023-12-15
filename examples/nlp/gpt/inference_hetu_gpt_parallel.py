@@ -114,21 +114,21 @@ def inference(args):
                        )
 
     # ---- Hetu model definition ----
-    model = GPTLMHeadModel(config=config, device_group=all_device_group)
-    
+    model = GPTLMHeadModel(config=config, device_group=all_device_group)   
+
     # ---- Load tokenizer ----
     tokenizer = GPT2Tokenizer.from_pretrained('./checkpoint/HuggingFace')
     
     # ---- Load checkpoint ----
-    load_checkpoint(model, "./checkpoint/HuggingFace", config=config, device_index=local_device_index)
-    print("Load the model successfully, the components are:", model.state_dict().keys())
+    load_checkpoint(model, "./checkpoint/HuggingFace", config=config, local_device=local_device)
+    # print("Load the model successfully, the components are:", model.state_dict().keys())
     # You could also see the values by model.state_dict().values()
 
     assert config.num_micro_batches == 1, f'2d parallel must set num_micro_batches = 1, got {config.num_micro_batches}'
     batch_size = config.global_batch_size // config.dp
-    # there will be some random bugs if set max_len larger (still working on it)
-    max_len = 20 # dynamic seq_len will pad to max_len
     print(f'{local_device}: 2d parallel config: global_batch_size={config.global_batch_size}, dp={config.dp}, batch_size={batch_size}')
+    
+    max_len = 50 # dynamic seq_len will pad to max_len
 
     # ---- Build graph ----
     # Placeholders for kv_cache

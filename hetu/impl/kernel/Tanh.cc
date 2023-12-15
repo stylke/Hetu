@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
@@ -19,12 +20,54 @@ void tanh_cpu(const spec_t* input, size_t size, spec_t* output) {
 }
 
 template <typename spec_t>
+void tanh_cpu(const spec_t* input, size_t size, spec_t* output,
+              int64_t ndims, const int64_t* stride, const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; idx++) {
+    int64_t i_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    output[i_idx] = std::tanh(input[i_idx]);
+  }
+}
+
+template <typename spec_t>
+void tanh_cpu(const spec_t* input, size_t size, spec_t* output,
+              int64_t ndims, const int64_t* stride, const int64_t* stride_out,
+              const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; idx++) {
+    int64_t i_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    int64_t o_idx = hetu::impl::get_index(idx, ndims, stride_out, c_shape);
+    output[o_idx] = std::tanh(input[i_idx]);
+  }
+}
+
+template <typename spec_t>
 void tanh_gradient_cpu(const spec_t* input, const spec_t* output_grad,
                        size_t size, spec_t* output) {
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static)
 #endif
   for (size_t idx = 0; idx < size; ++idx) {
+    output[idx] = (1 - input[idx] * input[idx]) * output_grad[idx];
+  }
+}
+
+template <typename spec_t>
+void tanh_gradient_cpu(const spec_t* input, const spec_t* output_grad,
+                       size_t size, spec_t* output, 
+                       int64_t ndims, const int64_t* stride, const int64_t* stride_out,
+                       const int64_t* stride_in, const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; ++idx) {
+    int64_t o_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    int64_t og_idx = hetu::impl::get_index(idx, ndims, stride_out, c_shape);
+    int64_t ig_idx = hetu::impl::get_index(idx, ndims, stride_in, c_shape);
     output[idx] = (1 - input[idx] * input[idx]) * output_grad[idx];
   }
 }
@@ -43,7 +86,8 @@ void TanhCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output, size]() {
           dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-          auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+          auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
+          auto mat_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
           auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
           auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 
@@ -60,8 +104,8 @@ void TanhCpu(const NDArray& input, NDArray& output, const Stream& stream) {
           engine_stream.wait();
           engine_stream.wait();
         },"Tanh");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void TanhGradientCpu(const NDArray& input, const NDArray& output_grad,
@@ -77,18 +121,25 @@ void TanhGradientCpu(const NDArray& input, const NDArray& output_grad,
     return;
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "TanhGradientCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
         [input, output_grad, input_grad, size]() {
-        tanh_gradient_cpu<spec_t>(input->data_ptr<spec_t>(),
-                                  output_grad->data_ptr<spec_t>(), size,
-                                  input_grad->data_ptr<spec_t>());
+        if (input->is_contiguous() && output_grad->is_contiguous() && input_grad->is_contiguous()) {
+          tanh_gradient_cpu<spec_t>(input->data_ptr<spec_t>(),
+                                    output_grad->data_ptr<spec_t>(), size,
+                                    input_grad->data_ptr<spec_t>());
+        }
+        else {
+          tanh_gradient_cpu<spec_t>(input->data_ptr<spec_t>(),
+                                    output_grad->data_ptr<spec_t>(), size,
+                                    input_grad->data_ptr<spec_t>(), input->ndim(),
+                                    input->stride().data(), output_grad->stride().data(),
+                                    input_grad->stride().data(), input->shape().data());
+        } 
         },"TanhGradient");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

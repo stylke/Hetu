@@ -11,7 +11,7 @@ class PadOp;
 class PadGradientOpImpl;
 class PadGradientOp;
 
-class PadOpImpl : public OpInterface {
+class PadOpImpl final : public OpInterface {
  public:
   PadOpImpl(const HTShape& paddings,
             const std::string& mode, double constant)
@@ -77,6 +77,10 @@ class PadOpImpl : public OpInterface {
   double _constant;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const PadOpImpl&>(rhs);
@@ -91,7 +95,7 @@ class PadOpImpl : public OpInterface {
 Tensor MakePadOp(Tensor input, const HTShape& paddings, std::string mode, double constant,
                  OpMeta op_meta = OpMeta());
 
-class PadGradientOpImpl : public OpInterface {
+class PadGradientOpImpl final : public OpInterface {
 
  public:
   PadGradientOpImpl(const HTShape& paddings, const std::string& mode)
@@ -135,6 +139,10 @@ class PadGradientOpImpl : public OpInterface {
   HTShape _paddings;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const PadGradientOpImpl&>(rhs);

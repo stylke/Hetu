@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/core/symbol.h"
 
 namespace hetu {
 namespace graph {
@@ -11,24 +12,41 @@ class ArrayReshapeOp;
 class ArrayReshapeGradientOpImpl;
 class ArrayReshapeGradientOp;
 
-class ArrayReshapeOpImpl : public OpInterface {
+// reshape算子虽然依赖shape，但不需要symbolic方法
+// 原因是其可以通过-1去推断维度的大小
+// 2023.12.9修正：依然是需要symbolic shape的
+// 因为可能会有seq_len以及batch_size同时发生变化的情况
+class ArrayReshapeOpImpl final : public OpInterface {
  private:
   friend class ArrayReshapeOp;
   struct constrcutor_access_key {};
 
  public:
-  ArrayReshapeOpImpl(const HTShape& output_shape, int64_t padding_axis = -1, bool is_inplace = false)
+  // symbolic shape constructor
+  ArrayReshapeOpImpl(const SyShape& output_shape, int64_t padding_axis = -1, bool is_inplace = false)
   : OpInterface(quote(ArrayReshapeOp)),
      _global_output_shape(output_shape), 
      _padding_axis(padding_axis), 
      _inplace(is_inplace) { // default is global output shape, if distributed, then turn into local output shape
   }
+  // fixed shape constructor
+  ArrayReshapeOpImpl(const HTShape& output_shape, int64_t padding_axis = -1, bool is_inplace = false)
+  : OpInterface(quote(ArrayReshapeOp)),
+     _global_output_shape(output_shape.begin(), output_shape.end()), 
+     _padding_axis(padding_axis), 
+     _inplace(is_inplace) { // default is global output shape, if distributed, then turn into local output shape
+  }
 
   HTShape get_output_shape() const {
+    return get_HTShape_from_SyShape(_global_output_shape);
+  }
+
+  const SyShape& get_symbolic_output_shape() const {
     return _global_output_shape;
   }
 
-  int64_t padding_axis() const {
+  // deprecated: only used in gpt inference, before symbolic shape is realized
+  int64_t get_padding_axis() const {
     return _padding_axis;
   }
 
@@ -42,6 +60,7 @@ class ArrayReshapeOpImpl : public OpInterface {
       numel *= d;
     }
     HTShape output_shape = get_output_shape();
+    // HT_LOG_DEBUG << "ArrayReshapeOpImpl get_output_shape(), output_shape is" << output_shape << " and input shape is " << input_shape;
     int index = -1;
     int numel_output = 1;
     for (int i = 0; i < output_shape.size(); i++) {
@@ -55,6 +74,10 @@ class ArrayReshapeOpImpl : public OpInterface {
     }
     if (index != -1) {
       output_shape[index] = numel / numel_output;
+    }
+    else {
+      HT_ASSERT(numel_output == numel) << "ArrayReshapeOpImpl: the numel of input and output should be equal, "
+        << "but input shape is " << input_shape << " and output shape is " << output_shape;
     }
     return output_shape;
   }
@@ -160,14 +183,19 @@ class ArrayReshapeOpImpl : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
+  // deprecated: only used in gpt inference, before symbolic shape is realized
   HTShapeList DoInferDynamicShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
-  HTShape _global_output_shape;
+  SyShape _global_output_shape;
   // HTShape _local_output_shape;
   int64_t _padding_axis;
   bool _inplace;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ArrayReshapeOpImpl&>(rhs);
@@ -178,16 +206,22 @@ class ArrayReshapeOpImpl : public OpInterface {
   }
 };
 
+// fixed shape
 Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
                           OpMeta op_meta = OpMeta());
 
+// symbolic shape
+Tensor MakeArrayReshapeOp(Tensor input, const SyShape& output_shape,
+                          OpMeta op_meta = OpMeta());
+
+// deprecated: only used in gpt inference, before symbolic shape is realized
 Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
                           int64_t padding_axis, OpMeta op_meta = OpMeta());
 
 Tensor MakeViewOp(Tensor input, const HTShape& output_shape,
                   OpMeta op_meta = OpMeta());
 
-class ArrayReshapeGradientOpImpl : public OpInterface {
+class ArrayReshapeGradientOpImpl final : public OpInterface {
 
  public:
   ArrayReshapeGradientOpImpl(bool is_inplace = false, const HTShape& in_shape = {})
@@ -224,6 +258,10 @@ class ArrayReshapeGradientOpImpl : public OpInterface {
   HTShape _input_shape;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ArrayReshapeGradientOpImpl&>(rhs);

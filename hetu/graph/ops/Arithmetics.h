@@ -2,9 +2,13 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Unary.h"
 
 namespace hetu {
 namespace graph {
+
+class BinaryOpImpl;
+class BinaryGradientOpImpl;
 
 class AddElewiseOpImpl;
 class AddByConstOpImpl;
@@ -29,16 +33,115 @@ class SubElewiseGradientOpImpl;
 class MulElewiseGradientOpImpl;
 class DivElewiseGradientOpImpl;
 
-class AddElewiseOpImpl final: public OpInterface {
+class BinaryOpImpl : public OpInterface {
+ protected:
+  BinaryOpImpl(OpType&& op_type, bool inplace)
+  : OpInterface(std::move(op_type)), _inplace(inplace) {}
+ 
  public:
-  AddElewiseOpImpl()
-  : OpInterface(quote(AddElewiseOp)) {
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
+  inline bool inplace() const {
+    return _inplace;
+  }
+
+  inline uint64_t inplace_pos() const {
+    return 0;
+  }
+
+  inline bool inplace_at(size_t input_position) const override {
+    return inplace() && input_position == inplace_pos();
+  }
+
+  inline uint64_t op_indicator() const noexcept override {
+    return _inplace ? INPLACE_OP : 0;
+  }
+
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const BinaryOpImpl&>(rhs);
+      return inplace() == rhs_.inplace();
+    }
+    return false;
+  }
+
+ protected:
+  bool _inplace;
+};
+
+class BinaryGradientOpImpl : public OpInterface {
+ protected:
+  BinaryGradientOpImpl(OpType&& op_type, HTAxes axe,
+                       HTKeepDims keep_dims, int index)
+  : OpInterface(std::move(op_type)),
+    _add_axes(axe),
+    _keep_dims(keep_dims),
+    _index(index) {}
+ 
+ public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
+  void set_axes(HTAxes axe) {
+    _add_axes = axe;
+  }
+
+  void set_keep_dims(HTKeepDims keep_dims) {
+    _keep_dims = keep_dims;
+  }
+
+  HTAxes axes() const {
+    return _add_axes;
+  }
+
+  HTKeepDims keep_dims() const{
+    return _keep_dims;
+  }
+
+  int index() const {
+    return _index;
+  }
+
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const BinaryGradientOpImpl&>(rhs);
+      return (index() == rhs_.index() &&
+              keep_dims() == rhs_.keep_dims() &&
+              axes() == rhs_.axes());
+    }
+    return false;
+  }
+
+ protected:
+  std::vector<NDArrayMeta> 
+  DoInferMeta(const TensorList& inputs) const override {
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    NDArrayMeta output_meta = inputs[2]->meta();
+    return {output_meta};
+  }
+
+  HTAxes _add_axes;
+  HTKeepDims _keep_dims;
+  int _index;
+};
+
+class AddElewiseOpImpl final : public BinaryOpImpl {
+ public:
+  AddElewiseOpImpl(bool inplace)
+  : BinaryOpImpl(quote(AddElewiseOp), inplace) {
   }
 
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
     HTShape shape = Broadcast(inputs[0]->shape(), inputs[1]->shape());
+    if (inplace()) 
+      HT_ASSERT(shape == inputs[0]->shape())
+      << "inplace operator's output shape should be the same as input shape, but got "
+      << shape << " and " << inputs[0]->shape();
     // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(shape)
@@ -56,17 +159,18 @@ class AddElewiseOpImpl final: public OpInterface {
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
+
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return BinaryOpImpl::operator==(rhs);
   }
 };
 
-class AddByConstOpImpl : public OpInterface {
+class AddByConstOpImpl final : public BinaryOpImpl {
  public:
-  AddByConstOpImpl(double value)
-  : OpInterface(quote(AddByConstOp)), _value(value) {
+  AddByConstOpImpl(double value, bool inplace)
+  : BinaryOpImpl(quote(AddByConstOp), inplace), _value(value) {
   }
 
   inline double const_value() const {
@@ -87,13 +191,13 @@ protected:
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
   
   double _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (BinaryOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const AddByConstOpImpl&>(rhs);
       return const_value() == rhs_.const_value();
     }
@@ -101,17 +205,20 @@ protected:
   }
 };
 
-class SubElewiseOpImpl : public OpInterface {
+class SubElewiseOpImpl final : public BinaryOpImpl {
  public:
-  SubElewiseOpImpl()
-  : OpInterface(quote(SubElewiseOp)) {
+  SubElewiseOpImpl(bool inplace)
+  : BinaryOpImpl(quote(SubElewiseOp), inplace) {
   }
 
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
     HTShape shape = Broadcast(inputs[0]->shape(), inputs[1]->shape());
-    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    if (inplace()) 
+      HT_ASSERT(shape == inputs[0]->shape())
+      << "inplace operator's output shape should be the same as input shape, but got "
+      << shape << " and " << inputs[0]->shape();
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(shape)
                                            .set_device(inputs[0]->device());
@@ -128,17 +235,18 @@ class SubElewiseOpImpl : public OpInterface {
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
+
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return BinaryOpImpl::operator==(rhs);
   }
 };
 
-class SubByConstOpImpl : public OpInterface {
+class SubByConstOpImpl final : public BinaryOpImpl {
  public:
-  SubByConstOpImpl(double value)
-  : OpInterface(quote(SubByConstOp)), _value(value) {
+  SubByConstOpImpl(double value, bool inplace)
+  : BinaryOpImpl(quote(SubByConstOp), inplace), _value(value) {
   }
 
   inline double const_value() const {
@@ -159,13 +267,13 @@ protected:
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
   
   double _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (BinaryOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const SubByConstOpImpl&>(rhs);
       return const_value() == rhs_.const_value();
     }
@@ -173,10 +281,10 @@ protected:
   }
 };
 
-class SubFromConstOpImpl : public OpInterface {
+class SubFromConstOpImpl final : public BinaryOpImpl {
   public:
-  SubFromConstOpImpl(double value)
-  : OpInterface(quote(SubFromConstOp)), _value(value) {
+  SubFromConstOpImpl(double value, bool inplace)
+  : BinaryOpImpl(quote(SubFromConstOp), inplace), _value(value) {
   }
 
   inline double const_value() const {
@@ -197,13 +305,13 @@ protected:
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
   
   double _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (BinaryOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const SubFromConstOpImpl&>(rhs);
       return const_value() == rhs_.const_value();
     }
@@ -211,46 +319,43 @@ protected:
   }
 };
 
-class NegateOpImpl : public OpInterface {
+class NegateOpImpl final : public UnaryOpImpl {
  public:
-  NegateOpImpl()
-  : OpInterface(quote(NegateOp)) {
+  NegateOpImpl(bool inplace)
+  : UnaryOpImpl(quote(NegateOp), inplace) {
   }
 
 protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    NDArrayMeta output_meta = inputs.front()->meta();
-    return {output_meta};
-  }
-
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
-                           RuntimeContext& runtime_ctx) const override;
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
-  
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return UnaryOpImpl::operator==(rhs);
   }
 };
 
-class MulElewiseOpImpl : public OpInterface {
+class MulElewiseOpImpl final : public BinaryOpImpl {
 public:
-  MulElewiseOpImpl()
-  : OpInterface(quote(MulElewiseOp)) {
+  MulElewiseOpImpl(bool inplace)
+  : BinaryOpImpl(quote(MulElewiseOp), inplace) {
   }
 
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
     HTShape shape = Broadcast(inputs[0]->shape(), inputs[1]->shape());
-    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    if (inplace()) 
+      HT_ASSERT(shape == inputs[0]->shape())
+      << "inplace operator's output shape should be the same as input shape, but got "
+      << shape << " and " << inputs[0]->shape();
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(shape)
                                            .set_device(inputs[0]->device());
@@ -267,17 +372,18 @@ public:
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
+
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return BinaryOpImpl::operator==(rhs);
   }
 };
 
-class MulByConstOpImpl : public OpInterface {
+class MulByConstOpImpl final : public BinaryOpImpl {
  public:
-  MulByConstOpImpl(double value)
-  : OpInterface(quote(MulByConstOp)), _value(value) {
+  MulByConstOpImpl(double value, bool inplace)
+  : BinaryOpImpl(quote(MulByConstOp), inplace), _value(value) {
   }
 
   inline double const_value() const {
@@ -298,13 +404,13 @@ protected:
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
   
   double _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (BinaryOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const MulByConstOpImpl&>(rhs);
       return const_value() == rhs_.const_value();
     }
@@ -312,17 +418,20 @@ protected:
   }
 };
 
-class DivElewiseOpImpl : public OpInterface {
+class DivElewiseOpImpl final : public BinaryOpImpl {
  public:
-  DivElewiseOpImpl()
-  : OpInterface(quote(DivElewiseOp)) {
+  DivElewiseOpImpl(bool inplace)
+  : BinaryOpImpl(quote(DivElewiseOp), inplace) {
   }
 
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
     HTShape shape = Broadcast(inputs[0]->shape(), inputs[1]->shape());
-    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    if (inplace()) 
+      HT_ASSERT(shape == inputs[0]->shape())
+      << "inplace operator's output shape should be the same as input shape, but got "
+      << shape << " and " << inputs[0]->shape();
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(shape)
                                            .set_device(inputs[0]->device());
@@ -339,17 +448,19 @@ class DivElewiseOpImpl : public OpInterface {
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
+
+  bool _inplace;
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return BinaryOpImpl::operator==(rhs);
   }
 };
 
-class DivByConstOpImpl : public OpInterface {
+class DivByConstOpImpl final : public BinaryOpImpl {
  public:
-  DivByConstOpImpl(double value)
-  : OpInterface(quote(DivByConstOp)), _value(value) {
+  DivByConstOpImpl(double value, bool inplace)
+  : BinaryOpImpl(quote(DivByConstOp), inplace), _value(value) {
   }
 
   inline double const_value() const {
@@ -370,13 +481,13 @@ protected:
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
   
   double _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (BinaryOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const DivByConstOpImpl&>(rhs);
       return const_value() == rhs_.const_value();
     }
@@ -385,10 +496,10 @@ protected:
 };
 
 
-class DivFromConstOpImpl : public OpInterface {
+class DivFromConstOpImpl final : public BinaryOpImpl {
  public:
-  DivFromConstOpImpl(double value)
-  : OpInterface(quote(DivFromConstOp)), _value(value) {
+  DivFromConstOpImpl(double value, bool inplace)
+  : BinaryOpImpl(quote(DivFromConstOp), inplace), _value(value) {
   }
 
   inline double const_value() const {
@@ -409,13 +520,13 @@ protected:
                            RuntimeContext& runtime_ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const override;
   
   double _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
+    if (BinaryOpImpl::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const DivFromConstOpImpl&>(rhs);
       return const_value() == rhs_.const_value();
     }
@@ -423,71 +534,35 @@ protected:
   }
 };
 
-class ReciprocalOpImpl : public OpInterface {
+class ReciprocalOpImpl final : public UnaryOpImpl {
  public:
-  ReciprocalOpImpl()
-  : OpInterface(quote(ReciprocalOp)) {
+  ReciprocalOpImpl(bool inplace)
+  : UnaryOpImpl(quote(ReciprocalOp), inplace) {
   }
 
 protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    NDArrayMeta output_meta = inputs.front()->meta();
-    return {output_meta};
-  }
-
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
 
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
-                           RuntimeContext& runtime_ctx) const override;
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return UnaryOpImpl::operator==(rhs);
   }
 };
 
-class AddElewiseGradientOpImpl : public OpInterface {
+class AddElewiseGradientOpImpl final : public BinaryGradientOpImpl {
  public:
   AddElewiseGradientOpImpl(HTAxes axe, HTKeepDims keep_dims, int index)
-  : OpInterface(quote(AddElewiseGradientOp)),
-  _add_axes(axe),
-  _keep_dims(keep_dims),
-  _index(index) {
-  }
-
-  void set_axes(HTAxes axe) {
-    _add_axes = axe;
-  }
-
-  void set_keep_dims(HTKeepDims keep_dims) {
-    _keep_dims = keep_dims;
-  }
-
-  HTAxes axes() const {
-    return _add_axes;
-  }
-
-  HTKeepDims keep_dims() const{
-    return _keep_dims;
-  }
-
-  int index() const {
-    return _index;
-  }
+  : BinaryGradientOpImpl(quote(AddElewiseGradientOp), axe, keep_dims, index) {}
 
  protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
-    NDArrayMeta output_meta = inputs[2]->meta();
-    return {output_meta};
-  }
-
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;  
 
@@ -496,61 +571,19 @@ class AddElewiseGradientOpImpl : public OpInterface {
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
-  HTAxes _add_axes;
-
-  HTKeepDims _keep_dims;
-
-  int _index;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const AddElewiseGradientOpImpl&>(rhs);
-      return (index() == rhs_.index() 
-              && keep_dims() == rhs_.keep_dims()
-              && axes() == rhs_.axes());
-    }
-    return false;
+    return BinaryGradientOpImpl::operator==(rhs);
   }
 };
 
-class SubElewiseGradientOpImpl : public OpInterface {
+class SubElewiseGradientOpImpl final : public BinaryGradientOpImpl {
  public:
   SubElewiseGradientOpImpl(HTAxes axe, HTKeepDims keep_dims, int index)
-  : OpInterface(quote(SubElewiseGradientOp)),
-  _add_axes(axe),
-  _keep_dims(keep_dims),
-  _index(index) {
-  }
-
-  void set_axes(HTAxes axe) {
-    _add_axes = axe;
-  }
-
-  void set_keep_dims(HTKeepDims keep_dims) {
-    _keep_dims = keep_dims;
-  }
-
-  HTAxes axes() const {
-    return _add_axes;
-  }
-
-  HTKeepDims keep_dims() const{
-    return _keep_dims;
-  }
-
-  int index() const {
-    return _index;
-  }
+  : BinaryGradientOpImpl(quote(SubElewiseGradientOp), axe, keep_dims, index) {}
 
  protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
-    NDArrayMeta output_meta = inputs[2]->meta();
-    return {output_meta};
-  }
-
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;
 
@@ -559,61 +592,19 @@ class SubElewiseGradientOpImpl : public OpInterface {
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
-  HTAxes _add_axes;
-
-  HTKeepDims _keep_dims;
-
-  int _index;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const SubElewiseGradientOpImpl&>(rhs);
-      return (index() == rhs_.index() 
-              && keep_dims() == rhs_.keep_dims()
-              && axes() == rhs_.axes());
-    }
-    return false;
+    return BinaryGradientOpImpl::operator==(rhs);
   }
 };
 
-class MulElewiseGradientOpImpl : public OpInterface {
+class MulElewiseGradientOpImpl final : public BinaryGradientOpImpl {
   public:
   MulElewiseGradientOpImpl(HTAxes axe, HTKeepDims keep_dims, int index)
-  : OpInterface(quote(MulElewiseGradientOp)),
-  _add_axes(axe),
-  _keep_dims(keep_dims),
-  _index(index) {
-  }
-
-  void set_axes(HTAxes axe) {
-    _add_axes = axe;
-  }
-
-  void set_keep_dims(HTKeepDims keep_dims) {
-    _keep_dims = keep_dims;
-  }
-
-  HTAxes axes() const {
-    return _add_axes;
-  }
-
-  HTKeepDims keep_dims() const{
-    return _keep_dims;
-  }
-
-  int index() const {
-    return _index;
-  }
+  : BinaryGradientOpImpl(quote(MulElewiseGradientOp), axe, keep_dims, index) {}
 
  protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
-    NDArrayMeta output_meta = inputs[2]->meta();
-    return {output_meta};
-  }
-
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;
   
@@ -622,61 +613,19 @@ class MulElewiseGradientOpImpl : public OpInterface {
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
-  HTAxes _add_axes;
-
-  HTKeepDims _keep_dims;
-
-  int _index;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const MulElewiseGradientOpImpl&>(rhs);
-      return (index() == rhs_.index() 
-              && keep_dims() == rhs_.keep_dims()
-              && axes() == rhs_.axes());
-    }
-    return false;
+    return BinaryGradientOpImpl::operator==(rhs);
   }
 };
 
-class DivElewiseGradientOpImpl : public OpInterface {
+class DivElewiseGradientOpImpl final : public BinaryGradientOpImpl {
   public:
   DivElewiseGradientOpImpl(HTAxes axe, HTKeepDims keep_dims, int index)
-  : OpInterface(quote(DivElewiseGradientOp)),
-  _add_axes(axe),
-  _keep_dims(keep_dims),
-  _index(index) {
-  }
-
-  void set_axes(HTAxes axe) {
-    _add_axes = axe;
-  }
-
-  void set_keep_dims(HTKeepDims keep_dims) {
-    _keep_dims = keep_dims;
-  }
-
-  HTAxes axes() const {
-    return _add_axes;
-  }
-
-  HTKeepDims keep_dims() const{
-    return _keep_dims;
-  }
-
-  int index() const {
-    return _index;
-  }
+  : BinaryGradientOpImpl(quote(DivElewiseGradientOp), axe, keep_dims, index) {}
 
  protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
-    NDArrayMeta output_meta = inputs[2]->meta();
-    return {output_meta};
-  }
-  
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;
   
@@ -685,21 +634,10 @@ class DivElewiseGradientOpImpl : public OpInterface {
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
-  HTAxes _add_axes;
-
-  HTKeepDims _keep_dims;
-
-  int _index;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const DivElewiseGradientOpImpl&>(rhs);
-      return (index() == rhs_.index() 
-              && keep_dims() == rhs_.keep_dims()
-              && axes() == rhs_.axes());
-    }
-    return false;
+    return BinaryGradientOpImpl::operator==(rhs);
   }
 };
 
@@ -739,6 +677,42 @@ Tensor MakeDivByConstOp(Tensor input, double value,
 Tensor MakeDivFromConstOp(double value, Tensor input,
                           OpMeta op_meta = OpMeta());
 
+Tensor MakeAddElewiseInplaceOp(Tensor a, Tensor b,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeSubElewiseInplaceOp(Tensor a, Tensor b,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeMulElewiseInplaceOp(Tensor a, Tensor b,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeDivElewiseInplaceOp(Tensor a, Tensor b,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeAddByConstInplaceOp(Tensor input, double value,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeAddByConstInplaceOp(double value, Tensor input,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeSubByConstInplaceOp(Tensor input, double value,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeSubFromConstInplaceOp(double value, Tensor input,
+                          OpMeta op_meta = OpMeta());
+
+Tensor MakeMulByConstInplaceOp(Tensor input, double value,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeMulByConstInplaceOp(double value, Tensor input,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeDivByConstInplaceOp(Tensor input, double value,
+                          OpMeta op_meta = OpMeta());
+
+Tensor MakeDivFromConstInplaceOp(double value, Tensor input,
+                          OpMeta op_meta = OpMeta());
+
 Tensor MakeAddElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
                                 OpMeta op_meta = OpMeta());
 
@@ -751,11 +725,13 @@ Tensor MakeMulElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output,
 Tensor MakeDivElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
                                 OpMeta op_meta = OpMeta());
 
-Tensor MakeNegateOp(Tensor input, 
-                    OpMeta op_meta = OpMeta());
+Tensor MakeNegateOp(Tensor input, OpMeta op_meta = OpMeta());
 
-Tensor MakeReciprocalOp(Tensor input, 
-                        OpMeta op_meta = OpMeta());
+Tensor MakeNegateInplaceOp(Tensor input, OpMeta op_meta = OpMeta());
+
+Tensor MakeReciprocalOp(Tensor input, OpMeta op_meta = OpMeta());
+
+Tensor MakeReciprocalInplaceOp(Tensor input, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

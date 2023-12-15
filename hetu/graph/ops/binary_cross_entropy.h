@@ -45,11 +45,7 @@ class BinaryCrossEntropyOpImpl final : public LossOpImpl {
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const BinaryCrossEntropyOpImpl&>(rhs);
-      return reduction() == rhs_.reduction();
-    }
-    return false;
+    return LossOpImpl::operator==(rhs);
   }
 };
 
@@ -77,12 +73,7 @@ class BinaryCrossEntropyGradientOpImpl final : public LossGradientOpImpl {
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ =
-        reinterpret_cast<const BinaryCrossEntropyGradientOpImpl&>(rhs);
-      return reduction() == rhs_.reduction();
-    }
-    return false;
+    return LossGradientOpImpl::operator==(rhs);
   }
 };
 

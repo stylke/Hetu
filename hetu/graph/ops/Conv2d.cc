@@ -265,8 +265,6 @@ void Conv2dAddBiasOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& o
 Tensor MakeConv2dOp(Tensor input, Tensor filter, int64_t padding, int64_t stride,
                     OpMeta op_meta) {
   TensorList inputs = {std::move(input), std::move(filter)};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<Conv2dOpImpl>(padding, stride),
           std::move(inputs),
@@ -294,8 +292,6 @@ Tensor MakeConv2dGradientofDataOp(Tensor filter, Tensor grad_output, Tensor inpu
 Tensor MakeConv2dAddBiasOp(Tensor input, Tensor filter, Tensor bias, int64_t padding,
                            int64_t stride, OpMeta op_meta) {
   TensorList inputs = {std::move(input), std::move(filter), std::move(bias)};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<Conv2dAddBiasOpImpl>(padding, stride),
           std::move(inputs),

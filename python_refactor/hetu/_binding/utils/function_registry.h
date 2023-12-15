@@ -6,6 +6,30 @@
 
 namespace hetu {
 
+PyNumberMethods& get_registered_int_symbol_number_methods();
+
+std::vector<PyMethodDef>& get_registered_int_symbol_methods();
+
+std::vector<PyMethodDef>& get_registered_int_symbol_class_methods();
+
+int RegisterIntSymbolMethod(const char* name, PyCFunction func, int flags,
+                         const char* doc);
+
+int RegisterIntSymbolClassMethod(const char* name, PyCFunction func, int flags,
+                              const char* doc);
+
+#define REGISTER_INT_SYMBOL_NUMBER_METHOD(slot, func)                              \
+  static auto __int_symbol_number_method_##slot##_registry =                       \
+    ((hetu::get_registered_int_symbol_number_methods().slot) = (func))
+
+#define REGISTER_INT_SYMBOL_METHOD(name, func, flags, doc)                         \
+  static auto __int_symbol_method_##name##_registry =                              \
+    hetu::RegisterIntSymbolMethod(quote(name), func, flags, doc)
+
+#define REGISTER_INT_SYMBOL_CLASS_METHOD(name, func, flags, doc)                   \
+  static auto __int_symbol_class_method_##name##_registry =                        \
+    hetu::RegisterIntSymbolClassMethod(quote(name), func, flags, doc)
+
 namespace impl {
 
 std::vector<PyMethodDef>& get_registered_ndarray_methods();

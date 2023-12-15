@@ -43,6 +43,11 @@
   args: Tensor input
   self: input
 
+- name: neg_
+  op: NegateInplaceOp
+  args: Tensor input
+  self: input
+
 - name: mul
   op: MulElewiseOp
   args: Tensor input, Tensor other
@@ -73,8 +78,73 @@
   args: float value, Tensor tensor
   self: tensor
 
+- name: add_
+  op: AddElewiseInplaceOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: add_
+  op: AddByConstInplaceOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: add_
+  op: AddByConstInplaceOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: sub_
+  op: SubElewiseInplaceOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: sub_
+  op: SubByConstInplaceOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: sub_
+  op: SubFromConstInplaceOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: mul_
+  op: MulElewiseInplaceOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: mul_
+  op: MulByConstInplaceOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: mul_
+  op: MulByConstInplaceOp
+  args: float value, Tensor tensor
+  self: tensor
+
+- name: div_
+  op: DivElewiseInplaceOp
+  args: Tensor input, Tensor other
+  self: input
+
+- name: div_
+  op: DivByConstInplaceOp
+  args: Tensor tensor, float value
+  self: tensor
+
+- name: div_
+  op: DivFromConstInplaceOp
+  args: float value, Tensor tensor
+  self: tensor
+
 - name: reciprocal
   op: ReciprocalOp
+  args: Tensor input
+  self: input
+
+- name: reciprocal_
+  op: ReciprocalInplaceOp
   args: Tensor input
   self: input
 
@@ -83,10 +153,64 @@
   args: Tensor input
   self: input
 
+- name: sqrt_
+  op: SqrtInplaceOp
+  args: Tensor input
+  self: input
+
+- name: rsqrt
+  op: ReciprocalSqrtOp
+  args: Tensor input
+  self: input
+
+- name: rsqrt_
+  op: ReciprocalSqrtInplaceOp
+  args: Tensor input
+  self: input
+
 - name: add
   op: SumOp
   args: TensorList inputs
 
+- name: pow
+  op: PowTensorAndConstOp
+  args: Tensor tensor, double exponent
+  self: tensor
+
+- name: pow_
+  op: PowTensorAndConstInplaceOp
+  args: Tensor tensor, double exponent
+  self: tensor
+
+- name: ceil
+  op: CeilOp
+  args: Tensor tensor
+  self: tensor
+
+- name: ceil_
+  op: CeilInplaceOp
+  args: Tensor tensor
+  self: tensor
+
+- name: floor
+  op: FloorOp
+  args: Tensor tensor
+  self: tensor
+
+- name: floor_
+  op: FloorInplaceOp
+  args: Tensor tensor
+  self: tensor
+
+- name: round
+  op: RoundOp
+  args: Tensor tensor
+  self: tensor
+
+- name: round_
+  op: RoundInplaceOp
+  args: Tensor tensor
+  self: tensor
 
 #######################################################
 # Transform
@@ -111,6 +235,7 @@
   op: ConcatenateOp
   args: TensorList inputs, int64_t axis=0
 
+# deprecated: only used in gpt inference, before symbolic shape is realized
 - name: dynamic_concat
   op: DynamicConcatenateOp
   args: TensorList inputs, int64_t axis=0
@@ -142,6 +267,12 @@
 
 - name: reshape
   op: ArrayReshapeOp
+  args: Tensor input, SyShape output_shape
+  self: input
+
+# deprecated: only used in gpt inference, before symbolic shape is realized
+- name: reshape
+  op: ArrayReshapeOp
   args: Tensor input, HTShape output_shape, int64_t padding_axis
   self: input
 
@@ -155,11 +286,17 @@
   args: Tensor input, HTShape begin_pos, HTShape output_shape
   self: input
 
+- name: slice
+  op: SliceOp
+  args: Tensor input, SyShape begin_pos, SyShape output_shape
+  self: input
+
 - name: split
   op: SplitOp
   args: Tensor input, int64_t num_chunks, int64_t dim
   self: input
 
+# deprecated: only used in gpt inference, before symbolic shape is realized
 - name: split
   op: SplitOp
   args: Tensor input, int64_t num_chunks, int64_t dim, int64_t padding_axis
@@ -172,7 +309,12 @@
 
 - name: transpose
   op: TransposeOp
-  args: Tensor input, HTShape perms
+  args: Tensor input, HTAxes perms
+  self: input
+
+- name: diagonal
+  op: DiagonalOp
+  args: Tensor input, int64_t offset=0, int64_t dim1=0, int64_t dim2=1
   self: input
 
 #######################################################
@@ -191,11 +333,6 @@
   op: MatMulOp
   args: Tensor input, Tensor other, bool trans_a=False, bool trans_b=False
   self: input
-
-# - name: matmul2
-#   op: MatMul2Op
-#   args: Tensor input, Tensor other, bool trans_a=False, bool trans_b=False
-#   self: input
 
 - name: bmm
   op: BatchMatMulOp
@@ -288,12 +425,22 @@
 
 - name: dropout
   op: DropoutOp
-  args: Tensor input, double keep_prob, bool recompute=False, bool inplace=False
+  args: Tensor input, double keep_prob, bool recompute=False
+  self: input
+
+- name: dropout_
+  op: DropoutInplaceOp
+  args: Tensor input, double keep_prob, bool recompute=False
   self: input
 
 - name: dropout2d
   op: Dropout2dOp
-  args: Tensor input, double keep_prob, bool recompute=False, bool inplace=False
+  args: Tensor input, double keep_prob, bool recompute=False
+  self: input
+
+- name: dropout2d_
+  op: Dropout2dInplaceOp
+  args: Tensor input, double keep_prob, bool recompute=False
   self: input
 
 # #######################################################
@@ -314,8 +461,18 @@
   args: Tensor input
   self: input
 
+- name: relu_
+  op: ReluInplaceOp
+  args: Tensor input
+  self: input
+
 - name: leakyrelu
   op: LeakyReluOp
+  args: Tensor input, double alpha
+  self: input
+
+- name: leakyrelu_
+  op: LeakyReluInplaceOp
   args: Tensor input, double alpha
   self: input
 
@@ -324,8 +481,48 @@
   args: Tensor input
   self: input
 
+- name: sigmoid_
+  op: SigmoidInplaceOp
+  args: Tensor input
+  self: input
+
 - name: sin
   op: SinOp
+  args: Tensor input
+  self: input
+
+- name: sin_
+  op: SinInplaceOp
+  args: Tensor input
+  self: input
+
+- name: abs
+  op: AbsOp
+  args: Tensor input
+  self: input
+
+- name: abs_
+  op: AbsInplaceOp
+  args: Tensor input
+  self: input
+
+- name: exp
+  op: ExpOp
+  args: Tensor input
+  self: input
+
+- name: log
+  op: LogOp
+  args: Tensor input
+  self: input
+
+- name: exp_
+  op: ExpInplaceOp
+  args: Tensor input
+  self: input
+
+- name: log_
+  op: LogInplaceOp
   args: Tensor input
   self: input
 
@@ -336,6 +533,11 @@
 
 - name: tanh
   op: TanhOp
+  args: Tensor input
+  self: input
+
+- name: tanh_
+  op: TanhInplaceOp
   args: Tensor input
   self: input
 
@@ -416,7 +618,7 @@
 
 - name: as_strided
   op: AsStridedOp
-  args: Tensor input, HTShape outshape, HTShape stride
+  args: Tensor input, HTShape outshape, HTShape stride, int64_t storage_offset=0
   self: input
 
 - name: repeat
@@ -437,3 +639,17 @@
 - name: where
   op: WhereOp
   args: Tensor cond, Tensor inputA, Tensor inputB
+
+- name: where_
+  op: WhereInplaceOp
+  args: Tensor cond, Tensor inputA, Tensor inputB
+
+- name: contiguous
+  op: ContiguousOp
+  args: Tensor input
+  self: input
+
+- name: attn
+  op: AttentionOp
+  args: Tensor q, Tensor k, Tensor v, double p_dropout=0, double softmax_scale=-1, bool is_causal=False, bool return_softmax=False
+  self: q

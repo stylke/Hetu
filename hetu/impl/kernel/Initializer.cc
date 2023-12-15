@@ -56,9 +56,9 @@ void NormalInitsCpu(NDArray& data, double mean, double stddev, uint64_t seed,
       init_normal_cpu<spec_t>(data->data_ptr<spec_t>(), size,
                               static_cast<spec_t>(mean),
                               static_cast<spec_t>(stddev), seed);
-      },"NormalInits");
-      //cpu_stream.Sync();
+      },"NormalInits");    
   });
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void UniformInitsCpu(NDArray& data, double lb, double ub, uint64_t seed,
@@ -79,9 +79,9 @@ void UniformInitsCpu(NDArray& data, double lb, double ub, uint64_t seed,
       init_uniform_cpu<spec_t>(data->data_ptr<spec_t>(), size,
                                static_cast<spec_t>(lb), static_cast<spec_t>(ub),
                                seed);
-      },"UniformInit");
-      //cpu_stream.Sync();
+      },"UniformInit");   
   });
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void TruncatedNormalInitsCpu(NDArray& data, double mean, double stddev,
@@ -103,9 +103,9 @@ void TruncatedNormalInitsCpu(NDArray& data, double mean, double stddev,
         data->data_ptr<spec_t>(), size, static_cast<spec_t>(mean),
         static_cast<spec_t>(stddev), static_cast<spec_t>(lb),
         static_cast<spec_t>(ub), seed);
-      },"TruncatedNormalInits");
-      //cpu_stream.Sync();
-    });
+      },"TruncatedNormalInits");    
+  });
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 } // namespace impl

@@ -9,16 +9,6 @@ namespace graph {
 
 void LinearOpImpl::DoCompute(Operator& op,const NDArrayList& inputs, NDArrayList& outputs,
                             RuntimeContext& ctx) const {
-  // HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), hetu::impl::Linear,
-  //                              inputs.at(0), trans_a(), inputs.at(1), trans_b(),
-  //                              inputs.at(2), outputs.at(0), op->instantiation_ctx().stream());
-  // HT_LOG_INFO << "F16:" << outputs.at(0);
-  
-  // auto input_0 = NDArray::to(inputs.at(0), inputs.at(0)->device(), DataType::FLOAT32, kBlockingStream);
-  // auto input_1 = NDArray::to(inputs.at(1), inputs.at(1)->device(), DataType::FLOAT32, kBlockingStream);
-  // auto input_2 = NDArray::to(inputs.at(2), inputs.at(2)->device(), DataType::FLOAT32, kBlockingStream);
-  // auto output_0 = NDArray::linear(inputs.at(0), inputs.at(1), inputs.at(2), trans_a(), trans_b(), kBlockingStream);
-  // HT_LOG_INFO << "F32:" << output_0;
   if (inputs.size() == 2)
     NDArray::linear(inputs.at(0), inputs.at(1), NDArray(), trans_a(), trans_b(),
                     op->instantiation_ctx().stream_index, outputs.at(0));
@@ -80,7 +70,7 @@ HTShapeList LinearOpImpl::DoInferShape(Operator& op,
   const HTShape& b = input_shapes.at(1);
   HT_ASSERT(a.size() == 2 && b.size() == 2 &&
             a.at(trans_a() ? 0 : 1) == b.at(trans_b() ? 1 : 0))
-    << "Invalid input shapes for " << type() << ":"
+    << "Invalid input shapes for " << op << ":"
     << " (shape_a) " << a << " (shape_b) " << b << " (transpose_a) "
     << trans_a() << " (transpose_b) " << trans_b();
   return {{a.at(trans_a() ? 1 : 0), b.at(trans_b() ? 0 : 1)}};
@@ -177,8 +167,6 @@ void LinearOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
 Tensor MakeLinearOp(Tensor a, Tensor b, Tensor bias, bool trans_a,
                     bool trans_b, OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b), std::move(bias)};
-  DataType input_type = DataType::FLOAT16;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<LinearOpImpl>(trans_a, trans_b),
         std::move(inputs),

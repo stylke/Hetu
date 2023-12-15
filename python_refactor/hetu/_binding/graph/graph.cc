@@ -4,7 +4,9 @@
 #include "hetu/_binding/utils/except.h"
 #include "hetu/_binding/utils/decl_utils.h"
 #include "hetu/_binding/utils/arg_parser.h"
+#include "hetu/graph/graph.h"
 #include "hetu/graph/eager_graph.h"
+#include "hetu/graph/define_and_run_graph.h"
 
 namespace hetu {
 namespace graph {
@@ -143,6 +145,27 @@ PyObject* PyGraph_make_new_eager_graph(PyObject*, PyObject* args,
   HT_PY_FUNC_END
 }
 
+PyObject* PyGraph_make_new_define_and_run_graph(PyObject*, PyObject* args,
+                                       PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "make_new_define_and_run_graph(str name, int init_capacity=None)",
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    return PyGraph_New(
+      Graph::make_new_graph<DefineAndRunGraph>(
+        parsed_args.get_string(0),
+        parsed_args.get_int64_or_else(1, Graph::DEFAULT_GRAPH_INITIAL_CAPACITY))
+        .id());
+    Py_RETURN_NONE;
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
 PyObject* PyPushGraphCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -182,6 +205,7 @@ PyMethodDef PyGraphCtx_methods[] = {
   {"get_default_define_by_run_graph", (PyCFunction) PyGraph_get_default_define_by_run_graph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {"get_default_eager_graph", (PyCFunction) PyGraph_get_default_eager_graph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {"make_new_eager_graph", (PyCFunction) PyGraph_make_new_eager_graph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+  {"make_new_define_and_run_graph", (PyCFunction) PyGraph_make_new_define_and_run_graph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {"push_graph_ctx", (PyCFunction) PyPushGraphCtx, METH_VARARGS | METH_KEYWORDS, nullptr},
   {"pop_graph_ctx", (PyCFunction) PyPopGraphCtx, METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr}

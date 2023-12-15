@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
@@ -36,21 +37,22 @@ void LinearCpu(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
     [stream, a, b, bias, trans_a, trans_b, output, m, n, k]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::memory::desc srcA_md, srcB_md, bias_md, dst_md;
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(output->dtype());
       if (!trans_a)
-          srcA_md = dnnl::memory::desc({m, k}, dnnl::memory::data_type::f32, 
+          srcA_md = dnnl::memory::desc({m, k}, dnnltype, 
                                         dnnl::memory::format_tag::ab);
       else
-          srcA_md = dnnl::memory::desc({m, k}, dnnl::memory::data_type::f32, 
+          srcA_md = dnnl::memory::desc({m, k}, dnnltype, 
                                         dnnl::memory::format_tag::ba);
       if (!trans_b)
-          srcB_md = dnnl::memory::desc({k, n}, dnnl::memory::data_type::f32, 
+          srcB_md = dnnl::memory::desc({k, n}, dnnltype, 
                                         dnnl::memory::format_tag::ab);
       else
-          srcB_md = dnnl::memory::desc({k, n}, dnnl::memory::data_type::f32, 
+          srcB_md = dnnl::memory::desc({k, n}, dnnltype, 
                                         dnnl::memory::format_tag::ba);
-      bias_md = dnnl::memory::desc({m, n}, dnnl::memory::data_type::f32,
+      bias_md = dnnl::memory::desc({m, n}, dnnltype,
                                     dnnl::memory::format_tag::ab);
-      dst_md = dnnl::memory::desc({m, n}, dnnl::memory::data_type::f32, 
+      dst_md = dnnl::memory::desc({m, n}, dnnltype, 
                                   dnnl::memory::format_tag::ab);
                           
       auto srcA_mem = dnnl::memory(srcA_md, eng, a->data_ptr<spec_t>());
@@ -71,8 +73,8 @@ void LinearCpu(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
       Matmul.execute(engine_stream, matmul_args);
       engine_stream.wait();
     },"Linear");
-    //cpu_stream.Sync();
   });
+  NDArray::MarkUsedBy({a, b, bias, output}, stream);
 }
 
 } // namespace impl

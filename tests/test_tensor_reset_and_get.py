@@ -20,6 +20,7 @@ def unit_test():
                                 ds_split01, local_device_index, 
                                 dtype=ht.float32, requires_grad=False, 
                                 device_group=all_device_group, name='x')  
+    print(x.get_device_group())
     print(x.get_data())
           
     x.reset_data(np.ones((6, 2)) * local_device_index)

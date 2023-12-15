@@ -10,19 +10,8 @@ namespace graph {
 void ReduceOpImpl::DoCompute(Operator& op,
                              const NDArrayList& inputs, NDArrayList& outputs,
                              RuntimeContext& ctx) const {
-  HTAxes reduce_axes = get_axes();
-  if (reduce_axes.size() <= 1)
-    NDArray::reduce(inputs.at(0), reduction(), get_axes(), false,
-                    op->instantiation_ctx().stream_index, outputs.at(0));
-  else {
-    NDArray tmp = NDArray::reduce(inputs.at(0), reduction(), {reduce_axes[reduce_axes.size() - 1]}, false,
-                                  op->instantiation_ctx().stream_index);
-    for (int i = 1; i < reduce_axes.size() - 1; ++i)
-      tmp = NDArray::reduce(tmp, reduction(), {reduce_axes[reduce_axes.size() - 1 - i]}, false,
-                            op->instantiation_ctx().stream_index);
-    NDArray::reduce(tmp, reduction(), {reduce_axes[0]}, false,
-                    op->instantiation_ctx().stream_index, outputs.at(0));
-  }
+  NDArray::reduce(inputs.at(0), reduction(), get_axes(), false,
+                  op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList ReduceOpImpl::DoGradient(Operator& op,
@@ -154,17 +143,18 @@ void ReduceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   outputs.at(0)->set_distributed_states(ds_output);
 }
 
-void  ReduceGradientOpImpl::DoCompute(Operator& op,
+void ReduceGradientOpImpl::DoCompute(Operator& op,
                                      const NDArrayList& inputs,
                                      NDArrayList& outputs, RuntimeContext& ctx) const {
   if (reduction() == ReductionType::MEAN) {
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       op->instantiation_ctx().placement.type(), type(), hetu::impl::BroadcastShapeMul, inputs.at(0),
-      get_const_value(), outputs.at(0), get_add_axes(), op->instantiation_ctx().stream());
+      get_const_value(), outputs.at(0), get_axes(), op->instantiation_ctx().stream());
   } else {
+    auto axes = get_axes();
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                     hetu::impl::BroadcastShape, inputs.at(0),
-                                    outputs.at(0), get_add_axes(), op->instantiation_ctx().stream());
+                                    outputs.at(0), axes, op->instantiation_ctx().stream());
   }
 }
 
@@ -233,6 +223,12 @@ Tensor MakeReduceMinOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
                        OpMeta op_meta) {
   return MakeReduceOp(std::move(input), ReductionType::MIN, axes, keepdims, op_meta);          
+}
+
+Tensor MakeReduceProdOp(Tensor input, const HTAxes& axes,
+                        const HTKeepDims& keepdims,
+                        OpMeta op_meta) {
+  return MakeReduceOp(std::move(input), ReductionType::PROD, axes, keepdims, op_meta);
 }
 
 Tensor MakeReduceGradientOp(Tensor input, Tensor ori_output, Tensor ori_input, const HTShape& shape,

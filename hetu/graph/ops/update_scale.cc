@@ -26,7 +26,7 @@ TensorList MakeUpdateScaleOp(Tensor scale, Tensor growth_tracker, Tensor found_i
                              double backoff_factor, int growth_interval, OpMeta op_meta) {
   TensorList inputs = {std::move(scale), std::move(growth_tracker), std::move(found_inf)};
   // DataType input_type = DataType::FLOAT32;
-  // AutoCast::Tensor_AutoCast(inputs, input_type);
+  // 
   return Graph::MakeOp(
          std::make_shared<UpdateScaleOpImpl>(growth_factor, backoff_factor, growth_interval),
          std::move(inputs),

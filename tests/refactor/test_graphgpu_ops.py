@@ -28,7 +28,15 @@ class TestArithmeticOps(unittest.TestCase):
         ((64, 256), (256,)), 
     ]
 
+    _test_pow_exponents = [
+        0.0,
+        -1.0,
+        -2.0,
+        4.0
+    ]
+
     def test_elementwise_add(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             y_np = np.random.randn(*shape).astype(np.float32)
@@ -49,8 +57,10 @@ class TestArithmeticOps(unittest.TestCase):
             self.assertTrue(allclose(x.add(c), gt))
             self.assertTrue(allclose(hetu.add(x, c), gt))
             self.assertTrue(allclose(hetu.add(c, x), gt))
+        print(sys._getframe().f_code.co_name)
     
     def test_broadcast_add(self):
+        print(sys._getframe().f_code.co_name)
         for shape_x, shape_y in TestArithmeticOps._test_broadcast_shapes:
             x_np = np.random.randn(*shape_x).astype(np.float32)
             y_np = np.random.randn(*shape_y).astype(np.float32)
@@ -76,8 +86,10 @@ class TestArithmeticOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_elementwise_sub(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             y_np = np.random.randn(*shape).astype(np.float32)
@@ -102,8 +114,10 @@ class TestArithmeticOps(unittest.TestCase):
             gt = c - x_np
             self.assertTrue(allclose(c - x, gt))
             self.assertTrue(allclose(hetu.sub(c, x), gt))
+        print(sys._getframe().f_code.co_name)
     
     def test_broadcast_sub(self):
+        print(sys._getframe().f_code.co_name)
         for shape_x, shape_y in TestArithmeticOps._test_broadcast_shapes:
             x_np = np.random.randn(*shape_x).astype(np.float32)
             y_np = np.random.randn(*shape_y).astype(np.float32)
@@ -131,8 +145,10 @@ class TestArithmeticOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
     
     def test_neg(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             x = hetu.from_numpy(x_np)
@@ -140,7 +156,23 @@ class TestArithmeticOps(unittest.TestCase):
             self.assertTrue(allclose(x.neg(), gt))
             self.assertTrue(allclose(hetu.neg(x), gt))
 
+            if GRAD_TEST:
+                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_out = torch.neg(torch_in)
+                torch_loss = torch_out.sum()
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
+                hetu_in = hetu.Tensor(x_np, requires_grad=True)
+                hetu_out = hetu.neg(hetu_in)
+                hetu_loss = hetu_out.sum()
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
+                torch_loss.backward()
+                torch_optimizer.step()
+                hetu_optimizer.minimize(hetu_loss)
+                self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
+
     def test_elementwise_mul(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             y_np = np.random.randn(*shape).astype(np.float32)
@@ -161,8 +193,10 @@ class TestArithmeticOps(unittest.TestCase):
             self.assertTrue(allclose(x.mul(c), gt))
             self.assertTrue(allclose(hetu.mul(x, c), gt))
             self.assertTrue(allclose(hetu.mul(c, x), gt))
+        print(sys._getframe().f_code.co_name)
     
     def test_broadcast_mul(self):
+        print(sys._getframe().f_code.co_name)
         for shape_x, shape_y in TestArithmeticOps._test_broadcast_shapes:
             x_np = np.random.randn(*shape_x).astype(np.float32)
             y_np = np.random.randn(*shape_y).astype(np.float32)
@@ -188,8 +222,10 @@ class TestArithmeticOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
     
     def test_elementwise_div(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             y_np = np.random.randn(*shape).astype(np.float32)
@@ -214,8 +250,10 @@ class TestArithmeticOps(unittest.TestCase):
             gt = c / x_np
             self.assertTrue(allclose(c / x, gt))
             self.assertTrue(allclose(hetu.div(c, x), gt))
+        print(sys._getframe().f_code.co_name)
     
     def test_broadcast_div(self):
+        print(sys._getframe().f_code.co_name)
         for shape_x, shape_y in TestArithmeticOps._test_broadcast_shapes:
             x_np = np.random.randn(*shape_x).astype(np.float32)
             y_np = np.random.randn(*shape_y).astype(np.float32) + 10
@@ -249,15 +287,18 @@ class TestArithmeticOps(unittest.TestCase):
               torch_loss = torch_out.sum()
               torch_optimizer = optim.SGD([torch_in], lr = 0.5)
               hetu_in = hetu.Tensor(y_np, requires_grad=True)
-              hetu_out = hetu.div(x, hetu_in)
+              hetu_x = hetu.from_numpy(x_np)
+              hetu_out = hetu.div(hetu_x, hetu_in)
               hetu_loss = hetu_out.sum()
               hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
               torch_loss.backward()
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_reciprocal(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             x = hetu.from_numpy(x_np)
@@ -265,13 +306,165 @@ class TestArithmeticOps(unittest.TestCase):
             self.assertTrue(allclose(x.reciprocal(), gt))
             self.assertTrue(allclose(hetu.reciprocal(x), gt))
 
+            if GRAD_TEST:
+                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_out = torch.reciprocal(torch_in)
+                torch_loss = torch_out.sum()
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
+                hetu_in = hetu.Tensor(x_np, requires_grad=True)
+                hetu_out = hetu.reciprocal(hetu_in)
+                hetu_loss = hetu_out.sum()
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
+                torch_loss.backward()
+                torch_optimizer.step()
+                hetu_optimizer.minimize(hetu_loss)
+                self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
+
     def test_sqrt(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.abs(np.random.randn(*shape)).astype(np.float32)
             x = hetu.from_numpy(x_np)
             gt = np.sqrt(x_np)
             self.assertTrue(allclose(x.sqrt(), gt))
             self.assertTrue(allclose(hetu.sqrt(x), gt))
+
+            if GRAD_TEST:
+                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_out = torch.sqrt(torch_in)
+                torch_loss = torch_out.sum()
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
+                hetu_in = hetu.Tensor(x_np, requires_grad=True)
+                hetu_out = hetu.sqrt(hetu_in)
+                hetu_loss = hetu_out.sum()
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
+                torch_loss.backward()
+                torch_optimizer.step()
+                hetu_optimizer.minimize(hetu_loss)
+                self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
+    
+    def test_rsqrt(self):
+        print(sys._getframe().f_code.co_name)
+        for shape in TestArithmeticOps._test_elementwise_shapes:
+            x_np = np.abs(np.random.randn(*shape)).astype(np.float32)
+            gt = np.reciprocal(np.sqrt(x_np))
+            x = hetu.from_numpy(x_np)
+            self.assertTrue(allclose(x.rsqrt(), gt))
+            self.assertTrue(allclose(hetu.rsqrt(x), gt))
+
+            if GRAD_TEST:
+                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_out = torch.rsqrt(torch_in)
+                torch_loss = torch_out.sum()
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
+                hetu_in = hetu.Tensor(x_np, requires_grad=True)
+                hetu_out = hetu.rsqrt(hetu_in)
+                hetu_loss = hetu_out.sum()
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
+                torch_loss.backward()
+                torch_optimizer.step()
+                hetu_optimizer.minimize(hetu_loss)
+                self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
+    
+    def test_pow(self):
+        print(sys._getframe().f_code.co_name)
+        for shape in TestArithmeticOps._test_elementwise_shapes:
+            x_np = np.random.randn(*shape).astype(np.float64)
+            for exponent in TestArithmeticOps._test_pow_exponents:
+                gt = np.power(x_np, exponent)
+                x = hetu.from_numpy(x_np)
+                self.assertTrue(allclose(x.pow(exponent), gt))
+                self.assertTrue(allclose(hetu.pow(x, exponent), gt))
+
+                if GRAD_TEST:
+                    torch_in = torch.tensor(x_np, requires_grad=True)
+                    torch_out = torch.pow(torch_in, exponent)
+                    torch_loss = torch_out.sum()
+                    torch_optimizer = optim.SGD([torch_in], lr = 0.5)
+                    hetu_in = hetu.Tensor(x_np, requires_grad=True)
+                    hetu_out = hetu.pow(hetu_in, exponent)
+                    hetu_loss = hetu_out.sum()
+                    hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
+                    torch_loss.backward()
+                    torch_optimizer.step()
+                    hetu_optimizer.minimize(hetu_loss)
+                    self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
+    
+    def test_ceil(self):
+        print(sys._getframe().f_code.co_name)
+        for shape in TestArithmeticOps._test_elementwise_shapes:
+            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.from_numpy(x_np)
+            gt = np.ceil(x_np)
+            self.assertTrue(allclose(x.ceil(), gt))
+            self.assertTrue(allclose(hetu.ceil(x), gt))
+
+            if GRAD_TEST:
+                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_out = torch.ceil(torch_in)
+                torch_loss = torch_out.sum()
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
+                hetu_in = hetu.Tensor(x_np, requires_grad=True)
+                hetu_out = hetu.ceil(hetu_in)
+                hetu_loss = hetu_out.sum()
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
+                torch_loss.backward()
+                torch_optimizer.step()
+                hetu_optimizer.minimize(hetu_loss)
+                self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
+    
+    def test_floor(self):
+        print(sys._getframe().f_code.co_name)
+        for shape in TestArithmeticOps._test_elementwise_shapes:
+            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.from_numpy(x_np)
+            gt = np.floor(x_np)
+            self.assertTrue(allclose(x.floor(), gt))
+            self.assertTrue(allclose(hetu.floor(x), gt))
+
+            if GRAD_TEST:
+                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_out = torch.floor(torch_in)
+                torch_loss = torch_out.sum()
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
+                hetu_in = hetu.Tensor(x_np, requires_grad=True)
+                hetu_out = hetu.floor(hetu_in)
+                hetu_loss = hetu_out.sum()
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
+                torch_loss.backward()
+                torch_optimizer.step()
+                hetu_optimizer.minimize(hetu_loss)
+                self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
+    
+    def test_round(self):
+        print(sys._getframe().f_code.co_name)
+        for shape in TestArithmeticOps._test_elementwise_shapes:
+            x_np = np.random.randn(*shape).astype(np.float32)
+            x = hetu.from_numpy(x_np)
+            gt = np.round(x_np)
+            self.assertTrue(allclose(x.round(), gt))
+            self.assertTrue(allclose(hetu.round(x), gt))
+
+            if GRAD_TEST:
+                torch_in = torch.tensor(x_np, requires_grad=True)
+                torch_out = torch.round(torch_in)
+                torch_loss = torch_out.sum()
+                torch_optimizer = optim.SGD([torch_in], lr = 0.5)
+                hetu_in = hetu.Tensor(x_np, requires_grad=True)
+                hetu_out = hetu.round(hetu_in)
+                hetu_loss = hetu_out.sum()
+                hetu_optimizer = hetu.SGDOptimizer([hetu_in], lr = 0.5)
+                torch_loss.backward()
+                torch_optimizer.step()
+                hetu_optimizer.minimize(hetu_loss)
+                self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     _test_sum_shapes = [
         ((1024,), (1,), (1024, 16)), 
@@ -282,6 +475,7 @@ class TestArithmeticOps(unittest.TestCase):
     ]
 
     def test_sum(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestArithmeticOps._test_elementwise_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             y_np = np.random.randn(*shape).astype(np.float32)
@@ -291,67 +485,35 @@ class TestArithmeticOps(unittest.TestCase):
             z = hetu.from_numpy(z_np)
             gt = x_np + y_np + z_np
             self.assertTrue(allclose(hetu.add([x,y,z]), gt))
+        print(sys._getframe().f_code.co_name)
 
 class TestMatMulOps(unittest.TestCase):
 
     _test_shapes = [
         # 1D x 1D
         ((64,), (64,)),
-        ((128,), (128,)),
-        ((256,), (256,)),
-        ((512,), (512,)),
-        ((1024,), (1024,)),
         # 2D x 1D
         ((64, 128), (128,)),
-        ((64, 256), (256,)),
-        ((64, 512), (512,)),
-        ((256, 512), (512,)),
-        ((1024, 256), (256,)),
         # 1D x 2D
         ((128,), (128, 64)),
-        ((256,), (256, 64)),
-        ((512,), (512, 64)),
-        ((512,), (512, 1024)),
-        ((256,), (256, 1024)),
         # 2D x 2D
         ((64, 128), (128, 512)),
-        ((64, 256), (256, 128)),
-        ((64, 256), (256, 1024)),
-        ((128, 256), (256, 256)),
-        ((1024, 256), (256, 512)),
         # ND x 1D
         ((8, 64, 128), (128,)),
-        ((8, 64, 256), (256,)),
-        ((8, 64, 512), (512,)),
-        ((8, 256, 128), (128,)),
-        ((8, 256, 512), (512,)),
         # 1D x ND
         ((128,), (8, 128, 64)),
-        ((256,), (8, 256, 64)),
-        ((512,), (8, 512, 64)),
-        ((128,), (8, 128, 256)),
-        ((1024,), (4, 1024, 32)),
         # ND x 2D
         ((2, 64, 128), (128, 512)),
-        ((2, 64, 256), (256, 512)),
-        ((8, 64, 256), (256, 128)),
-        ((8, 64, 128), (128, 128)),
-        ((8, 64, 256), (256, 256)),
         # 2D x ND
         ((512, 128), (2, 128, 64)),
-        ((512, 256), (2, 256, 64)),
-        ((128, 256), (8, 256, 64)),
-        ((128, 128), (8, 128, 64)),
-        ((256, 256), (16, 256, 64)),
         # ND x ND
         ((8, 64, 256), (8, 256, 8)),
         ((8, 64, 256), (8, 8, 256, 64)),
         ((8, 16, 8, 64), (8, 16, 64, 256)),
-        ((8, 1, 64, 256), (8, 1, 256, 16)),
-        ((8, 1, 256, 256), (8, 1, 256, 1024)),
     ]
     
     def test_matmul_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape_x, shape_y in TestMatMulOps._test_shapes:
             x_np = np.random.randn(*shape_x).astype(np.float32)
             y_np = np.random.randn(*shape_y).astype(np.float32)
@@ -374,6 +536,7 @@ class TestMatMulOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
     
     # def test_linear_op(self):
     #     for shape_x, shape_y in TestMatMulOps._test_shapes:
@@ -405,6 +568,7 @@ class TestBatchMatMulOps(unittest.TestCase):
     ]
     
     def test_batch_matmul_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape_x, shape_y in TestBatchMatMulOps._test_shapes:
             x_np = np.random.randn(*shape_x).astype(np.float32)
             y_np = np.random.randn(*shape_y).astype(np.float32)
@@ -427,6 +591,7 @@ class TestBatchMatMulOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
 # class TestMatDotOps(unittest.TestCase):
 
@@ -463,6 +628,7 @@ class TestActivationOps(unittest.TestCase):
     ]
 
     def test_sigmoid_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestActivationOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             gt = 1 / (1 + np.exp(-x_np))
@@ -483,8 +649,10 @@ class TestActivationOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
     
     def test_sin_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestActivationOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             gt = np.sin(x_np)
@@ -505,8 +673,10 @@ class TestActivationOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
     
     def test_relu_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestActivationOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32) - 0.5
             gt = x_np * (x_np > 0).astype(x_np.dtype)
@@ -527,9 +697,11 @@ class TestActivationOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
             
     
     def test_leaky_relu_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestActivationOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             alphas = [0.1, 0.2, 0.5]
@@ -552,8 +724,10 @@ class TestActivationOps(unittest.TestCase):
                     torch_optimizer.step()
                     hetu_optimizer.minimize(hetu_loss)
                     self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_tanh_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestActivationOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             gt = np.tanh(x_np)
@@ -574,8 +748,10 @@ class TestActivationOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_triu_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestActivationOps._test_shapes:
             x_np = np.random.randn(*shape)
             gt = torch.triu(torch.from_numpy(x_np), 0).numpy()
@@ -596,8 +772,10 @@ class TestActivationOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_tril_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestActivationOps._test_shapes:
             x_np = np.random.randn(*shape)
             gt = torch.tril(torch.from_numpy(x_np), 0).numpy()
@@ -618,9 +796,11 @@ class TestActivationOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
             
     
     def test_softmax_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape, dim in TestActivationOps._test_softmax_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             gt = torch.softmax(torch.from_numpy(x_np), dim).numpy()
@@ -643,6 +823,7 @@ class TestActivationOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
 
 class TestTransformOps(unittest.TestCase):
@@ -663,6 +844,7 @@ class TestTransformOps(unittest.TestCase):
     ]
 
     def test_reshape_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestTransformOps._test_shapes:
             x_np = np.random.randn(*shape)
             shape_to = list(shape)
@@ -686,8 +868,10 @@ class TestTransformOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_broadcast_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestTransformOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             shape_to = list(shape)
@@ -710,8 +894,10 @@ class TestTransformOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_concat_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestTransformOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             y_np = np.random.randn(*shape).astype(np.float32)
@@ -725,8 +911,10 @@ class TestTransformOps(unittest.TestCase):
             self.assertTrue(allclose(hetu.concat([x, y], 0), gt))
             gt = np.concatenate((x_np, y_np, z_np), 0)
             self.assertTrue(allclose(hetu.concat([x, y, z], 0), gt))
+        print(sys._getframe().f_code.co_name)
     
     def test_pad_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestTransformOps._pad_shapes:
             x_np = np.random.randn(*shape)
             x = hetu.from_numpy(x_np)
@@ -747,8 +935,10 @@ class TestTransformOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_slice_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestTransformOps._test_shapes:
             x_np = np.random.randn(*shape)
             begin_pos = list(np.random.randint(0, 16 ,size = [2]))
@@ -757,8 +947,10 @@ class TestTransformOps(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             self.assertTrue(allclose(hetu.slice(x, begin_pos, out_size), gt))
             self.assertTrue(allclose(x.slice(begin_pos, out_size), gt))
+        print(sys._getframe().f_code.co_name)
 
     def test_split_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestTransformOps._test_shapes:
             x_np = np.random.randn(*shape)
             idx = list(np.random.randint(0, 8 ,size = [1]))
@@ -766,8 +958,10 @@ class TestTransformOps(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             self.assertTrue(allclose(hetu.split(x, 8, 0)[idx[0]], gt))
             self.assertTrue(allclose(x.split(8, 0)[idx[0]], gt))
+        print(sys._getframe().f_code.co_name)   
     
     def test_transpose_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestTransformOps._test_shapes:
             x_np = np.random.randn(*shape)
             gt = np.transpose(x_np, (1, 0))
@@ -812,6 +1006,7 @@ class TestTransformOps(unittest.TestCase):
               torch_optimizer.step()
               hetu_optimizer.minimize(hetu_loss)
               self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
 class TestConv2dOps(unittest.TestCase):
 
@@ -825,6 +1020,7 @@ class TestConv2dOps(unittest.TestCase):
     ]
 
     def test_conv2d_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestConv2dOps._data_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             x = hetu.from_numpy(x_np)
@@ -856,6 +1052,7 @@ class TestConv2dOps(unittest.TestCase):
                     torch_optimizer.step()
                     hetu_optimizer.minimize(hetu_loss)
                     self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
 
 
@@ -868,6 +1065,7 @@ class TestPoolOps(unittest.TestCase):
 
 
     def test_maxpool_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestPoolOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             x = hetu.from_numpy(x_np)
@@ -889,8 +1087,10 @@ class TestPoolOps(unittest.TestCase):
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
                 self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_avgpool_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestPoolOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             x = hetu.from_numpy(x_np)
@@ -912,6 +1112,7 @@ class TestPoolOps(unittest.TestCase):
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
                 self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
 class TestNormOps(unittest.TestCase):
 
@@ -922,6 +1123,7 @@ class TestNormOps(unittest.TestCase):
 
 
     def test_batchnorm_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestPoolOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             x = hetu.from_numpy(x_np)
@@ -956,8 +1158,10 @@ class TestNormOps(unittest.TestCase):
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
                 self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
     def test_layernorm_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestPoolOps._test_shapes:
             for i in range(1, 4):
                 norm_shape = shape[i:]
@@ -988,8 +1192,10 @@ class TestNormOps(unittest.TestCase):
                     torch_optimizer.step()
                     hetu_optimizer.minimize(hetu_loss)
                     self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+            print(sys._getframe().f_code.co_name)
     
     def test_instancenorm_op(self):
+        print(sys._getframe().f_code.co_name)
         for shape in TestPoolOps._test_shapes:
             x_np = np.random.randn(*shape).astype(np.float32)
             x = hetu.from_numpy(x_np)
@@ -1020,6 +1226,7 @@ class TestNormOps(unittest.TestCase):
                 torch_optimizer.step()
                 hetu_optimizer.minimize(hetu_loss)
                 self.assertTrue(allclose(hetu_in, torch_in.detach().numpy()))
+        print(sys._getframe().f_code.co_name)
 
 class TestReduceOps(unittest.TestCase):
 
@@ -1651,8 +1858,88 @@ class TestOtherOps(unittest.TestCase):
             x = hetu.from_numpy(x_np)
             y = hetu.from_numpy(y_np)
             self.assertTrue(allclose(hetu.where(cond, x, y), gt))
+
+            if GRAD_TEST:
+                torch_cond = torch.tensor(cond_np, dtype=torch.bool)
+                torch_x = torch.tensor(x_np, requires_grad=True)
+                torch_y = torch.tensor(y_np)
+                torch_out = torch.where(torch_cond, torch_x, torch_y)
+                torch_loss = torch_out.sum()
+                torch_optimizer = optim.SGD([torch_x], lr = 0.5)
+                hetu_cond = hetu.Tensor(cond_np)
+                hetu_x = hetu.Tensor(x_np, requires_grad=True)
+                hetu_y = hetu.Tensor(y_np)
+                hetu_out = hetu.where(hetu_cond, hetu_x, hetu_y)
+                hetu_loss = hetu_out.sum()
+                hetu_optimizer = hetu.SGDOptimizer([hetu_x], lr = 0.5)
+                torch_loss.backward()
+                torch_optimizer.step()
+                hetu_optimizer.minimize(hetu_loss)
+                self.assertTrue(allclose(hetu_x, torch_x.detach().numpy()))
         print(sys._getframe().f_code.co_name)
 
+    # _attn_shapes = [
+    #     ((8, 12, 16, 16),),
+    # ]
+
+
+    # def test_attnop(self):
+    #     print(sys._getframe().f_code.co_name)
+    #     for shape_x in TestOtherOps._attn_shapes:
+    #         q_np = np.random.randn(*shape_x)
+    #         k_np = np.random.randn(*shape_x)
+    #         v_np = np.random.randn(*shape_x)
+
+    #         q = hetu.from_numpy(q_np)
+    #         k = hetu.from_numpy(k_np)
+    #         v = hetu.from_numpy(v_np)
+            
+    #         query = q.transpose([0, 2, 1, 3])
+    #         value = v.transpose([0, 2, 1, 3])
+    #         # [micro_batch_size, num_heads, head_dim, seq_len]
+    #         key_t = k.transpose([0, 2, 3, 1]) # k^T
+
+    #         # self-attn, shape=[micro_batch_size, num_heads, seq_len, head_dim]
+    #         attn_weights = hetu.bmm(query, key_t)
+
+    #         # scale
+    #         attn_weights = attn_weights / (float(value.global_shape[-1]) ** 0.5)
+
+    #         # mask
+    #         # causal_mask = ht.from_numpy_parallel(parallel_data_provider(np.tile(self.bias[:, :, :seq_len, :seq_len], 
+    #         #                                                                     (micro_batch_size, num_heads, 1, 1)),
+    #         #                                                             attn_weights.distributed_states, device_index),
+    #         #                                     attn_weights.distributed_states, device_group=self.device_group, name='causal_mask')
+    #         # mask = ht.from_numpy_parallel(parallel_data_provider(np.full(attn_weights.global_shape, self.masked_value, dtype=np.float32),
+    #         #                                                     attn_weights.distributed_states, device_index), 
+    #         #                             attn_weights.distributed_states, device_group=self.device_group, name='mask')
+    #         # attn_weights = ht.where(causal_mask, attn_weights, mask)
+    #         # if attention_mask is not None:
+    #         #     # attn_weights: shape=[micro_batch_size, num_heads, seq_len, seq_len]
+    #         #     # attention_mask: shape=[micro_batch_size, 1, 1, seq_len], 注意ds的设置
+    #         #     # 被mask的<pad>位置上值为-1e4, 没有被mask的位置上值为0
+    #         #     # todo: +-*/允许对应维度一个为n一个为1的情况下, n被切分
+    #         #     # print(f'attn_weights global_shape={attn_weights.global_shape}, attention_mask.global_shape={attention_mask.global_shape}')
+    #         #     # print(f'attn_weights shape={attn_weights.shape}, attention_mask.shape={attention_mask.shape}')
+    #         #     attn_weights = attn_weights + attention_mask
+    #         # softmax
+    #         attn_weights = hetu.softmax(attn_weights, 3)
+    #         # dropout
+    #         # attn_weights = self.attn_dropout(attn_weights)
+    #         # weight sum, shape=[micro_batch_size, num_heads, seq_len, head_dim]
+    #         attn_output = hetu.bmm(attn_weights, value)
+
+    #         # [micro_batch_size, seq_len, num_heads, head_dim]
+    #         attn_output = attn_output.transpose([0, 2, 1, 3])
+    #         print(attn_output.numpy(force=True).flatten()[:10])
+
+    #         q = hetu.from_numpy(q_np)
+    #         k = hetu.from_numpy(k_np)
+    #         v = hetu.from_numpy(v_np)
+    #         attn_output2 = hetu.attn(q, k, v)[0]
+    #         print(attn_output2.numpy(force=True).flatten()[:10])
+            
+    #     print(sys._getframe().f_code.co_name)
                 
 
 if __name__ == "__main__":

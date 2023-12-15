@@ -13,7 +13,7 @@ class ZerosLikeOpImpl final : public ScalarsLikeOpImpl {
 
  public:
   bool operator==(const OpInterface& rhs) const {
-    return OpInterface::operator==(rhs);
+    return ScalarsLikeOpImpl::operator==(rhs);
   }
 };
 

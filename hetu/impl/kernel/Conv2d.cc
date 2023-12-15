@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
@@ -21,11 +22,12 @@ void Conv2dCpu(const NDArray& input_x, const NDArray& input_f, NDArray& output,
       auto _future = cpu_stream.EnqueueTask(
       [input_x, input_f, output, eng, 
       padding_h, padding_w, stride_h, stride_w]() {
-        auto conv_src_md = dnnl::memory::desc(input_x->shape(), dnnl::memory::data_type::f32, 
+        auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_x->dtype());
+        auto conv_src_md = dnnl::memory::desc(input_x->shape(), dnnltype, 
                                               dnnl::memory::format_tag::nchw);
-        auto conv_weights_md = dnnl::memory::desc(input_f->shape(), dnnl::memory::data_type::f32, 
+        auto conv_weights_md = dnnl::memory::desc(input_f->shape(), dnnltype, 
                                                   dnnl::memory::format_tag::oihw);
-        auto conv_dst_md = dnnl::memory::desc(output->shape(), dnnl::memory::data_type::f32,
+        auto conv_dst_md = dnnl::memory::desc(output->shape(), dnnltype,
                                               dnnl::memory::format_tag::nchw);
 
         auto conv_src_mem = dnnl::memory(conv_src_md, eng, input_x->data_ptr<spec_t>());
@@ -56,10 +58,9 @@ void Conv2dCpu(const NDArray& input_x, const NDArray& input_f, NDArray& output,
         conv_prim.execute(engine_stream, conv_args);
         engine_stream.wait();
       },
-      "Conv2d");
-      //cpu_stream.Sync();
+      "Conv2d"); 
     });
-  return;
+  NDArray::MarkUsedBy({input_x, input_f, output}, stream);
 }
 
 void Conv2dGradientofFilterCpu(const NDArray& input_x,
@@ -78,11 +79,12 @@ void Conv2dGradientofFilterCpu(const NDArray& input_x,
       auto _future = cpu_stream.EnqueueTask(
       [input_x, gradient_y, gradient_f, eng,
       padding_h, padding_w, stride_h, stride_w]() {
-      auto conv_src_md = dnnl::memory::desc(input_x->shape(), dnnl::memory::data_type::f32, 
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_x->dtype());
+      auto conv_src_md = dnnl::memory::desc(input_x->shape(), dnnltype, 
                                             dnnl::memory::format_tag::nchw);
-      auto conv_weights_md = dnnl::memory::desc(gradient_f->shape(), dnnl::memory::data_type::f32, 
+      auto conv_weights_md = dnnl::memory::desc(gradient_f->shape(), dnnltype, 
                                                 dnnl::memory::format_tag::oihw);
-      auto conv_dst_md = dnnl::memory::desc(gradient_y->shape(), dnnl::memory::data_type::f32,
+      auto conv_dst_md = dnnl::memory::desc(gradient_y->shape(), dnnltype,
                                             dnnl::memory::format_tag::nchw);
 
       auto conv_src_mem = dnnl::memory(conv_src_md, eng, input_x->data_ptr<spec_t>());
@@ -117,8 +119,7 @@ void Conv2dGradientofFilterCpu(const NDArray& input_x,
       conv_prim.execute(engine_stream, conv_args);   
       engine_stream.wait();      
       },
-      "Conv2dFilter");
-      //cpu_stream.Sync();
+      "Conv2dFilter");  
     });
   return;
 }
@@ -138,11 +139,12 @@ void Conv2dGradientofDataCpu(const NDArray& input_f, const NDArray& gradient_y,
     auto _future = cpu_stream.EnqueueTask(
       [input_f, gradient_y, gradient_x, eng,
       padding_h, padding_w, stride_h, stride_w]() {
-      auto conv_src_md = dnnl::memory::desc(gradient_x->shape(), dnnl::memory::data_type::f32, 
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_f->dtype());
+      auto conv_src_md = dnnl::memory::desc(gradient_x->shape(), dnnltype, 
                                             dnnl::memory::format_tag::nchw);
-      auto conv_weights_md = dnnl::memory::desc(input_f->shape(), dnnl::memory::data_type::f32, 
+      auto conv_weights_md = dnnl::memory::desc(input_f->shape(), dnnltype, 
                                                 dnnl::memory::format_tag::oihw);
-      auto conv_dst_md = dnnl::memory::desc(gradient_y->shape(), dnnl::memory::data_type::f32,
+      auto conv_dst_md = dnnl::memory::desc(gradient_y->shape(), dnnltype,
                                             dnnl::memory::format_tag::nchw);
 
       auto conv_src_mem = dnnl::memory(conv_src_md, eng, gradient_x->data_ptr<spec_t>());
@@ -177,7 +179,6 @@ void Conv2dGradientofDataCpu(const NDArray& input_f, const NDArray& gradient_y,
       conv_prim.execute(engine_stream, conv_args);         
       },
       "Conv2dData");
-      //cpu_stream.Sync();
     });
   return;
 }
@@ -199,13 +200,14 @@ void Conv2dAddBiasCpu(const NDArray& input_x, const NDArray& input_f,
     auto _future = cpu_stream.EnqueueTask(
       [input_x, input_f, output, bias, eng, 
       padding_h, padding_w, stride_h, stride_w]() {
-      auto conv_src_md = dnnl::memory::desc(input_x->shape(), dnnl::memory::data_type::f32, 
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_x->dtype());
+      auto conv_src_md = dnnl::memory::desc(input_x->shape(), dnnltype, 
                                             dnnl::memory::format_tag::nchw);
-      auto conv_weights_md = dnnl::memory::desc(input_f->shape(), dnnl::memory::data_type::f32, 
+      auto conv_weights_md = dnnl::memory::desc(input_f->shape(), dnnltype, 
                                                 dnnl::memory::format_tag::oihw);
-      auto conv_dst_md = dnnl::memory::desc(output->shape(), dnnl::memory::data_type::f32,
+      auto conv_dst_md = dnnl::memory::desc(output->shape(), dnnltype,
                                             dnnl::memory::format_tag::nchw);
-      auto conv_bias_md = dnnl::memory::desc(bias->shape(), dnnl::memory::data_type::f32, 
+      auto conv_bias_md = dnnl::memory::desc(bias->shape(), dnnltype, 
                                              dnnl::memory::format_tag::a);
 
       auto conv_src_mem = dnnl::memory(conv_src_md, eng, input_x->data_ptr<spec_t>());
@@ -237,7 +239,6 @@ void Conv2dAddBiasCpu(const NDArray& input_x, const NDArray& input_f,
       conv_prim.execute(engine_stream, conv_args); 
       },
       "Conv2dBias");
-      //cpu_stream.Sync();
     });
   return;
 }

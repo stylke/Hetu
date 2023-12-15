@@ -151,19 +151,25 @@ class Graph {
 
   virtual void ResetVariableDataInner(const Tensor& tensor,
                                       const Initializer& init) {
-    HT_RUNTIME_ERROR << "Cannot reset variable data in graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot reset variable data in graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }
 
   virtual NDArray& GetVariableDataInner(const Tensor& tensor) {
-    HT_RUNTIME_ERROR << "Cannot get variable data from graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot get variable data from graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }
 
   virtual NDArray GetDetachedVariableDataInner(const Tensor& tensor) {
-    HT_RUNTIME_ERROR << "Cannot get detached variable data from graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot get detached variable data from graph " << name()
+                     << " with type " << type();
+    __builtin_unreachable();
+  }
+
+  virtual DeviceGroup GetVariableDeviceGroupInner(const Tensor& tensor) {
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot get variable device group from graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }
@@ -172,7 +178,7 @@ class Graph {
   AllocVariableDataInner(const Tensor& tensor,
                          const Initializer& init = VoidifiedInitializer(),
                          uint64_t seed = 0, const HTShape& global_shape = HTShape()) {
-    HT_RUNTIME_ERROR << "Cannot allocate variable data in graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot allocate variable data in graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }  
@@ -180,7 +186,7 @@ class Graph {
   virtual void
   RegisterVariableDataInner(const Tensor& tensor, NDArray data,
                             const Initializer& init = VoidifiedInitializer()) {
-    HT_RUNTIME_ERROR << "Cannot register variable data for graph " << name()
+    HT_RUNTIME_ERROR << "NotImplementedError: Cannot register variable data for graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
   }
@@ -240,10 +246,7 @@ class Graph {
   std::atomic<GraphId> _next_tensor_id{0};
 
  private:
-  static GraphId _next_graph_id() {
-    static std::atomic<GraphId> _global_graph_id{0};
-    return _global_graph_id++;
-  }
+  static GraphId _next_graph_id();
 
   /******************************************************
    * Static helper functions
@@ -414,6 +417,12 @@ class Graph {
     return Graph::GetGraph(tensor).GetDetachedVariableDataInner(tensor);
   }
 
+    static DeviceGroup GetVariableDeviceGroup(const Tensor& tensor) {
+    HT_VALUE_ERROR_IF(!tensor->is_variable())
+      << "'GetDetachedVariableData' does not support non-variable tensor: " << tensor;
+    return Graph::GetGraph(tensor).GetVariableDeviceGroupInner(tensor);
+  }
+
   static NDArray&
   AllocVariableData(const Tensor& tensor,
                     const Initializer& init = VoidifiedInitializer(),
@@ -451,6 +460,8 @@ class Graph {
                   "Template class is not derived from Graph");
     auto graph = std::make_shared<T>(Graph::constrcutor_access_key(),
                                      std::forward<Args>(args)...);
+    HT_LOG_DEBUG << "device = " << hetu::impl::comm::GetLocalDevice() << ": make a new graph named " 
+      << graph->name() << ", whose id is " << graph->id();
     HT_VALUE_ERROR_IF(Graph::_global_graphs.size() != graph->id())
       << "Graph must be initialized using the `_make_new_graph` function";
     HT_VALUE_ERROR_IF(Graph::_name_to_graphs.find(graph->name()) !=
@@ -478,6 +489,8 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
                                  std::function<bool(const Operator&)> stop_at) {
   std::unordered_map<OpId, int32_t> in_degrees;
   std::unordered_set<OpId> visited;
+  std::unordered_map<OpId, OpIdSet> extra_edges;
+  OpRefList inplace_ops;
   OpRefDeque traverse_queue;
   OpRefDeque topo_queue;
   OpRefList ret;
@@ -520,16 +533,64 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
     topo_queue.pop_front();
     ret.push_back(op_ref);
     Operator::for_each_output_tensor(op_ref.get(), [&](Tensor& tensor) {
+      // Place inplace ops after other ops
+      // Step 1. Find all inplace ops.
+      int64_t num_inplace_consumers = 0;
+      int64_t num_consumers = tensor->num_consumers();
+      OpIdSet inplace_ids;
       Tensor::for_each_consumer(tensor, [&](Operator& consumer_op) {
         if (in_degrees.find(consumer_op->id()) == in_degrees.end())
           return;
-        if ((--in_degrees[consumer_op->id()]) == 0)
+        // NOTE: Only inplace ops that do operation on `tensor` directly
+        // are considered.
+        // For example, for `where` op, its inplace tensor is the 1st
+        // input tensor, not the 2nd input tensor. So for the 2nd input,
+        // we should not consider `where` as its inplace op.
+        if (is_inplace_op(std::ref(consumer_op)) &&
+            tensor->id() == consumer_op->inplace_tensor_id()) {
+          inplace_ids.insert(consumer_op->id());
+          inplace_ops.push_back(std::ref(consumer_op));
+          num_inplace_consumers++;
+          return;
+        }
+      });
+      bool has_extra_edge = num_inplace_consumers > 0 &&
+                            num_inplace_consumers < num_consumers;
+      // Step 2. If there are both inplace and other ops,
+      // add extra edges from others to inplace ops and add in_degrees.
+      if (has_extra_edge) {
+        Tensor::for_each_consumer(tensor, [&](Operator& consumer_op) {
+          if (in_degrees.find(consumer_op->id()) == in_degrees.end() ||
+              is_inplace_op(std::ref(consumer_op)))
+            return;
+          // NOTE: Check if the extra edge already exists.
+          for (auto inplace_id : inplace_ids) {
+            if (extra_edges[consumer_op->id()].insert(inplace_id).second)
+              in_degrees[inplace_id]++;
+          }
+        });
+      }
+      // Step 3. Check extra_edges and decrease in_degrees of inplace ops.
+      Tensor::for_each_consumer(tensor, [&](Operator& consumer_op) {
+        if (in_degrees.find(consumer_op->id()) == in_degrees.end())
+          return;
+        if ((--in_degrees[consumer_op->id()]) == 0) {
           topo_queue.push_back(std::ref(consumer_op));
+          if (has_extra_edge && !is_inplace_op(std::ref(consumer_op))) {
+            for (auto inplace_id : extra_edges[consumer_op->id()]) {
+              if (--in_degrees[inplace_id] == 0) {
+                auto inplace_op = std::find_if(inplace_ops.begin(), inplace_ops.end(),
+                  [&](const OpRef& op_ref) { return op_ref.get()->id() == inplace_id; });
+                if (inplace_op != inplace_ops.end())
+                  topo_queue.push_back(*inplace_op);
+              }
+            }
+          }
+        }
       });
     });
   }
 
-  // TODO: support all in place ops
   visited.clear();
   for (size_t i = 0; i < ret.size(); i++) {
     // BatchISendIRecvOp must be directly after nearest SplitOp
@@ -549,6 +610,8 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
         }
       }
     }
+    /*
+    // Question: is it necessary?
     // ensure update ops are executed later
     if (is_optimizer_update_op(ret[i])) {
       if (visited.find(ret[i].get()->id()) != visited.end())
@@ -572,6 +635,7 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
         break;
       }
     }
+    */
   }
 
   return ret;
@@ -636,6 +700,8 @@ inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_
   return {fw_ops, bw_ops};
 }
 
+std::ostream& operator<<(std::ostream&, const Graph&);
+
 // variable related APIs that need to used in python
 
 inline void ResetVariableData(const Tensor& tensor, const NDArray& provided_data) {
@@ -644,6 +710,10 @@ inline void ResetVariableData(const Tensor& tensor, const NDArray& provided_data
 
 inline NDArray GetDetachedVariableData(const Tensor& tensor) {
   return Graph::GetDetachedVariableData(tensor);
+}
+
+inline DeviceGroup GetVariableDeviceGroup(const Tensor& tensor) {
+  return Graph::GetVariableDeviceGroup(tensor);
 }
 
 } // namespace graph

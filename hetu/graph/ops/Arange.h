@@ -9,7 +9,7 @@ namespace graph {
 class ArangeOpImpl;
 class ArangeOp;
 
-class ArangeOpImpl : public OpInterface {
+class ArangeOpImpl final : public OpInterface {
  public:
   ArangeOpImpl(double start, double end, double step)
   : OpInterface(quote(ArangeOp)),

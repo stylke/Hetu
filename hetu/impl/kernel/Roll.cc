@@ -9,7 +9,7 @@ namespace impl {
 
 template <typename spec_t>
 void roll_cpu(const spec_t *input, spec_t *output, size_t size, int rank,
-              int64_t *shifts, int64_t *strides, int64_t *sizes) {
+              const int64_t *shifts, const int64_t *strides, const int64_t *sizes) {
   for (size_t idx = 0; idx < size; ++idx) {
 
     int output_idx = idx;
@@ -34,13 +34,12 @@ void RollCpu(const NDArray& input, const HTShape& shift, const HTAxes& axis,
   HT_ASSERT_SAME_DEVICE(input, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t len = input->numel();
   int64_t nums = shift.size();
   int64_t n_dims = input->ndim();
 
-  int *stride_dim = new int[n_dims];
+  HTAxes stride_dim(n_dims);
   stride_dim[n_dims - 1] = 1;
   for (int i = 0; i < n_dims; i++) {
     if (i > 0)
@@ -48,9 +47,9 @@ void RollCpu(const NDArray& input, const HTShape& shift, const HTAxes& axis,
         input->shape(n_dims - i) * stride_dim[n_dims - i];
   }
 
-  int64_t *strides = new int64_t[nums];
-  int64_t *sizes = new int64_t[nums];
-  int64_t *shifts = new int64_t[nums];
+  HTStride strides(n_dims);
+  HTShape sizes(n_dims);
+  HTShape shifts(n_dims);
 
   if (axis.size() == 0) {
     strides[0] = 1;
@@ -74,13 +73,10 @@ void RollCpu(const NDArray& input, const HTShape& shift, const HTAxes& axis,
         [input, output, len, nums, shifts, strides, sizes]() {
         roll_cpu<spec_t>(
           input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), 
-          len, nums, shifts, strides, sizes);
-        free(shifts);
-        free(strides);
-        free(sizes);
-        },"Roll");
-      //cpu_stream.Sync();
+          len, nums, shifts.data(), strides.data(), sizes.data());
+        },"Roll"); 
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

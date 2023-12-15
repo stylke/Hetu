@@ -67,8 +67,8 @@ void NLLLossCpu(const NDArray& pred, const NDArray& label,
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(), n_rows, n_cols,
         loss->data_ptr<spec_t>());
       },"NLLLoss");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 template <typename spec_t>
@@ -86,7 +86,6 @@ void NLLLossGradientCpu(const NDArray& pred, const NDArray& label,
   HT_ASSERT_SAME_DEVICE(pred, output);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t n_rows = 1, n_cols;
   for (size_t i = 0; i < pred->ndim() - 1; ++i)
@@ -102,9 +101,9 @@ void NLLLossGradientCpu(const NDArray& pred, const NDArray& label,
       nllloss_gradient_cpu(
         pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(),
         grad_loss->data_ptr<spec_t>(), n_rows, n_cols, output->data_ptr<spec_t>());
-      },"NLLLossGradient");
-      //cpu_stream.Sync();
+      },"NLLLossGradient");    
     });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

@@ -52,6 +52,8 @@ std::string ArgType2Str(ArgType type) {
       return "FeedDict";
     case ArgType::SGDOPTIMIZER:
       return "SGDOptimizer";
+    case ArgType::ADAMOPTIMIZER:
+      return "AdamOptimizer";
     case ArgType::DISTRIBUTED_STATES:
       return "hetu.DistributedStates";
     case ArgType::INITIALIZER:
@@ -126,8 +128,14 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::FEED_DICT;
   if (type == "Optimizer" || type == "SGDOptimizer")
     return ArgType::SGDOPTIMIZER;
+  if (type == "AdamOptimizer")
+    return ArgType::ADAMOPTIMIZER;
   if (type == "hetu.DistributedStates" || type == "DistributedStates")
     return ArgType::DISTRIBUTED_STATES;
+  if (type == "hetu.IntSymbol" || type == "IntSymbol")
+    return ArgType::INT_SYMBOL;
+  if (type == "List[hetu.IntSymbol]" || type == "List[IntSymbol]" || type == "SyShape")
+    return ArgType::SYMBOLIC_SHAPE;
   if (type == "hetu.Initializer" || type == "Initializer")
     return ArgType::INITIALIZER;
   HT_VALUE_ERROR << "Unknown argument type: " << type;
@@ -313,8 +321,14 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyFeedDict(obj);
     case ArgType::SGDOPTIMIZER:
       return CheckPySGDOptimizer(obj);
+    case ArgType::ADAMOPTIMIZER:
+      return CheckPyAdamOptimizer(obj);
     case ArgType::DISTRIBUTED_STATES:
       return CheckPyDistributedStates(obj);
+    case ArgType::INT_SYMBOL:
+      return CheckPyIntSymbol(obj);
+    case ArgType::SYMBOLIC_SHAPE:
+      return CheckPySyShape(obj);
     case ArgType::INITIALIZER:
       return CheckPyInitializer(obj);
     default:

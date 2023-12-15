@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
@@ -45,9 +46,9 @@ void BroadcastCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       broadcast_cpu<spec_t>(input->data_ptr<spec_t>(), input_size, size,
                             output->data_ptr<spec_t>());
       },
-      "Broadcast");
-      //cpu_stream.Sync();
+      "Broadcast");     
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void BroadcastGradientCpu(const NDArray& input, NDArray& output,
@@ -69,9 +70,9 @@ void BroadcastGradientCpu(const NDArray& input, NDArray& output,
       broadcast_gradient_cpu<spec_t>(input->data_ptr<spec_t>(), input_size,
                                      size, output->data_ptr<spec_t>());
       },
-      "BroadcastGradient");
-      //cpu_stream.Sync();
+      "BroadcastGradient");     
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

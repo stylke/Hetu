@@ -23,13 +23,15 @@ void AllReduceCpu(const NDArray& input, NDArray& output, ReductionType red_type,
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->AllReduce(input, output, red_type);
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void AllGatherCpu(const NDArray& input, NDArray& output,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->AllGather(input, output);                  
+  comm_group->AllGather(input, output);      
+  NDArray::MarkUsedBy({input, output}, stream);            
 }
 
 void ReduceScatterCpu(const NDArray& input, NDArray& output, ReductionType red_type,
@@ -37,6 +39,7 @@ void ReduceScatterCpu(const NDArray& input, NDArray& output, ReductionType red_t
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->ReduceScatter(input, output, red_type);
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void P2PSendCpu(const NDArray& data, const Device& dst, const Stream& stream) {
@@ -47,6 +50,7 @@ void P2PSendCpu(const NDArray& data, const Device& dst, const Stream& stream) {
   ranks[1] = std::max(src_rank, dst_rank);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Send(data, dst_rank);
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void P2PRecvCpu(NDArray& data, const Device& src, const Stream& stream) {
@@ -57,6 +61,7 @@ void P2PRecvCpu(NDArray& data, const Device& src, const Stream& stream) {
   ranks[1] = std::max(src_rank, dst_rank);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Recv(data, src_rank);
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void BatchedISendIRecvCpu(const NDArrayList& send_datas, 
@@ -67,7 +72,8 @@ void BatchedISendIRecvCpu(const NDArrayList& send_datas,
   std::transform(comm_deivces.begin(), comm_deivces.end(), ranks.begin(), [&](const Device& device) { return DeviceToWorldRank(device); });
   std::sort(ranks.begin(), ranks.end());
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
-  std::vector<Task> tasks;
+  std::vector<CommTask> tasks;
+  tasks.reserve(send_datas.size() + recv_datas.size());
   for (int i = 0; i < send_datas.size(); i++) {
     tasks.push_back(comm_group->ISend(send_datas[i], DeviceToWorldRank(dsts[i])));
   }
@@ -75,20 +81,16 @@ void BatchedISendIRecvCpu(const NDArrayList& send_datas,
     tasks.push_back(comm_group->IRecv(recv_datas[i], DeviceToWorldRank(srcs[i])));
   }
   comm_group->BatchedISendIRecv(tasks);
+  NDArray::MarkUsedBy(send_datas, stream);
+  NDArray::MarkUsedBy(recv_datas, stream);
 }
 
-void BroadcastCommCpu(const NDArray& input, NDArray& output, int broadcaster,
-                   const DeviceGroup& device_group, const Stream& stream) {
+void BroadcastCommCpu(NDArray& data, int broadcaster,
+                      const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->Sync();
-  size_t size = output->numel();
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-    input->dtype(), spec_t, "ReshapeCpu", [&]() {
-      memory_copy_cpu<spec_t>(input->data_ptr<spec_t>(),
-                              output->data_ptr<spec_t>(), size);
-    });
-  comm_group->Broadcast(output, broadcaster);
+  comm_group->Broadcast(data, broadcaster);
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void ReduceCommCpu(const NDArray& input, NDArray& output, int reducer,
@@ -96,6 +98,7 @@ void ReduceCommCpu(const NDArray& input, NDArray& output, int reducer,
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Reduce(input, output, reducer);
+  NDArray::MarkUsedBy({input, output}, stream);    
 }
 
 void GatherCpu(const NDArray& input, NDArray& output, int gatherer,
@@ -103,6 +106,7 @@ void GatherCpu(const NDArray& input, NDArray& output, int gatherer,
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Gather(input, output, gatherer);
+  NDArray::MarkUsedBy({input, output}, stream);  
 }
 
 void ScatterCpu(const NDArray& input, NDArray& output, int scatterer,
@@ -110,6 +114,7 @@ void ScatterCpu(const NDArray& input, NDArray& output, int scatterer,
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Scatter(input, output, scatterer);
+  NDArray::MarkUsedBy({input, output}, stream);  
 }
 
 } // namespace impl

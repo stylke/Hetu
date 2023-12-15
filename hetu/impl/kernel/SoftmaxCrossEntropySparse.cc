@@ -84,7 +84,6 @@ void SoftmaxCrossEntropySparseCpu(const NDArray& pred, const NDArray& label,
   size_t n_cols = pred->shape(pred->ndim() - 1);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   if (n_rows == 0)
     return;
   HT_DISPATCH_FLOATING_TYPES(
@@ -95,8 +94,8 @@ void SoftmaxCrossEntropySparseCpu(const NDArray& pred, const NDArray& label,
           pred->data_ptr<spec_t>(), label->data_ptr<int64_t>(), n_rows, n_cols,
           ignored_index, loss->data_ptr<spec_t>());
         },"SoftmaxCrossEntropySparse");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 void SoftmaxCrossEntropySparseGradientCpu(const NDArray& pred, const NDArray& label,
@@ -110,7 +109,7 @@ void SoftmaxCrossEntropySparseGradientCpu(const NDArray& pred, const NDArray& la
   size_t n_cols = pred->shape(pred->ndim() - 1);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
+
   if (n_rows == 0)
     return;
   HT_DISPATCH_FLOATING_TYPES(
@@ -122,8 +121,8 @@ void SoftmaxCrossEntropySparseGradientCpu(const NDArray& pred, const NDArray& la
           grad_loss->data_ptr<spec_t>(), n_rows, n_cols,
           ignored_index, output->data_ptr<spec_t>());
         },"SoftmaxCrossEntropySparseGradient");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

@@ -9,7 +9,7 @@ namespace graph {
 class DynamicConcatenateOpImpl;
 class DynamicConcatenateOp;
 
-class DynamicConcatenateOpImpl : public OpInterface {
+class DynamicConcatenateOpImpl final : public OpInterface {
  private:
   friend class DynamicConcatenateOp;
   struct constrcutor_access_key {};
@@ -80,6 +80,10 @@ class DynamicConcatenateOpImpl : public OpInterface {
 
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const DynamicConcatenateOpImpl&>(rhs);

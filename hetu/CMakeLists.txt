@@ -6,6 +6,8 @@ if(${HETU_COMPILE_CUDA})
   file(GLOB_RECURSE HETU_CU_SRC ${HETU_SRC_DIR}/hetu/*.cu)
   list(APPEND HETU_SRC ${HETU_CU_SRC})
 endif()
+list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/autograd/*")
+list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/execution/*")
 list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/test/*")
 list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/autograd/*")
 list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/execution/*")
@@ -46,3 +48,36 @@ if(${HETU_COMPILE_DNNL})
     target_include_directories(hetu_C PUBLIC ${DNNL_BUILD_INCLUDE_DIR})
   endif()
 endif()
+
+if(${USE_FLASH_ATTN})
+  find_package(CUTLASS)
+  if(NOT CUTLASS_FOUND)
+    message("cutlass not found, preparing...")
+    include(${CMAKE_SOURCE_DIR}/cmake/external/cutlass.cmake)
+  endif()
+
+  find_package(FLASH)
+  if(NOT FLASH_FOUND)
+    message("flash attention not found, preparing...")
+    include(${CMAKE_SOURCE_DIR}/cmake/external/flashattn.cmake)
+    target_link_libraries(hetu_C PUBLIC ${FLASH_DLL_PATH})
+    message("flash attention not found:${FLASH_INCLUDE_DIR}")
+    target_include_directories(hetu_C PUBLIC ${FLASH_INCLUDE_DIR})
+    # message("${FLASH_INCLUDE_DIR}")
+    add_dependencies(hetu_C project_flashattn)
+  else()
+    target_link_libraries(hetu_C PUBLIC ${FLASH_LIBRARY})
+    target_include_directories(hetu_C PUBLIC ${FLASH_INCLUDE_DIR})
+  endif()
+endif()
+
+target_compile_options(hetu_C PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                       -O3;
+                       -std=c++17;
+                       --use_fast_math;
+                       -U__CUDA_NO_HALF_OPERATORS__,
+                       -U__CUDA_NO_HALF_CONVERSIONS__,
+                       -U__CUDA_NO_HALF2_OPERATORS__,
+                       -U__CUDA_NO_BFLOAT16_CONVERSIONS__,
+                       --threads 8
+                       >)

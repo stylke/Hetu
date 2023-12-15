@@ -2,8 +2,10 @@
 
 #include "hetu/common/macros.h"
 #include "hetu/core/ndarray.h"
+#include "hetu/core/symbol.h"
 #include "hetu/graph/common.h"
 #include "hetu/graph/distributed_states.h"
+
 
 namespace hetu {
 namespace graph {
@@ -121,18 +123,56 @@ class TensorDef : public shared_ptr_target {
   }
 
   const HTShape& shape() const {
+    /*
+    // 优先使用symbolic的value
+    if (_symbolic) 
+      return get_HTShape_from_SyShape(_symbolic_shape);
+    */
     return _meta.shape;
   }
 
   int64_t shape(size_t axis) const {
+    /*
+    // 优先使用symbolic的value
+    if (_symbolic) {
+      auto shape = get_HTShape_from_SyShape(_symbolic_shape);
+      return shape[axis];
+    }
+    */
     return _meta.shape[axis];
   }
 
   const HTStride& stride() const {
+    /*
+    // 优先使用symbolic的value
+    if (_symbolic) {
+      auto shape = get_HTShape_from_SyShape(_symbolic_shape);
+      HTStride stride(shape.size());
+      if (stride.size() > 0) {
+        stride[stride.size() - 1] = 1;
+        for (auto d = stride.size() - 1; d > 0; d--)
+          stride[d - 1] = stride[d] * shape[d];
+      }
+      return stride;
+    }
+    */
     return _meta.stride;
   }
 
   int64_t stride(size_t axis) const {
+    /*
+    // 优先使用symbolic的value
+    if (_symbolic) {
+      auto shape = get_HTShape_from_SyShape(_symbolic_shape);
+      HTStride stride(shape.size());
+      if (stride.size() > 0) {
+        stride[stride.size() - 1] = 1;
+        for (auto d = stride.size() - 1; d > 0; d--)
+          stride[d - 1] = stride[d] * shape[d];
+      }
+      return stride[axis];
+    }
+    */
     return _meta.stride[axis];
   }
 
@@ -167,6 +207,35 @@ class TensorDef : public shared_ptr_target {
 
   void set_is_grad(bool is_grad) {
     _is_grad = is_grad;
+  }
+
+  bool is_contiguous() const {
+    if (ndim() < 1 || numel() <= 1) { return true; }
+    int64_t ndim_ = ndim();
+    int64_t contiguous_stride = 1;
+    for (int64_t i = ndim_ - 1; i >= 0; i--) {
+      if (stride(i) != contiguous_stride)
+        return false;
+      contiguous_stride *= shape(i);
+    }
+    return true;
+  }
+
+  // NOTE: Contiguous copy maybe removed in eager mode,
+  // so we need to further check if the contiguous copy
+  // is still there before using it.
+  bool maybe_have_contiguous_op() const {
+    return _contiguous_op_id != std::numeric_limits<OpId>::max();
+  }
+
+  OpId get_contiguous_op_id() const {
+    HT_ASSERT(maybe_have_contiguous_op())
+    << "Missing contiguous op of tensor " << name();
+    return _contiguous_op_id;
+  }
+
+  void set_contiguous_op_id(OpId contiguous_op_id) {
+    _contiguous_op_id = contiguous_op_id;
   }
 
   NDArray get_or_compute();
@@ -207,6 +276,51 @@ class TensorDef : public shared_ptr_target {
     _distributed_states.set_placement_group(placement_group);
   }  
 
+  bool symbolic() const {
+    return _symbolic;
+  }
+
+  const SyShape& symbolic_shape() const {
+    HT_ASSERT(_symbolic) << "symbolic_shape() can only work after calling set_symbolic_shape() or init_symbolic_shape()";
+    return _symbolic_shape;
+  }
+
+  void set_shape(const HTShape& shape) {
+    _meta.set_shape(shape);
+    // no need to set _global_shape
+    // since global_shape() method will automatically calc it
+  }
+  
+  // (most likely) not a leaf
+  void set_symbolic_shape(const SyShape& symbolic_shape) {
+    _symbolic = true;
+    _symbolic_shape = symbolic_shape;
+  }
+
+  // leaf
+  void set_symbolic_shape(const HTShape& shape) {
+    _symbolic = true;
+    set_HTShape_to_SyShape(shape, _symbolic_shape);
+  }
+
+  // leaf
+  void init_symbolic_shape(const HTShape& shape) {
+    _symbolic = true;
+    for (auto x : _symbolic_shape) {
+      x.reset();
+    }
+    set_HTShape_to_SyShape(shape, _symbolic_shape);
+  }
+
+  // leaf
+  void init_symbolic_shape() {
+    _symbolic = true;
+    for (auto x : _symbolic_shape) {
+      x.reset();
+    }
+    set_HTShape_to_SyShape(_meta.shape, _symbolic_shape);
+  }
+
  protected:
   void AddConsumer(Operator& op);
 
@@ -226,6 +340,12 @@ class TensorDef : public shared_ptr_target {
   DistributedStates _distributed_states;
   HTShape _global_shape;
   bool _is_grad{false};
+
+  // Used when the tensor's shape is not fixed
+  bool _symbolic;
+  SyShape _symbolic_shape;
+
+  OpId _contiguous_op_id{std::numeric_limits<OpId>::max()};
 };
 
 class Tensor : public shared_ptr_wrapper<TensorDef> {

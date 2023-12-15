@@ -19,13 +19,15 @@ void AllReduceCuda(const NDArray& input, NDArray& output, ReductionType red_type
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->AllReduce(input, output, red_type);
+  NDArray::MarkUsedBy({input, output}, stream);  
 }
 
 void AllGatherCuda(const NDArray& input, NDArray& output,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->AllGather(input, output);                  
+  comm_group->AllGather(input, output); 
+  NDArray::MarkUsedBy({input, output}, stream);                   
 }
 
 void ReduceScatterCuda(const NDArray& input, NDArray& output, ReductionType red_type,
@@ -33,6 +35,7 @@ void ReduceScatterCuda(const NDArray& input, NDArray& output, ReductionType red_
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->ReduceScatter(input, output, red_type);
+  NDArray::MarkUsedBy({input, output}, stream);  
 }
 
 void P2PSendCuda(const NDArray& data, const Device& dst, const Stream& stream) {
@@ -43,6 +46,7 @@ void P2PSendCuda(const NDArray& data, const Device& dst, const Stream& stream) {
   ranks[1] = std::max(src_rank, dst_rank);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Send(data, dst_rank);
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void P2PRecvCuda(NDArray& data, const Device& src, const Stream& stream) {
@@ -53,6 +57,7 @@ void P2PRecvCuda(NDArray& data, const Device& src, const Stream& stream) {
   ranks[1] = std::max(src_rank, dst_rank);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Recv(data, src_rank);
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void BatchedISendIRecvCuda(const NDArrayList& send_datas, 
@@ -63,7 +68,8 @@ void BatchedISendIRecvCuda(const NDArrayList& send_datas,
   std::transform(comm_deivces.begin(), comm_deivces.end(), ranks.begin(), [&](const Device& device) { return DeviceToWorldRank(device); });
   std::sort(ranks.begin(), ranks.end());
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
-  std::vector<Task> tasks;
+  std::vector<CommTask> tasks;
+  tasks.reserve(send_datas.size() + recv_datas.size());
   for (int i = 0; i < send_datas.size(); i++) {
     tasks.push_back(comm_group->ISend(send_datas[i], DeviceToWorldRank(dsts[i])));
   }
@@ -71,25 +77,16 @@ void BatchedISendIRecvCuda(const NDArrayList& send_datas,
     tasks.push_back(comm_group->IRecv(recv_datas[i], DeviceToWorldRank(srcs[i])));
   }
   comm_group->BatchedISendIRecv(tasks);
+  NDArray::MarkUsedBy(send_datas, stream);
+  NDArray::MarkUsedBy(recv_datas, stream);
 }
 
-void BroadcastCommCuda(const NDArray& input, NDArray& output, int broadcaster,
-                   const DeviceGroup& device_group, const Stream& stream) {
+void BroadcastCommCuda(NDArray& data, int broadcaster,
+                       const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->Sync();
-  size_t size = output->numel();
-  dim3 blocks, threads;
-  threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-    input->dtype(), spec_t, "ReshapeCuda", [&]() {
-      memory_copy_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), size);
-    });
-  comm_group->Broadcast(output, broadcaster);
+  comm_group->Broadcast(data, broadcaster);
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 void ReduceCommCuda(const NDArray& input, NDArray& output, int reducer,
@@ -97,6 +94,7 @@ void ReduceCommCuda(const NDArray& input, NDArray& output, int reducer,
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Reduce(input, output, reducer);
+  NDArray::MarkUsedBy({input, output}, stream);  
 }
 
 void GatherCuda(const NDArray& input, NDArray& output, int gatherer,
@@ -104,6 +102,7 @@ void GatherCuda(const NDArray& input, NDArray& output, int gatherer,
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Gather(input, output, gatherer);
+  NDArray::MarkUsedBy({input, output}, stream);  
 }
 
 void ScatterCuda(const NDArray& input, NDArray& output, int scatterer,
@@ -111,6 +110,7 @@ void ScatterCuda(const NDArray& input, NDArray& output, int scatterer,
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
   comm_group->Scatter(input, output, scatterer);
+  NDArray::MarkUsedBy({input, output}, stream);  
 }
 
 } // namespace impl

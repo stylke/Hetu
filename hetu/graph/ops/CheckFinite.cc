@@ -24,8 +24,6 @@ HTShapeList CheckFiniteOpImpl::DoInferShape(Operator& op,
 
 Tensor MakeCheckFiniteOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
         std::make_shared<CheckFiniteOpImpl>(),
         std::move(inputs),

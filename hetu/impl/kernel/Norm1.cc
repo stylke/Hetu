@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include <cmath>
@@ -18,6 +19,7 @@ void NormCpu(const NDArray& input, NDArray& output, int64_t dim, int64_t p, cons
     auto _future = cpu_stream.EnqueueTask(
     [stream, input, output, dim, p]() {
       dnnl::engine eng(dnnl::engine::kind::cpu, 0);
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
       dnnl::memory::dims in_shape = input->shape();
       dnnl::memory::dims in_stride = input->stride();
       dnnl::memory::dims out_shape = input->shape();
@@ -28,14 +30,14 @@ void NormCpu(const NDArray& input, NDArray& output, int64_t dim, int64_t p, cons
         out_stride[i] = stride_size;
         stride_size *= out_shape[i];
       }
-      auto src_md = dnnl::memory::desc(in_shape, dnnl::memory::data_type::f32, in_stride);
-      auto dst_md = dnnl::memory::desc(out_shape, dnnl::memory::data_type::f32, out_stride);
+      auto src_md = dnnl::memory::desc(in_shape, dnnltype, in_stride);
+      auto dst_md = dnnl::memory::desc(out_shape, dnnltype, out_stride);
 
       auto src_mem = dnnl::memory(src_md, eng, input->data_ptr<spec_t>());
       auto dst_mem = dnnl::memory(dst_md, eng, output->data_ptr<spec_t>());
 
       if (in_shape == out_shape)
-        hetu::omp::read_from_dnnl_memory(output->data_ptr<spec_t>(), src_mem);
+        hetu::cpu::read_from_dnnl_memory(output->data_ptr<spec_t>(), src_mem);
       else {
 
         // Create primitive descriptor.
@@ -56,6 +58,7 @@ void NormCpu(const NDArray& input, NDArray& output, int64_t dim, int64_t p, cons
     }
   },"Norm");
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -127,8 +130,8 @@ void NormGradientCpu(const NDArray& input, const NDArray& output, const NDArray&
       input->data_ptr<spec_t>(), output->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(), 
       input_grad->data_ptr<spec_t>(), p, reduce_dim_size, after_dim_size, size);
       },"NormGradient");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({input, output, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

@@ -90,7 +90,7 @@ class GPTAttention(ht.nn.Module):
         # softmax
         attn_weights = ht.softmax(attn_weights, 3)
         # dropout
-        attn_weights = self.attn_dropout(attn_weights)
+        # attn_weights = self.attn_dropout(attn_weights)
         # weight sum, shape=[micro_batch_size, num_heads, seq_len, head_dim]
         attn_output = ht.bmm(attn_weights, value)
 
@@ -112,10 +112,16 @@ class GPTAttention(ht.nn.Module):
         qkv = self.qkv_dense(hidden_states)
         # print(f'qkv.global_shape={qkv.global_shape}, qkv.shape={qkv.shape}, qkv.distributed_states={qkv.distributed_states}')        
         # [micro_batch_size, seq_len, num_heads, 3*head_dim]
-        qkv = qkv.reshape([micro_batch_size, seq_len, self.num_heads, 3 * self.head_dim])
+        qkv = qkv.reshape([micro_batch_size, -1, self.num_heads, 3 * self.head_dim])
         # q,k,v shape=[micro_batch_size, seq_len, num_heads, head_dim]
         query, key, value = ht.split(qkv, 3, qkv.ndim - 1)
 
+        '''
+        query = ht.contiguous(query)
+        value = ht.contiguous(value)
+        key = ht.contiguous(key)
+        '''
+        
         # [micro_batch_size, num_heads, seq_len, head_dim]
         query = query.transpose([0, 2, 1, 3])
         value = value.transpose([0, 2, 1, 3])
@@ -128,13 +134,13 @@ class GPTAttention(ht.nn.Module):
         # [micro_batch_size, seq_len, num_heads, head_dim]
         attn_output = attn_output.transpose([0, 2, 1, 3])
         # [micro_batch_size*seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([micro_batch_size * seq_len, self.num_heads * self.head_dim])
+        attn_output = attn_output.reshape([-1, self.num_heads * self.head_dim])
         # row parallel, shape=[micro_batch_size*seq_len, num_heads*head_dim]
         attn_output = self.dense(attn_output)
         # [micro_batch_size, seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([micro_batch_size, seq_len, self.num_heads * self.head_dim])
+        attn_output = attn_output.reshape([micro_batch_size, -1, self.num_heads * self.head_dim])
         # dropout
-        attn_output = self.resid_dropout(attn_output)
+        # attn_output = self.resid_dropout(attn_output)
 
         # [micro_batch_size, seq_len, num_heads*head_dim]
         return attn_output
@@ -181,7 +187,7 @@ class ParallelMLP(ht.nn.Module):
 
         # [b*seq_len, 4h] -> [b*seq_len, h]
         output = self.dense_4h_to_h(intermediate_parallel)
-        output = self.dropout(output)
+        # output = self.dropout(output)
         return output
 
 class GPTMLP(ht.nn.Module):
@@ -285,7 +291,7 @@ class GPTModel(ht.nn.Module):
             assert attention_mask.global_shape == input_ids.global_shape \
                 and attention_mask.distributed_states.check_equal(attention_mask.distributed_states), \
                 'attention_mask global_shape and distributed_states should be equal to input_ids!'
-            attention_mask = attention_mask.reshape([micro_batch_size, 1, 1, seq_len])
+            attention_mask = attention_mask.reshape([micro_batch_size, 1, 1, -1])
             # 原attention_mask: 1为使用的值, 0为mask的值
             # attention_mask = attention_mask.to(dtype=self.dtype)  # fp16 compatibility
             attention_mask = (1.0 - attention_mask) * -10000.0 # 0为使用的值, -10000为mask的值
@@ -299,7 +305,7 @@ class GPTModel(ht.nn.Module):
             token_type_embeds = self.wte(token_type_ids) # [b, seq_len, embed_dim]
             hidden_states = hidden_states + token_type_embeds
         # dropout
-        hidden_states = self.drop(hidden_states)
+        # hidden_states = self.drop(hidden_states)
 
         # 12 x multihead self-attn
         for i, block in enumerate(self.h):

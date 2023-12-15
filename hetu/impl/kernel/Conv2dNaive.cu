@@ -131,8 +131,6 @@ __global__ void conv2d_gradient_filter_naive_kernel(const spec_t* grad_output, c
                                                     const int padWidth, const int padHeight) {
   const int channelStride = kernelWidth * kernelHeight;
 
-  // Each Block is responsible for accumulating over a permutation of
-  // (channels x kH x kW), use blockIdx to determine which one
   int bidx = blockIdx.x;
   int kW = bidx % kernelWidth;
   int kH = (bidx / kernelWidth) % kernelHeight;
@@ -140,29 +138,15 @@ __global__ void conv2d_gradient_filter_naive_kernel(const spec_t* grad_output, c
   int kC = ch % inputChannels;
   int kN = ch / inputChannels;
 
-  // Need to calculate which input channel is associated with this filter
-  // channe;
-
   spec_t grad = 0;
 
   const int laneId = threadIdx.x % 32;
   const int batch = threadIdx.x / 32;
   const int nwarps = blockDim.x / 32;
   const int imageElements = outputWidth * outputHeight;
-  // Use warp per item.  In the original kernel, a threadblock was used to sum over NHW.
-  // Here, we use a warp to sum values over HW dimension, and if batchSize is larger than the
-  // number of warps, a warp would loop over remaining batch items (e.g. if there are 8 warps,
-  // warp 0 would go over 0-8-16 etc image, warp 1 over 1-9-17 etc). Later in blockReduce,
-  // all the warps will be reduced anyway, thus the full reduction will be over NHW, like it
-  // should be. That allows to get rid of one modulo operation inside the loop (because n/batchIdx
-  // now does not have to be computed through modulo, you are just looping over it), and
-  // bring a nice speed-up.
   for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){
     // Warp-stride loop over elements in a batch item
     for (size_t idx = laneId; idx < imageElements; idx += 32) {
-    // Need to calculate the following: batch position, and offset into the grad_output
-    // in height, and width. We can intuit the corresponding position in the input from
-    // the other parameters we have
       int go_w_offset = idx % outputWidth;
       int go_h_offset = (idx / outputWidth);
 
@@ -179,14 +163,10 @@ __global__ void conv2d_gradient_filter_naive_kernel(const spec_t* grad_output, c
   }
   __syncthreads();
 
-  // At this point each thread in the block has a local gradient, which we need to
-  // accumulate prior to writing the global value
   extern __shared__ char smem[];
   spec_t* buf = reinterpret_cast<spec_t*>(smem);
   hetu::cuda::BlockReduceSum(grad, buf);
 
-  // After reduction, first thread in the block has the gradient, so its responsible
-  // for writing it to grad_weight
   if (threadIdx.x == 0) {
     grad_weight[bidx] = grad;
   }
@@ -231,7 +211,7 @@ void Conv2dNaiveCuda(const NDArray& input_x, const NDArray& input_f, NDArray& ou
         out_W, out_H, filter_W, filter_H,
         stride_w, stride_h, padding_w, padding_h);
     });
-  return;
+  NDArray::MarkUsedBy({input_x, input_f, output}, stream);
 }
 
 void Conv2dGradientofFilterNaiveCuda(const NDArray& input_x,
@@ -276,7 +256,7 @@ void Conv2dGradientofFilterNaiveCuda(const NDArray& input_x,
         input_C, df_C, input_W, input_H, dy_W, dy_H,
         df_W, df_H, stride_w, stride_h, padding_w, padding_h); 
     });
-  return;
+  NDArray::MarkUsedBy({gradient_y, input_x, gradient_f}, stream);
 }
 
 void Conv2dGradientofDataNaiveCuda(const NDArray& input_f, const NDArray& gradient_y,
@@ -319,7 +299,7 @@ void Conv2dGradientofDataNaiveCuda(const NDArray& input_f, const NDArray& gradie
         dy_W, dy_H, filter_W, filter_H,
         stride_w, stride_h, padding_w, padding_h);      
     });
-  return;
+  NDArray::MarkUsedBy({gradient_y, gradient_x, input_f}, stream);
 }
 
 void Conv2dAddBiasNaiveCuda(const NDArray& input_x, const NDArray& input_f,
@@ -364,7 +344,7 @@ void Conv2dAddBiasNaiveCuda(const NDArray& input_x, const NDArray& input_f,
         out_W, out_H, filter_W, filter_H,
         stride_w, stride_h, padding_w, padding_h);
     });
-  return;
+  NDArray::MarkUsedBy({input_x, output, input_f, bias}, stream);
 }
 
 } // namespace impl

@@ -11,7 +11,7 @@ class ConcatenateOp;
 class ConcatenateGradientOpImpl;
 class ConcatenateGradientOp;
 
-class ConcatenateOpImpl : public OpInterface {
+class ConcatenateOpImpl final : public OpInterface {
  private:
   friend class ConcatenateOp;
   struct constrcutor_access_key {};
@@ -93,6 +93,10 @@ class ConcatenateOpImpl : public OpInterface {
 
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ConcatenateOpImpl&>(rhs);
@@ -106,7 +110,7 @@ class ConcatenateOpImpl : public OpInterface {
 Tensor MakeConcatenateOp(TensorList inputs, size_t axis = 0,
                          OpMeta op_meta = OpMeta());
 
-class ConcatenateGradientOpImpl : public OpInterface {
+class ConcatenateGradientOpImpl final : public OpInterface {
  public:
   ConcatenateGradientOpImpl(size_t axis, size_t offset,
                             OpMeta op_meta = OpMeta())
@@ -149,6 +153,10 @@ class ConcatenateGradientOpImpl : public OpInterface {
 
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ConcatenateGradientOpImpl&>(rhs);

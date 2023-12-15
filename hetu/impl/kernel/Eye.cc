@@ -23,7 +23,6 @@ void EyeCpu(NDArray& output, const Stream& stream) {
   HT_ASSERT(output->ndim() == 2);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t size = output->numel();
   size_t ncols = output->shape(1);
@@ -36,8 +35,8 @@ void EyeCpu(NDArray& output, const Stream& stream) {
       eye_cpu<spec_t>(
         output->data_ptr<spec_t>(), size, ncols);
       },"Eye");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({output}, stream);
 }
 
 } // namespace impl

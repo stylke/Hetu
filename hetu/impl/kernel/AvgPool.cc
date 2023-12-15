@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
@@ -93,10 +94,11 @@ void AvgPoolCpu(const NDArray& input, const size_t kernel_H,
       auto _future = cpu_stream.EnqueueTask(
         [eng, input, output, kernel_H, kernel_W,
         padding, stride]() {
-        auto src_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
+        auto src_md = dnnl::memory::desc(input->shape(), dnnltype, dnnl::memory::format_tag::nchw);
         auto src_mem = dnnl::memory(src_md, eng, input->data_ptr<spec_t>());
 
-        auto dst_md = dnnl::memory::desc(output->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto dst_md = dnnl::memory::desc(output->shape(), dnnltype, dnnl::memory::format_tag::nchw);
         auto dst_mem = dnnl::memory(dst_md, eng, output->data_ptr<spec_t>());
 
         // Create primitive descriptor.
@@ -123,8 +125,8 @@ void AvgPoolCpu(const NDArray& input, const size_t kernel_H,
         engine_stream.wait();
       },
       "AvgPool");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void AvgPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
@@ -146,16 +148,17 @@ void AvgPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
         [eng, output_Y, gradient_Y,
         input_X, gradient_X, kernel_H, kernel_W,
         padding, stride]() {
-        auto src_md = dnnl::memory::desc(input_X->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_X->dtype());
+        auto src_md = dnnl::memory::desc(input_X->shape(), dnnltype, dnnl::memory::format_tag::nchw);
         auto src_mem = dnnl::memory(src_md, eng, input_X->data_ptr<spec_t>());
 
-        auto dst_md = dnnl::memory::desc(output_Y->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto dst_md = dnnl::memory::desc(output_Y->shape(), dnnltype, dnnl::memory::format_tag::nchw);
         auto dst_mem = dnnl::memory(dst_md, eng, output_Y->data_ptr<spec_t>());
 
-        auto gdst_md = dnnl::memory::desc(gradient_Y->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto gdst_md = dnnl::memory::desc(gradient_Y->shape(), dnnltype, dnnl::memory::format_tag::nchw);
         auto gdst_mem = dnnl::memory(gdst_md, eng, gradient_Y->data_ptr<spec_t>());
       
-        auto gsrc_md = dnnl::memory::desc(gradient_X->shape(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::nchw);
+        auto gsrc_md = dnnl::memory::desc(gradient_X->shape(), dnnltype, dnnl::memory::format_tag::nchw);
         auto gsrc_mem = dnnl::memory(gsrc_md, eng, gradient_X->data_ptr<spec_t>());
 
         // Create primitive descriptor.
@@ -188,9 +191,9 @@ void AvgPoolGradientCpu(const NDArray& output_Y, const NDArray& gradient_Y,
         pooling_prim.execute(engine_stream, pooling_args);
         engine_stream.wait();
       },
-      "AvgPoolGradient");
-      //cpu_stream.Sync();
+      "AvgPoolGradient");     
     });
+  NDArray::MarkUsedBy({output_Y, gradient_Y, input_X, gradient_X}, stream);
 }
 
 } // namespace impl

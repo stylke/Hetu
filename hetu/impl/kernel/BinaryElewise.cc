@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 
 namespace hetu {
@@ -13,7 +14,6 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
   HT_ASSERT_SAME_DEVICE(inputA, output);
   HT_ASSERT_SAME_DEVICE(inputB, output);
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   dnnl::memory::dims A_dims(output->ndim());
   dnnl::memory::dims A_stride(output->ndim());
@@ -52,18 +52,13 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     inputA->dtype(), spec_t, "BinaryElewiseCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
-        [eng, inputA, inputB, output, A_dims, A_stride,
+        [inputA, inputB, output, A_dims, A_stride,
          B_dims, B_stride, out_strides, op]() {
-          dnnl::memory::data_type mtype;
-          if (inputA->dtype() == DataType::FLOAT32)
-            mtype = dnnl::memory::data_type::f32;
-          else if (inputA->dtype() == DataType::FLOAT16) 
-            mtype = dnnl::memory::data_type::f16;
-          else
-            mtype = dnnl::memory::data_type::f64;
-          auto src_A_md = dnnl::memory::desc(A_dims, mtype, A_stride);
-          auto src_B_md = dnnl::memory::desc(B_dims, mtype, B_stride);
-          auto dst_md = dnnl::memory::desc(output->shape(), mtype, out_strides);
+          dnnl::engine eng(dnnl::engine::kind::cpu, 0);
+          auto dnnltype = hetu::cpu::dtype_to_dnnltype(inputA->dtype());
+          auto src_A_md = dnnl::memory::desc(A_dims, dnnltype, A_stride);
+          auto src_B_md = dnnl::memory::desc(B_dims, dnnltype, B_stride);
+          auto dst_md = dnnl::memory::desc(output->shape(), dnnltype, out_strides);
 
           // Create src memory objects.
           auto src_A_mem = dnnl::memory(src_A_md, eng, inputA->data_ptr<spec_t>());
@@ -87,6 +82,7 @@ void BinaryElewiseToolCpu(const NDArray& inputA, const NDArray& inputB,
         },
         "BinaryEleWise");
     });
+  NDArray::MarkUsedBy({inputA, inputB, output}, stream);
 }
 
 void AddElewiseCpu(const NDArray& inputA, const NDArray& inputB,

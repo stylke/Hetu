@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
@@ -17,8 +18,9 @@ void SoftmaxCpu(const NDArray& input, NDArray& output, int64_t dim, const Stream
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output, dim]() {
           dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-          auto src_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
-          auto dst_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+          auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
+          auto src_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
+          auto dst_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
           auto src_mem = dnnl::memory(src_md, eng, input->data_ptr<spec_t>());
           auto dst_mem = dnnl::memory(dst_md, eng, output->data_ptr<spec_t>());
 
@@ -43,8 +45,8 @@ void SoftmaxCpu(const NDArray& input, NDArray& output, int64_t dim, const Stream
           softmax_prim.execute(engine_stream, softmax_args);
           engine_stream.wait();
         },"Softmax");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void SoftmaxGradientCpu(const NDArray& input_Y, const NDArray& output_grad,
@@ -59,8 +61,9 @@ void SoftmaxGradientCpu(const NDArray& input_Y, const NDArray& output_grad,
       auto _future = cpu_stream.EnqueueTask(
         [stream, input_Y, output_grad, input_grad, dim]() {
           dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-          auto src_md = dnnl::memory::desc(input_Y->shape(), dnnl::memory::data_type::f32, input_Y->stride());
-          auto dst_md = dnnl::memory::desc(input_Y->shape(), dnnl::memory::data_type::f32, input_Y->stride());
+          auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_Y->dtype());
+          auto src_md = dnnl::memory::desc(input_Y->shape(), dnnltype, input_Y->stride());
+          auto dst_md = dnnl::memory::desc(input_Y->shape(), dnnltype, input_Y->stride());
           auto dst_mem = dnnl::memory(dst_md, eng, input_Y->data_ptr<spec_t>());
           auto gdst_mem = dnnl::memory(dst_md, eng, output_grad->data_ptr<spec_t>());
           auto gsrc_mem = dnnl::memory(src_md, eng, input_grad->data_ptr<spec_t>());
@@ -90,6 +93,7 @@ void SoftmaxGradientCpu(const NDArray& input_Y, const NDArray& output_grad,
           engine_stream.wait();
         },"SoftmaxGradient");
     });
+  NDArray::MarkUsedBy({input_Y, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

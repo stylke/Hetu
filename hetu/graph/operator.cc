@@ -13,7 +13,7 @@ void OpInterface::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   // default: distributed states of output tensor directly copy from input tensor
   // check input states is valid & check distributed states of all input tensor are the same.
   HT_ASSERT(inputs.size() > 0) << op_meta.name << ": distributed states should be manually set when in_degree=0!";
-  HT_LOG_DEBUG << op_meta.name << ": default copy states from inputs";
+  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " " << op_meta.name << ": default copy states from inputs";
   DistributedStates default_ds;
   for (auto& input : inputs) {
     const auto& input_ds = input->get_distributed_states(); 
@@ -74,6 +74,8 @@ HTShapeList OpInterface::DoInferShape(Operator& op,
   __builtin_unreachable();
 }
 
+// deprecated: only used in gpt inference, before symbolic shape is realized
+/*
 NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                                         RuntimeContext& runtime_ctx) const {
   NDArrayList outputs;
@@ -92,20 +94,62 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     }
     // Although we have inferred the meta of tensors,
     // InferShape is still necessary in pipeline parallelism
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " op: " << op->name() << ", DoInferShape...";
     auto output_shapes = DoInferShape(op, input_shapes, runtime_ctx);
     HTShapeList output_dynamic_shapes;
+    // deprecated: only used in gpt inference, before symbolic shape is realized
     if (is_dynamic)
       output_dynamic_shapes = DoInferDynamicShape(op, input_dynamic_shapes, runtime_ctx);
-    for (size_t i = 0; i < output_shapes.size(); i++) {
+    auto output_size = op->num_outputs();
+    for (size_t i = 0; i < output_size; i++) {
+      HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " op: " << op->name() 
+        << ", output tensor shape: " << op->output(i)->shape() 
+        << ", output NDArray shape: " << output_shapes[i];
+      for (size_t j = 0; j < output_shapes[i].size(); j++) {
+        HT_ASSERT(output_shapes[i][j] == op->output(i)->shape(j));
       outputs.push_back(NDArray::empty(output_shapes[i],
                                        op->instantiation_ctx().placement,
                                        op->output(i)->dtype(),
+                                       op->instantiation_ctx().stream_index,
                                        is_dynamic ? output_dynamic_shapes[i] : HTShape()));
     }
+    // deprecated: only used in gpt inference, before symbolic shape is realized
     if (is_dynamic)
       HT_LOG_TRACE_IF(hetu::impl::comm::GetLocalDevice().index() == 0U) << "op: " << op << " input_shapes: " << input_shapes   
         << " input_dynamic_shapes: " << input_dynamic_shapes << " output_shapes: " << output_shapes 
         << " output_dynamic_shapes: " << output_dynamic_shapes;
+  }
+  return outputs;
+}
+*/
+
+NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
+                                        RuntimeContext& runtime_ctx) const {
+  auto local_device = hetu::impl::comm::GetLocalDevice(); // only for debug use
+  NDArrayList outputs;
+  auto output_size = op->num_outputs();
+  if (output_size > 0) {
+    outputs.reserve(output_size);
+    for (size_t i = 0; i < output_size; i++) {
+      // question: will tensor shape != NDArray shape happen in any situation
+      const auto& output_shape = runtime_ctx.get_runtime_shape(op->output(i)->id());
+      HT_LOG_DEBUG << local_device << ": exec op " << op
+        << " output " << i << " shape = " << output_shape;
+      outputs.push_back(NDArray::empty(output_shape,
+                                       op->instantiation_ctx().placement,
+                                       op->output(i)->dtype(),
+                                       op->instantiation_ctx().stream_index));
+      // for some ops that rely on symbolic shape
+      if (op->output(i)->symbolic()) {
+        HT_LOG_TRACE << local_device << ": exec op " << op 
+          << " output " << i << " has " << op->output(i)->symbolic_shape();
+        if (is_SyShape_leaf(op->output(i)->symbolic_shape())) {
+          op->output(i)->set_symbolic_shape(output_shape);
+          HT_LOG_TRACE << local_device << ": set symbolic shape of exec op " << op 
+            << " output " << i << " to " << output_shape;
+        }
+      }
+    }
   }
   return outputs;
 }
@@ -149,8 +193,10 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
   // Deduce requires grad
   bool requires_grad = false;
   if (is_variable_op(*_body)) {
-    requires_grad = reinterpret_cast<VariableOpImpl&>(*_body).requires_grad() | 
-                    reinterpret_cast<ParallelVariableOpImpl&>(*_body).requires_grad();
+    if (_body->type() == "VariableOp")
+      requires_grad = reinterpret_cast<VariableOpImpl&>(*_body).requires_grad();
+    else
+      requires_grad = reinterpret_cast<ParallelVariableOpImpl&>(*_body).requires_grad();
   } else {
     requires_grad =
       std::any_of(_inputs.begin(), _inputs.end(),
@@ -253,6 +299,8 @@ void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
     // Both ops are on the same device. We can block the current op
     // by waiting for the stop event of the dependency.
     input_op->instantiation_ctx().stop[micro_batch_id]->Block(instantiation_ctx().stream());
+    HT_LOG_TRACE << "input op " << input_op << " stream is: " << input_op->instantiation_ctx().stream() 
+      << " and current op " << name() << " stream is " << instantiation_ctx().stream();
   }
 }
 

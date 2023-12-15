@@ -11,7 +11,7 @@ class SoftmaxOp;
 class SoftmaxGradientOpImpl;
 class SoftmaxGradientOp;
 
-class SoftmaxOpImpl : public OpInterface {
+class SoftmaxOpImpl final : public OpInterface {
  private:
   friend class SoftmaxOp;
   struct constrcutor_access_key {};
@@ -46,6 +46,10 @@ class SoftmaxOpImpl : public OpInterface {
   int64_t _dim;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const SoftmaxOpImpl&>(rhs);
@@ -57,7 +61,7 @@ class SoftmaxOpImpl : public OpInterface {
 
 Tensor MakeSoftmaxOp(Tensor input, int64_t dim, OpMeta op_meta = OpMeta());
 
-class SoftmaxGradientOpImpl : public OpInterface {
+class SoftmaxGradientOpImpl final : public OpInterface {
  private:
   friend class SoftmaxGradientOp;
   struct constrcutor_access_key {};
@@ -89,6 +93,10 @@ class SoftmaxGradientOpImpl : public OpInterface {
   int64_t _dim;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const SoftmaxGradientOpImpl&>(rhs);

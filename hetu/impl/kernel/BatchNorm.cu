@@ -25,22 +25,7 @@ void BatchNormCuda(const NDArray& input_X, const NDArray& bn_scale,
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
-  cudnnDataType_t datatype;
-  if (input_X->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (input_X->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (input_X->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input_X->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_NOT_IMPLEMENTED << "UNSUPPORTED TYPE:" << input_X->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input_X->dtype());
 
   // input
   size_t input_N = input_X->shape(0);
@@ -74,16 +59,13 @@ void BatchNormCuda(const NDArray& input_X, const NDArray& bn_scale,
 
       float alpha_f = 1.0f;
       float beta_f = 0.0f;
-      if (input_X->dtype() == DataType::UNDETERMINED) {
-      }
-      else if (input_X->dtype() == DataType::FLOAT16 || input_X->dtype() == DataType::BFLOAT16 ) {
+      if (input_X->dtype() == DataType::FLOAT16 || input_X->dtype() == DataType::BFLOAT16 ) {
         CUDNN_CALL(cudnnBatchNormalizationForwardTraining(
           handle, CUDNN_BATCHNORM_SPATIAL, &alpha_f, &beta_f, input_desc, input_X->data_ptr<spec_t>(),
           output_desc, output_Y->data_ptr<spec_t>(), bnScaleBiasMeanVar_desc, bn_scale->data_ptr<float>(),
           bn_bias->data_ptr<float>(), momentum, running_mean->data_ptr<void>(), running_var->data_ptr<void>(), eps,
           save_mean->data_ptr<void>(), save_var->data_ptr<void>()));
-      }
-      else {
+      } else {
         CUDNN_CALL(cudnnBatchNormalizationForwardTraining(
           handle, CUDNN_BATCHNORM_SPATIAL, &alpha, &beta, input_desc, input_X->data_ptr<spec_t>(),
           output_desc, output_Y->data_ptr<spec_t>(), bnScaleBiasMeanVar_desc, bn_scale->data_ptr<spec_t>(),
@@ -95,7 +77,10 @@ void BatchNormCuda(const NDArray& input_X, const NDArray& bn_scale,
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(bnScaleBiasMeanVar_desc));
     });
-  return;
+  
+  NDArray::MarkUsedBy({input_X, bn_scale, bn_bias, output_Y, running_mean,
+                       running_var, save_mean, save_var},
+                      stream);
 }
 
 void BatchNormGradientCuda(const NDArray& gradient_Y, const NDArray& input_X,
@@ -117,22 +102,7 @@ void BatchNormGradientCuda(const NDArray& gradient_Y, const NDArray& input_X,
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
-  cudnnDataType_t datatype;
-  if (input_X->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (input_X->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (input_X->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input_X->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_X->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input_X->dtype());
 
   // input
   size_t input_N = input_X->shape(0);
@@ -174,8 +144,7 @@ void BatchNormGradientCuda(const NDArray& gradient_Y, const NDArray& input_X,
           gradient_X->data_ptr<spec_t>(), bnScaleBiasMeanVar_desc, bn_scale->data_ptr<spec_t>(),
           gradient_bn_scale->data_ptr<float>(), gradient_bn_bias->data_ptr<float>(), eps, 
           save_mean->data_ptr<void>(), save_var->data_ptr<void>()));
-      }
-      else {
+      } else {
         CUDNN_CALL(cudnnBatchNormalizationBackward(
           handle, CUDNN_BATCHNORM_SPATIAL, &one, &zero, &one, &zero,
           input_desc, input_X->data_ptr<spec_t>(), output_desc, gradient_Y->data_ptr<spec_t>(), input_desc,
@@ -188,6 +157,11 @@ void BatchNormGradientCuda(const NDArray& gradient_Y, const NDArray& input_X,
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(bnScaleBiasMeanVar_desc));
     });
+  
+  NDArray::MarkUsedBy({gradient_Y, input_X, bn_scale, gradient_X,
+                       gradient_bn_scale, gradient_bn_bias, save_mean,
+                       save_var},
+                      stream);
 }
 
 } // namespace impl

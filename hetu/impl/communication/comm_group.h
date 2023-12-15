@@ -10,7 +10,15 @@ namespace impl {
 namespace comm {
 
 using hetu::operator<<;
-using Task = std::function<void()>;
+
+struct CommTask {
+  std::function<void()> fn;
+  NDArrayList data;
+
+  CommTask() = default;
+  CommTask(std::function<void()> fn_, NDArrayList data_)
+  : fn(std::move(fn_)), data(std::move(data_)) {}
+};
 
 class CommunicationGroupDef : public shared_ptr_target {
  protected:
@@ -109,17 +117,17 @@ class CommunicationGroupDef : public shared_ptr_target {
                        << "\" is not defined.";
   }
 
-  virtual Task ISend(const NDArray& data, int receiver) {
+  virtual CommTask ISend(const NDArray& data, int receiver) {
     HT_NOT_IMPLEMENTED << "ISend fn of backend \"" << backend()
                        << "\" is not defined.";
   }
 
-  virtual Task IRecv(NDArray& data, int sender) {
+  virtual CommTask IRecv(NDArray& data, int sender) {
     HT_NOT_IMPLEMENTED << "IRecv fn of backend \"" << backend()
                        << "\" is not defined.";
   }
 
-  virtual void BatchedISendIRecv(const std::vector<Task>& tasks) {
+  virtual void BatchedISendIRecv(const std::vector<CommTask>& tasks) {
     HT_NOT_IMPLEMENTED << "BatchedISendIRecv fn of backend \"" << backend()
                        << "\" is not defined.";
   }  

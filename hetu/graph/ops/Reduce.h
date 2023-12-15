@@ -11,7 +11,7 @@ class ReduceOp;
 class ReduceGradientOpImpl;
 class ReduceGradientOp;
 
-class ReduceOpImpl : public OpInterface {
+class ReduceOpImpl final : public OpInterface {
 protected:
   ReduceOpImpl(OpType&& op_type, ReductionType reduction = kMEAN, 
                const HTAxes& axes = {},
@@ -22,9 +22,9 @@ protected:
     _keepdims(keepdims),
     _reduction(reduction) {
     HT_ASSERT(_reduction == kSUM || _reduction == kMEAN || _reduction == kMAX 
-              || _reduction == kMIN || _reduction == kNONE)
+              || _reduction == kMIN || _reduction == kPROD || _reduction == kNONE)
       << "Unsupported reduction type \'" << _reduction << "\' for " << type()
-      << " operators. Expected: [\'mean\', \'sum\', \'max\', \'min\', \'none\']";
+      << " operators. Expected: [\'sum\', \'mean\', \'max\', \'min\', \'prod\', \'none\']";
   }
 
  public:
@@ -108,6 +108,10 @@ protected:
 
   ReductionType _reduction;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ReduceOpImpl&>(rhs);
@@ -142,7 +146,11 @@ Tensor MakeReduceMinOp(Tensor input, const HTAxes& axes,
                        const HTKeepDims& keepdims,
                        OpMeta op_meta);
 
-class ReduceGradientOpImpl : public OpInterface {
+Tensor MakeReduceProdOp(Tensor input, const HTAxes& axes,
+                       const HTKeepDims& keepdims,
+                       OpMeta op_meta);
+
+class ReduceGradientOpImpl final : public OpInterface {
  public:
   ReduceGradientOpImpl(const HTShape& shape,
                        ReductionType reduction = kMEAN,
@@ -231,6 +239,10 @@ class ReduceGradientOpImpl : public OpInterface {
 
   ReductionType _reduction;
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ReduceGradientOpImpl&>(rhs);

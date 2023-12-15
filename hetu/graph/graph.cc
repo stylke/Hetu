@@ -3,8 +3,10 @@
 #include "hetu/graph/define_and_run_graph.h"
 #include "hetu/graph/eager_graph.h"
 #include "hetu/graph/executable_graph.h"
+#include "hetu/graph/ops/Contiguous.h"
 #include "hetu/graph/ops/ones_like.h"
 #include "hetu/graph/ops/sum.h"
+#include "hetu/graph/ops/Contiguous.h"
 #include "hetu/impl/communication/comm_group.h"
 #include <thread>
 
@@ -19,14 +21,29 @@ std::shared_ptr<Graph> Graph::_default_define_by_run_graph;
 std::shared_ptr<Graph> Graph::_default_define_and_run_graph;
 thread_local std::stack<GraphId> Graph::_cur_graph_ctx;
 
+GraphId Graph::_next_graph_id() {
+  static std::atomic<GraphId> _global_graph_id{0};
+  return _global_graph_id++;
+}
+
 void Graph::Init() {
   // exit handler
-  std::atexit([]() {
+  auto status = std::atexit([]() {
+    HT_LOG_DEBUG << "Clearing and destructing all graphs...";
+    Graph::_name_to_graphs.clear();
+    Graph::_default_eager_graph = nullptr;
+    Graph::_default_define_by_run_graph = nullptr;
+    Graph::_default_define_and_run_graph = nullptr;
     for (auto& graph : Graph::_global_graphs) {
+      if (graph == nullptr)
+        continue;
       graph->Clear();
     }
     Graph::_global_graphs.clear();
+    HT_LOG_DEBUG << "Destructed all graphs";
   });
+  HT_ASSERT(status == 0)
+      << "Failed to register the exit function for memory pools.";
 
   auto concurrency = std::thread::hardware_concurrency();
   Graph::_global_graphs.reserve(MIN(concurrency, 16) * 2);
@@ -43,18 +60,12 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta) {
   Graph::InitOnce();
   if (inputs.empty() && op_meta.extra_deps.empty()) {
-    if (is_placeholder_op(*body)) {
-      HT_LOG_TRACE << "Make placeholder op (use default_define_and_run_graph)";
-      return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
-                  Graph::get_default_define_and_run_graph());
-    } else {
-      HT_VALUE_ERROR_IF(Graph::_cur_graph_ctx.empty())
-        << "The target graph must be explicitly passed or enqueued to ctx "
-        << "when making a new op with zero inputs";
-      HT_LOG_TRACE << "Make variable op on a " << Graph::GetGraph(Graph::_cur_graph_ctx.top()).type() << " graph";
-      return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
-                    Graph::GetGraph(Graph::_cur_graph_ctx.top()));
-    }
+    HT_VALUE_ERROR_IF(Graph::_cur_graph_ctx.empty())
+      << "The target graph must be explicitly passed or enqueued to ctx "
+      << "when making a new op with zero inputs";
+    HT_LOG_TRACE << "Make variable op on a " << Graph::GetGraph(Graph::_cur_graph_ctx.top()).type() << " graph";
+    return MakeOp(std::move(body), std::move(inputs), std::move(op_meta),
+                  Graph::GetGraph(Graph::_cur_graph_ctx.top()));
   } else {
     GraphId target_graph_id = std::numeric_limits<GraphId>::max();
     bool input_graph_changed = false;
@@ -87,6 +98,32 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
 Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta, Graph& graph) {
   Graph::InitOnce();
+  if (body->require_contig_inputs()) {
+    for (auto& input : inputs) {
+      auto& input_graph = Graph::GetGraph(input->graph_id());
+      if (!input->is_contiguous()) {
+        if (input->maybe_have_contiguous_op()) {
+          HT_LOG_TRACE << "Tensor " << input->name()
+                       << " is not contiguous for op " << body->type()
+                       << ". But it may have a contiguous copy, use it instead";
+          auto op_id = input->get_contiguous_op_id();
+          // NOTE: Contiguous copy is created in the same graph as input.
+          auto op = input_graph.GetOp(op_id);
+          if (op.is_defined()) {
+            input = op->output(0);
+          } else {
+            HT_LOG_TRACE << "Contiguous copy is not found, make a new one";
+            input = MakeContiguousOp(input);
+          }
+        } else {
+          HT_LOG_TRACE << "Make Contiguous op for Tensor " << input->name()
+                       << " while making " << body->type() << " op";
+          input = MakeContiguousOp(input);
+        }
+      }
+    }
+  }
+  AutoCast::Graph_AutoCast(inputs, body);
   return graph.MakeOpInner(std::move(body), std::move(inputs),
                            std::move(op_meta));
 }
@@ -198,7 +235,6 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         grad_outputs.push_back(grad);
       }
     }
-
     if (op->num_inputs() > 0) {
       auto grad_inputs = op->Gradient(grad_outputs);
       for (size_t i = 0; i < op->num_inputs(); i++) {
@@ -214,7 +250,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         Tensor final_grad = grad_inputs[i];
         if (ds_grad.is_valid()) {
           // HT_LOG_DEBUG << local_device << ": " << "grad_op: " << grad_op << ": states: " << ds_grad.ds_info() << ", shape: " << grad_inputs[i]->shape();
-          if (ds_grad.get_dim(-2) > 1) { // partial->duplicate
+          if (ds_grad.get_dim(-2) > 1) { // partial->duplicate to sync the gradients for dp
             int32_t device_num = ds_grad.get_device_num();
             std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
             std::unordered_map<int32_t, int32_t> res_states = ds_grad.combine_states(src2dst);
@@ -270,6 +306,12 @@ std::string GraphType2Str(GraphType type) {
 
 std::ostream& operator<<(std::ostream& os, GraphType type) {
   os << GraphType2Str(type);
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Graph& graph) {
+  os << "graph(name=" << graph.name() << ", id=" << graph.id()
+     << ", type=" << graph.type() << ")";
   return os;
 }
 

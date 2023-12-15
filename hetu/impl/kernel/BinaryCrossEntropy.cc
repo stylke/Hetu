@@ -22,6 +22,24 @@ void binary_cross_entropy_cpu(const spec_t* pred, const spec_t* label,
 }
 
 template <typename spec_t>
+void binary_cross_entropy_cpu(const spec_t* pred, const spec_t* label,
+                              size_t n_rows, spec_t* loss,
+                              int64_t ndims, const int64_t* stride_pred, const int64_t* stride_label,
+                              const int64_t* stride_loss, const int64_t* c_shape) {
+  for (size_t idx = 0; idx < n_rows; idx++) {
+    int64_t pred_idx = hetu::impl::get_index(idx, ndims, stride_pred, c_shape);
+    int64_t label_idx = hetu::impl::get_index(idx, ndims, stride_label, c_shape);
+    int64_t loss_idx = hetu::impl::get_index(idx, ndims, stride_loss, c_shape);
+    spec_t v1 = std::log(pred[pred_idx]);
+    spec_t v2 = std::log(1 - pred[pred_idx]);
+    // clip to -100 following PyTorch
+    spec_t min_value = -100;
+    loss[loss_idx] =
+      -label[label_idx] * MAX(v1, min_value) - (1 - label[label_idx]) * MAX(v2, min_value);
+  }
+}
+
+template <typename spec_t>
 void binary_cross_entropy_gradient_cpu(const spec_t* pred, const spec_t* label,
                                        const spec_t* grad_loss, size_t n_rows,
                                        spec_t* output) {
@@ -34,6 +52,26 @@ void binary_cross_entropy_gradient_cpu(const spec_t* pred, const spec_t* label,
   }
 }
 
+
+template <typename spec_t>
+void binary_cross_entropy_gradient_cpu(const spec_t* pred, const spec_t* label,
+                                       const spec_t* grad_loss, size_t n_rows,
+                                       spec_t* output, int64_t ndims, const int64_t* stride_pred, 
+                                       const int64_t* stride_label, const int64_t* stride_loss, 
+                                       const int64_t* stride_out, const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < n_rows; idx++) {
+    int64_t pred_idx = hetu::impl::get_index(idx, ndims, stride_pred, c_shape);
+    int64_t label_idx = hetu::impl::get_index(idx, ndims, stride_label, c_shape);
+    int64_t loss_idx = hetu::impl::get_index(idx, ndims, stride_loss, c_shape);
+    int64_t o_idx = hetu::impl::get_index(idx, ndims, stride_out, c_shape);
+    spec_t denominator = pred[pred_idx] * (1 - pred[pred_idx]);
+    output[o_idx] = grad_loss[loss_idx] * (pred[pred_idx] - label[label_idx]) / MAX(denominator, spec_t(1e-12));
+  }
+}
+
 void BinaryCrossEntropyCpu(const NDArray& pred, const NDArray& label,
                            NDArray& loss, const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(pred);
@@ -43,7 +81,6 @@ void BinaryCrossEntropyCpu(const NDArray& pred, const NDArray& label,
   HT_ASSERT_SAME_NDIM(pred, loss);
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
 
   size_t n_rows = 1;
   for (size_t i = 0; i < pred->ndim() - 1; i++)
@@ -54,13 +91,22 @@ void BinaryCrossEntropyCpu(const NDArray& pred, const NDArray& label,
     pred->dtype(), spec_t, "BinaryCrossEntropyCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
       [pred, label, loss, n_rows]() {
-      binary_cross_entropy_cpu(pred->data_ptr<spec_t>(),
-                               label->data_ptr<spec_t>(), n_rows,
-                               loss->data_ptr<spec_t>());
+      if (pred->is_contiguous() && label->is_contiguous() && loss->is_contiguous()) {
+        binary_cross_entropy_cpu(pred->data_ptr<spec_t>(),
+                                label->data_ptr<spec_t>(), n_rows,
+                                loss->data_ptr<spec_t>());
+      }
+      else {
+        binary_cross_entropy_cpu(pred->data_ptr<spec_t>(),
+                                label->data_ptr<spec_t>(), n_rows,
+                                loss->data_ptr<spec_t>(), pred->ndim(),
+                                pred->stride().data(), label->stride().data(),
+                                loss->stride().data(), pred->shape().data());
+      }
       },
       "BinaryCrossEntropy");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({pred, label, loss}, stream);
 }
 
 void BinaryCrossEntropyGradientCpu(const NDArray& pred, const NDArray& label,
@@ -85,13 +131,22 @@ void BinaryCrossEntropyGradientCpu(const NDArray& pred, const NDArray& label,
     pred->dtype(), spec_t, "BinaryCrossEntropyGradientCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
       [pred, label, grad_loss, output, n_rows]() {
-      binary_cross_entropy_gradient_cpu(
-        pred->data_ptr<spec_t>(), label->data_ptr<spec_t>(),
-        grad_loss->data_ptr<spec_t>(), n_rows, output->data_ptr<spec_t>());
+      if (pred->is_contiguous() && label->is_contiguous() && grad_loss->is_contiguous()) {
+        binary_cross_entropy_gradient_cpu(
+          pred->data_ptr<spec_t>(), label->data_ptr<spec_t>(),
+          grad_loss->data_ptr<spec_t>(), n_rows, output->data_ptr<spec_t>());
+      } 
+      else {
+        binary_cross_entropy_gradient_cpu(
+          pred->data_ptr<spec_t>(), label->data_ptr<spec_t>(),
+          grad_loss->data_ptr<spec_t>(), n_rows, output->data_ptr<spec_t>(), pred->ndim(),
+          pred->stride().data(), label->stride().data(), grad_loss->stride().data(),
+          output->stride().data(), pred->shape().data());        
+      }
       },
       "BinaryCrossEntropyGradient");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({pred, label, grad_loss, output}, stream);
 }
 
 } // namespace impl

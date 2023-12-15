@@ -5,17 +5,17 @@
 namespace hetu {
 namespace graph {
 
-void TransposeOpImpl::DoCompute(Operator& op, 
-                                const NDArrayList& inputs, NDArrayList& outputs,
-                                RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-                                  hetu::impl::Transpose, inputs.at(0),
-                                  outputs.at(0), get_perms().data(), op->instantiation_ctx().stream());
+NDArrayList TransposeOpImpl::DoCompute(Operator& op,
+                                       const NDArrayList& inputs,
+                                       RuntimeContext& ctx) const {
+  NDArray output = NDArray::permute(inputs.at(0), get_perms(),
+                                    op->instantiation_ctx().stream_index);
+  return {output};
 }
 
 TensorList TransposeOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  const HTShape& perm = get_perms();
-  HTShape grad_perm = perm;
+  const auto& perm = get_perms();
+  HTAxes grad_perm = perm;
   for (size_t i = 0; i < perm.size(); ++i) {
     grad_perm[perm[i]] = i;
   }
@@ -28,7 +28,7 @@ HTShapeList TransposeOpImpl::DoInferShape(Operator& op,
                                           const HTShapeList& input_shapes, 
                                           RuntimeContext& ctx) const {
   HTShape ori_shape = input_shapes.at(0);
-  HTShape perm = get_perms();
+  const auto& perm = get_perms();
   HT_ASSERT(perm.size() == ori_shape.size());
   int ndim = perm.size();
   HTShape vis(ndim);
@@ -46,7 +46,7 @@ HTShapeList TransposeOpImpl::DoInferShape(Operator& op,
 
 void TransposeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                      const OpMeta& op_meta) const {
-  HTShape perm = get_perms();
+  HTAxes perm = get_perms();
   const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
   HT_ASSERT(ds_input.is_valid()) 
     << "TransposeOpDef: distributed states for input must be valid!";
@@ -84,7 +84,7 @@ void TransposeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outpu
   outputs.at(0)->set_distributed_states({device_num, new_states, new_order});     
 }
 
-Tensor MakeTransposeOp(Tensor input, HTShape perms, OpMeta op_meta) {
+Tensor MakeTransposeOp(Tensor input, HTAxes perms, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<TransposeOpImpl>(perms),
     {std::move(input)},

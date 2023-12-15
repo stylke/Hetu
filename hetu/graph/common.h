@@ -53,6 +53,7 @@ using Tensor2TensorMap = std::unordered_map<TensorId, Tensor>;
 using Tensor2TensorListMap = std::unordered_map<TensorId, TensorList>;
 using Tensor2NDArrayMap = std::unordered_map<TensorId, NDArray>;
 using Tensor2IntMap = std::unordered_map<TensorId, int>;
+using Tensor2ShapeMap = std::unordered_map<TensorId, HTShape>;
 
 using GradAndVar = std::pair<Tensor, Tensor>;
 using GradAndVarList = std::vector<GradAndVar>;
@@ -63,7 +64,6 @@ template <>
 struct is_tensor_list<TensorList> : std::true_type {};
 
 using GraphId = uint64_t;
-using AutoCastId = uint64_t;
 using GraphName = std::string;
 using FeedDict = Tensor2NDArrayMap;
 class Graph;

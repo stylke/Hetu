@@ -1,4 +1,4 @@
-export HT_INTERNAL_LOG_LEVEL=TRACE
+export HETU_INTERNAL_LOG_LEVEL=INFO
 export CUDA_VISIBLE_DEVICES=0,1,2,3 
 mpirun --allow-run-as-root -np 4 python inference_hetu_gpt_parallel.py \
 --global_batch_size 4 \

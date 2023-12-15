@@ -48,6 +48,10 @@ class OptimizerUpdateOpInterface : public OpInterface {
                          const DeviceGroup& placement_group) const override;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ =
@@ -65,7 +69,7 @@ class OptimizerUpdateOpInterface : public OpInterface {
   float _learning_rate;
 };
 
-class SGDUpdateOpImpl : public OptimizerUpdateOpInterface {
+class SGDUpdateOpImpl final : public OptimizerUpdateOpInterface {
  public:
   SGDUpdateOpImpl(float learning_rate)
   : OptimizerUpdateOpInterface(quote(SGDUpdateOp), learning_rate) {}
@@ -75,7 +79,7 @@ class SGDUpdateOpImpl : public OptimizerUpdateOpInterface {
                  RuntimeContext& runtime_ctx) const override;
 };
 
-class SGDUpdateWithGradScalerOpImpl : public OptimizerUpdateOpInterface {
+class SGDUpdateWithGradScalerOpImpl final : public OptimizerUpdateOpInterface {
  public:
   SGDUpdateWithGradScalerOpImpl(float learning_rate)
   : OptimizerUpdateOpInterface(quote(SGDUpdateWithGradScalerOp), learning_rate) {}
@@ -85,7 +89,7 @@ class SGDUpdateWithGradScalerOpImpl : public OptimizerUpdateOpInterface {
                  RuntimeContext& runtime_ctx) const override;
 };
 
-class MomentumUpdateOpImpl : public OptimizerUpdateOpInterface {
+class MomentumUpdateOpImpl final : public OptimizerUpdateOpInterface {
  public:
   MomentumUpdateOpImpl(float learning_rate, float momentum, bool nesterov)
   : OptimizerUpdateOpInterface(quote(MomemtumUpdateOp), learning_rate),
@@ -121,6 +125,69 @@ class MomentumUpdateOpImpl : public OptimizerUpdateOpInterface {
   bool _nesterov;
 };
 
+class AdamOpImpl : public OptimizerUpdateOpInterface {
+ public:
+  AdamOpImpl(float learning_rate, float beta1 = 0.9,
+             float beta2 = 0.999, float eps = 1e-8,
+             float weight_decay = 0)
+  : OptimizerUpdateOpInterface(quote(AdamOp), learning_rate),
+    _beta1(beta1),
+    _beta2(beta2),
+    _eps(eps),
+    _weight_decay(weight_decay) {
+    HT_VALUE_ERROR_IF(beta1 < 0 || beta1 > 1)
+      << "Invalid beta1: " << beta1;
+    HT_VALUE_ERROR_IF(beta2 < 0 || beta1 > 2)
+      << "Invalid beta2: " << beta2;
+  }
+
+ protected:
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& runtime_ctx) const override;
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
+ public:
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const AdamOpImpl&>(rhs);
+      return beta1() == rhs_.beta1() && 
+             beta2() == rhs_.beta2() && 
+             eps() == rhs_.eps() && 
+             weight_decay() == rhs_.weight_decay();
+    }
+    return false;
+  }
+
+  float beta1() const {
+    return _beta1;
+  }
+
+  float beta2() const {
+    return _beta2;
+  }
+
+  float eps() const {
+    return _eps;
+  }
+
+  float weight_decay() const {
+    return _weight_decay;
+  }
+
+  const NDArray& adam_step() const {
+    return _adam_step;
+  }
+
+ protected:
+  float _beta1;
+  float _beta2;
+  float _eps;
+  float _weight_decay;
+  NDArray _adam_step;
+};
+
 Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, float learning_rate,
                        OpMeta op_meta = OpMeta());
 
@@ -130,6 +197,13 @@ Tensor MakeSGDUpdateWithGradScalerOp(Tensor param, Tensor grad, Tensor infinite_
 Tensor MakeMomentumUpdateOp(Tensor param, Tensor grad, Tensor velocity,
                             float learning_rate, float momentum, bool nesterov,
                             OpMeta op_meta = OpMeta());
+
+Tensor MakeAdamOp(Tensor param, Tensor grad, 
+                  Tensor mean, Tensor variance,
+                  float learning_rate, Tensor step, float beta1 = 0.9,
+                  float beta2 = 0.999, float eps = 1e-8,
+                  float weight_decay = 0,
+                  OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

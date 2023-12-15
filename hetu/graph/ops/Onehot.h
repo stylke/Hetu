@@ -9,7 +9,7 @@ namespace graph {
 class OnehotOpImpl;
 class OnehotOp;
 
-class OnehotOpImpl : public OpInterface {
+class OnehotOpImpl final : public OpInterface {
  public:
   OnehotOpImpl(size_t num_classes)
   : OpInterface(quote(OnehotOp)), _classes(num_classes) {
@@ -46,6 +46,10 @@ class OnehotOpImpl : public OpInterface {
   size_t _classes;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const OnehotOpImpl&>(rhs);

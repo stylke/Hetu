@@ -23,7 +23,8 @@ class ReLU(Module):
             self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return hetu.relu(input)
+        with hetu.graph("define_and_run"):
+            return hetu.relu(input, self.inplace)
 
 
 class Sigmoid(Module):
@@ -60,7 +61,7 @@ class LeakyReLU(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         with hetu.graph("define_and_run"):
-            return hetu.leakyrelu(input, self.negative_slope)
+            return hetu.leakyrelu(input, self.negative_slope, self.inplace)
       
         
 class NewGeLU(Module):
@@ -75,5 +76,6 @@ class NewGeLU(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         with hetu.graph("define_and_run"):
-            # TODO: implement hetu.pow(input, 3.0) to replace input * input * input
-            return 0.5 * input * (1.0 + hetu.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * input * input * input)))
+            #  0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
+            # TODO: implement hetu.pow(input, 3.0) to replace input * input * input, or implement a cuda kernel
+            return 0.5 * input * (1.0 + hetu.tanh(math.sqrt(2.0 / math.pi) * (input + 0.044715 * (input * input * input))))

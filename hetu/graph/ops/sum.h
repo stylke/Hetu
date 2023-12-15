@@ -77,6 +77,11 @@ class SumOpImpl final : public OpInterface {
       NDArray::add(input, output, stream_id, output);
     }
   }
+
+ public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
 };
 
 Tensor MakeSumOp(TensorList inputs, OpMeta op_meta = OpMeta());

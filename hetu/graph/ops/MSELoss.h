@@ -12,7 +12,7 @@ class MSELossOp;
 class MSELossGradientOpImpl;
 class MSELossGradientOp;
 
-class MSELossOpImpl : public LossOpImpl {
+class MSELossOpImpl final : public LossOpImpl {
  public:
   MSELossOpImpl(ReductionType reduction = kMEAN)
   : LossOpImpl(quote(MSELossOp), reduction) {}
@@ -38,11 +38,7 @@ class MSELossOpImpl : public LossOpImpl {
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const MSELossOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction());
-    }
-    return false;
+    return LossOpImpl::operator==(rhs);
   }
 };
 
@@ -54,7 +50,7 @@ Tensor MakeMSELossOp(Tensor preds, Tensor labels,
                      const std::string& reduction = "mean",
                      OpMeta op_meta = OpMeta());
 
-class MSELossGradientOpImpl : public LossGradientOpImpl {
+class MSELossGradientOpImpl final : public LossGradientOpImpl {
  public:
   MSELossGradientOpImpl(ReductionType reduction = kMEAN)
   : LossGradientOpImpl(quote(MSELossGradientOp), reduction) {}
@@ -75,11 +71,7 @@ class MSELossGradientOpImpl : public LossGradientOpImpl {
 
  public:
   bool operator==(const OpInterface& rhs) const override {
-    if (OpInterface::operator==(rhs)) {
-      const auto& rhs_ = reinterpret_cast<const MSELossOpImpl&>(rhs);
-      return (reduction() == rhs_.reduction());
-    }
-    return false;
+    return LossGradientOpImpl::operator==(rhs);
   }
 };
 

@@ -32,7 +32,6 @@ void Conv2dReduceSumCpu(const NDArray& input, NDArray& output,
   HT_ASSERT(input->shape(1) == output->shape(0));
 
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
   
   size_t batch_size = input->shape(0);
   size_t input_size = input->shape(2) * input->shape(3);
@@ -47,9 +46,9 @@ void Conv2dReduceSumCpu(const NDArray& input, NDArray& output,
                                 output->data_ptr<spec_t>(), input_size,
                                 output_size, batch_size);
       },
-      "Conv2dReduce");
-      //cpu_stream.Sync(); 
+      "Conv2dReduce");   
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

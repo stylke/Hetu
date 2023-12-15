@@ -3,6 +3,7 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
+#include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
 namespace impl {
@@ -10,39 +11,56 @@ namespace impl {
 template <typename spec_t>
 __global__ void gather_kernel(const spec_t* input, const int64_t* ids, size_t size, 
                               size_t after_stride, size_t cur_stride,
-                              size_t after_stride_out, size_t cur_stride_out,
-                              spec_t* output) {
+                              size_t after_stride_out, size_t cur_stride_out, spec_t* output,
+                              const OffsetCalculator* in_offset_calculator,
+                              const OffsetCalculator* ids_offset_calculator,
+                              const OffsetCalculator* out_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
   size_t b_index = idx / (cur_stride_out * after_stride_out);
   size_t p_index = idx % (cur_stride_out * after_stride_out);
   size_t a_index = p_index % after_stride_out;
-  size_t id_num = int(ids[idx]);
+  auto ids_offset = ids_offset_calculator->get(idx);
+  size_t id_num = int(ids[ids_offset]);
   size_t i_index =
     b_index * (cur_stride * after_stride) + id_num * after_stride + a_index;
-  output[idx] = input[i_index];
+  auto in_offset = in_offset_calculator->get(i_index);
+  auto out_offset = out_offset_calculator->get(idx);
+  output[out_offset] = input[in_offset];
 }
 
 template <typename spec_t>
-extern __global__ void array_zero_set_kernel(spec_t* input, size_t size);
+__global__ static void array_zero_set_kernel(spec_t* input, size_t size,
+                                             const OffsetCalculator* in_offset_calculator) {
+  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= size)
+    return;
+  auto in_offset = in_offset_calculator->get(idx);
+  input[in_offset] = 0;
+}
 
 template <typename spec_t>
 __global__ void gather_gradient_kernel(const spec_t* grad_output, const int64_t* ids,
-                                       size_t size, 
-                                       size_t after_stride, size_t cur_stride,
+                                       size_t size, size_t after_stride, size_t cur_stride,
                                        size_t after_stride_out, size_t cur_stride_out,
-                                       spec_t* grad_input) {
+                                       spec_t* grad_input,
+                                       const OffsetCalculator* grad_out_offset_calculator,
+                                       const OffsetCalculator* ids_offset_calculator,
+                                       const OffsetCalculator* grad_in_offset_calculator) {
   auto idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
   size_t b_index = idx / (cur_stride_out * after_stride_out);
   size_t p_index = idx % (cur_stride_out * after_stride_out);
   size_t a_index = p_index % after_stride_out;
-  size_t id_num = int(ids[idx]);
+  auto ids_offset = ids_offset_calculator->get(idx);
+  size_t id_num = int(ids[ids_offset]);
   size_t i_index =
     b_index * (cur_stride * after_stride) + id_num * after_stride + a_index;
-  hetu::cuda::AtomicAdd(grad_input + i_index, grad_output[idx]);
+  auto grad_out_offset = grad_out_offset_calculator->get(idx);
+  auto grad_in_offset = grad_in_offset_calculator->get(i_index);
+  hetu::cuda::AtomicAdd(grad_input + grad_in_offset, grad_output[idx]);
 }
 
 void GatherCuda(const NDArray& input, const NDArray& id, NDArray& output,
@@ -69,12 +87,25 @@ void GatherCuda(const NDArray& input, const NDArray& id, NDArray& output,
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  NDArray in_offset_calculator_arr, id_offset_calculator_arr,
+          out_offset_calculator_arr;
+  OffsetCalculator *in_offset_calculator, *id_offset_calculator,
+                   *out_offset_calculator;
+  std::tie(in_offset_calculator_arr, in_offset_calculator) =
+    AllocOffsetCalculator(input, stream);
+  std::tie(id_offset_calculator_arr, id_offset_calculator) =
+    AllocOffsetCalculator(id, stream);
+  std::tie(out_offset_calculator_arr, out_offset_calculator) = 
+    AllocOffsetCalculator(output, stream);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "GatherCuda", [&]() {
       gather_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         input->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size,
-        after_stride, cur_stride, after_stride_out, cur_stride_out, output->data_ptr<spec_t>());
+        after_stride, cur_stride, after_stride_out, cur_stride_out, output->data_ptr<spec_t>(),
+        in_offset_calculator, id_offset_calculator, out_offset_calculator);
     });
+  NDArray::MarkUsedBy({input, id, output, in_offset_calculator_arr,
+                      id_offset_calculator_arr, out_offset_calculator_arr}, stream);
 }
 
 void GatherGradientCuda(const NDArray& grad_output, const NDArray& id, NDArray& grad_input,
@@ -96,12 +127,23 @@ void GatherGradientCuda(const NDArray& grad_output, const NDArray& id, NDArray& 
   dim3 blocks, threads;
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  NDArray grad_out_offset_calculator_arr, id_offset_calculator_arr,
+          grad_in_offset_calculator_arr;
+  OffsetCalculator *grad_out_offset_calculator, *id_offset_calculator,
+                   *grad_in_offset_calculator;
+  std::tie(grad_out_offset_calculator_arr, grad_out_offset_calculator) =
+    AllocOffsetCalculator(grad_output, stream);
+  std::tie(id_offset_calculator_arr, id_offset_calculator) =
+    AllocOffsetCalculator(id, stream);
+  std::tie(grad_in_offset_calculator_arr, grad_in_offset_calculator) = 
+    AllocOffsetCalculator(grad_input, stream);
   threads.x = MIN(grad_input->numel(), HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(grad_input->numel(), HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   HT_DISPATCH_FLOATING_TYPES(
     grad_output->dtype(), spec_t, "ArraySetZeroCuda", [&]() {
       array_zero_set_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        grad_input->data_ptr<spec_t>(), grad_input->numel());
+        grad_input->data_ptr<spec_t>(), grad_input->numel(),
+        grad_in_offset_calculator);
     });
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
@@ -109,8 +151,11 @@ void GatherGradientCuda(const NDArray& grad_output, const NDArray& id, NDArray& 
     grad_output->dtype(), spec_t, "GatherGradientCuda", [&]() {
       gather_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         grad_output->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size, 
-        after_stride, cur_stride, after_stride_out, cur_stride_out, grad_input->data_ptr<spec_t>());
+        after_stride, cur_stride, after_stride_out, cur_stride_out, grad_input->data_ptr<spec_t>(),
+        grad_out_offset_calculator, id_offset_calculator, grad_in_offset_calculator);
     });
+  NDArray::MarkUsedBy({grad_output, id, grad_input, grad_out_offset_calculator_arr,
+                      id_offset_calculator_arr, grad_in_offset_calculator_arr}, stream);
 }
 
 } // namespace impl

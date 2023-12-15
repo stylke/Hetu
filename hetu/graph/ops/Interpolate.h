@@ -11,7 +11,7 @@ class InterpolateOp;
 class InterpolateGradientOpImpl;
 class InterpolateGradientOp;
 
-class InterpolateOpImpl : public OpInterface {
+class InterpolateOpImpl final : public OpInterface {
  public:
   InterpolateOpImpl(const HTShape& outshape,
                     bool align_corners = false, double scale_factor = 0)
@@ -90,7 +90,7 @@ Tensor MakeInterpolateOp(Tensor input, const HTShape& outshape,
                          bool align_corners = false, double scale_factor = 0,
                          OpMeta op_meta = OpMeta());
 
-class InterpolateGradientOpImpl : public OpInterface {
+class InterpolateGradientOpImpl final : public OpInterface {
  public:
   InterpolateGradientOpImpl(bool align_corners = false, double scale_factor = 0)
   : OpInterface(quote(InterpolateGradientOp)),

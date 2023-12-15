@@ -145,7 +145,7 @@ NDArray sumproduct_pair(Operator& op, NDArray& left_, NDArray& right_, HTShape s
     os[i] = out_size[i];
   }
 
-  result = NDArray::view(result, os);
+  result = NDArray::reshape(result, os, op->instantiation_ctx().stream_index);
   result = NDArray::permute(result, opermutation, op->instantiation_ctx().stream_index);
 
   // finally squeeze summed dimensions if desired
@@ -157,7 +157,7 @@ NDArray sumproduct_pair(Operator& op, NDArray& left_, NDArray& right_, HTShape s
       }
     }
 
-    result = NDArray::view(result, sizes);
+    result = NDArray::reshape(result, sizes, op->instantiation_ctx().stream_index);
   }
   return result;
 }
@@ -525,7 +525,8 @@ void EinsumGradientOpImpl::DoCompute(Operator& op,
       } else {
         int first_idx = first_output_idx.find(label)->second;
         output_tensor =
-          NDArray::diagonal_grad(output_tensor, first_idx, output_idx, op->instantiation_ctx().stream_index);
+          NDArray::diagonal_grad(NDArray::contiguous(output_tensor, op->instantiation_ctx().stream_index),
+                                 first_idx, output_idx, op->instantiation_ctx().stream_index);
       }
       output_idx += 1;
     }

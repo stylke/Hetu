@@ -15,7 +15,7 @@ using HTShapeList = std::vector<HTShape>;
 using HTStrideList = std::vector<HTStride>;
 using HTKeepDims = std::vector<bool>;
 
-constexpr size_t HT_MAX_NDIM = 10;
+constexpr size_t HT_MAX_NDIM = 16;
 
 namespace {
 inline int64_t NumEl(const HTShape& shape) {
@@ -43,10 +43,12 @@ inline HTStride Shape2Stride(const HTShape& shape) {
 class NDArrayMeta {
  public:
   NDArrayMeta() = default;
-  NDArrayMeta(const HTShape& shape, DataType dtype, const Device& device, const HTShape& dynamic_shape = {}) {
+  NDArrayMeta(const HTShape& shape, DataType dtype, const Device& device,
+              const HTStride& stride = {}, const HTShape& dynamic_shape = {}) {
     set_shape(shape);
     set_dtype(dtype);
     set_device(device);
+    set_stride(stride);
     set_dynamic_shape(dynamic_shape);
   }
   NDArrayMeta(const NDArrayMeta&) = default;
@@ -116,6 +118,28 @@ class NDArrayMeta {
     return *this;
   }
 
+  // NOTE: Set strides after shape because contiguous strides are set in `set_shape`.
+  inline NDArrayMeta& set_stride(const HTStride& s) {
+    HT_ASSERT(s.size() <= HT_MAX_NDIM)
+      << "Currently we only support shape up to " << HT_MAX_NDIM
+      << " dimensions. Got " << s.size() << ".";
+    if (s.size() == 0)
+      return *this;
+    stride = s;
+    return *this;
+  }
+
+  inline NDArrayMeta& set_stride(HTStride&& s) {
+    HT_ASSERT(s.size() <= HT_MAX_NDIM)
+      << "Currently we only support shape up to " << HT_MAX_NDIM
+      << " dimensions. Got " << s.size() << ".";
+    if (s.size() == 0)
+      return *this;
+    stride = std::move(s);
+    return *this;
+  }
+
+  // deprecated: only used in gpt inference, before symbolic shape is realized
   inline NDArrayMeta& set_dynamic_shape(const HTShape& dynamic_s) {
     if(dynamic_s.empty() || dynamic_s == shape) {
       dynamic_shape = {};
@@ -137,6 +161,7 @@ class NDArrayMeta {
     return *this;
   }
 
+  // deprecated: only used in gpt inference, before symbolic shape is realized
   inline NDArrayMeta& set_dynamic_shape(HTShape&& dynamic_s) {
     if(dynamic_s.empty() || dynamic_s == shape) {
       dynamic_shape = {};
@@ -188,6 +213,8 @@ class NDArrayMeta {
   Device device{kUndeterminedDevice};
   HTShape shape;
   HTStride stride;
+
+  // deprecated: only used in gpt inference, before symbolic shape is realized
   // dynamic_shape is used in LLM inference because of dynamic seq_len.
   HTShape dynamic_shape; // dynamic_shape + padding = shape
 };

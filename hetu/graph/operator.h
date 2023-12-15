@@ -7,6 +7,7 @@
 #include "hetu/utils/context_store.h"
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/stream/CPUStream.h"
+#include "hetu/impl/communication/comm_group.h"
 
 namespace hetu {
 namespace graph {
@@ -113,6 +114,10 @@ class RuntimeContext {
   RuntimeContext(size_t init_capacity) {
     _ctxs.reserve(init_capacity);
   }
+  
+  RuntimeContext(size_t init_capacity, const Tensor2ShapeMap& shape_plan): _shape_plan(shape_plan) {
+    _ctxs.reserve(init_capacity);
+  }
 
   ~RuntimeContext() {
     for (auto& kv : _ctxs)
@@ -147,8 +152,16 @@ class RuntimeContext {
     _ctxs.clear();
   }
 
+  const HTShape& get_runtime_shape(const TensorId& tensor_id) const {
+    auto it = _shape_plan.find(tensor_id);
+    HT_ASSERT(it != _shape_plan.end())
+      << "Tensor " << tensor_id << " is not existed in runtime shape plan";
+    return it->second;
+  }
+
  private:
   std::unordered_map<OpId, OpRuntimeContext*> _ctxs;
+  Tensor2ShapeMap _shape_plan;
 };
 
 struct OpInstantiationContext {
@@ -183,12 +196,21 @@ class OpInterface : public shared_ptr_target {
     return _type;
   }
 
+  virtual bool require_contig_inputs() const {
+    return true;
+  }
+
+  virtual uint64_t inplace_pos() const {
+    return 0;
+  }
+
   virtual uint64_t op_indicator() const noexcept {
     return 0;
   }
 
   virtual bool operator==(const OpInterface& rhs) const {
-    return op_indicator() == rhs.op_indicator() && type() == rhs.type();
+    return op_indicator() == rhs.op_indicator() && type() == rhs.type()
+        && require_contig_inputs() == rhs.require_contig_inputs();
   }
 
   bool operator!=(const OpInterface& rhs) const {
@@ -281,32 +303,7 @@ class OpInterface : public shared_ptr_target {
   virtual NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
                                 RuntimeContext& runtime_ctx) const {
     auto outputs = DoAllocOutputs(op, inputs, runtime_ctx);
-    // NDArrayList f32inputs = inputs;
-    // for (auto& input: f32inputs) {
-    //   if (input->dtype() != DataType::FLOAT32)
-    //     input = NDArray::to(input, input->device(), DataType::FLOAT32);
-    //   else
-    //     input = NDArray::copy(input);
-    // }
-    // auto f32outputs = DoAllocOutputs(op, f32inputs, runtime_ctx);
-    // for (auto& output: f32outputs) {
-    //   if (output->dtype() != DataType::FLOAT32)
-    //     output = NDArray::to(output, output->device(), DataType::FLOAT32);
-    //   else
-    //     output = NDArray::copy(output);
-    // }
     DoCompute(op, inputs, outputs, runtime_ctx);
-    // if (_type != "DataTransfer") {
-    //   HT_LOG_INFO << _type <<  "\nInputs";
-    //   for (auto& input: inputs){
-    //     HT_LOG_INFO << input->raw_data_ptr() <<  " "  << NDArray::sum(NDArray::abs(input, kBlockingStream), {0}, false, kBlockingStream) << " " << input;
-    //   }
-    //   HT_LOG_INFO << "\nOutputs";
-    //   for (auto& output: outputs){
-    //     HT_LOG_INFO << output->raw_data_ptr() <<  " "  << NDArray::sum(NDArray::abs(output, kBlockingStream), {0}, false, kBlockingStream) << " " << output;
-    //   }
-    //   // HT_LOG_INFO  << "\nF32Inputs:" << f32inputs << "\nF32Outputs:" << f32outputs;
-    // }
     return outputs;
   }
 
@@ -365,10 +362,29 @@ class OpDef : public shared_ptr_target {
       << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
       << ", got micro batch id: " << micro_batch_id;
     BlockOrSyncAllInputs(micro_batch_id);
+    // precision debug
+    /*
+    NDArrayList input_sums;
+    for (auto& input : inputs) {
+      input_sums.push_back(NDArray::sum(input));
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
+      << ", the input vals are (may not sync) " << input_sums;
+    */
     instantiation_ctx().start[micro_batch_id]->Record(stream());
-    auto ret = _body->Compute(get_self(), inputs, runtime_ctx);
+    auto rets = _body->Compute(get_self(), inputs, runtime_ctx);
     instantiation_ctx().stop[micro_batch_id]->Record(stream());
-    return ret;
+    // precision debug
+    /*
+    // stream().Sync();
+    NDArrayList ret_sums;
+    for (auto& ret : rets) {
+      ret_sums.push_back(NDArray::sum(ret));
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": compute op: " << name()
+      << ", the result is (may not sync) " << ret_sums;
+    */
+    return rets;
   }
 
   void Sync(size_t micro_batch_id = 0) {
@@ -437,6 +453,10 @@ class OpDef : public shared_ptr_target {
 
   bool inplace_at(size_t input_position) const {
     return _body->inplace_at(input_position);
+  }
+
+  TensorId inplace_tensor_id() const {
+    return _inputs[_body->inplace_pos()]->id();
   }
 
   const TensorList& inputs() const noexcept {
@@ -764,6 +784,7 @@ static const uint64_t P2P_OP = 1ul << 13;
 static const uint64_t BATCHED_ISEND_IRECV_OP = 1ul << 14;
 static const uint64_t GATHER_OP = 1ul << 15;
 static const uint64_t SCATTER_OP = 1ul << 16;
+static const uint64_t INPLACE_OP = 1ul << 17;
 static const uint64_t COMM_SPLIT_OP = 1ul << 19;
 static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t UNKNOWN_OP = 1ul << 21;
@@ -804,6 +825,7 @@ DECLARE_OP_INDICATOR_CHECKER(p2p, P2P_OP)
 DECLARE_OP_INDICATOR_CHECKER(batched_isend_irecv, BATCHED_ISEND_IRECV_OP)
 DECLARE_OP_INDICATOR_CHECKER(gather, GATHER_OP)
 DECLARE_OP_INDICATOR_CHECKER(scatter, SCATTER_OP)
+DECLARE_OP_INDICATOR_CHECKER(inplace, INPLACE_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm_split, COMM_SPLIT_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm, COMM_OP)
 DECLARE_OP_INDICATOR_CHECKER(unknown, UNKNOWN_OP)

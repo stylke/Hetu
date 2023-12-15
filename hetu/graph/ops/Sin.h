@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
+#include "hetu/graph/ops/Unary.h"
 
 namespace hetu {
 namespace graph {
@@ -11,62 +12,99 @@ class SinOp;
 class CosOpImpl;
 class CosOp;
 
-class SinOpImpl : public OpInterface {
+class SinOpImpl final : public UnaryOpImpl {
  private:
   friend class SinOp;
   struct constrcutor_access_key {};
 
  public:
-  SinOpImpl()
-  : OpInterface(quote(SinOp)) {
+  SinOpImpl(bool inplace)
+  : UnaryOpImpl(quote(SinOp), inplace) {
   }
 
  protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    return {inputs[0]->meta()};
-  };
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const override;
+                 RuntimeContext& ctx) const {};
 
   TensorList DoGradient(Operator& op, const TensorList& grad_outputs) const override;
 
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
-
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return UnaryOpImpl::operator==(rhs);
   }
 };
 
 Tensor MakeSinOp(Tensor input, OpMeta op_meta = OpMeta());
+Tensor MakeSinInplaceOp(Tensor input, OpMeta op_meta = OpMeta());
 
-class CosOpImpl : public OpInterface {
+class SinGradientOpImpl final : public UnaryGradientOpImpl {
 
  public:
-  CosOpImpl()
-  : OpInterface(quote(CosOp)) {
+  SinGradientOpImpl()
+  : UnaryGradientOpImpl(quote(SinGradientOp)) {
   }
 
  protected:
-  std::vector<NDArrayMeta> 
-  DoInferMeta(const TensorList& inputs) const override {
-    return {inputs[0]->meta()};
-  };
-
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
-  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
-
  public:
   bool operator==(const OpInterface& rhs) const override {
-    return OpInterface::operator==(rhs);
+    return UnaryGradientOpImpl::operator==(rhs); 
   }
 };
 
-Tensor MakeCosOp(Tensor input, OpMeta op_meta = OpMeta());
+Tensor MakeSinGradientOp(Tensor input, Tensor grad_output,
+                          OpMeta op_meta = OpMeta());
+
+class CosOpImpl final : public UnaryOpImpl {
+
+ public:
+  CosOpImpl(bool inplace)
+  : UnaryOpImpl(quote(CosOp), inplace) {
+  }
+
+ protected:
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) const {};
+
+  TensorList DoGradient(Operator& op, const TensorList& grad_outputs) const override;
+
+ public:
+  bool operator==(const OpInterface& rhs) const override {
+    return UnaryOpImpl::operator==(rhs);
+  }
+};
+
+Tensor MakeCosOp(Tensor input, bool inplace = false, OpMeta op_meta = OpMeta());
+
+class CosGradientOpImpl final : public UnaryGradientOpImpl {
+
+ public:
+  CosGradientOpImpl()
+  : UnaryGradientOpImpl(quote(CosGradientOp)) {
+  }
+
+ protected:
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) const override;
+
+ public:
+  bool operator==(const OpInterface& rhs) const override {
+    return UnaryGradientOpImpl::operator==(rhs); 
+  }
+};
+
+Tensor MakeCosGradientOp(Tensor input, Tensor grad_output,
+                          OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

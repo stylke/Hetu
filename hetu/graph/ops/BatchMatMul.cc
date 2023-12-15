@@ -62,7 +62,7 @@ HTShapeList BatchMatMulOpImpl::DoInferShape(Operator& op,
   HT_ASSERT(a.size() >= 2 && b.size() >= 2 && a.size() == b.size() &&
             a.at(trans_a() ? ndims + 0 : ndims + 1) ==
               b.at(trans_b() ? ndims + 1 : ndims + 0))
-    << "Invalid input shapes for " << type() << ":"
+    << "Invalid input shapes for " << op << ":"
     << " (shape_a) " << a << " (shape_b) " << b << " (transpose_a) "
     << trans_a() << " (transpose_b) " << trans_b();
   HTShape shape = {};
@@ -172,8 +172,6 @@ void BatchMatMulOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& out
 Tensor MakeBatchMatMulOp(Tensor a, Tensor b, bool trans_a, bool trans_b,
                          OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b)};
-  DataType input_type = DataType::FLOAT32;
-  AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
           std::make_shared<BatchMatMulOpImpl>(trans_a, trans_b),
           std::move(inputs),

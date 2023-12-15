@@ -34,24 +34,34 @@ void NDArrayMeta::view(const HTShape& view_shape) {
 void NDArrayMeta::unsqueeze(int64_t dim) {
   int64_t unsqueezed_dim = static_cast<int64_t>(ndim()) + 1;
   dim = ParseAxis(dim, unsqueezed_dim);
+  int64_t new_stride = dim >= ndim() ? 1 : shape[dim] * stride[dim];
   shape.insert(shape.begin() + dim, 1);
-  stride = Shape2Stride(shape);
+  stride.insert(stride.begin() + dim, new_stride);
 }
 
 void NDArrayMeta::squeeze() {
+  HTShape squeeze_shape;
+  HTShape squeeze_stride;
   auto origin_ndim = ndim();
-  shape.erase(std::remove(shape.begin(), shape.end(), 1), shape.end());
-  if (origin_ndim != ndim())
-    stride = Shape2Stride(shape);
+  for (size_t i = 0; i < origin_ndim; i++) {
+    if (shape[i] != 1) {
+      squeeze_shape.emplace_back(shape[i]);
+      squeeze_stride.emplace_back(stride[i]);
+    }
+  }
+  shape = std::move(squeeze_shape);
+  stride = std::move(squeeze_stride);
 }
 
 void NDArrayMeta::squeeze(int64_t dim) {
+  HTShape squeeze_shape;
+  HTStride squeeze_stride;
   int64_t num_dim = static_cast<int64_t>(ndim());
   dim = ParseAxis(dim, num_dim);
   if (shape[dim] != 1)
     return;
   shape.erase(shape.begin() + dim);
-  stride = Shape2Stride(shape);
+  stride.erase(stride.begin() + dim);
 }
 
 void NDArrayMeta::flatten(int64_t start_dim, int64_t end_dim) {
@@ -76,12 +86,14 @@ void NDArrayMeta::permute(const HTAxes& axes) {
     HT_ASSERT(vis[axes[i]] == 0);
     vis[axes[i]]++;
   }
-  HTShape permuted_shape = {};
+  HTShape permuted_shape = shape;
+  HTStride permuted_stride = stride;
   for (int64_t i = 0; i < num_dim; ++i) {
-    permuted_shape.emplace_back(shape[axes[i]]);
+    permuted_shape[i] = shape[axes[i]];
+    permuted_stride[i] = stride[axes[i]];
   }
   shape = permuted_shape;
-  stride = Shape2Stride(shape);
+  stride = permuted_stride;
 }
 
 HTShape NDArrayMeta::Broadcast(const HTShape& shape_a, const HTShape& shape_b) {

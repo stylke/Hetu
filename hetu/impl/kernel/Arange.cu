@@ -28,6 +28,7 @@ void ArangeCuda(double start, double step, NDArray& output, const Stream& stream
       range_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         static_cast<spec_t>(start), static_cast<spec_t>(step), size, output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({output}, stream);
 }
 
 } // namespace impl

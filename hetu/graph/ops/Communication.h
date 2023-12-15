@@ -104,8 +104,8 @@ Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
 class AllReduceOpImpl final : public OpInterface {
  public:
   AllReduceOpImpl(const DeviceGroup& comm_group, ReductionType red_type = kSUM,
-                  const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(AllReduceOp)), _comm_group(comm_group), _red_type(red_type) {
+                  bool inplace = false, const DeviceGroup& device_group = DeviceGroup())
+  : OpInterface(quote(AllReduceOp)), _comm_group(comm_group), _red_type(red_type), _inplace(inplace) {
     HT_ASSERT(_comm_group.num_devices() >= 2)
              << "AllReduce requires two or more comm devices. Got " << _comm_group;
     if (!device_group.empty()) {
@@ -117,8 +117,12 @@ class AllReduceOpImpl final : public OpInterface {
     }
   }
 
-  uint64_t op_indicator() const noexcept override {
-    return ALL_REDUCE_OP;
+  inline uint64_t op_indicator() const noexcept override {
+    return _inplace ? ALL_REDUCE_OP | INPLACE_OP : ALL_REDUCE_OP;
+  }
+
+  inline bool inplace() const {
+    return _inplace;
   }
 
   ReductionType reduction_type() const {
@@ -138,8 +142,14 @@ class AllReduceOpImpl final : public OpInterface {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;
 
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const {};
+  
+  bool _inplace{false};
 
  public:
   const DeviceGroup& comm_group() const {
@@ -152,10 +162,10 @@ class AllReduceOpImpl final : public OpInterface {
 };
 
 Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, 
-                       OpMeta op_meta = OpMeta());
+                       bool inplace = false, OpMeta op_meta = OpMeta());
 
-Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, 
-                       ReductionType red_type, OpMeta op_meta = OpMeta());                       
+Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, ReductionType red_type, 
+                       bool inplace = false, OpMeta op_meta = OpMeta());
 
 class P2PSendOpImpl final : public OpInterface {
  public:
@@ -271,6 +281,18 @@ Tensor MakeP2PRecvOp(const DeviceGroup& src_group, DataType dtype,
 
 class BatchedISendIRecvOpImpl final : public OpInterface {
  public:
+  /*
+  // symbolic shape constructor
+  BatchedISendIRecvOpImpl(const std::vector<Device>& dst_devices, 
+                          const SyShapeList& outputs_shape,
+                          const std::vector<Device>& src_devices, 
+                          const std::vector<Device>& comm_devices,
+                          DataType dtype)
+  : OpInterface(quote(BatchedISendIRecvOp)), _dst_devices(dst_devices), 
+  _outputs_shape({}), _src_devices(src_devices), 
+  _comm_devices(comm_devices), _dtype(dtype) {}
+  */
+  // fixed shape constructor
   BatchedISendIRecvOpImpl(const std::vector<Device>& dst_devices, 
                           const HTShapeList& outputs_shape,
                           const std::vector<Device>& src_devices, 
@@ -391,8 +413,8 @@ Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group,
 class ReduceScatterOpImpl final : public OpInterface {
  public:
   ReduceScatterOpImpl(const DeviceGroup& comm_group, ReductionType red_type = kSUM,
-                      const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(ReduceScatterOp)), _comm_group(comm_group), _red_type(red_type) {
+                      bool inplace = false, const DeviceGroup& device_group = DeviceGroup())
+  : OpInterface(quote(ReduceScatterOp)), _comm_group(comm_group), _red_type(red_type), _inplace(inplace) {
     HT_ASSERT(comm_group.num_devices() >= 2)
       << "ReduceScatter requires two or more devices. Got " << comm_group;          
     if (!device_group.empty()) {
@@ -404,8 +426,20 @@ class ReduceScatterOpImpl final : public OpInterface {
     }    
   }
 
-  uint64_t op_indicator() const noexcept override {
-    return REDUCE_SCATTER_OP;
+  inline bool inplace() const {
+    return _inplace;
+  }
+
+  inline uint64_t inplace_pos() const {
+    return 0;
+  }
+
+  inline bool inplace_at(size_t input_position) const override {
+    return inplace() && input_position == inplace_pos();
+  }
+
+  inline uint64_t op_indicator() const noexcept override {
+    return _inplace ? REDUCE_SCATTER_OP | INPLACE_OP : REDUCE_SCATTER_OP;
   }
 
   ReductionType reduction_type() const {
@@ -425,18 +459,24 @@ class ReduceScatterOpImpl final : public OpInterface {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;  
 
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& runtime_ctx) const override;
+                 RuntimeContext& ctx) const {};
+
+  bool _inplace;
 
  protected:
   DeviceGroup _comm_group;
   ReductionType _red_type{kNONE};
 };
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group,
-                           OpMeta op_meta = OpMeta());
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group,  
+                           bool inplace = false, OpMeta op_meta = OpMeta());
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group,
-                           ReductionType red_type, OpMeta op_meta = OpMeta());
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, ReductionType red_type, 
+                           bool inplace = false, OpMeta op_meta = OpMeta());
 }
 }

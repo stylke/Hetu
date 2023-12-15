@@ -5,7 +5,7 @@
 namespace hetu {
 namespace graph {
 
-class PlaceholderOpImpl : public OpInterface {
+class PlaceholderOpImpl final : public OpInterface {
  public:
   PlaceholderOpImpl(const NDArrayMeta& data_meta)
   : OpInterface(quote(PlaceholderOp)), _data_meta(std::move(data_meta)) {}

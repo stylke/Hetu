@@ -58,9 +58,9 @@ void IndexAddCpu(const NDArray& input, const NDArray& id, NDArray& output,
       index_add_cpu<spec_t>(input->data_ptr<spec_t>(), id->data_ptr<spec_t>(),
                             size, before_stride, after_stride, cur_stride,
                             output->data_ptr<spec_t>());
-      },"IndexAdd");
-      //cpu_stream.Sync();
+      },"IndexAdd");   
     });
+  NDArray::MarkUsedBy({input, id, output}, stream);
 }
 
 } // namespace impl

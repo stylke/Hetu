@@ -232,8 +232,6 @@ __forceinline__ __device__ double cuda_log<double>(double x) {
 
 template <typename T>
 __forceinline__ __device__ T cuda_exp(T x) {
-  HT_NOT_IMPLEMENTED << "cuda_exp is not implemented for type "
-                     << typeid(T).name();
 }
 
 template <>
@@ -258,6 +256,37 @@ __forceinline__ __device__ float cuda_exp<float>(float x) {
 template <>
 __forceinline__ __device__ double cuda_exp<double>(double x) {
   return exp(x);
+}
+
+template <typename T>
+__forceinline__ __device__ T cuda_erf(T x) {
+  HT_NOT_IMPLEMENTED << "cuda_erf is not implemented for type "
+                     << typeid(T).name();
+}
+
+template <>
+__forceinline__ __device__ hetu::float16 cuda_erf<hetu::float16>(hetu::float16 x) {
+  // return herf(x);
+  return static_cast<hetu::float16>(erff(float(x)));
+}
+
+template <>
+__forceinline__ __device__ hetu::bfloat16 cuda_erf<hetu::bfloat16>(hetu::bfloat16 x) {
+  // #if(__CUDA_ARCH__ >= 800)
+  // return herf(x);
+  // #else
+  return static_cast<hetu::bfloat16>(erff(float(x)));
+  // #endif
+}
+
+template <>
+__forceinline__ __device__ float cuda_erf<float>(float x) {
+  return erff(x);
+}
+
+template <>
+__forceinline__ __device__ double cuda_erf<double>(double x) {
+  return erf(x);
 }
 
 template <typename T>
@@ -322,8 +351,8 @@ __forceinline__ __device__ double cuda_rsqrt<double>(double x) {
 
 template <typename T>
 __forceinline__ __device__ T cuda_sin(T x) {
-  HT_NOT_IMPLEMENTED << "cuda_sin is not implemented for type "
-                     << typeid(T).name();
+  // HT_NOT_IMPLEMENTED << "cuda_sin is not implemented for type "
+  //                    << typeid(T).name();
 }
 
 template <>
@@ -352,8 +381,8 @@ __forceinline__ __device__ double cuda_sin<double>(double x) {
 
 template <typename T>
 __forceinline__ __device__ T cuda_cos(T x) {
-  HT_NOT_IMPLEMENTED << "cuda_cos is not implemented for type "
-                     << typeid(T).name();
+  // HT_NOT_IMPLEMENTED << "cuda_cos is not implemented for type "
+  //                    << typeid(T).name();
 }
 
 template <>
@@ -388,16 +417,12 @@ __forceinline__ __device__ T cuda_tanh(T x) {
 
 template <>
 __forceinline__ __device__ hetu::float16 cuda_tanh<hetu::float16>(hetu::float16 x) {
-  return (hexp(x) - hexp(-x)) / (hexp(x) + hexp(-x));
+  return static_cast<hetu::float16>(tanhf(float(x)));
 }
 
 template <>
 __forceinline__ __device__ hetu::bfloat16 cuda_tanh<hetu::bfloat16>(hetu::bfloat16 x) {
-  #if(__CUDA_ARCH__ >= 800)
-  return (hexp(x) - hexp(-x)) / (hexp(x) + hexp(-x));
-  #else
-  return static_cast<hetu::bfloat16>((expf(float(x)) - expf(float(-x))) / (expf(float(x)) + expf(float(-x))));
-  #endif
+  return static_cast<hetu::bfloat16>(tanhf(float(x)));
 }
 
 template <>
@@ -412,8 +437,8 @@ __forceinline__ __device__ double cuda_tanh<double>(double x) {
 
 template <typename T>
 __forceinline__ __device__ T cuda_pow(T x, T exponent) {
-  HT_NOT_IMPLEMENTED << "cuda_pow is not implemented for type "
-                     << typeid(T).name();
+  // HT_NOT_IMPLEMENTED << "cuda_pow is not implemented for type "
+  //                    << typeid(T).name();
 }
 
 template <>
@@ -571,6 +596,27 @@ __forceinline__ __device__ void WarpReduceArgmax(bfloat16& val) {
 
 template <typename spec_t>
 __forceinline__ __device__ void BlockReduceArgmax(spec_t& val,
+                                                  spec_t* shared_value) {
+  int tid = threadIdx.x % warpSize;
+  int wid = threadIdx.x / warpSize;
+
+  WarpReduceArgmax(val);
+
+  __syncthreads();
+  if (tid == 0) {
+    shared_value[wid] = val;
+  }
+
+  __syncthreads();
+  val = (threadIdx.x < blockDim.x / warpSize) ? shared_value[tid] : -SIZE_MAX;
+
+  if (wid == 0)
+    WarpReduceArgmax(val);
+  __syncthreads();
+}
+
+template <typename spec_t>
+__forceinline__ __device__ void BlockReduceArgmax(spec_t& val,
                                                   spec_t* shared_value,
                                                   spec_t* wrap_max) {
   int tid = threadIdx.x % warpSize;
@@ -591,6 +637,88 @@ __forceinline__ __device__ void BlockReduceArgmax(spec_t& val,
     if (threadIdx.x == 0)
       wrap_max[0] = val;
   __syncthreads();
+}
+
+template <typename spec_t>
+__forceinline__ __device__ void WarpReduceArgmin(spec_t& val) {
+  spec_t tmp_val;
+  unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
+  for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
+    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    if (tmp_val < val) {
+      val = tmp_val;
+    }
+  }
+}
+
+template <>
+__forceinline__ __device__ void WarpReduceArgmin(bfloat16& val) {
+  bfloat16 tmp_val;
+  #if defined(__CUDACC__) && (__CUDA_ARCH__ >= 800)
+  unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
+  for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
+    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    if (tmp_val < val) {
+      val = tmp_val;
+    }
+  }
+  #endif
+}
+
+template <typename spec_t>
+__forceinline__ __device__ void BlockReduceArgmin(spec_t& val,
+                                                  spec_t* shared_value) {
+  int tid = threadIdx.x % warpSize;
+  int wid = threadIdx.x / warpSize;
+
+  WarpReduceArgmin(val);
+
+  __syncthreads();
+  if (tid == 0) {
+    shared_value[wid] = val;
+  }
+
+  __syncthreads();
+  val = (threadIdx.x < blockDim.x / warpSize) ? shared_value[tid] : SIZE_MAX;
+
+  if (wid == 0)
+    WarpReduceArgmin(val);
+  __syncthreads();
+}
+
+template <typename spec_t>
+__forceinline__ __device__ void BlockReduceArgmin(spec_t& val,
+                                                  spec_t* shared_value,
+                                                  spec_t* wrap_min) {
+  int tid = threadIdx.x % warpSize;
+  int wid = threadIdx.x / warpSize;
+
+  WarpReduceArgmin(val);
+
+  __syncthreads();
+  if (tid == 0) {
+    shared_value[wid] = val;
+  }
+
+  __syncthreads();
+  val = (threadIdx.x < blockDim.x / warpSize) ? shared_value[tid] : SIZE_MAX;
+
+  if (wid == 0)
+    WarpReduceArgmin(val);
+    if (threadIdx.x == 0)
+      wrap_min[0] = val;
+  __syncthreads();
+}
+
+__forceinline__ __device__ int64_t get_index(int64_t idx, int64_t ndims, const int64_t* stride, const int64_t* c_shape) {
+  int64_t i_idx = 0;
+  int64_t t = idx;
+  for (int i = 0; i < ndims; ++i) {
+    int64_t ratio = t / c_shape[i];
+    t -= ratio * c_shape[i];
+    i_idx += ratio * stride[i];
+  }
+  return i_idx;
 }
 
 } // namespace cuda

@@ -9,7 +9,7 @@ namespace graph {
 class BatchNormOpImpl;
 class BatchNormGradientOpImpl;
 
-class BatchNormOpImpl : public OpInterface {
+class BatchNormOpImpl final : public OpInterface {
  private:
   friend class BatchNormOp;
   struct constrcutor_access_key {};
@@ -81,7 +81,7 @@ TensorList MakeBatchNormOp(Tensor input, Tensor bn_scale, Tensor bn_bias,
                            double momentum = 0.1, double eps = 1e-5,
                            OpMeta op_meta = OpMeta());
 
-class BatchNormGradientOpImpl : public OpInterface {
+class BatchNormGradientOpImpl final : public OpInterface {
 
  public:
   BatchNormGradientOpImpl(double eps,

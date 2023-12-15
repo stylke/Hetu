@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "cmath"
@@ -14,7 +15,33 @@ void sqrt_cpu(const spec_t* input, size_t size, spec_t* output) {
 #pragma omp parallel for schedule(static)
 #endif
   for (size_t idx = 0; idx < size; ++idx) {
-    output[idx] = 0;
+    output[idx] = std::sqrt(input[idx]);
+  }
+}
+
+template <typename spec_t>
+void sqrt_cpu(const spec_t* input, size_t size, spec_t* output,
+              int64_t ndims, const int64_t* stride, const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; idx++) {
+    int64_t i_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    output[i_idx] = std::sqrt(input[i_idx]);
+  }
+}
+
+template <typename spec_t>
+void sqrt_cpu(const spec_t* input, size_t size, spec_t* output,
+              int64_t ndims, const int64_t* stride, const int64_t* stride_out,
+              const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; idx++) {
+    int64_t i_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    int64_t o_idx = hetu::impl::get_index(idx, ndims, stride_out, c_shape);
+    output[o_idx] = std::sqrt(input[i_idx]);
   }
 }
 
@@ -43,12 +70,8 @@ void SqrtCpu(const NDArray& input, NDArray& output, const Stream& stream) {
       auto _future = cpu_stream.EnqueueTask(
         [stream, input, output, size]() {
           dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-          dnnl::memory::data_type mtype;
-          if (input->dtype() == DataType::FLOAT32)
-            mtype = dnnl::memory::data_type::f32;
-          else 
-            mtype = dnnl::memory::data_type::f64;
-          auto mat_md = dnnl::memory::desc(input->shape(), mtype, input->stride());
+          auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
+          auto mat_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
           auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
           auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 
@@ -64,8 +87,8 @@ void SqrtCpu(const NDArray& input, NDArray& output, const Stream& stream) {
           Sqrt.execute(engine_stream, sqrt_args);
           engine_stream.wait();
         },"Sqrt");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void ReciprocalSqrtCpu(const NDArray& output_grad, NDArray& input_grad,
@@ -83,7 +106,8 @@ void ReciprocalSqrtCpu(const NDArray& output_grad, NDArray& input_grad,
       auto _future = cpu_stream.EnqueueTask(
         [stream, input_grad, output_grad, size]() {
           dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-          auto mat_md = dnnl::memory::desc(input_grad->shape(), dnnl::memory::data_type::f32, input_grad->stride());
+          auto dnnltype = hetu::cpu::dtype_to_dnnltype(input_grad->dtype());
+          auto mat_md = dnnl::memory::desc(input_grad->shape(), dnnltype, input_grad->stride());
           auto src_mem = dnnl::memory(mat_md, eng, output_grad->data_ptr<spec_t>());
           auto dst_mem = dnnl::memory(mat_md, eng, input_grad->data_ptr<spec_t>());
 
@@ -99,8 +123,8 @@ void ReciprocalSqrtCpu(const NDArray& output_grad, NDArray& input_grad,
           Reciprocal.execute(engine_stream, sqrt_args);
           engine_stream.wait();
         },"ReciprocalSqrt");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({output_grad, input_grad}, stream);
 }
 
 } // namespace impl

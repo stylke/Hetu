@@ -79,8 +79,8 @@ void GatherCpu(const NDArray& input, const NDArray& id, NDArray& output,
         input->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size,
         after_stride, cur_stride, after_stride_out, cur_stride_out, output->data_ptr<spec_t>());
       },"Gather");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({input, id, output}, stream);
 }
 
 void GatherGradientCpu(const NDArray& grad_output, const NDArray& id, NDArray& grad_input,
@@ -112,8 +112,8 @@ void GatherGradientCpu(const NDArray& grad_output, const NDArray& id, NDArray& g
         grad_output->data_ptr<spec_t>(), id->data_ptr<int64_t>(), size, 
         after_stride, cur_stride, after_stride_out, cur_stride_out, grad_input->data_ptr<spec_t>());
       },"GatherGradient");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({grad_output, id, grad_input}, stream);
 }
 
 } // namespace impl

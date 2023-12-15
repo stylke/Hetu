@@ -16,6 +16,8 @@ extern void ReduceMaxCuda(const NDArray&, NDArray&, const int64_t*, int64_t,
                           const Stream&);
 extern void ReduceMinCuda(const NDArray&, NDArray&, const int64_t*, int64_t,
                           const Stream&);
+extern void ReduceProdCuda(const NDArray&, NDArray&, const int64_t*, int64_t,
+                          const Stream&);
 
 void CudnnReduceCuda(const NDArray& input, NDArray& output, const HTAxes& axes,
                      ReductionType red_type, const Stream& stream) {
@@ -34,8 +36,8 @@ void CudnnReduceCuda(const NDArray& input, NDArray& output, const HTAxes& axes,
       ReduceMinCuda(input, output, axes.data(), axes.size(), stream);
       break;
     case kPROD:
-      HT_NOT_IMPLEMENTED << "ReduceProd is not implemented";
-      __builtin_unreachable();
+      ReduceProdCuda(input, output, axes.data(), axes.size(), stream);
+      break;
     case kNONE:
       HT_NOT_IMPLEMENTED << "Reduction type cannot be none";
       __builtin_unreachable();
@@ -48,10 +50,8 @@ void CudnnReduceCuda(const NDArray& input, NDArray& output, const HTAxes& axes,
 
 void ReduceCuda(const NDArray& input, NDArray& output, const HTAxes& axes,
                 ReductionType red_type, const Stream& stream) {
-  // TODO: Optimize reduction performance. Do NOT rely on CuDNN.
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
-  // HT_LOG_INFO << input << "\n" << output << "\n" << axes << "\n" << red_type;
   HTAxes parsed_axes = NDArrayMeta::ParseAxes(axes, input->ndim());
   CudnnReduceCuda(input, output, parsed_axes, red_type, stream);
 }

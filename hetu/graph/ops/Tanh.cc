@@ -11,16 +11,18 @@ void TanhOpImpl::DoCompute(Operator& op,
   NDArray::tanh(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
+NDArrayList TanhOpImpl::DoCompute(Operator& op,
+                                  const NDArrayList& inputs,
+                                  RuntimeContext& ctx) const {
+  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  DoCompute(op, inputs, outputs, ctx);
+  return outputs;
+}
+
 TensorList TanhOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   return {op->requires_grad(0) ? MakeTanhGradientOp(op->output(0), grad_outputs.at(0),
                                 op->grad_op_meta().set_name(op->grad_name()))
                               : Tensor()};
-}
-
-HTShapeList TanhOpImpl::DoInferShape(Operator& op, 
-                                     const HTShapeList& input_shapes, 
-                                     RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
 }
 
 void TanhGradientOpImpl::DoCompute(Operator& op,
@@ -32,18 +34,20 @@ void TanhGradientOpImpl::DoCompute(Operator& op,
                                   inputs.at(1), outputs.at(0), op->instantiation_ctx().stream());
 }
 
-HTShapeList TanhGradientOpImpl::DoInferShape(Operator& op, 
-                                             const HTShapeList& input_shapes,
-                                             RuntimeContext& ctx) const {
-  return {input_shapes.at(0)};
+Tensor MakeTanhOp(Tensor input, OpMeta op_meta) {
+  TensorList inputs = {std::move(input)};
+  return Graph::MakeOp(
+    std::make_shared<TanhOpImpl>(false),
+    std::move(inputs),
+    std::move(op_meta))->output(0);
 }
 
-Tensor MakeTanhOp(Tensor input, OpMeta op_meta) {
+Tensor MakeTanhInplaceOp(Tensor input, OpMeta op_meta) {
   TensorList inputs = {std::move(input)};
   DataType input_type = DataType::FLOAT32;
   AutoCast::Tensor_AutoCast(inputs, input_type);
   return Graph::MakeOp(
-    std::make_shared<TanhOpImpl>(),
+    std::make_shared<TanhOpImpl>(true),
     std::move(inputs),
     std::move(op_meta))->output(0);
 }

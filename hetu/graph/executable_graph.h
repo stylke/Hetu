@@ -7,9 +7,8 @@
 
 namespace hetu {
 namespace graph {
-  
-struct ExecutePlan
-{
+
+struct ExecutePlan {
   OpRefList local_fw_topo;
   OpRefList local_bw_topo;
   OpRefList local_topo;
@@ -33,7 +32,6 @@ struct ExecutePlan
     accumulated_ops = _accumulated_ops;
   }
 };
-
 
 class ExecutableGraph : public Graph {
  protected:
@@ -60,6 +58,55 @@ class ExecutableGraph : public Graph {
 
   GraphType type() const {
     return GraphType::EXECUTABLE;
+  }
+
+  void SetStages(const std::vector<DeviceGroup>& device_groups) {
+    _stages = device_groups;
+  }
+
+  void InitShapePlan(const Tensor2ShapeMap& shape_plan) {
+    _shape_plan = shape_plan;
+  }
+
+  void InitShapePlan(Tensor2ShapeMap&& shape_plan) {
+    _shape_plan = std::move(shape_plan);
+  }
+
+  void RecordTensorShape(const TensorId& key, const HTShape& value) {
+    auto it = _shape_plan.find(key);
+    if (it != _shape_plan.end()) {
+      // already existed, then must be equal
+      HT_ASSERT(it->second.size() == value.size())
+        << "Tensor " << key << " is already exited in shape plan but is unequal";
+      for (size_t i = 0; i < value.size(); i++) { 
+        HT_ASSERT(it->second[i] == value[i])
+          << "Tensor " << key << " is already exited in shape plan but is unequal";
+      }
+      return;
+    }
+    _shape_plan.insert(std::make_pair(key, value));
+  }
+
+  void RecordTensorShape(const TensorId& key, HTShape&& value) {
+    auto it = _shape_plan.find(key);
+    if (it != _shape_plan.end()) {
+      // already existed, then must be equal
+      HT_ASSERT(it->second.size() == value.size())
+        << "Tensor " << key << " is already existed in shape plan but is unequal";
+      for (size_t i = 0; i < value.size(); i++) { 
+        HT_ASSERT(it->second[i] == value[i])
+          << "Tensor " << key << " is already existed in shape plan but is unequal";
+      }
+      return;
+    } 
+    _shape_plan.insert(std::make_pair(key, std::move(value)));
+  }
+
+  const HTShape& GetTensorShape(const TensorId& key) const {
+    auto it = _shape_plan.find(key);
+    HT_ASSERT(it != _shape_plan.end())
+      << "Tensor " << key << " is not existed in current shape plan";
+    return it->second;
   }
 
  protected:
@@ -96,6 +143,8 @@ class ExecutableGraph : public Graph {
 
   NDArray& GetVariableDataInner(const Tensor& tensor) override;
 
+  NDArray GetDetachedVariableDataInner(const Tensor& tensor) override;
+
   NDArray& AllocVariableDataInner(
     const Tensor& tensor,
     const Initializer& init = VoidifiedInitializer(),
@@ -131,7 +180,8 @@ class ExecutableGraph : public Graph {
   std::vector<DeviceGroup> _stages;
   int _num_micro_batches;
   ExecutePlan _execute_plan;
-  std::vector<hetu::impl::CUDAEvent> _p2p_events;
+  Tensor2ShapeMap _shape_plan;
+  std::vector<std::unique_ptr<Event>> _p2p_events;
 };
 
 } // namespace graph

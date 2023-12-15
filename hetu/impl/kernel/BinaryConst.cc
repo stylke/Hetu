@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
 
 namespace hetu {
@@ -12,6 +13,34 @@ void binary_const_cpu(const spec_t* input, spec_t value, size_t size,
                       Operator op, spec_t* output) {
   for (size_t idx = 0; idx < size; idx++)
     output[idx] = op(value, input[idx]);
+}
+
+template <typename spec_t>
+void add_const_cpu(const spec_t* input, spec_t value, size_t size,
+                   spec_t* output) {
+  for (size_t idx = 0; idx < size; idx++)
+    output[idx] = value + input[idx];
+}
+
+template <typename spec_t>
+void sub_const_cpu(const spec_t* input, spec_t value, size_t size,
+                   spec_t* output) {
+  for (size_t idx = 0; idx < size; idx++)
+    output[idx] = input[idx] - value;
+}
+
+template <typename spec_t>
+void mul_const_cpu(const spec_t* input, spec_t value, size_t size,
+                   spec_t* output) {
+  for (size_t idx = 0; idx < size; idx++)
+    output[idx] = value * input[idx];
+}
+
+template <typename spec_t>
+void div_const_cpu(const spec_t* input, spec_t value, size_t size,
+                   spec_t* output) {
+  for (size_t idx = 0; idx < size; idx++)
+    output[idx] = input[idx] / value;
 }
 
 template<typename Operator>
@@ -30,147 +59,74 @@ void BinaryConstToolCpu(const NDArray& input, double value,
 
 void AddConstCpu(const NDArray& input, double value,
                  NDArray& output, const Stream& stream) {
+  HT_ASSERT_CPU_DEVICE(input);
   CPUStream cpu_stream(stream);
+  size_t size = input->numel();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
   input->dtype(), spec_t, "AddConstCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
-      [stream, input, output, value]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, stream.stream_index() - 1);
-      dnnl::memory::data_type mtype;
-      if (input->dtype() == DataType::FLOAT32)
-        mtype = dnnl::memory::data_type::f32;
-      else if (input->dtype() == DataType::FLOAT16) 
-        mtype = dnnl::memory::data_type::f16;
-      else
-        mtype = dnnl::memory::data_type::f64;
-      auto mat_md = dnnl::memory::desc(input->shape(), mtype, input->stride());
-      auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
-      auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
-
-      auto AddConst_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
-                          dnnl::algorithm::eltwise_linear, mat_md, mat_md, float(1.f), float(value));
-      auto AddConst = dnnl::eltwise_forward(AddConst_pd);
-      std::unordered_map<int, dnnl::memory> binary_args;
-      binary_args.insert({DNNL_ARG_SRC, src_mem});
-      binary_args.insert({DNNL_ARG_DST, dst_mem});
-
-      dnnl::stream engine_stream(eng);
-      AddConst.execute(engine_stream, binary_args);
-      engine_stream.wait();
+      [stream, input, output, value, size]() {
+        add_const_cpu<spec_t>(
+          input->data_ptr<spec_t>(), static_cast<spec_t>(value), size, 
+          output->data_ptr<spec_t>());
     },
     "AddConst");
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void SubConstCpu(const NDArray& input, double value,
                  NDArray& output, const Stream& stream) {
-
+  HT_ASSERT_CPU_DEVICE(input);
   CPUStream cpu_stream(stream);
+  size_t size = input->numel();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
   input->dtype(), spec_t, "SubConstCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
-    [stream, input, output, value]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-      dnnl::memory::data_type mtype;
-      if (input->dtype() == DataType::FLOAT32)
-        mtype = dnnl::memory::data_type::f32;
-      else if (input->dtype() == DataType::FLOAT16) 
-        mtype = dnnl::memory::data_type::f16;
-      else
-        mtype = dnnl::memory::data_type::f64;
-      auto mat_md = dnnl::memory::desc(input->shape(), mtype, input->stride());
-      auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
-      auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
-
-      auto SubConst_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
-                          dnnl::algorithm::eltwise_linear, mat_md, mat_md, float(-1.f), float(value));
-      auto SubConst = dnnl::eltwise_forward(SubConst_pd);
-
-      std::unordered_map<int, dnnl::memory> binary_args;
-      binary_args.insert({DNNL_ARG_SRC, src_mem});
-      binary_args.insert({DNNL_ARG_DST, dst_mem});
-      dnnl::stream engine_stream(eng);
-      SubConst.execute(engine_stream, binary_args);
-      engine_stream.wait();
+      [stream, input, output, value, size]() {
+        sub_const_cpu<spec_t>(
+          input->data_ptr<spec_t>(), static_cast<spec_t>(value), size, 
+          output->data_ptr<spec_t>());
     },
     "SubConst");
-    //cpu_stream.Sync();
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void MulConstCpu(const NDArray& input, double value,
                  NDArray& output, const Stream& stream) {
+  HT_ASSERT_CPU_DEVICE(input);
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);
+  size_t size = input->numel();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
   input->dtype(), spec_t, "MulConstCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
-      [stream, input, output, value]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-      dnnl::memory::data_type mtype;
-      if (input->dtype() == DataType::FLOAT32)
-        mtype = dnnl::memory::data_type::f32;
-      else if (input->dtype() == DataType::FLOAT16) 
-        mtype = dnnl::memory::data_type::f16;
-      else
-        mtype = dnnl::memory::data_type::f64;
-      auto mat_md = dnnl::memory::desc(input->shape(), mtype, input->stride());
-      auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
-      auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
-
-      auto MulConst_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
-                          dnnl::algorithm::eltwise_linear, mat_md, mat_md, float(value), float(0.f));
-      auto MulConst = dnnl::eltwise_forward(MulConst_pd);
-
-      std::unordered_map<int, dnnl::memory> binary_args;
-      binary_args.insert({DNNL_ARG_SRC, src_mem});
-      binary_args.insert({DNNL_ARG_DST, dst_mem});
-      dnnl::stream engine_stream(eng);
-      MulConst.execute(engine_stream, binary_args);
-      engine_stream.wait();
+      [stream, input, output, value, size]() {
+        mul_const_cpu<spec_t>(
+          input->data_ptr<spec_t>(), static_cast<spec_t>(value), size, 
+          output->data_ptr<spec_t>());
     },
     "MulConst");
-    //cpu_stream.Sync();
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void DivConstCpu(const NDArray& input, double value,
                  NDArray& output, const Stream& stream) {
-
+  HT_ASSERT_CPU_DEVICE(input);
   CPUStream cpu_stream(stream);
-  dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-  dnnl::stream engine_stream(eng);
+  size_t size = input->numel();
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
   input->dtype(), spec_t, "DivConstCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
-      [stream, input, output, value]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
-      dnnl::memory::data_type mtype;
-      if (input->dtype() == DataType::FLOAT32)
-        mtype = dnnl::memory::data_type::f32;
-      else if (input->dtype() == DataType::FLOAT16) 
-        mtype = dnnl::memory::data_type::f16;
-      else
-        mtype = dnnl::memory::data_type::f64;
-      auto mat_md = dnnl::memory::desc(input->shape(), mtype, input->stride());
-      auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
-      auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
-
-      auto DivConst_pd = dnnl::eltwise_forward::primitive_desc(eng, dnnl::prop_kind::forward_training,
-                          dnnl::algorithm::eltwise_pow, mat_md, mat_md, float(value), float(-1.f));
-      auto DivConst = dnnl::eltwise_forward(DivConst_pd);
-
-      std::unordered_map<int, dnnl::memory> binary_args;
-      binary_args.insert({DNNL_ARG_SRC, src_mem});
-      binary_args.insert({DNNL_ARG_DST, dst_mem});
-      dnnl::stream engine_stream(eng);
-      DivConst.execute(engine_stream, binary_args);
-      engine_stream.wait();
+      [stream, input, output, value, size]() {
+        div_const_cpu<spec_t>(
+          input->data_ptr<spec_t>(), static_cast<spec_t>(value), size, 
+          output->data_ptr<spec_t>());
     },
     "DivConst");
-    //cpu_stream.Sync();
   });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

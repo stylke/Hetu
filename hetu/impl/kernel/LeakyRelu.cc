@@ -2,6 +2,7 @@
 #include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/omp_utils.h"
+#include "hetu/impl/utils/dnnl_utils.h"
 #include "hetu/impl/stream/CPUStream.h"
 
 namespace hetu {
@@ -21,6 +22,36 @@ void leaky_relu_cpu(const spec_t* input, spec_t alpha, size_t size,
 }
 
 template <typename spec_t>
+void leaky_relu_cpu(const spec_t* input, spec_t alpha, size_t size, spec_t* output,
+                    int64_t ndims, const int64_t* stride, const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; idx++) {
+    int64_t i_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    output[i_idx] = input[i_idx];
+    if (input[i_idx] < 0)
+      output[i_idx] *= alpha;
+  }
+}
+
+template <typename spec_t>
+void leaky_relu_cpu(const spec_t* input, spec_t alpha, size_t size, spec_t* output,
+                    int64_t ndims, const int64_t* stride, const int64_t* stride_out,
+                    const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; idx++) {
+    int64_t i_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    int64_t o_idx = hetu::impl::get_index(idx, ndims, stride_out, c_shape);
+    output[o_idx] = input[i_idx];
+    if (input[i_idx] < 0)
+      output[o_idx] *= alpha;
+  }
+}
+
+template <typename spec_t>
 void leaky_relu_gradient_cpu(const spec_t* input, const spec_t* output_grad,
                              spec_t alpha_LeakyRelu, size_t size,
                              spec_t* output) {
@@ -31,6 +62,24 @@ void leaky_relu_gradient_cpu(const spec_t* input, const spec_t* output_grad,
     output[idx] = output_grad[idx];
     if (input[idx] < 0)
       output[idx] *= alpha_LeakyRelu;
+  }
+}
+
+template <typename spec_t>
+void leaky_relu_gradient_cpu(const spec_t* input, const spec_t* output_grad,
+                             spec_t alpha_LeakyRelu, size_t size,
+                             spec_t* output, int64_t ndims, const int64_t* stride, const int64_t* stride_out,
+                             const int64_t* stride_in, const int64_t* c_shape) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size; ++idx) {
+    int64_t i_idx = hetu::impl::get_index(idx, ndims, stride, c_shape);
+    int64_t og_idx = hetu::impl::get_index(idx, ndims, stride_out, c_shape);
+    int64_t ig_idx = hetu::impl::get_index(idx, ndims, stride_in, c_shape);
+    output[ig_idx] = output_grad[og_idx];
+    if (input[i_idx] < 0)
+      output[ig_idx] *= alpha_LeakyRelu;
   }
 }
 
@@ -48,9 +97,10 @@ void LeakyReluCpu(const NDArray& input, double alpha, NDArray& output,
     input->dtype(), spec_t, "LeakyReluCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
       [stream, input, output, alpha]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, 0);\
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng);
-      auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
+      auto mat_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
       auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
       auto dst_mem = dnnl::memory(mat_md, eng, output->data_ptr<spec_t>());
 
@@ -61,9 +111,9 @@ void LeakyReluCpu(const NDArray& input, double alpha, NDArray& output,
       LeakyRelu.execute(engine_stream,
                         {{DNNL_ARG_SRC, src_mem}, {DNNL_ARG_DST, dst_mem}});
       engine_stream.wait();
-      },"LeakyRelu");
-      //cpu_stream.Sync();
+      },"LeakyRelu");    
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void LeakyReluGradientCpu(const NDArray& input, const NDArray& output_grad,
@@ -83,9 +133,10 @@ void LeakyReluGradientCpu(const NDArray& input, const NDArray& output_grad,
     input->dtype(), spec_t, "LeakyReluGradientCpu", [&]() {
       auto _future = cpu_stream.EnqueueTask(
       [stream, output_grad, input, input_grad, alpha]() {
-      dnnl::engine eng(dnnl::engine::kind::cpu, 0);\
+      dnnl::engine eng(dnnl::engine::kind::cpu, 0);
       dnnl::stream engine_stream(eng);
-      auto mat_md = dnnl::memory::desc(input->shape(), dnnl::memory::data_type::f32, input->stride());
+      auto dnnltype = hetu::cpu::dtype_to_dnnltype(input->dtype());
+      auto mat_md = dnnl::memory::desc(input->shape(), dnnltype, input->stride());
       auto src_mem = dnnl::memory(mat_md, eng, input->data_ptr<spec_t>());
       auto g_dst_mem = dnnl::memory(mat_md, eng, output_grad->data_ptr<spec_t>());
       auto g_src_mem = dnnl::memory(mat_md, eng, input_grad->data_ptr<spec_t>());
@@ -105,8 +156,8 @@ void LeakyReluGradientCpu(const NDArray& input, const NDArray& output_grad,
                        {DNNL_ARG_DIFF_SRC, g_src_mem}});
       engine_stream.wait();
       },"LeakyReluGradient");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 } // namespace impl

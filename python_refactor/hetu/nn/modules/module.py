@@ -319,7 +319,7 @@ class Module(object):
     # Save and Load
     ############################################################################ 
 
-    def _save_to_state_dict(self, destination, prefix):
+    def _save_to_state_dict(self, destination, prefix, format='numpy'):
         r"""Saves module state to `destination` dictionary, containing a state
         of the module, but not its descendants. This is called on every
         submodule in :meth:`~hetu.nn.Module.state_dict`.
@@ -335,13 +335,23 @@ class Module(object):
         _parameters = self.__dict__.get('_parameters')
         for name, param in _parameters.items():
             if param is not None:
-                destination[prefix + name] = param.get_data()
+                if format is 'numpy':
+                    destination[prefix + name] = param.get_data()
+                elif format is 'hetu':
+                    destination[prefix + name] = param
+                else:
+                    raise NotImplementedError("state_dict() can only use numpy.ndarray or hetu.Tensor.")
         _buffers = self.__dict__.get('_buffers')
         for name, buf in _buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
-                destination[prefix + name] = buf.get_data()
+                if format is 'numpy':
+                    destination[prefix + name] = buf.get_data()
+                elif format is 'hetu': 
+                    destination[prefix + name] = buf
+                else:
+                    raise NotImplementedError("state_dict() can only use numpy.ndarray or hetu.Tensor.")
                 
-    def state_dict(self, destination=None, prefix=''):
+    def state_dict(self, destination=None, prefix='', format='numpy'):
         r"""Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
@@ -359,13 +369,13 @@ class Module(object):
         """
         if destination is None:
             destination = OrderedDict()
-        self._save_to_state_dict(destination, prefix)
+        self._save_to_state_dict(destination, prefix, format)
         for name, module in self._modules.items():
             if module is not None:
-                module.state_dict(destination, prefix + name + '.')
+                module.state_dict(destination, prefix + name + '.', format)
         return destination
     
-    def _load_from_state_dict(self, state_dict, device_index, prefix, strict,
+    def _load_from_state_dict(self, state_dict, local_device, prefix, strict,
                               missing_keys, unexpected_keys, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
         this module, but not its descendants. This is called on every submodule
@@ -402,14 +412,24 @@ class Module(object):
             if key in state_dict:
                 param_data = state_dict[key]
                 try:
-                    if device_index is None:
+                    if local_device is None:
                         # Tensor
                         assert param.shape == list(param_data.shape), "shape mismatched!"
                         param.reset_data(param_data)
                     else:
                         # Distributed Tensor
                         assert param.global_shape == list(param_data.shape), "global shape mismatched!"
-                        param.reset_data(parallel_data_provider(param_data, param.distributed_states, device_index))
+                        device_group = param.get_device_group()
+                        assert device_group.num_devices > 0, f"device group has {device_group.num_devices} devices, which is illegal, please check your model initialization."
+                        # 3D parallel: for pipeline situation, a device don't need to load all the checkpoint
+                        if device_group.contains(local_device):
+                            device_index = device_group.get_index(local_device)
+                            param.reset_data(parallel_data_provider(param_data, param.distributed_states, device_index))
+                            '''
+                            if 'lm_head' in key:
+                                print('lm_head', parallel_data_provider(param_data, param.distributed_states, device_index), 
+                                        'param.get_data():', param.get_data())
+                            '''
                 except Exception as ex:
                     error_msgs.append('While resetting the parameter named "{}", '
                                       'whose global dimensions in the model are {} and '
@@ -427,7 +447,7 @@ class Module(object):
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
                         
-    def load_state_dict(self, state_dict, device_index = None, strict = True):
+    def load_state_dict(self, state_dict, local_device = None, strict = True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
@@ -454,7 +474,7 @@ class Module(object):
     
         def load(module, prefix=''):
             module._load_from_state_dict(
-                state_dict, device_index, prefix, True, missing_keys, unexpected_keys, error_msgs)
+                state_dict, local_device, prefix, True, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
                 if child is not None:
                     load(child, prefix + name + '.')

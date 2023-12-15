@@ -68,6 +68,7 @@ void DiagonalCuda(const NDArray& input, NDArray& output, int dim1, int dim2,
         static_cast<int>(input->shape(dim2)), dim_len, offset,
         output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 template <typename spec_t>
@@ -134,6 +135,7 @@ void DiagonalGradientCuda(const NDArray& input, NDArray& output, int dim1,
         input->data_ptr<spec_t>(), size, strideA, strideB, strideC, dim_len,
         output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

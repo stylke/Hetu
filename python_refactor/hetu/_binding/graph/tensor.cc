@@ -2,6 +2,7 @@
 #include "hetu/_binding/graph/tensor_ctor.h"
 #include "hetu/_binding/graph/graph.h"
 #include "hetu/_binding/core/ndarray.h"
+#include "hetu/_binding/core/symbol.h"
 #include "hetu/_binding/constants.h"
 #include "hetu/_binding/utils/function_registry.h"
 #include "hetu/_binding/utils/pybind_common.h"
@@ -145,6 +146,17 @@ PyObject* PyTensor_global_shape(PyTensor* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_symbolic_shape(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  if (!self->tensor->symbolic()) {
+    HT_LOG_DEBUG << "You are using symbolic_shape attribute of " << self->tensor
+      << ", so we turn this tensor to a symbolic tensor on the fly!";
+    self->tensor->init_symbolic_shape(); 
+  }
+  return PySyShape_New(self->tensor->symbolic_shape());
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_size(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -236,6 +248,13 @@ PyObject* PyTensor_get_or_compute(PyTensor* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_symbolic(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  self->tensor->init_symbolic_shape();
+  Py_RETURN_NONE;
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   auto* unsafe_self = PyTensor_Type->tp_alloc(PyTensor_Type, 0);
@@ -298,13 +317,12 @@ PyObject* PyTensor_reset_data(PyTensor* self, PyObject* args, PyObject* kwargs) 
   if (parsed_args.signature_index() == 0) {
     auto* array_obj = parsed_args.get_numpy_array(0);
     ResetVariableData(self->tensor, NDArrayFromNumpy(array_obj));
-    HT_LOG_TRACE << "ResetVariableData successfully.";
-    Py_RETURN_BOOLEAN_COND(true);
+    // HT_LOG_TRACE << "ResetVariableData successfully.";
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
   }
-  Py_RETURN_BOOLEAN_COND(false);
+  Py_RETURN_NONE;
   HT_PY_FUNC_END
 }
 
@@ -316,7 +334,7 @@ PyObject* PyTensor_get_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     auto ret = GetDetachedVariableData(self->tensor);
-    HT_LOG_TRACE << "GetDetachedVariableData successfully.";
+    // HT_LOG_TRACE << "GetDetachedVariableData successfully.";
     return NDArrayToNumpy(ret, false);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -324,6 +342,24 @@ PyObject* PyTensor_get_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
   }
   HT_PY_FUNC_END
 }
+
+PyObject* PyTensor_get_device_group(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "get_device_group()"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    auto ret = GetVariableDeviceGroup(self->tensor);
+    // HT_LOG_TRACE << "GetVariableDeviceGroup successfully.";
+    return PyDeviceGroup_New(ret);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
 
 PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
@@ -377,6 +413,7 @@ PyGetSetDef PyTensor_properties[] = {
   {PY_GET_SET_DEF_NAME("device"), (getter) PyTensor_device, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("dtype"), (getter) PyTensor_dtype, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("global_shape"), (getter) PyTensor_global_shape, nullptr, nullptr, nullptr},  
+  {PY_GET_SET_DEF_NAME("symbolic_shape"), (getter) PyTensor_symbolic_shape, nullptr, nullptr, nullptr},  
   {PY_GET_SET_DEF_NAME("is_variable"), (getter) PyTensor_is_variable, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("is_parameter"), (getter) PyTensor_is_parameter, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("requires_grad"), (getter) PyTensor_requires_grad, nullptr, nullptr, nullptr},
@@ -438,7 +475,9 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"to", (PyCFunction) PyTensor_data_transfer, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"reset_data", (PyCFunction) PyTensor_reset_data, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_data", (PyCFunction) PyTensor_get_data, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"get_device_group", (PyCFunction) PyTensor_get_device_group, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
+    {"symbolic", (PyCFunction) PyTensor_symbolic, METH_NOARGS, nullptr }, 
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {nullptr}
   });

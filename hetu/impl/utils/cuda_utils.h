@@ -1,12 +1,14 @@
 #pragma once
-#define __CUDA_NO_HALF_OPERATORS__
 
 #include "hetu/common/macros.h"
 #include "hetu/core/device.h"
+#include "hetu/core/ndarray.h"
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <curand_kernel.h>
+#include <type_traits>
+#include <functional>
 
 namespace hetu {
 namespace cuda {
@@ -38,7 +40,13 @@ DECLARE_HT_EXCEPTION(cuda_error);
   CUDA_CALL(cudaGetDeviceProperties(ptr, device))
 // memory
 #define CudaMalloc(ptr, size) CUDA_CALL(cudaMalloc(ptr, size))
+#define CudaMallocAsync(ptr, size, stream)                                     \
+  CUDA_CALL(cudaMallocAsync(ptr, size, stream))
 #define CudaFree(ptr) CUDA_CALL(cudaFree(ptr))
+#define CudaFreeAsync(ptr, stream) CUDA_CALL(cudaFreeAsync(ptr, stream))
+#define CudaMemset(ptr, value, size) CUDA_CALL(cudaMemset(ptr, value, size))
+#define CudaMemsetAsync(ptr, value, size, stream)                              \
+  CUDA_CALL(cudaMemsetAsync(ptr, value, size, stream))
 #define CudaMemcpy(dst_ptr, src_ptr, size, direction)                          \
   CUDA_CALL(cudaMemcpy(dst_ptr, src_ptr, size, direction))
 #define CudaMemcpyAsync(dst_ptr, src_ptr, size, direction, stream)             \
@@ -59,7 +67,7 @@ DECLARE_HT_EXCEPTION(cuda_error);
 #define CudaStreamWaitEvent(stream, event, flags)                              \
   CUDA_CALL(cudaStreamWaitEvent(stream, event, flags))
 // event
-#define CudaEventCreate(ptr) CUDA_CALL(cudaEventCreate(ptr))
+#define CudaEventCreate(ptr, flags) CUDA_CALL(cudaEventCreate(ptr, flags))
 #define CudaEventDestroy(event) CUDA_CALL(cudaEventDestroy(event))
 #define CudaEventElapsedTime(ptr, start, end)                                  \
   CUDA_CALL(cudaEventElapsedTime(ptr, start, end))
@@ -95,6 +103,51 @@ class CUDADeviceGuard final {
   int32_t _prev_device_id{-1};
   int32_t _cur_device_id;
 };
+
+// A helper buffer to pass arguments like shapes, strides, axes to cuda kernels
+// Remember that kernel arguments are stored in constant memory, 
+// which may have a slower access speed than global memory. 
+// If that matters, use `to_int64_ndarray` instead.
+template <std::size_t N>
+struct Int64Buffer {
+  int64_t values[N];
+  __forceinline__ __host__ __device__ const int64_t&
+  operator[](size_t i) const {
+    return values[i];
+  }
+  __forceinline__ __host__ __device__ int64_t& operator[](size_t i) {
+    return values[i];
+  }
+};
+
+template <std::size_t N>
+inline Int64Buffer<N> to_int64_buffer(const std::vector<int64_t>& vec) {
+  HT_VALUE_ERROR_IF(vec.size() > N)
+    << "Trying to set " << vec.size() << " values in buffer with size " << N;
+  Int64Buffer<N> ret;
+  std::copy(vec.begin(), vec.end(), &(ret.values[0]));
+  return ret;
+}
+
+template <std::size_t N, class InputIt>
+inline Int64Buffer<N> to_int64_buffer(InputIt first, InputIt last) {
+  auto n = std::distance(first, last);
+  HT_VALUE_ERROR_IF(n > N) << "Trying to set " << n
+                           << " values in buffer with size " << N;
+  Int64Buffer<N> ret;
+  std::copy(first, last, &(ret.values[0]));
+  return ret;
+}
+
+// Helper functions to copy shapes, strides, or axes into NDArrays (blocking)
+NDArray to_int64_ndarray(const std::vector<int64_t>& vec,
+                         DeviceIndex device_id);
+NDArray to_int64_ndarray(const int64_t* from, size_t n, DeviceIndex device_id);
+
+// Helper functions to copy bytes into NDArrays (blocking)
+NDArray to_byte_ndarray(const std::vector<uint8_t>& vec,
+                        DeviceIndex device_id);
+NDArray to_byte_ndarray(const uint8_t* from, size_t n, DeviceIndex device_id);
 
 } // namespace cuda
 } // namespace hetu

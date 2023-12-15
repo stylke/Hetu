@@ -24,8 +24,8 @@ void ArraySetCpu(NDArray& data, double value, const Stream& stream) {
         array_set_cpu<spec_t>(data->data_ptr<spec_t>(),
                               static_cast<spec_t>(value), size);
       },"ArraySet");
-      //cpu_stream.Sync();
     });
+  NDArray::MarkUsedBy({data}, stream);
 }
 
 } // namespace impl

@@ -28,6 +28,9 @@ void DistributedStates::set_distributed_states(const DistributedStates& dst_dist
   }
   set_states(dst_distributed_states._states); // set_states会检查是否和device_num相匹配
   set_order(dst_distributed_states._order); // set_order会检查是否和states相匹配
+  // dst_distributed_states已经和tensor绑定过，即placement_group不为空时
+  if (dst_distributed_states.has_placement_group())
+    set_placement_group(dst_distributed_states._placement_group); // set_placement_group会检查是否和device_num相匹配
 }
 
 bool DistributedStates::is_none() const {
@@ -361,7 +364,10 @@ int32_t DistributedStates::get_dup_group_index(int32_t device_index) const {
 
 std::string DistributedStates::ds_info() const {
   std::ostringstream os;
-  os << "device num = " << _device_num << ", order = [";
+  if (_placement_group.empty())
+    os << "device num = " << _device_num << ", placement_group is not binding yet" << ", order = [";
+  else
+    os << "device num = " << _device_num << ", placement_group = " << _placement_group << ", order = [";
   std::vector<int32_t> order(_order);
   for (auto o = order.begin(); o != order.end(); o++) {
     os << *o;
