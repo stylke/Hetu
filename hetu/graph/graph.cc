@@ -19,14 +19,29 @@ std::shared_ptr<Graph> Graph::_default_define_by_run_graph;
 std::shared_ptr<Graph> Graph::_default_define_and_run_graph;
 thread_local std::stack<GraphId> Graph::_cur_graph_ctx;
 
+GraphId Graph::_next_graph_id() {
+  static std::atomic<GraphId> _global_graph_id{0};
+  return _global_graph_id++;
+}
+
 void Graph::Init() {
   // exit handler
-  std::atexit([]() {
+  auto status = std::atexit([]() {
+    HT_LOG_DEBUG << "Clearing and destructing all graphs...";
+    Graph::_name_to_graphs.clear();
+    Graph::_default_eager_graph = nullptr;
+    Graph::_default_define_by_run_graph = nullptr;
+    Graph::_default_define_and_run_graph = nullptr;
     for (auto& graph : Graph::_global_graphs) {
+      if (graph == nullptr)
+        continue;
       graph->Clear();
     }
     Graph::_global_graphs.clear();
+    HT_LOG_DEBUG << "Destructed all graphs";
   });
+  HT_ASSERT(status == 0)
+      << "Failed to register the exit function for memory pools.";
 
   auto concurrency = std::thread::hardware_concurrency();
   Graph::_global_graphs.reserve(MIN(concurrency, 16) * 2);
@@ -270,6 +285,12 @@ std::string GraphType2Str(GraphType type) {
 
 std::ostream& operator<<(std::ostream& os, GraphType type) {
   os << GraphType2Str(type);
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const Graph& graph) {
+  os << "graph(name=" << graph.name() << ", id=" << graph.id()
+     << ", type=" << graph.type() << ")";
   return os;
 }
 

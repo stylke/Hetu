@@ -6,6 +6,7 @@
 #include "hetu/core/ndarray_meta.h"
 #include "hetu/core/ndarray_storage.h"
 #include "hetu/core/stream.h"
+#include <future>
 
 namespace hetu {
 
@@ -17,7 +18,7 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
  public:
   NDArray() = default;
   NDArray(const NDArrayMeta& meta,
-          std::shared_ptr<NDArrayStorage> storage = nullptr,
+          std::shared_ptr<NDArrayStorage> storage,
           size_t storage_offset = 0)
   : shared_ptr_wrapper<NDArrayDef>() {
     _ptr = make_ptr<NDArrayDef>(meta, storage, storage_offset);
@@ -29,6 +30,10 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
 
  public:
   static const StreamIndex DEFAULT_STREAM;
+
+  static void MarkUsedBy(const NDArray& array, const Stream& stream);
+
+  static void MarkUsedBy(const NDArrayList& arrays, const Stream& stream);
 
   static NDArray to(const NDArray& input,
                     const Device& device = Device(kUndeterminedDevice),
@@ -474,9 +479,11 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
   static NDArray empty(const HTShape& shape,
                        const Device& device = Device(kCPU),
                        DataType dtype = kFloat32,
+                       StreamIndex stream_id = DEFAULT_STREAM,
                        const HTShape& dynamic_shape = {});
 
-  static NDArray empty_like(const NDArray& other);
+  static NDArray empty_like(const NDArray& other,
+                            StreamIndex stream_id = DEFAULT_STREAM);
 
   static NDArray full(const HTShape& shape, double fill_value,
                       const Device& device = Device(kCPU),
@@ -561,23 +568,18 @@ inline NDArray operator/(double scalar, const NDArray& input) {
 class NDArrayDef : public shared_ptr_target {
  public:
   NDArrayDef(const NDArrayMeta& meta,
-             std::shared_ptr<NDArrayStorage> storage = nullptr,
+             std::shared_ptr<NDArrayStorage> storage,
              size_t storage_offset = 0)
   : _meta(meta), _storage(storage) {
     HT_ASSERT(_meta.dtype != kUndeterminedDataType &&
               _meta.device != kUndeterminedDevice && meta.numel() > 0)
       << "Invalid meta: " << _meta;
+    HT_VALUE_ERROR_IF(_storage == nullptr) << "Storage is not provided";
     size_t bytes_per_value = DataType2Size(meta.dtype);
-    if (storage == nullptr) {
-      _storage = std::make_shared<NDArrayStorage>(
-        meta.numel() * bytes_per_value, meta.device);
-      _storage_offset = 0;
-    } else {
-      HT_ASSERT_GE(_storage->size() - storage_offset * bytes_per_value,
-                   meta.numel() * bytes_per_value)
-        << "Storage size is not sufficient";
-      _storage_offset = storage_offset;
-    }
+    HT_ASSERT_GE(_storage->size() - storage_offset * bytes_per_value,
+                 meta.numel() * bytes_per_value)
+      << "Storage size is not sufficient";
+    _storage_offset = storage_offset;
   }
 
   NDArrayDef(NDArray& other)
@@ -662,6 +664,10 @@ class NDArrayDef : public shared_ptr_target {
     return _meta.stride;
   }
 
+  int64_t stride(size_t axis) const {
+    return _meta.stride[axis];
+  }
+
   bool is_dynamic() const {
     return !_meta.dynamic_shape.empty();
   }
@@ -679,7 +685,11 @@ class NDArrayDef : public shared_ptr_target {
     return _meta.dynamic_shape[axis];
   }
 
-  std::shared_ptr<NDArrayStorage> storage() const {
+  const std::shared_ptr<NDArrayStorage>& storage() const {
+    return _storage;
+  }
+
+  std::shared_ptr<NDArrayStorage>& storage() {
     return _storage;
   }
 
@@ -690,6 +700,10 @@ class NDArrayDef : public shared_ptr_target {
   void set_meta(const NDArrayMeta& meta) {
     _meta = meta;
   }
+
+  std::future<void> wait_async() const;
+
+  void wait() const;
 
  protected:
   friend class NDArray;

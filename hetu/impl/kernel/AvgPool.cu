@@ -1,7 +1,8 @@
 #include "hetu/core/ndarray.h"
+#include "hetu/core/stream.h"
+#include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/cuda/CUDADnn.h"
-#include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 
 namespace hetu {
@@ -26,29 +27,10 @@ void AvgPoolCuda(const NDArray& input, const size_t kernel_H,
   size_t output_H = output->shape(2);
   size_t output_W = output->shape(3);
 
-  cudnnDataType_t datatype;
-  if (input->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (input->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (input->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_NOT_IMPLEMENTED << "UNSUPPORTED TYPE:" << input->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input->dtype());
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "AvgPoolCuda", [&]() {
-      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
-      if (input->dtype() == DataType::BFLOAT16)
-        return;
-      #endif
       // pooling descriptor
       cudnnPoolingDescriptor_t avgpool_desc;
       CUDNN_CALL(cudnnCreatePoolingDescriptor(&avgpool_desc));
@@ -80,8 +62,7 @@ void AvgPoolCuda(const NDArray& input, const size_t kernel_H,
         CUDNN_CALL(cudnnPoolingForward(handle, avgpool_desc, &alpha_f, input_desc,
                                       input->data_ptr<spec_t>(), &beta_f, output_desc,
                                       output->data_ptr<spec_t>()));
-      }
-      else {
+      } else {
         CUDNN_CALL(cudnnPoolingForward(handle, avgpool_desc, &alpha, input_desc,
                                       input->data_ptr<spec_t>(), &beta, output_desc,
                                       output->data_ptr<spec_t>()));
@@ -91,6 +72,7 @@ void AvgPoolCuda(const NDArray& input, const size_t kernel_H,
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
       CUDNN_CALL(cudnnDestroyPoolingDescriptor(avgpool_desc));
     });
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
@@ -116,22 +98,7 @@ void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
   size_t output_H = output_Y->shape(2);
   size_t output_W = output_Y->shape(3);
 
-  cudnnDataType_t datatype;
-  if (output_Y->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (output_Y->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (output_Y->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (output_Y->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_LOG_INFO << "UNSUPPORTED TYPE:" << output_Y->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(output_Y->dtype());
 
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     output_Y->dtype(), spec_t, "AvgPoolGradientCuda", [&]() {
@@ -167,8 +134,7 @@ void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
                                         output_Y->data_ptr<spec_t>(), output_desc, gradient_Y->data_ptr<spec_t>(),
                                         input_desc, input_X->data_ptr<spec_t>(), &beta_f, input_desc,
                                         gradient_X->data_ptr<spec_t>()));
-      }
-      else {
+      } else {
         CUDNN_CALL(cudnnPoolingBackward(handle, avgpool_desc, &alpha, output_desc,
                                         output_Y->data_ptr<spec_t>(), output_desc, gradient_Y->data_ptr<spec_t>(),
                                         input_desc, input_X->data_ptr<spec_t>(), &beta, input_desc,
@@ -178,6 +144,7 @@ void AvgPoolGradientCuda(const NDArray& output_Y, const NDArray& gradient_Y,
       CUDNN_CALL(cudnnDestroyTensorDescriptor(output_desc));
       CUDNN_CALL(cudnnDestroyPoolingDescriptor(avgpool_desc));
     });
+  NDArray::MarkUsedBy({input_X, output_Y, gradient_X, gradient_Y}, stream);
 }
 
 } // namespace impl

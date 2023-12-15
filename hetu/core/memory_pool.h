@@ -2,36 +2,92 @@
 
 #include "hetu/common/macros.h"
 #include "hetu/core/device.h"
-#include <mutex>
+#include "hetu/core/stream.h"
 #include <memory>
+#include <mutex>
+#include <future>
 
 namespace hetu {
+
+using DataPtrId = uint64_t;
+using mempool_clock_t = uint64_t;
 
 struct DataPtr {
   void* ptr;
   size_t size;
   Device device;
+  DataPtrId id; // id provided by the memory pool
 };
+
+using DataPtrList = std::vector<DataPtr>;
+
+std::ostream& operator<<(std::ostream&, const DataPtr&);
+
+using DataPtrDeleter = std::function<void(DataPtr)>;
 
 class MemoryPool {
  public:
-  MemoryPool() = default;
+  MemoryPool(Device device, std::string name)
+  : _device{std::move(device)}, _name{std::move(name)} {}
 
-  virtual DataPtr AllocDataSpace(size_t num_bytes) = 0;
+  virtual DataPtr AllocDataSpace(size_t num_bytes,
+                                 const Stream& stream = Stream()) = 0;
 
-  virtual void FreeDataSpace(DataPtr ptr) = 0;
+  virtual DataPtr BorrowDataSpace(void* ptr, size_t num_bytes,
+                                  DataPtrDeleter deleter) = 0;
 
-  virtual Device device() = 0;
+  virtual void FreeDataSpace(DataPtr data_ptr) = 0;
+
+  virtual void EmptyCache() {}
+
+  virtual void MarkDataSpaceUsedByStream(DataPtr data_ptr,
+                                         const Stream& stream) = 0;
+
+  virtual void MarkDataSpacesUsedByStream(DataPtrList& data_ptrs,
+                                          const Stream& stream) = 0;
+
+  virtual std::future<void> WaitDataSpace(DataPtr data_ptr,
+                                          bool async = true) = 0;
+
+  virtual void PrintSummary() = 0;
+  
+  const Device& device() const {
+    return _device;
+  }
+
+  const std::string& name() const {
+    return _name;
+  }
 
 protected:
-  std::mutex _mtx;  
+  inline DataPtrId next_id() {
+    // the caller should hold the mutex
+    return _next_id++;
+  }
+
+  inline mempool_clock_t next_clock() {
+    // the caller should hold the mutex
+    // spare clock = 0
+    return ++_clock;
+  }
+  
+  const Device _device;
+  const std::string _name;
+  mempool_clock_t _clock{0};
+  DataPtrId _next_id{0};
+  std::mutex _mtx;
 };
 
-void RegisterMemoryPool(std::shared_ptr<MemoryPool> memory_pool);
+void RegisterMemoryPoolCtor(const Device& device,
+                            std::function<std::shared_ptr<MemoryPool>()> ctor);
 
 std::shared_ptr<MemoryPool> GetMemoryPool(const Device& device);
 
-DataPtr AllocFromMemoryPool(const Device& device, size_t num_bytes);
+DataPtr AllocFromMemoryPool(const Device& device, size_t num_bytes,
+                            const Stream& stream = Stream());
+
+DataPtr BorrowToMemoryPool(const Device& device, void* ptr, size_t num_bytes,
+                           DataPtrDeleter deleter);
 
 void FreeToMemoryPool(DataPtr ptr);
 

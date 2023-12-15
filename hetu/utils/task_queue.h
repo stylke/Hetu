@@ -11,9 +11,8 @@
 #include <future>
 
 namespace hetu {
-namespace impl {
 
-// A lightweight task queue for CPU streams
+// A lightweight task queue
 class TaskQueue final {
   using Task = std::tuple<std::function<void()>, uint64_t, std::string>;
 
@@ -129,5 +128,4 @@ class TaskQueue final {
   bool _shutdowned{false};
 };
 
-} // namespace impl
 } // namespace hetu

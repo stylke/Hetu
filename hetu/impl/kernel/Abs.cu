@@ -1,6 +1,7 @@
 #include "hetu/core/ndarray.h"
-#include "hetu/impl/stream/CUDAStream.h"
+#include "hetu/core/stream.h"
 #include "hetu/impl/utils/common_utils.h"
+#include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
 

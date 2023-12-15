@@ -12,10 +12,10 @@ class TransposeOp;
 class TransposeOpImpl : public OpInterface {
  public:
   TransposeOpImpl(HTShape perms)
-  : OpInterface(quote(TransposeOp)), _perms(perms) {
+  : OpInterface(quote(TransposeOp)), _perms{std::move(perms)} {
   }
 
-  HTShape get_perms() const {
+  const HTShape& get_perms() const {
     return _perms;
   }
 

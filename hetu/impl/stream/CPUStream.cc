@@ -1,5 +1,5 @@
 #include "hetu/impl/stream/CPUStream.h"
-#include "hetu/impl/stream/TaskQueue.h"
+#include "hetu/utils/task_queue.h"
 #include <mutex>
 
 namespace hetu {

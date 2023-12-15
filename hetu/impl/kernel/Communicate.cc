@@ -8,16 +8,6 @@ namespace impl {
 
 using namespace hetu::impl::comm;
 
-template <typename spec_t>
-void memory_copy_cpu(const spec_t* input, spec_t* output, size_t size) {
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-  for (size_t idx = 0; idx < size; ++idx) {
-    output[idx] = input[idx];
-  }
-}
-
 void AllReduceCpu(const NDArray& input, NDArray& output, ReductionType red_type,
                   const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
@@ -67,7 +57,8 @@ void BatchedISendIRecvCpu(const NDArrayList& send_datas,
   std::transform(comm_deivces.begin(), comm_deivces.end(), ranks.begin(), [&](const Device& device) { return DeviceToWorldRank(device); });
   std::sort(ranks.begin(), ranks.end());
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
-  std::vector<Task> tasks;
+  std::vector<CommTask> tasks;
+  tasks.reserve(send_datas.size() + recv_datas.size());
   for (int i = 0; i < send_datas.size(); i++) {
     tasks.push_back(comm_group->ISend(send_datas[i], DeviceToWorldRank(dsts[i])));
   }
@@ -77,18 +68,11 @@ void BatchedISendIRecvCpu(const NDArrayList& send_datas,
   comm_group->BatchedISendIRecv(tasks);
 }
 
-void BroadcastCommCpu(const NDArray& input, NDArray& output, int broadcaster,
-                   const DeviceGroup& device_group, const Stream& stream) {
+void BroadcastCommCpu(NDArray& data, int broadcaster,
+                      const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->Sync();
-  size_t size = output->numel();
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-    input->dtype(), spec_t, "ReshapeCpu", [&]() {
-      memory_copy_cpu<spec_t>(input->data_ptr<spec_t>(),
-                              output->data_ptr<spec_t>(), size);
-    });
-  comm_group->Broadcast(output, broadcaster);
+  comm_group->Broadcast(data, broadcaster);
 }
 
 void ReduceCommCpu(const NDArray& input, NDArray& output, int reducer,

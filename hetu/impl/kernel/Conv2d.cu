@@ -12,7 +12,6 @@ namespace impl {
 void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
                 const int padding_h, const int padding_w, const int stride_h,
                 const int stride_w, const Stream& stream) {
-  // HT_LOG_INFO << input_x << "\n" << input_f << "\n" << output;
   HT_ASSERT_CUDA_DEVICE(input_x);
   HT_ASSERT_SAME_DEVICE(input_x, input_f);
   HT_ASSERT_SAME_DEVICE(input_x, output);
@@ -21,22 +20,7 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
-  cudnnDataType_t datatype;
-  if (input_x->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (input_x->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (input_x->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input_x->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_NOT_IMPLEMENTED << "UNSUPPORTED TYPE:" << input_x->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input_x->dtype());
 
   size_t input_N = input_x->shape(0);
   size_t input_C = input_x->shape(1);
@@ -53,79 +37,80 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
   size_t out_H = output->shape(2);
   size_t out_W = output->shape(3);
 
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-    input_x->dtype(), spec_t, "Conv2dCuda", [&]() {
-      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
-      if (input_x->dtype() == DataType::BFLOAT16)
-        return;
-      #endif
+  // input
+  cudnnTensorDescriptor_t input_desc;
+  CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
+  CUDNN_CALL(cudnnSetTensor4dDescriptor(input_desc, CUDNN_TENSOR_NCHW,
+                                        datatype, input_N, input_C, input_H,
+                                        input_W));
 
-      // input
-      cudnnTensorDescriptor_t input_desc;
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
-      CUDNN_CALL(cudnnSetTensor4dDescriptor(input_desc, CUDNN_TENSOR_NCHW,
-                                            datatype, input_N, input_C, input_H,
-                                            input_W));
+  // filter
+  cudnnFilterDescriptor_t filter_desc;
+  CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc));
+  CUDNN_CALL(cudnnSetFilter4dDescriptor(filter_desc, datatype,
+                                        CUDNN_TENSOR_NCHW, filter_N,
+                                        filter_C, filter_H, filter_W));
 
-
-      // filter
-      cudnnFilterDescriptor_t filter_desc;
-      CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc));
-      CUDNN_CALL(cudnnSetFilter4dDescriptor(filter_desc, datatype,
-                                            CUDNN_TENSOR_NCHW, filter_N,
-                                            filter_C, filter_H, filter_W));
-
-      // convolution
-      cudnnConvolutionDescriptor_t conv_desc;
-      CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
-      CUDNN_CALL(cudnnSetConvolution2dDescriptor(
-        conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype));
-      if (input_x->dtype() == DataType::FLOAT16)
-        CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
-      // output
-      cudnnTensorDescriptor_t out_desc;
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&out_desc));
-      CUDNN_CALL(cudnnSetTensor4dDescriptor(
-        out_desc, CUDNN_TENSOR_NCHW, datatype, out_N, out_C, out_H, out_W));
-      // algorithm
-      cudnnConvolutionFwdAlgo_t algo;
-      size_t workspace_size;
+  // convolution
+  cudnnConvolutionDescriptor_t conv_desc;
+  CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
+  CUDNN_CALL(cudnnSetConvolution2dDescriptor(
+    conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
+    CUDNN_CROSS_CORRELATION, input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype));
+  if (input_x->dtype() == DataType::FLOAT16)
+    CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
+  // output
+  cudnnTensorDescriptor_t out_desc;
+  CUDNN_CALL(cudnnCreateTensorDescriptor(&out_desc));
+  CUDNN_CALL(cudnnSetTensor4dDescriptor(
+    out_desc, CUDNN_TENSOR_NCHW, datatype, out_N, out_C, out_H, out_W));
+  // algorithm
+  cudnnConvolutionFwdAlgo_t algo;
+  size_t workspace_size = 0;
+  NDArray workspace;
 
 #if defined(CUDNN_MAJOR) && ((CUDNN_MAJOR >= 8))
-      // workaround here
-      // TODO: using cudnnFindConvolutionForwardAlgorithm in CuDNN 8 instead
-      int return_algo_cnt = CUDNN_CONVOLUTION_FWD_ALGO_COUNT;
-      cudnnConvolutionFwdAlgoPerf_t
-        perf_results[CUDNN_CONVOLUTION_FWD_ALGO_COUNT];
-      CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm_v7(
-        handle, input_desc, filter_desc, conv_desc, out_desc,
-        CUDNN_CONVOLUTION_FWD_ALGO_COUNT, &return_algo_cnt, perf_results));
+  // workaround here
+  // TODO: using cudnnFindConvolutionForwardAlgorithm in CuDNN 8 instead
+  int return_algo_cnt = CUDNN_CONVOLUTION_FWD_ALGO_COUNT;
+  cudnnConvolutionFwdAlgoPerf_t
+    perf_results[CUDNN_CONVOLUTION_FWD_ALGO_COUNT];
+  CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm_v7(
+    handle, input_desc, filter_desc, conv_desc, out_desc,
+    CUDNN_CONVOLUTION_FWD_ALGO_COUNT, &return_algo_cnt, perf_results));
 
-      void* tmp_work_data = nullptr;
-      for (int i = 0; i < return_algo_cnt; ++i) {
-        CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
-          handle, input_desc, filter_desc, conv_desc, out_desc,
-          perf_results[i].algo, &workspace_size));
-        if (cudaMalloc(&tmp_work_data, workspace_size) == cudaSuccess) {
-          algo = perf_results[i].algo;
-          CudaFree(tmp_work_data);
-          break;
-        }
-      }
-
+  void* tmp_work_data = nullptr;
+  bool flag = false;
+  for (int i = 0; i < return_algo_cnt; ++i) {
+    CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
+      handle, input_desc, filter_desc, conv_desc, out_desc,
+      perf_results[i].algo, &workspace_size));
+    if (cudaMalloc(&tmp_work_data, workspace_size) == cudaSuccess) {
+      algo = perf_results[i].algo;
+      CudaFree(tmp_work_data);
+      flag = true;
+      break;
+    }
+  }
+  HT_RUNTIME_ERROR_IF(!flag) << "Memory insufficient to create workspace";
 #else
-        CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(
-            handle, input_desc, filter_desc, conv_desc, out_desc, 
-            CUDNN_CONVOLUTION_FWD_PREFER_FASTEST, 0, &algo));
+  CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(
+      handle, input_desc, filter_desc, conv_desc, out_desc, 
+      CUDNN_CONVOLUTION_FWD_PREFER_FASTEST, 0, &algo));
 #endif
-      CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
-        handle, input_desc, filter_desc, conv_desc, out_desc, algo,
-        &workspace_size));
+  CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
+    handle, input_desc, filter_desc, conv_desc, out_desc, algo,
+    &workspace_size));
 
-      DataPtr work_data_ptr =
-        AllocFromMemoryPool(input_x->device(), workspace_size);
-      void* work_data = work_data_ptr.ptr;
+  if (workspace_size != 0) {
+    workspace = NDArray::empty({static_cast<int64_t>(workspace_size)},
+                               input_x->device(), kInt8, stream.stream_index());
+  }
+
+  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+    input_x->dtype(), spec_t, "Conv2dCuda", [&]() {
+      void* workspace_ptr =
+        workspace.is_defined() ? workspace->raw_data_ptr() : nullptr;
 
       spec_t alpha = 1.0f;
       spec_t beta = 0.0f;
@@ -136,22 +121,20 @@ void Conv2dCuda(const NDArray& input_x, const NDArray& input_f, NDArray& output,
       if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16) {
         CUDNN_CALL(cudnnConvolutionForward(handle, &alpha_f, input_desc, input_x->data_ptr<spec_t>(),
                                            filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
-                                           algo, work_data, workspace_size, &beta_f,
+                                           algo, workspace_ptr, workspace_size, &beta_f,
                                            out_desc, output->data_ptr<spec_t>()));
-      }
-      else {
+      } else {
         CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_x->data_ptr<spec_t>(),
                                            filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
-                                           algo, work_data, workspace_size, &beta,
+                                           algo, workspace_ptr, workspace_size, &beta,
                                            out_desc, output->data_ptr<spec_t>()));
       }
-      FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(out_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
       CUDNN_CALL(cudnnDestroyFilterDescriptor(filter_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
     });
-  CudaStreamSynchronize(cuda_stream);
+  NDArray::MarkUsedBy({input_x, input_f, output, workspace}, stream);
   return;
 }
 
@@ -168,22 +151,7 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
-  cudnnDataType_t datatype;
-  if (input_x->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (input_x->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (input_x->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input_x->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_x->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input_x->dtype());
 
   // input
   size_t input_N = input_x->shape(0);
@@ -201,77 +169,83 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
   size_t df_H = gradient_f->shape(2);
   size_t df_W = gradient_f->shape(3);
 
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-    input_x->dtype(), spec_t, "Conv2dGradientofFilterCuda", [&]() {
-      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
-      if (input_x->dtype() == DataType::BFLOAT16)
-        return;
-      #endif
-      // input
-      cudnnTensorDescriptor_t input_desc;
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
-      CUDNN_CALL(cudnnSetTensor4dDescriptor(input_desc, CUDNN_TENSOR_NCHW,
-                                            datatype, input_N, input_C, input_H,
-                                            input_W));
+  // input
+  cudnnTensorDescriptor_t input_desc;
+  CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
+  CUDNN_CALL(cudnnSetTensor4dDescriptor(input_desc, CUDNN_TENSOR_NCHW,
+                                        datatype, input_N, input_C, input_H,
+                                        input_W));
 
-      // dy
-      cudnnTensorDescriptor_t dy_desc;
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&dy_desc));
-      CUDNN_CALL(cudnnSetTensor4dDescriptor(dy_desc, CUDNN_TENSOR_NCHW,
-                                            datatype, dy_N, dy_C, dy_H, dy_W));
+  // dy
+  cudnnTensorDescriptor_t dy_desc;
+  CUDNN_CALL(cudnnCreateTensorDescriptor(&dy_desc));
+  CUDNN_CALL(cudnnSetTensor4dDescriptor(dy_desc, CUDNN_TENSOR_NCHW,
+                                        datatype, dy_N, dy_C, dy_H, dy_W));
 
-      // conv2d
-      cudnnConvolutionDescriptor_t conv_desc;
-      CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
-      CUDNN_CALL(cudnnSetConvolution2dDescriptor(
-        conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, input_x->dtype() == DataType::FLOAT16 || 
-        input_x->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype));
-      if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16)
-        CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
+  // conv2d
+  cudnnConvolutionDescriptor_t conv_desc;
+  CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
+  CUDNN_CALL(cudnnSetConvolution2dDescriptor(
+    conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
+    CUDNN_CROSS_CORRELATION, input_x->dtype() == DataType::FLOAT16 || 
+    input_x->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype));
+  if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16)
+    CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
 
-      // dw
-      cudnnFilterDescriptor_t df_desc;
-      CUDNN_CALL(cudnnCreateFilterDescriptor(&df_desc));
-      CUDNN_CALL(cudnnSetFilter4dDescriptor(
-        df_desc, datatype, CUDNN_TENSOR_NCHW, df_N, df_C, df_H, df_W));
-      // algo
-      cudnnConvolutionBwdFilterAlgo_t algo;
-      size_t workspace_size;
+  // dw
+  cudnnFilterDescriptor_t df_desc;
+  CUDNN_CALL(cudnnCreateFilterDescriptor(&df_desc));
+  CUDNN_CALL(cudnnSetFilter4dDescriptor(
+    df_desc, datatype, CUDNN_TENSOR_NCHW, df_N, df_C, df_H, df_W));
+  // algo
+  cudnnConvolutionBwdFilterAlgo_t algo;
+  size_t workspace_size = 0;
+  NDArray workspace;
 
 #if defined(CUDNN_MAJOR) && ((CUDNN_MAJOR >= 8))
-      // TODO: using cudnnFindConvolutionBackwardFilterAlgorithm in CuDNN 8
-      // instead algo = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT;
-      int return_algo_cnt = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT;
-      cudnnConvolutionBwdFilterAlgoPerf_t
-        perf_results[CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT];
-      CUDNN_CALL(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
-        handle, input_desc, dy_desc, conv_desc, df_desc,
-        CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT, &return_algo_cnt,
-        perf_results));
+  // TODO: using cudnnFindConvolutionBackwardFilterAlgorithm in CuDNN 8
+  // instead algo = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT;
+  int return_algo_cnt = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT;
+  cudnnConvolutionBwdFilterAlgoPerf_t
+    perf_results[CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT];
+  CUDNN_CALL(cudnnGetConvolutionBackwardFilterAlgorithm_v7(
+    handle, input_desc, dy_desc, conv_desc, df_desc,
+    CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT, &return_algo_cnt,
+    perf_results));
 
-      void* tmp_work_data = nullptr;
-      for (int i = 0; i < return_algo_cnt; ++i) {
-        CUDNN_CALL(cudnnGetConvolutionBackwardFilterWorkspaceSize(
-          handle, input_desc, dy_desc, conv_desc, df_desc, perf_results[i].algo,
-          &workspace_size));
-        if (cudaMalloc(&tmp_work_data, workspace_size) == cudaSuccess) {
-          algo = perf_results[i].algo;
-          CudaFree(tmp_work_data);
-          break;
-        }
-      }
+  void* tmp_work_data = nullptr;
+  bool flag = false;
+  for (int i = 0; i < return_algo_cnt; ++i) {
+    CUDNN_CALL(cudnnGetConvolutionBackwardFilterWorkspaceSize(
+      handle, input_desc, dy_desc, conv_desc, df_desc, perf_results[i].algo,
+      &workspace_size));
+    if (cudaMalloc(&tmp_work_data, workspace_size) == cudaSuccess) {
+      algo = perf_results[i].algo;
+      CudaFree(tmp_work_data);
+      flag = true;
+      break;
+    }
+  }
+  HT_RUNTIME_ERROR_IF(!flag) << "Memory insufficient to create workspace";
 #else
-        CUDNN_CALL(cudnnGetConvolutionBackwardFilterAlgorithm(
-            handle, input_desc, dy_desc, conv_desc, df_desc,
-            CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST, 0, &algo));
+  CUDNN_CALL(cudnnGetConvolutionBackwardFilterAlgorithm(
+      handle, input_desc, dy_desc, conv_desc, df_desc,
+      CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST, 0, &algo));
 #endif
-      CUDNN_CALL(cudnnGetConvolutionBackwardFilterWorkspaceSize(
-        handle, input_desc, dy_desc, conv_desc, df_desc, algo,
-        &workspace_size));
-      DataPtr work_data_ptr =
-        AllocFromMemoryPool(input_x->device(), workspace_size);
-      void* work_data = work_data_ptr.ptr;
+  CUDNN_CALL(cudnnGetConvolutionBackwardFilterWorkspaceSize(
+    handle, input_desc, dy_desc, conv_desc, df_desc, algo,
+    &workspace_size));
+
+  if (workspace_size != 0) {
+    workspace = NDArray::empty({static_cast<int64_t>(workspace_size)},
+                               input_x->device(), kInt8, stream.stream_index());
+  }
+
+  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+    input_x->dtype(), spec_t, "Conv2dGradientofFilterCuda", [&]() {
+      void* workspace_ptr =
+        workspace.is_defined() ? workspace->raw_data_ptr() : nullptr;
+
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
 
@@ -281,20 +255,18 @@ void Conv2dGradientofFilterCuda(const NDArray& input_x,
       if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16) {
         CUDNN_CALL(cudnnConvolutionBackwardFilter(
           handle, &alpha_f, input_desc, input_x->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
-          conv_desc, algo, work_data, workspace_size, &beta_f, df_desc, gradient_f->data_ptr<spec_t>()));
-      }
-      else {
+          conv_desc, algo, workspace_ptr, workspace_size, &beta_f, df_desc, gradient_f->data_ptr<spec_t>()));
+      } else {
         CUDNN_CALL(cudnnConvolutionBackwardFilter(
           handle, &alpha, input_desc, input_x->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
-          conv_desc, algo, work_data, workspace_size, &beta, df_desc, gradient_f->data_ptr<spec_t>()));
+          conv_desc, algo, workspace_ptr, workspace_size, &beta, df_desc, gradient_f->data_ptr<spec_t>()));
       }
-      FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(dy_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
       CUDNN_CALL(cudnnDestroyFilterDescriptor(df_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
     });
-  return;
+  NDArray::MarkUsedBy({input_x, gradient_y, gradient_f, workspace}, stream);
 }
 
 void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
@@ -309,22 +281,7 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
-  cudnnDataType_t datatype;
-  if (input_f->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (input_f->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (input_f->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input_f->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_f->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input_f->dtype());
 
   // filter
   size_t filter_N = input_f->shape(0);
@@ -341,74 +298,79 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
   size_t dx_C = gradient_x->shape(1);
   size_t dx_H = gradient_x->shape(2);
   size_t dx_W = gradient_x->shape(3);
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-    input_f->dtype(), spec_t, "Conv2dGradientofDataCuda", [&]() {
-      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
-      if (input_f->dtype() == DataType::BFLOAT16)
-        return;
-      #endif
-      // filter
-      cudnnFilterDescriptor_t filter_desc;
-      CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc));
-      CUDNN_CALL(cudnnSetFilter4dDescriptor(filter_desc, datatype,
-                                            CUDNN_TENSOR_NCHW, filter_N,
-                                            filter_C, filter_H, filter_W));
-      // dy
-      cudnnTensorDescriptor_t dy_desc;
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&dy_desc));
-      CUDNN_CALL(cudnnSetTensor4dDescriptor(dy_desc, CUDNN_TENSOR_NCHW,
-                                            datatype, dy_N, dy_C, dy_H, dy_W));
-      // conv2d
-      cudnnConvolutionDescriptor_t conv_desc;
-      CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
-      CUDNN_CALL(cudnnSetConvolution2dDescriptor(
-        conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, input_f->dtype() == DataType::FLOAT16 || input_f->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype));
-      if (input_f->dtype() == DataType::FLOAT16 || input_f->dtype() == DataType::BFLOAT16)
-        CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
-      // dx
-      cudnnTensorDescriptor_t dx_desc;
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&dx_desc));
-      CUDNN_CALL(cudnnSetTensor4dDescriptor(dx_desc, CUDNN_TENSOR_NCHW,
-                                            datatype, dx_N, dx_C, dx_H, dx_W));
 
-      // algo
-      cudnnConvolutionBwdDataAlgo_t algo;
-      size_t workspace_size;
+  // filter
+  cudnnFilterDescriptor_t filter_desc;
+  CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc));
+  CUDNN_CALL(cudnnSetFilter4dDescriptor(filter_desc, datatype,
+                                        CUDNN_TENSOR_NCHW, filter_N,
+                                        filter_C, filter_H, filter_W));
+  // dy
+  cudnnTensorDescriptor_t dy_desc;
+  CUDNN_CALL(cudnnCreateTensorDescriptor(&dy_desc));
+  CUDNN_CALL(cudnnSetTensor4dDescriptor(dy_desc, CUDNN_TENSOR_NCHW,
+                                        datatype, dy_N, dy_C, dy_H, dy_W));
+  // conv2d
+  cudnnConvolutionDescriptor_t conv_desc;
+  CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
+  CUDNN_CALL(cudnnSetConvolution2dDescriptor(
+    conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
+    CUDNN_CROSS_CORRELATION, input_f->dtype() == DataType::FLOAT16 || input_f->dtype() == DataType::BFLOAT16 ? CUDNN_DATA_FLOAT : datatype));
+  if (input_f->dtype() == DataType::FLOAT16 || input_f->dtype() == DataType::BFLOAT16)
+    CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
+  // dx
+  cudnnTensorDescriptor_t dx_desc;
+  CUDNN_CALL(cudnnCreateTensorDescriptor(&dx_desc));
+  CUDNN_CALL(cudnnSetTensor4dDescriptor(dx_desc, CUDNN_TENSOR_NCHW,
+                                        datatype, dx_N, dx_C, dx_H, dx_W));
+
+  // algo
+  cudnnConvolutionBwdDataAlgo_t algo;
+  size_t workspace_size = 0;
+  NDArray workspace;
 
 #if defined(CUDNN_MAJOR) && ((CUDNN_MAJOR >= 8))
-      // TODO: using cudnnFindConvolutionBackwardDataAlgorithm in CuDNN 8
-      // instead
-      int return_algo_cnt = CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT;
-      cudnnConvolutionBwdDataAlgoPerf_t
-        perf_results[CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT];
-      CUDNN_CALL(cudnnGetConvolutionBackwardDataAlgorithm_v7(
-        handle, filter_desc, dy_desc, conv_desc, dx_desc,
-        CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT, &return_algo_cnt, perf_results));
+  // TODO: using cudnnFindConvolutionBackwardDataAlgorithm in CuDNN 8
+  // instead
+  int return_algo_cnt = CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT;
+  cudnnConvolutionBwdDataAlgoPerf_t
+    perf_results[CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT];
+  CUDNN_CALL(cudnnGetConvolutionBackwardDataAlgorithm_v7(
+    handle, filter_desc, dy_desc, conv_desc, dx_desc,
+    CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT, &return_algo_cnt, perf_results));
 
-      void* tmp_work_data = nullptr;
-      for (int i = 0; i < return_algo_cnt; ++i) {
-        CUDNN_CALL(cudnnGetConvolutionBackwardDataWorkspaceSize(
-          handle, filter_desc, dy_desc, conv_desc, dx_desc,
-          perf_results[i].algo, &workspace_size));
-        if (cudaMalloc(&tmp_work_data, workspace_size) == cudaSuccess) {
-          algo = perf_results[i].algo;
-          CudaFree(tmp_work_data);
-          break;
-        }
-      }
+  void* tmp_work_data = nullptr;
+  bool flag = false;
+  for (int i = 0; i < return_algo_cnt; ++i) {
+    CUDNN_CALL(cudnnGetConvolutionBackwardDataWorkspaceSize(
+      handle, filter_desc, dy_desc, conv_desc, dx_desc,
+      perf_results[i].algo, &workspace_size));
+    if (cudaMalloc(&tmp_work_data, workspace_size) == cudaSuccess) {
+      algo = perf_results[i].algo;
+      CudaFree(tmp_work_data);
+      flag = true;
+      break;
+    }
+  }
+  HT_RUNTIME_ERROR_IF(!flag) << "Memory insufficient to create workspace";
 #else
-        CUDNN_CALL(cudnnGetConvolutionBackwardDataAlgorithm(
-            handle, filter_desc, dy_desc, conv_desc, dx_desc,
-            CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST, 0, &algo));
+  CUDNN_CALL(cudnnGetConvolutionBackwardDataAlgorithm(
+      handle, filter_desc, dy_desc, conv_desc, dx_desc,
+      CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST, 0, &algo));
 #endif
-      CUDNN_CALL(cudnnGetConvolutionBackwardDataWorkspaceSize(
-        handle, filter_desc, dy_desc, conv_desc, dx_desc, algo,
-        &workspace_size));
+  CUDNN_CALL(cudnnGetConvolutionBackwardDataWorkspaceSize(
+    handle, filter_desc, dy_desc, conv_desc, dx_desc, algo,
+    &workspace_size));
 
-      DataPtr work_data_ptr =
-        AllocFromMemoryPool(input_f->device(), workspace_size);
-      void* work_data = work_data_ptr.ptr;
+  if (workspace_size != 0) {
+    workspace = NDArray::empty({static_cast<int64_t>(workspace_size)},
+                               input_f->device(), kInt8, stream.stream_index());
+  }
+
+  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+    input_f->dtype(), spec_t, "Conv2dGradientofDataCuda", [&]() {
+      void* workspace_ptr =
+        workspace.is_defined() ? workspace->raw_data_ptr() : nullptr;
 
       spec_t alpha = 1.0;
       spec_t beta = 0.0;
@@ -419,21 +381,18 @@ void Conv2dGradientofDataCuda(const NDArray& input_f, const NDArray& gradient_y,
       if (input_f->dtype() == DataType::FLOAT16 || input_f->dtype() == DataType::BFLOAT16) {
         CUDNN_CALL(cudnnConvolutionBackwardData(
           handle, &alpha_f, filter_desc, input_f->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
-          conv_desc, algo, work_data, workspace_size, &beta_f, dx_desc, gradient_x->data_ptr<spec_t>()));
-      }
-      else {
+          conv_desc, algo, workspace_ptr, workspace_size, &beta_f, dx_desc, gradient_x->data_ptr<spec_t>()));
+      } else {
         CUDNN_CALL(cudnnConvolutionBackwardData(
           handle, &alpha, filter_desc, input_f->data_ptr<spec_t>(), dy_desc, gradient_y->data_ptr<spec_t>(), 
-          conv_desc, algo, work_data, workspace_size, &beta, dx_desc, gradient_x->data_ptr<spec_t>()));        
+          conv_desc, algo, workspace_ptr, workspace_size, &beta, dx_desc, gradient_x->data_ptr<spec_t>()));        
       }
-
-      FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(dy_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(dx_desc));
       CUDNN_CALL(cudnnDestroyFilterDescriptor(filter_desc));
     });
-  return;
+  NDArray::MarkUsedBy({input_f, gradient_y, gradient_x, workspace}, stream);
 }
 
 template <typename spec_t>
@@ -461,22 +420,7 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
 
-  cudnnDataType_t datatype;
-  if (input_f->dtype() == DataType::FLOAT32) {
-    datatype = CUDNN_DATA_FLOAT;
-  } else if (input_f->dtype() == DataType::FLOAT64) {
-    datatype = CUDNN_DATA_DOUBLE;
-  } else if (input_f->dtype() == DataType::FLOAT16) {
-    datatype = CUDNN_DATA_HALF;
-  }
-  #if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
-  else if (input_f->dtype() == DataType::BFLOAT16) {
-    datatype = CUDNN_DATA_BFLOAT16;
-  }
-  #endif
-  else {
-    HT_LOG_INFO << "UNSUPPORTED TYPE:" << input_f->dtype();
-  }
+  cudnnDataType_t datatype = to_cudnn_DataType(input_x->dtype());
 
   size_t input_N = input_x->shape(0);
   size_t input_C = input_x->shape(1);
@@ -497,78 +441,83 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
   size_t size = out_N * out_C * out_H * out_W;
   size_t bias_output_size = out_H * out_W;
   size_t bias_input_size = out_C * bias_output_size;
+
+  // input
+  cudnnTensorDescriptor_t input_desc;
+  CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
+  CUDNN_CALL(cudnnSetTensor4dDescriptor(input_desc, CUDNN_TENSOR_NCHW,
+                                        datatype, input_N, input_C, input_H,
+                                        input_W));
+  // filter
+  cudnnFilterDescriptor_t filter_desc;
+  CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc));
+  CUDNN_CALL(cudnnSetFilter4dDescriptor(filter_desc, datatype,
+                                        CUDNN_TENSOR_NCHW, filter_N,
+                                        filter_C, filter_H, filter_W));
+
+  // convolution
+  cudnnConvolutionDescriptor_t conv_desc;
+  CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
+  CUDNN_CALL(cudnnSetConvolution2dDescriptor(
+    conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
+    CUDNN_CROSS_CORRELATION, input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16? CUDNN_DATA_FLOAT : datatype));
+  if (input_x->dtype() == DataType::FLOAT16)
+    CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
+
+  // output
+  cudnnTensorDescriptor_t out_desc;
+  CUDNN_CALL(cudnnCreateTensorDescriptor(&out_desc));
+  CUDNN_CALL(cudnnSetTensor4dDescriptor(
+    out_desc, CUDNN_TENSOR_NCHW, datatype, out_N, out_C, out_H, out_W));
+  // algorithm
+  cudnnConvolutionFwdAlgo_t algo;
+  size_t workspace_size = 0;
+  NDArray workspace;
+
+#if defined(CUDNN_MAJOR) && ((CUDNN_MAJOR >= 8))
+  // TODO: using cudnnFindConvolutionForwardAlgorithm in CuDNN 8 instead
+  int return_algo_cnt = CUDNN_CONVOLUTION_FWD_ALGO_COUNT;
+  cudnnConvolutionFwdAlgoPerf_t
+    perf_results[CUDNN_CONVOLUTION_FWD_ALGO_COUNT];
+  CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm_v7(
+    handle, input_desc, filter_desc, conv_desc, out_desc,
+    CUDNN_CONVOLUTION_FWD_ALGO_COUNT, &return_algo_cnt, perf_results));
+
+  void* tmp_work_data = nullptr;
+  bool flag = false;
+  for (int i = 0; i < return_algo_cnt; ++i) {
+    CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
+      handle, input_desc, filter_desc, conv_desc, out_desc,
+      perf_results[i].algo, &workspace_size));
+    if (cudaMalloc(&tmp_work_data, workspace_size) == cudaSuccess) {
+      algo = perf_results[i].algo;
+      CudaFree(tmp_work_data);
+      flag = true;
+      break;
+    }
+  }
+  HT_RUNTIME_ERROR_IF(!flag) << "Memory insufficient to create workspace";
+#else
+  CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(
+      handle, input_desc, filter_desc, conv_desc, out_desc,
+      CUDNN_CONVOLUTION_FWD_PREFER_FASTEST, 0, &algo));
+#endif
+  CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
+    handle, input_desc, filter_desc, conv_desc, out_desc, algo,
+    &workspace_size));
+
+  if (workspace_size != 0) {
+    workspace = NDArray::empty({static_cast<int64_t>(workspace_size)},
+                               input_x->device(), kInt8, stream.stream_index());
+  }
+
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input_x->dtype(), spec_t, "Conv2dAddBiasCuda", [&]() {
-      #if defined(CUDNN_VERSION) && CUDNN_VERSION < 8200
-      if (input_x->dtype() == DataType::BFLOAT16)
-        return;
-      #endif
-      // input
-      cudnnTensorDescriptor_t input_desc;
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&input_desc));
-      CUDNN_CALL(cudnnSetTensor4dDescriptor(input_desc, CUDNN_TENSOR_NCHW,
-                                            datatype, input_N, input_C, input_H,
-                                            input_W));
-      // filter
-      cudnnFilterDescriptor_t filter_desc;
-      CUDNN_CALL(cudnnCreateFilterDescriptor(&filter_desc));
-      CUDNN_CALL(cudnnSetFilter4dDescriptor(filter_desc, datatype,
-                                            CUDNN_TENSOR_NCHW, filter_N,
-                                            filter_C, filter_H, filter_W));
-
-      // convolution
-      cudnnConvolutionDescriptor_t conv_desc;
-      CUDNN_CALL(cudnnCreateConvolutionDescriptor(&conv_desc));
-      CUDNN_CALL(cudnnSetConvolution2dDescriptor(
-        conv_desc, padding_h, padding_w, stride_h, stride_w, 1, 1,
-        CUDNN_CROSS_CORRELATION, input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16? CUDNN_DATA_FLOAT : datatype));
-      if (input_x->dtype() == DataType::FLOAT16)
-        CUDNN_CALL(cudnnSetConvolutionMathType(conv_desc, CUDNN_TENSOR_OP_MATH));
-
-      // output
-      cudnnTensorDescriptor_t out_desc;
-      CUDNN_CALL(cudnnCreateTensorDescriptor(&out_desc));
-      CUDNN_CALL(cudnnSetTensor4dDescriptor(
-        out_desc, CUDNN_TENSOR_NCHW, datatype, out_N, out_C, out_H, out_W));
-      // algorithm
-      cudnnConvolutionFwdAlgo_t algo;
-      size_t workspace_size;
-
-#if defined(CUDNN_MAJOR) && ((CUDNN_MAJOR >= 8))
-      // TODO: using cudnnFindConvolutionForwardAlgorithm in CuDNN 8 instead
-      int return_algo_cnt = CUDNN_CONVOLUTION_FWD_ALGO_COUNT;
-      cudnnConvolutionFwdAlgoPerf_t
-        perf_results[CUDNN_CONVOLUTION_FWD_ALGO_COUNT];
-      CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm_v7(
-        handle, input_desc, filter_desc, conv_desc, out_desc,
-        CUDNN_CONVOLUTION_FWD_ALGO_COUNT, &return_algo_cnt, perf_results));
-
-      void* tmp_work_data = nullptr;
-      for (int i = 0; i < return_algo_cnt; ++i) {
-        CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
-          handle, input_desc, filter_desc, conv_desc, out_desc,
-          perf_results[i].algo, &workspace_size));
-        if (cudaMalloc(&tmp_work_data, workspace_size) == cudaSuccess) {
-          algo = perf_results[i].algo;
-          CudaFree(tmp_work_data);
-          break;
-        }
-      }
-#else
-        CUDNN_CALL(cudnnGetConvolutionForwardAlgorithm(
-            handle, input_desc, filter_desc, conv_desc, out_desc,
-            CUDNN_CONVOLUTION_FWD_PREFER_FASTEST, 0, &algo));
-#endif
-      CUDNN_CALL(cudnnGetConvolutionForwardWorkspaceSize(
-        handle, input_desc, filter_desc, conv_desc, out_desc, algo,
-        &workspace_size));
-
-      DataPtr work_data_ptr =
-        AllocFromMemoryPool(input_x->device(), workspace_size);
-      void* work_data = work_data_ptr.ptr;
+      void* workspace_ptr =
+        workspace.is_defined() ? workspace->raw_data_ptr() : nullptr;
 
       spec_t alpha = 1.0f;
       spec_t beta = 0.0f;
@@ -579,32 +528,24 @@ void Conv2dAddBiasCuda(const NDArray& input_x, const NDArray& input_f,
       if (input_x->dtype() == DataType::FLOAT16 || input_x->dtype() == DataType::BFLOAT16) {
         CUDNN_CALL(cudnnConvolutionForward(handle, &alpha_f, input_desc, input_x->data_ptr<spec_t>(),
                                           filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
-                                          algo, work_data, workspace_size, &beta_f,
+                                          algo, workspace_ptr, workspace_size, &beta_f,
                                           out_desc, output->data_ptr<spec_t>()));
-      } 
-      else {
+      }  else {
         CUDNN_CALL(cudnnConvolutionForward(handle, &alpha, input_desc, input_x->data_ptr<spec_t>(),
                                           filter_desc, input_f->data_ptr<spec_t>(), conv_desc,
-                                          algo, work_data, workspace_size, &beta,
+                                          algo, workspace_ptr, workspace_size, &beta,
                                           out_desc, output->data_ptr<spec_t>()));
       }
-
-
-      FreeToMemoryPool(work_data_ptr);
       CUDNN_CALL(cudnnDestroyTensorDescriptor(out_desc));
       CUDNN_CALL(cudnnDestroyConvolutionDescriptor(conv_desc));
       CUDNN_CALL(cudnnDestroyFilterDescriptor(filter_desc));
       CUDNN_CALL(cudnnDestroyTensorDescriptor(input_desc));
-
-      CudaStreamSynchronize(cuda_stream);
-
-      // HT_LOG_INFO << "Origin:" << output;
-
+      
       conv2d_add_bias_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         bias->data_ptr<spec_t>(), output->data_ptr<spec_t>(), bias_input_size,
         bias_output_size, size);
     });
-  return;
+  NDArray::MarkUsedBy({input_x, input_f, bias, output, workspace}, stream);
 }
 
 } // namespace impl

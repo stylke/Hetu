@@ -60,11 +60,11 @@ class MPICommunicationGroupDef : public CommunicationGroupDef {
 
   void Recv(NDArray& data, int sender) override;
 
-  Task ISend(const NDArray& data, int receiver) override;
+  CommTask ISend(const NDArray& data, int receiver) override;
 
-  Task IRecv(NDArray& data, int sender) override;
+  CommTask IRecv(NDArray& data, int sender) override;
 
-  void BatchedISendIRecv(const std::vector<Task>& tasks) override;
+  void BatchedISendIRecv(const std::vector<CommTask>& tasks) override;
   
   void Barrier(bool sync = false) override;
 

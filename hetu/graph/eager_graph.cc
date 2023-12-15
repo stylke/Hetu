@@ -44,6 +44,10 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
     input_arrays.push_back(_preserved_data[input->id()]);
   // HT_LOG_INFO << op << "\nInputs:" << input_arrays;
   auto output_arrays = op->Compute(input_arrays, _runtime_ctxs);
+  // Note: The usage should be marked inside kernels, 
+  // but we still mark here in case we forget to do so in some kernels. 
+  NDArray::MarkUsedBy(input_arrays, op->instantiation_ctx().stream());
+  NDArray::MarkUsedBy(output_arrays, op->instantiation_ctx().stream());
   for (size_t i = 0; i < op->num_outputs(); i++)
     _preserved_data[op->output(i)->id()] = output_arrays[i];
 
@@ -68,11 +72,12 @@ NDArray& EagerGraph::AllocVariableDataInner(const Tensor& tensor,
                                             const Initializer& init,
                                             uint64_t seed, 
                                             const HTShape& global_shape) {
-  // TODO: check meta is valid
-  _preserved_data[tensor->id()] =
-    NDArray::empty(tensor->shape(), tensor->placement(), tensor->dtype());
+  // TODO: check meta is valid & maybe we can use non-blocking stream?
+  _preserved_data[tensor->id()] = NDArray::empty(
+    tensor->shape(), tensor->placement(), tensor->dtype(), kBlockingStream);
   if (!init.vodify()) {
-    init.Init(_preserved_data[tensor->id()], seed, global_shape);
+    init.Init(_preserved_data[tensor->id()], seed, global_shape,
+              kBlockingStream);
   }
   return _preserved_data[tensor->id()];
 }

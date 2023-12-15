@@ -10,11 +10,11 @@ void TransposeOpImpl::DoCompute(Operator& op,
                                 RuntimeContext& ctx) const {
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::Transpose, inputs.at(0),
-                                  outputs.at(0), get_perms().data(), op->instantiation_ctx().stream());
+                                  outputs.at(0), get_perms(), op->instantiation_ctx().stream());
 }
 
 TensorList TransposeOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  const HTShape& perm = get_perms();
+  const auto& perm = get_perms();
   HTShape grad_perm = perm;
   for (size_t i = 0; i < perm.size(); ++i) {
     grad_perm[perm[i]] = i;
@@ -28,7 +28,7 @@ HTShapeList TransposeOpImpl::DoInferShape(Operator& op,
                                           const HTShapeList& input_shapes, 
                                           RuntimeContext& ctx) const {
   HTShape ori_shape = input_shapes.at(0);
-  HTShape perm = get_perms();
+  const auto& perm = get_perms();
   HT_ASSERT(perm.size() == ori_shape.size());
   int ndim = perm.size();
   HTShape vis(ndim);
