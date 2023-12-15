@@ -9,11 +9,14 @@
 
 namespace hetu {
 
+using DataPtrId = uint64_t;
+using mempool_clock_t = uint64_t;
+
 struct DataPtr {
   void* ptr;
   size_t size;
   Device device;
-  uint64_t id; // id provided by the memory pool
+  DataPtrId id; // id provided by the memory pool
 };
 
 using DataPtrList = std::vector<DataPtr>;
@@ -35,6 +38,8 @@ class MemoryPool {
 
   virtual void FreeDataSpace(DataPtr data_ptr) = 0;
 
+  virtual void EmptyCache() {}
+
   virtual void MarkDataSpaceUsedByStream(DataPtr data_ptr,
                                          const Stream& stream) = 0;
 
@@ -44,6 +49,8 @@ class MemoryPool {
   virtual std::future<void> WaitDataSpace(DataPtr data_ptr,
                                           bool async = true) = 0;
 
+  virtual void PrintSummary() = 0;
+  
   const Device& device() const {
     return _device;
   }
@@ -53,18 +60,26 @@ class MemoryPool {
   }
 
 protected:
-  uint64_t next_id() {
-    // Only called on alloc or borrow, so the lock has been acquired.
+  inline DataPtrId next_id() {
+    // the caller should hold the mutex
     return _next_id++;
+  }
+
+  inline mempool_clock_t next_clock() {
+    // the caller should hold the mutex
+    // spare clock = 0
+    return ++_clock;
   }
   
   const Device _device;
   const std::string _name;
-  uint64_t _next_id;
+  mempool_clock_t _clock{0};
+  DataPtrId _next_id{0};
   std::mutex _mtx;
 };
 
-void RegisterMemoryPool(std::shared_ptr<MemoryPool> memory_pool);
+void RegisterMemoryPoolCtor(const Device& device,
+                            std::function<std::shared_ptr<MemoryPool>()> ctor);
 
 std::shared_ptr<MemoryPool> GetMemoryPool(const Device& device);
 

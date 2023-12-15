@@ -1,17 +1,16 @@
 #pragma once
 
-#include "hetu/core/memory_pool.h"
+#include "hetu/impl/memory/CUDAMemoryPool.cuh"
 #include "hetu/utils/task_queue.h"
-#include <functional>
 
 namespace hetu {
 namespace impl {
 
-class CPUMemoryPool final : public MemoryPool {
+class CUDAStreamOrderedMemoryPool final : public CUDAMemoryPool {
  public:
-  CPUMemoryPool();
+  CUDAStreamOrderedMemoryPool(DeviceIndex device_id);
 
-  ~CPUMemoryPool();
+  ~CUDAStreamOrderedMemoryPool();
 
   DataPtr AllocDataSpace(size_t num_bytes, const Stream& stream = Stream());
 
@@ -27,37 +26,31 @@ class CPUMemoryPool final : public MemoryPool {
 
   void PrintSummary();
 
-  inline size_t get_data_alignment() const noexcept {
-    return 16;
-  }
-
  private:
-  struct CPUDataPtrInfo {
+  struct CudaDataPtrInfo {
     void* ptr;
     size_t num_bytes;
     Stream alloc_stream;
-    DataPtrDeleter deleter;
-    std::unordered_map<Stream, std::shared_ptr<Event>> dependent_events;
+    mempool_clock_t alloc_at;
+    mempool_clock_t free_at;
+    std::unordered_set<Stream> used_streams;
 
-    CPUDataPtrInfo(void* ptr_, size_t num_bytes_, Stream alloc_stream_,
-                   DataPtrDeleter deleter_ = {})
+    CudaDataPtrInfo(void* ptr_, size_t num_bytes_, Stream alloc_stream_,
+                    mempool_clock_t alloc_at_)
     : ptr(ptr_),
       num_bytes(num_bytes_),
       alloc_stream{std::move(alloc_stream_)},
-      deleter{std::move(deleter_)} {}
+      alloc_at(alloc_at_), 
+      free_at(0) {}
   };
 
-  static void _FreeOnAllocStream(CPUMemoryPool* const pool, DataPtr ptr);
-  static void _FreeOnJoinStream(CPUMemoryPool* const pool, DataPtr ptr);
-
-  std::unordered_map<uint64_t, CPUDataPtrInfo> _data_ptr_info;
-  std::function<void(DataPtr)> _free_on_alloc_stream_fn;
-  std::function<void(DataPtr)> _free_on_join_stream_fn;
+  std::unordered_map<uint64_t, CudaDataPtrInfo> _data_ptr_info;
+  std::vector<int> _free_stream_flags{HT_NUM_STREAMS_PER_DEVICE, 0};
+  std::unique_ptr<TaskQueue> _free_stream_watcher;
 
   size_t _allocated{0};
   size_t _peak_allocated{0};
   uint64_t _alloc_cnt{0};
-  uint64_t _borrow_cnt{0};
   uint64_t _free_cnt{0};
   uint64_t _mark_cnt{0};
 };
