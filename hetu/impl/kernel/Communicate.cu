@@ -11,9 +11,6 @@ namespace impl {
 
 using namespace hetu::impl::comm;
 
-template <typename spec_t>
-__global__ void memory_copy_kernel(const spec_t* input, spec_t* output, size_t size);
-
 void AllReduceCuda(const NDArray& input, NDArray& output, ReductionType red_type,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);

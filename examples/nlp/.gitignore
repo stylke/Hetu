@@ -11,3 +11,5 @@ gpt/debug_*
 gpt/scripts/debug_*
 gpt/core_python_*
 gpt/lhy.txt
+gpt/nsight/
+*.swp

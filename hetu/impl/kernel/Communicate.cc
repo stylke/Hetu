@@ -8,16 +8,6 @@ namespace impl {
 
 using namespace hetu::impl::comm;
 
-template <typename spec_t>
-void memory_copy_cpu(const spec_t* input, spec_t* output, size_t size) {
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-  for (size_t idx = 0; idx < size; ++idx) {
-    output[idx] = input[idx];
-  }
-}
-
 void AllReduceCpu(const NDArray& input, NDArray& output, ReductionType red_type,
                   const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
