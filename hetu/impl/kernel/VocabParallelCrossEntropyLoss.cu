@@ -59,6 +59,7 @@ void VocabParallelCrossEntropyCuda(const NDArray& vocab_parallel_logits, const N
         n_rows, n_cols, vocab_start_index, vocab_end_index, ignored_index,
         predicted_logits_partial->data_ptr<spec_t>(), log_sum_exp_logits->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({vocab_parallel_logits, labels, predicted_logits_partial, log_sum_exp_logits}, stream);
 }
 
 
@@ -115,6 +116,7 @@ void VocabParallelCrossEntropyGradientCuda(const NDArray& softmax,
         n_rows, n_cols, vocab_start_index, vocab_end_index, ignored_index,
         grad_loss->data_ptr<spec_t>(), output->data_ptr<spec_t>());
     });
+  NDArray::MarkUsedBy({softmax, labels, grad_loss, output}, stream);
 }
 
 } // namespace impl

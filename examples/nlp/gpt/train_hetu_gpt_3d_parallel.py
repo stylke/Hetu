@@ -123,6 +123,8 @@ def pretrain(args):
                     print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
                 step_num += 1
                 global_step_num += 1
+                # if global_step_num == 20:
+                #     return
                 # return
 
 if __name__ == '__main__':
@@ -177,3 +179,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     with ht.graph("define_and_run"):
         pretrain(args)
+        print(f'{local_device}: train hetu 3d parallel end...')

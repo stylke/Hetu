@@ -58,6 +58,7 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
                                   reduce_max, kMAX, _comm_group,
                                   op->instantiation_ctx().stream());
   auto vocab_parallel_logits = preds - reduce_max;
+  NDArray::MarkUsedBy({preds, labels, reduce_max_partial, reduce_max, vocab_parallel_logits}, op->instantiation_ctx().stream());
 
   // 2. log(sum(e^x))
   NDArray exp_logits = NDArray::empty_like(vocab_parallel_logits);
@@ -76,6 +77,7 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
   NDArray softmax = exp_logits / sum_exp_logits;
   OpRuntimeContext& op_ctx = ctx.get_or_create(op->id());
   op_ctx.put_ndarray("softmax", softmax);
+  NDArray::MarkUsedBy({exp_logits, sum_exp_logits_partial, sum_exp_logits, log_sum_exp_logits, softmax}, op->instantiation_ctx().stream());
 
   // 3. x[label]
   // Get the partition's vocab indecies, label should in range [vocab_start_index, vocab_end_index)]
@@ -95,6 +97,7 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
                                   hetu::impl::AllReduce, predict_logits_partial,
                                   predict_logits, kSUM, _comm_group,
                                   op->instantiation_ctx().stream());
+  NDArray::MarkUsedBy({predict_logits_partial, predict_logits}, op->instantiation_ctx().stream());
 
   // 4. log(sum(e^x)) - x[label], shape = [batch_size * seq_len, 1]
   NDArray loss_unreduced = log_sum_exp_logits - predict_logits;
@@ -105,6 +108,7 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
   } else {
     NDArray::copy(loss_unreduced, op->instantiation_ctx().stream_index, outputs.at(0));
   }
+  NDArray::MarkUsedBy({loss_unreduced}, op->instantiation_ctx().stream());
 }
 
 TensorList VocabParallelCrossEntropyOpImpl::DoGradient(
@@ -184,6 +188,7 @@ void VocabParallelCrossEntropyGradientOpImpl::DoCompute(
                                hetu::impl::VocabParallelCrossEntropyGradient, softmax,
                                labels, vocab_start_index, vocab_end_index, ignored_index(), 
                                broadcasted, outputs.at(0), op->instantiation_ctx().stream());
+  NDArray::MarkUsedBy({preds, labels, grad_output, broadcasted, softmax}, op->instantiation_ctx().stream());                               
 }
 
 HTShapeList VocabParallelCrossEntropyGradientOpImpl::DoInferShape(

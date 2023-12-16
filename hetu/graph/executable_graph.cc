@@ -864,29 +864,29 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
     HT_LOG_TRACE << "Running op " << op << " (type: " << op->type() << ")...";
 
-    if (!is_shared_weight_or_grad_p2p(op)) {
-      // batched p2p send & recv
-      if ((is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) &&
-        op->instantiation_ctx().placement.is_cuda()) {
-        if (!is_continuous_p2p) {
-          is_continuous_p2p = true;
-          auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
-          event->Record(Stream(op->placement(), kComputingStream));
-          event->Block(Stream(op->placement(), kP2PStream));
-          _p2p_events.emplace_back(std::move(event));
-          ncclGroupStart();
-          // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group start";
-        }
-      } else if (is_continuous_p2p) {
-        is_continuous_p2p = false;
-        // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group end";
-        ncclGroupEnd();
+    // if (!is_shared_weight_or_grad_p2p(op)) {
+    // batched p2p send & recv
+    if ((is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) &&
+      op->instantiation_ctx().placement.is_cuda()) {
+      if (!is_continuous_p2p) {
+        is_continuous_p2p = true;
         auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
-        event->Record(Stream(op->placement(), kP2PStream));
-        event->Block(Stream(op->placement(), kComputingStream));
+        event->Record(Stream(op->placement(), kComputingStream));
+        event->Block(Stream(op->placement(), kP2PStream));
         _p2p_events.emplace_back(std::move(event));
+        ncclGroupStart();
+        // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group start";
       }
+    } else if (is_continuous_p2p) {
+      is_continuous_p2p = false;
+      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group end";
+      ncclGroupEnd();
+      auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+      event->Record(Stream(op->placement(), kP2PStream));
+      event->Block(Stream(op->placement(), kComputingStream));
+      _p2p_events.emplace_back(std::move(event));
     }
+    // }
 
     NDArrayList input_vals;
     input_vals.reserve(op->num_inputs());
@@ -912,16 +912,16 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         tensor2data.erase(input->id());
       }
     }
-    if (is_shared_weight_or_grad_p2p(op)) {
-      auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
-      event->Record(Stream(op->placement(), kComputingStream));
-      event->Block(Stream(op->placement(), kP2PStream));
-      ncclGroupStart();
-    }    
+    // if (is_shared_weight_or_grad_p2p(op)) {
+    //   auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+    //   event->Record(Stream(op->placement(), kComputingStream));
+    //   event->Block(Stream(op->placement(), kP2PStream));
+    //   ncclGroupStart();
+    // }
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
-    if (is_shared_weight_or_grad_p2p(op)) {
-      ncclGroupEnd();
-    }    
+    // if (is_shared_weight_or_grad_p2p(op)) {
+    //   ncclGroupEnd();
+    // }
     // Note: The usage should be marked inside kernels, 
     // but we still mark here in case we forget to do so in some kernels. 
     NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
