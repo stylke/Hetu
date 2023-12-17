@@ -221,21 +221,12 @@ class TensorDef : public shared_ptr_target {
     return true;
   }
 
-  // NOTE: Contiguous copy maybe removed in eager mode,
-  // so we need to further check if the contiguous copy
-  // is still there before using it.
-  bool maybe_have_contiguous_op() const {
-    return _contiguous_op_id != std::numeric_limits<OpId>::max();
-  }
-
-  OpId get_contiguous_op_id() const {
-    HT_ASSERT(maybe_have_contiguous_op())
-    << "Missing contiguous op of tensor " << name();
+  std::optional<OpId> get_contiguous_op_id() const {
     return _contiguous_op_id;
   }
 
   void set_contiguous_op_id(OpId contiguous_op_id) {
-    _contiguous_op_id = contiguous_op_id;
+    _contiguous_op_id = std::make_optional<OpId>(contiguous_op_id);
   }
 
   NDArray get_or_compute();
@@ -345,7 +336,7 @@ class TensorDef : public shared_ptr_target {
   bool _symbolic;
   SyShape _symbolic_shape;
 
-  OpId _contiguous_op_id{std::numeric_limits<OpId>::max()};
+  std::optional<OpId> _contiguous_op_id{std::nullopt};
 };
 
 class Tensor : public shared_ptr_wrapper<TensorDef> {

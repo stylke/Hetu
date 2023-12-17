@@ -100,21 +100,15 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
   Graph::InitOnce();
   if (body->require_contig_inputs()) {
     for (auto& input : inputs) {
-      auto& input_graph = Graph::GetGraph(input->graph_id());
       if (!input->is_contiguous()) {
-        if (input->maybe_have_contiguous_op()) {
+        auto op_id = input->get_contiguous_op_id();
+        if (op_id.has_value()) {
           HT_LOG_TRACE << "Tensor " << input->name()
                        << " is not contiguous for op " << body->type()
                        << ". But it may have a contiguous copy, use it instead";
-          auto op_id = input->get_contiguous_op_id();
           // NOTE: Contiguous copy is created in the same graph as input.
-          auto op = input_graph.GetOp(op_id);
-          if (op.is_defined()) {
-            input = op->output(0);
-          } else {
-            HT_LOG_TRACE << "Contiguous copy is not found, make a new one";
-            input = MakeContiguousOp(input);
-          }
+          auto op = graph.GetOp(op_id.value());
+          input = op->output(0);
         } else {
           HT_LOG_TRACE << "Make Contiguous op for Tensor " << input->name()
                        << " while making " << body->type() << " op";
