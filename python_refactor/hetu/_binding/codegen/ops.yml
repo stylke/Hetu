@@ -372,6 +372,10 @@
   op: SoftmaxCrossEntropySparseOp
   args: Tensor preds, Tensor labels, int64_t ignored_index=-1, std::string reduction=\"mean\"
 
+- name: vocab_parallel_cross_entropy
+  op: VocabParallelCrossEntropyOp
+  args: Tensor preds, Tensor labels, int64_t ignored_index=-1, std::string reduction=\"mean\"
+
 #######################################################
 # CNN Related
 #######################################################
@@ -562,6 +566,10 @@
 # Communication
 #######################################################
 
+- name: name
+  op: CommOp
+  args: Tensor input, DistributedStates dst_ds, std::string mode
+
 - name: comm
   op: CommOp
   args: Tensor input, DistributedStates dst_ds, DeviceGroup dst_group
@@ -591,6 +599,11 @@
 - name: interpolate
   op: InterpolateOp
   args: Tensor input, HTShape outshape, bool align_corners=False, double scale_factor=0
+  self: input
+
+- name: range_mask
+  op: RangeMaskOp
+  args: Tensor input, int64_t min, int64_t max
   self: input
 
 - name: masked_fill

@@ -233,8 +233,8 @@ NDArrayList AllReduceOpImpl::DoCompute(Operator& op,
   NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::AllReduce, inputs.at(0),
-                                  outputs.at(0), _comm_group, // _comm_group is a subset of placement_group
-                                  op->instantiation_ctx().stream()); 
+                                  outputs.at(0), reduction_type(), _comm_group, // _comm_group is a subset of placement_group
+                                  op->instantiation_ctx().stream());
   return outputs;
 }
 
@@ -505,7 +505,8 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
     HTShape scatter_shape = inputs.at(0)->shape();
     scatter_shape[0] /= _comm_group.num_devices();
     meta.set_shape(scatter_shape);
-    int rank = GetWorldRank();
+    // int rank = GetWorldRank();
+    int rank = _comm_group.get_index(op->placement());
     size_t storage_offset = rank * (inputs.at(0)->numel() / _comm_group.num_devices());
     NDArray output = NDArray(meta, inputs.at(0)->storage(), inputs.at(0)->storage_offset() + storage_offset);
     outputs.emplace_back(output);
@@ -516,7 +517,7 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
 
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::ReduceScatter, inputs.at(0), outputs.at(0), 
-                                  _comm_group, op->instantiation_ctx().stream());
+                                  reduction_type(), _comm_group, op->instantiation_ctx().stream());
   return outputs;
 }
 
@@ -533,6 +534,18 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
 //                                   _comm_group, op->instantiation_ctx().stream());
 // }
 
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+                  ReductionType red_type, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds, DeviceGroup(), red_type), 
+                      {std::move(input)}, std::move(op_meta))->output(0);
+}
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
+                  const std::string& mode, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds, DeviceGroup(), Str2ReductionType(mode)), 
+                      {std::move(input)}, std::move(op_meta))->output(0);
+}
+
 Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, DeviceGroup dst_group, OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds, dst_group), 
                       {std::move(input)}, std::move(op_meta))->output(0);
@@ -543,10 +556,15 @@ Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, OpMeta op_meta) {
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, bool inplace,
-                       OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<AllReduceOpImpl>(comm_group, inplace, op_meta.device_group), 
-                      {std::move(input)}, std::move(op_meta))->output(0);
+Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, bool inplace, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<AllReduceOpImpl>(comm_group, kSUM, inplace, 
+                       op_meta.device_group), {std::move(input)}, std::move(op_meta))->output(0);
+}
+
+Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, 
+                       ReductionType red_type, bool inplace, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<AllReduceOpImpl>(comm_group, red_type, inplace, 
+                       op_meta.device_group), {std::move(input)}, std::move(op_meta))->output(0);
 }
 
 // p2p send no output
@@ -600,11 +618,17 @@ Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group,
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, bool inplace, 
-                           OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, inplace, op_meta.device_group), 
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, 
+                           bool inplace, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, kSUM, inplace, op_meta.device_group), 
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, 
+                           ReductionType red_type, bool inplace, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, red_type, inplace, op_meta.device_group), 
+                      {std::move(input)}, std::move(op_meta))->output(0);
 }
-}
+
+} // namespace graph
+} // namespace hetu

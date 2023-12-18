@@ -48,6 +48,7 @@ DataPtr CPUMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   DataPtr data_ptr{ptr, aligned_num_bytes, Device(kCPU), next_id()};
   _allocated += aligned_num_bytes;
   _peak_allocated = MAX(_peak_allocated, _allocated);
+  _alloc_cnt++;
 
   // Note: The `stream` argument might be a non-CPU stream
   // (e.g., allocated for device to host copy).
@@ -83,7 +84,8 @@ DataPtr CPUMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
                                           alloc_stream, std::move(deleter)));
   HT_RUNTIME_ERROR_IF(!insertion.second)
     << "Failed to insert data " << data_ptr << " to info";
-  
+  _borrow_cnt++;
+
   return data_ptr;
 }
 
@@ -139,6 +141,7 @@ void CPUMemoryPool::_FreeOnAllocStream(CPUMemoryPool* const pool,
   }
   pool->_allocated -= data_ptr.size;
   pool->_data_ptr_info.erase(it);
+  pool->_free_cnt++;
 }
 
 void CPUMemoryPool::_FreeOnJoinStream(CPUMemoryPool* const pool,
@@ -161,6 +164,7 @@ void CPUMemoryPool::_FreeOnJoinStream(CPUMemoryPool* const pool,
   lock.lock();
   pool->_allocated -= data_ptr.size;
   pool->_data_ptr_info.erase(it);
+  pool->_free_cnt++;
 }
 
 void CPUMemoryPool::MarkDataSpaceUsedByStream(DataPtr data_ptr,
@@ -187,6 +191,7 @@ void CPUMemoryPool::MarkDataSpaceUsedByStream(DataPtr data_ptr,
                      << stream;
     __builtin_unreachable();
   }
+  _mark_cnt++;
 }
 
 void CPUMemoryPool::MarkDataSpacesUsedByStream(DataPtrList& data_ptrs,
@@ -213,6 +218,7 @@ void CPUMemoryPool::MarkDataSpacesUsedByStream(DataPtrList& data_ptrs,
     HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
       << "Cannot find data " << data_ptr << " from info";
     it->second.dependent_events[stream] = event;
+    _mark_cnt++;
   }
 }
 
@@ -256,6 +262,16 @@ std::future<void> CPUMemoryPool::WaitDataSpace(DataPtr data_ptr, bool async) {
 
   return future;
 }
+
+void CPUMemoryPool::PrintSummary() {
+  HT_LOG_INFO << name() << ": alloc=" << _allocated << " bytes, "
+    << "peak_alloc=" << _peak_allocated << " bytes, "
+    << "alloc_cnt=" << _alloc_cnt << ", "
+    << "borrow_cnt=" << _borrow_cnt << ", "
+    << "free_cnt=" << _free_cnt << ", "
+    << "mark_cnt=" << _mark_cnt;
+}
+
 namespace {
 
 static std::once_flag cpu_memory_pool_register_flag;
@@ -263,8 +279,10 @@ static std::once_flag cpu_memory_pool_register_flag;
 struct CPUMemoryPoolRegister {
   CPUMemoryPoolRegister() {
     std::call_once(cpu_memory_pool_register_flag, []() {
-      auto cpu_memory_pool = std::make_shared<CPUMemoryPool>();
-      RegisterMemoryPool(cpu_memory_pool);
+      RegisterMemoryPoolCtor(
+          Device(kCPU), []() -> std::shared_ptr<MemoryPool> {
+            return std::make_shared<CPUMemoryPool>();
+          });
     });
   }
 };

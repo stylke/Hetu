@@ -156,6 +156,7 @@ NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape) {
   auto storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
     Device(kCPU), ptr, meta.numel() * element_size, [obj](DataPtr ptr) {
       py::call_guard<py::gil_scoped_acquire>();
+      // py::gil_scoped_acquire gil;
       Py_DECREF(obj);
     }));
 

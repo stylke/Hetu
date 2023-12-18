@@ -11,11 +11,11 @@ namespace impl {
 
 using namespace hetu::impl::comm;
 
-void AllReduceCuda(const NDArray& input, NDArray& output,
+void AllReduceCuda(const NDArray& input, NDArray& output, ReductionType red_type,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->AllReduce(input, output);
+  comm_group->AllReduce(input, output, red_type);
   NDArray::MarkUsedBy({input, output}, stream);  
 }
 
@@ -27,11 +27,11 @@ void AllGatherCuda(const NDArray& input, NDArray& output,
   NDArray::MarkUsedBy({input, output}, stream);                   
 }
 
-void ReduceScatterCuda(const NDArray& input, NDArray& output,
+void ReduceScatterCuda(const NDArray& input, NDArray& output, ReductionType red_type,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->ReduceScatter(input, output);
+  comm_group->ReduceScatter(input, output, red_type);
   NDArray::MarkUsedBy({input, output}, stream);  
 }
 

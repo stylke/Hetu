@@ -100,21 +100,15 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
   Graph::InitOnce();
   if (body->require_contig_inputs()) {
     for (auto& input : inputs) {
-      auto& input_graph = Graph::GetGraph(input->graph_id());
       if (!input->is_contiguous()) {
-        if (input->maybe_have_contiguous_op()) {
+        auto op_id = input->get_contiguous_op_id();
+        if (op_id.has_value()) {
           HT_LOG_TRACE << "Tensor " << input->name()
                        << " is not contiguous for op " << body->type()
                        << ". But it may have a contiguous copy, use it instead";
-          auto op_id = input->get_contiguous_op_id();
           // NOTE: Contiguous copy is created in the same graph as input.
-          auto op = input_graph.GetOp(op_id);
-          if (op.is_defined()) {
-            input = op->output(0);
-          } else {
-            HT_LOG_TRACE << "Contiguous copy is not found, make a new one";
-            input = MakeContiguousOp(input);
-          }
+          auto op = graph.GetOp(op_id.value());
+          input = op->output(0);
         } else {
           HT_LOG_TRACE << "Make Contiguous op for Tensor " << input->name()
                        << " while making " << body->type() << " op";
@@ -172,7 +166,6 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       it->second.push_back(filled_grads[i]);
   }
 
-  // the fw_op_id is also needed for the intermediate op
   auto reduce_grad = [](const OpId& fw_op_id, const TensorList& unreduced_grads) -> Tensor {
     TensorList filtered;
     filtered.reserve(unreduced_grads.size());
@@ -208,10 +201,9 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
           partial_grad_list.push_back(partial_grad);
         }
         // if allreduce group is different between input grads,
-        // it automatically turns to p2p + SumOp + allreduce (p2p will be added when instantiating).
+        // then assert error in state deduce process.
         Tensor partial_grad_sum = MakeSumOp(partial_grad_list, OpMeta().set_name("sum_op_for_partial_grad"));
         partial_grad_sum->set_is_grad(true);
-        // an intermediate op, remember to set the fw_op_id as well!
         partial_grad_sum->producer()->set_fw_op_id(fw_op_id);
         DistributedStates ds_dst = filtered[0]->get_distributed_states();
         grad_sum = MakeCommOp(partial_grad_sum, ds_dst, OpMeta().set_name("comm_op_after_partial_grad_sum"));

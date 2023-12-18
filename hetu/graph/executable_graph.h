@@ -14,18 +14,20 @@ struct ExecutePlan {
   OpRefList local_topo;
   TensorIdSet shared_weight_tensor;
   OpIdSet shared_weight_p2p;
+  OpIdSet shared_weight_grad_p2p;
   TensorIdSet accumulated_tensor;
   OpIdSet accumulated_ops;
 
   void update(OpRefList& _local_fw_topo, OpRefList& _local_bw_topo, 
               OpRefList& _local_topo, TensorIdSet& _shared_weight_tensor,
-              OpIdSet& _shared_weight_p2p, TensorIdSet& _accumulated_tensor, 
-              OpIdSet& _accumulated_ops) {
+              OpIdSet& _shared_weight_p2p, OpIdSet& _shared_weight_grad_p2p, 
+              TensorIdSet& _accumulated_tensor, OpIdSet& _accumulated_ops) {
     local_fw_topo = _local_fw_topo;
     local_bw_topo = _local_bw_topo;
     local_topo = _local_topo;
     shared_weight_tensor = _shared_weight_tensor;
     shared_weight_p2p = _shared_weight_p2p;
+    shared_weight_grad_p2p = _shared_weight_grad_p2p;
     accumulated_tensor = _accumulated_tensor;
     accumulated_ops = _accumulated_ops;
   }
@@ -117,8 +119,6 @@ class ExecutableGraph : public Graph {
   void ComputeFunc(size_t& micro_batch_id, const OpRefList& topo, RuntimeContext& runtime_ctx, 
                   Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
-                  const TensorIdSet& shared_weight_tensor, const OpIdSet& shared_weight_p2p,
-                  const TensorIdSet& accumulated_tensor, const OpIdSet& accumulated_ops,
                   const FeedDict& feed_dict, const TensorList& fetches,
                   const std::unordered_map<TensorId, size_t>& fetch_indices, 
                   bool& is_continuous_p2p);

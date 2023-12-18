@@ -9,12 +9,15 @@ namespace {
 static std::vector<std::vector<std::shared_ptr<MemoryPool>>> device_mem_pools(
   static_cast<std::underlying_type_t<DeviceType>>(NUM_DEVICE_TYPES),
   std::vector<std::shared_ptr<MemoryPool>>(HT_MAX_DEVICE_INDEX));
+static std::unordered_map<Device, std::function<std::shared_ptr<MemoryPool>()>>
+  device_mem_pool_ctors;
 static std::mutex pool_register_mutex;
 static std::once_flag memory_pool_exit_handler_register_flag;
 static std::once_flag error_suppression_flag;
 } // namespace
 
-void RegisterMemoryPool(std::shared_ptr<MemoryPool> memory_pool) {
+void RegisterMemoryPoolCtor(const Device& device,
+                            std::function<std::shared_ptr<MemoryPool>()> ctor) {
   // register exit handler
   std::call_once(memory_pool_exit_handler_register_flag, []() {
     auto status = std::atexit([]() {
@@ -28,13 +31,12 @@ void RegisterMemoryPool(std::shared_ptr<MemoryPool> memory_pool) {
   });
 
   std::lock_guard<std::mutex> lock(pool_register_mutex);
-  Device device = memory_pool->device();
-  auto device_type_id =
-    static_cast<std::underlying_type_t<DeviceType>>(device.type());
-  HT_ASSERT(device_mem_pools[device_type_id][device.index()] == nullptr)
+  HT_RUNTIME_ERROR_IF(device_mem_pool_ctors.find(device) !=
+                      device_mem_pool_ctors.end())
     << "Memory pool for device " << device << " has been registered";
-  device_mem_pools[device_type_id][device.index()] = memory_pool;
-  HT_LOG_DEBUG << "Registered memory pool for device " << device;
+  device_mem_pool_ctors.reserve(NUM_DEVICE_TYPES * HT_MAX_DEVICE_INDEX);
+  device_mem_pool_ctors.emplace(device, std::move(ctor));
+  HT_LOG_TRACE << "Registered memory pool for device " << device;
 }
 
 std::shared_ptr<MemoryPool> GetMemoryPool(const Device& device) {
@@ -42,10 +44,16 @@ std::shared_ptr<MemoryPool> GetMemoryPool(const Device& device) {
     static_cast<std::underlying_type_t<DeviceType>>(device.type());
   if (device_mem_pools.empty())
     return nullptr;
-  auto& ret = device_mem_pools[device_type_id][device.index()];
-  HT_ASSERT(ret != nullptr)
-    << "Memory pool for device " << device << " does not exist";
-  return ret;
+  
+  if (device_mem_pools[device_type_id][device.index()] == nullptr) {
+    std::lock_guard<std::mutex> lock(pool_register_mutex);
+    auto it = device_mem_pool_ctors.find(device);
+    HT_RUNTIME_ERROR_IF(it == device_mem_pool_ctors.end())
+      << "Memory pool for device " << device << " does not exist";
+    device_mem_pools[device_type_id][device.index()] = (it->second)();
+    HT_LOG_DEBUG << "Constructed memory pool for device " << device;
+  }
+  return device_mem_pools[device_type_id][device.index()];
 }
 
 DataPtr AllocFromMemoryPool(const Device& device, size_t num_bytes,

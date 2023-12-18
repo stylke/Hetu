@@ -277,6 +277,7 @@ void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
     return;
   // for commom case
   auto& input_op = input->producer();
+  // in_degree=0 op should't be blocked
   if (is_placeholder_op(input_op) || is_variable_op(input_op))
     return;
   // p2p ops are all gathered in group start/end, so the start/stop events for p2p ops is invalid, should not be used any more!

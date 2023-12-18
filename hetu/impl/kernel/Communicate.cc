@@ -8,11 +8,11 @@ namespace impl {
 
 using namespace hetu::impl::comm;
 
-void AllReduceCpu(const NDArray& input, NDArray& output,
+void AllReduceCpu(const NDArray& input, NDArray& output, ReductionType red_type,
                   const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->AllReduce(input, output);
+  comm_group->AllReduce(input, output, red_type);
   NDArray::MarkUsedBy({input, output}, stream);
 }
 
@@ -24,11 +24,11 @@ void AllGatherCpu(const NDArray& input, NDArray& output,
   NDArray::MarkUsedBy({input, output}, stream);            
 }
 
-void ReduceScatterCpu(const NDArray& input, NDArray& output,
+void ReduceScatterCpu(const NDArray& input, NDArray& output, ReductionType red_type,
                    const DeviceGroup& device_group, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->ReduceScatter(input, output);
+  comm_group->ReduceScatter(input, output, red_type);
   NDArray::MarkUsedBy({input, output}, stream);
 }
 

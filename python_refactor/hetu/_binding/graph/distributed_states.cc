@@ -63,6 +63,12 @@ PyObject* PyDistributedStates_repr(PyDistributedStates* self) {
   return PyDistributedStates_str(self);
 }
 
+PyObject* PyDistributedStates_device_num(PyDistributedStates* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLong_FromInteger(self->distributed_states.get_device_num()); 
+  HT_PY_FUNC_END
+}
+
 PyObject* PyDistributedStates_states(PyDistributedStates* self) {
   HT_PY_FUNC_BEGIN
   return PyDict_FromUnorderedMap(self->distributed_states.get_states()); 
@@ -147,6 +153,7 @@ PyObject* PyDistributedStates_get_dup_group_index(PyDistributedStates* self, PyO
 
 // NOLINTNEXTLINE
 PyGetSetDef PyDistributedStates_properties[] = {
+  {PY_GET_SET_DEF_NAME("device_num"), (getter) PyDistributedStates_device_num, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("states"), (getter) PyDistributedStates_states, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("order"), (getter) PyDistributedStates_order, nullptr, nullptr, nullptr},
   // {PY_GET_SET_DEF_NAME("placement_group"), (getter) PyDistributedStates_placement_group, nullptr, nullptr, nullptr},

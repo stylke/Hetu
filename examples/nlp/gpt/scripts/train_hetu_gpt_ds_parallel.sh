@@ -1,14 +1,15 @@
 # NCCL_DEBUG=info
-NUM_LAYERS=${1:-2}
+NUM_LAYERS=${1:-24}
 HIDDEN_SIZE=${2:-768}
 NUM_HEADS=${3:-12}
 SEQ_LEN=${4:-128}
 
-export HETU_INTERNAL_LOG_LEVEL=INFO
-mpirun --allow-run-as-root -np 8 python train_hetu_gpt_3d_parallel.py \
+mpirun --allow-run-as-root -np 8 \
+--output-filename logs/ds_parallel --merge-stderr-to-stdout \
+python train_hetu_gpt_ds_parallel.py \
+--ds_parallel_config ds_parallel_config/dp2_tp4.json \
 --global_batch_size 8 \
 --num_micro_batches 2 \
---dp 2 \
 --dataset wikicorpus_en \
 --vocab_size 30522 \
 --hidden_size $HIDDEN_SIZE \

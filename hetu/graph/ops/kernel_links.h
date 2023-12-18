@@ -226,6 +226,8 @@ DECLARE_KERNEL_CPU_AND_CUDA(PadGradient, const NDArray&, NDArray&,
                             const HTShape&, const Stream&, std::string);
 DECLARE_KERNEL_CPU_AND_CUDA(Pow, const NDArray&, double, NDArray&,
                             const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(RangeMask, const NDArray&, int64_t, int64_t,
+                            NDArray&, const Stream&);                            
 DECLARE_KERNEL_CPU_AND_CUDA(Reduce, const NDArray&, NDArray&, const HTAxes&,
                             ReductionType, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ReduceMax, const NDArray&, NDArray&, const int64_t*,
@@ -291,6 +293,12 @@ DECLARE_KERNEL_CPU_AND_CUDA(TriuTril, const NDArray&, NDArray&, bool,
                             int64_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(UpdateScale, NDArray&, NDArray&, const NDArray&, double, 
                             double, int, const Stream&);
+DECLARE_KERNEL_CUDA(VocabParallelCrossEntropy, const NDArray&, const NDArray&, 
+                    const int64_t, const int64_t, const int64_t, NDArray&, 
+                    NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(VocabParallelCrossEntropyGradient, const NDArray&, const NDArray&, 
+                    const int64_t, const int64_t, const int64_t, const NDArray&, 
+                    NDArray&, const Stream&);                    
 DECLARE_KERNEL_CPU_AND_CUDA(Where, const NDArray&, const NDArray&,
                             const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(NormalInits, NDArray&, double, double, uint64_t,
@@ -301,7 +309,7 @@ DECLARE_KERNEL_CPU_AND_CUDA(TruncatedNormalInits, NDArray&, double, double,
                             double, double, uint64_t, const Stream&);
 
 // Communication kernels
-DECLARE_KERNEL_CPU_AND_CUDA(AllReduce, const NDArray&, NDArray&,
+DECLARE_KERNEL_CPU_AND_CUDA(AllReduce, const NDArray&, NDArray&, ReductionType,
                             const DeviceGroup&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(P2PSend, const NDArray&, const Device&,
                             const Stream&);
@@ -312,7 +320,7 @@ DECLARE_KERNEL_CPU_AND_CUDA(BatchedISendIRecv, const NDArrayList&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AllGather, const NDArray&, NDArray&,
                             const DeviceGroup&, const Stream&);
-DECLARE_KERNEL_CPU_AND_CUDA(ReduceScatter, const NDArray&, NDArray&,
+DECLARE_KERNEL_CPU_AND_CUDA(ReduceScatter, const NDArray&, NDArray&, ReductionType,
                             const DeviceGroup&, const Stream&);
 /******************************************************
  * Dispatching kernels for operations

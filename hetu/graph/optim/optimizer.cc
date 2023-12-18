@@ -35,8 +35,8 @@ Tensor Optimizer::MakeStates(const Tensor& variable, const OpName& state_name) {
   HT_VALUE_ERROR_IF(!producer->is_parameter());
   // special case: Varibale States should be set distributed_states
   const DistributedStates& ds_variable = variable->get_distributed_states(); 
-  // HT_ASSERT (ds_variable.is_valid()) 
-  //   << "Diastributed States for varibale " << variable << " must be valid!";  
+  HT_ASSERT (ds_variable.is_valid()) 
+    << "Diastributed States for varibale " << variable << " must be valid!";  
   Tensor states = MakeVariableOp(ZerosInitializer(), variable->shape(),
                                  variable->dtype(), false, ds_variable, 
                                  OpMeta()

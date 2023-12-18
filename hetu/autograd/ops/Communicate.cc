@@ -168,7 +168,7 @@ NDArrayList AllReduceOpDef::DoCompute(const NDArrayList& inputs,
   NDArrayList outputs = std::move(DoAllocOutputs(inputs, ctx));
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::AllReduce, inputs.at(0),
-                                  outputs.at(0), _comm_group, stream()); // _comm_group is a subset of placement_group                              
+                                  outputs.at(0), kSUM, _comm_group, stream()); // _comm_group is a subset of placement_group                              
   return outputs;
 }
 
@@ -322,7 +322,7 @@ NDArrayList ReduceScatterOpDef::DoCompute(const NDArrayList& inputs,
   NDArray output = NDArray::empty(_outputs[0]->shape(), placement(), _outputs[0]->dtype());
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(placement().type(), type(),
                                   hetu::impl::ReduceScatter, inputs.at(0),
-                                  output, _comm_group, stream());
+                                  output, kSUM, _comm_group, stream());
   return {output};                                  
 }
 
