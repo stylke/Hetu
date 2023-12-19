@@ -158,10 +158,49 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     std::tie(exec_inputs, exec_in_deps) =
       Operator::transform_each_input_tensor(op, get_exec_input);
 
+    OpMeta exec_op_meta = OpMeta().set(op->op_meta()).set_extra_deps(std::move(exec_in_deps));
+    // 切换到新的并行方案（比如记录一个op2dg）
+    /*
+    // TODO: Test Case
+    // 手动让op的device group发生一下变化
+    if (!exec_op_meta.is_deduce_states) {
+      if (is_variable_op(op)) {
+        // pp = 2 -> pp = 1
+        // exec_op_meta.set_device_group(hetu::impl::comm::GetGlobalDeviceGroup());
+        ;
+      }
+      if (is_placeholder_op(op)) {
+        ;
+      }
+    }
+    */
+
     auto& exec_op = Graph::MakeOp(
-      op->_body, std::move(exec_inputs),
-      OpMeta().set(op->op_meta()).set_extra_deps(std::move(exec_in_deps)),
+      op->_body, 
+      std::move(exec_inputs),
+      exec_op_meta,
       *exec_graph);
+
+    // 切换到新的并行方案（比如记录一个tensor2ds来切换）
+    /*
+    // TODO: Test Case
+    // 手动让tensor的distributed states发生一下变化
+    if (!exec_op_meta.is_deduce_states) {
+      if (is_variable_op(op)) {
+        auto& variable = exec_op->output(0)
+        // tp = 2 -> tp = 1
+        // variable->set_distributed_states();
+        ;
+      }
+      if (is_placeholder_op(op)) {
+        auto& placeholder = exec_op->output(0)
+        // tp = 2 -> tp = 1
+        // placeholder->set_distributed_states();
+        ;
+      }
+    }
+    */
+
     if (_parameter_ops.find(op->id()) != _parameter_ops.end())
       Graph::MarkAsParameter(exec_op);
 
@@ -372,6 +411,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
 
     // TODO
     // 1、根据topo和shape plan，制定新的并行方案
+    // Test Case: 这里我们在Instantiate中手动让所有tensor的ds发生一下变化
 
     // Instantiate会将新的exec_graph_plan加入pool中
     Instantiate(topo, shape_plan);
@@ -392,8 +432,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     HT_LOG_DEBUG << local_device << ": [Graph Plan] Context switch to the new exec plan begin...";
 
     // TODO
-    // 1、切换到新的并行方案
-    // 2、*WIP: 将原先_active_plan的ckpt重新分配到新方案的设备上，这样才能继续训练
+    // 1、Automatically Done: 切换到新的并行方案（exec graph的并行信息都在tensor的distributed states中）
+    // 2、*WIP: 热切换，即将原先_active_plan的ckpt重新分配到新方案的设备上，这样才能继续训练
 
     // 热切换
     if (_is_active) {

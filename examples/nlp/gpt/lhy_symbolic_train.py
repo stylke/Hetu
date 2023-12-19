@@ -148,6 +148,16 @@ def pretrain(args):
         
         encoded_inputs = []
         seq_lens = []
+        input = ['Hello, I am',
+                "Good morning! Today",
+                "There is a question",
+                "Where can I find",
+                'Hello, I am',
+                "Good morning! Today",
+                "There is a question",
+                "Where can I find"]
+        encoded_inputs.append(tokenizer(input, return_tensors='np'))
+        seq_lens.append(4)
         input = ['Hello, I am a',
                 "Good morning! Today is",
                 "There is a question about",
@@ -160,16 +170,6 @@ def pretrain(args):
                 "Where can I find the best"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
         seq_lens.append(6)
-        input = ['Hello, I am',
-                "Good morning! Today",
-                "There is a question",
-                "Where can I find",
-                'Hello, I am',
-                "Good morning! Today",
-                "There is a question",
-                "Where can I find"]
-        encoded_inputs.append(tokenizer(input, return_tensors='np'))
-        seq_lens.append(4)
         input = ['Hello, I am a',
                 "Good morning! Today is",
                 "There is a question about",

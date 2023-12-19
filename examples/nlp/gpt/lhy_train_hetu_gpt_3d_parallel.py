@@ -111,6 +111,10 @@ def pretrain(args):
         input = ['Hello, I am a',
                 "Good morning! Today is",
                 "There is a question about",
+                "Where can I find the",
+                'Hello, I am a',
+                "Good morning! Today is",
+                "There is a question about",
                 "Where can I find the"]
         encoded_input = tokenizer(input, return_tensors='np')
 

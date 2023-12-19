@@ -6,7 +6,7 @@ SEQ_LEN=${4:-1024}
 
 export HETU_INTERNAL_LOG_LEVEL=INFO
 mpirun --allow-run-as-root -np 8 python lhy_train_hetu_gpt_3d_parallel.py \
---global_batch_size 4 \
+--global_batch_size 8 \
 --num_micro_batches 2 \
 --dp 2 \
 --vocab_size 50257 \

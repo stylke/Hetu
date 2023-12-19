@@ -12,6 +12,57 @@
 
 2. run `bash scripts/inference_hetu_gpt_parallel.sh` to use 2d parallel (dp=2, tp=2, 4 gpus)
 
+# Use hetu 3d-parallel to train gpt with single input shapes and and examine precision
+
+1. use `conda activate hetu-py`
+
+2. copy checkpoint folder (currently located on daim216 at `/home/gehao/lhy/Hetu-dev/examples/nlp/gpt/checkpoint`) to your own folder
+
+3. run `bash scripts/lhy_train_hetu_gpt_3d_parallel.sh` to use 3d parallel (fixed dp=2, tp=2, pp=2, 8 gpus) to train multi-rounds, watching the loss. It should exactly be:
+
+```
+device = device(type=cuda, index=4), loss = 3.320857524871826
+device = device(type=cuda, index=5), loss = 3.320857524871826
+device = device(type=cuda, index=6), loss = 3.320857524871826
+device = device(type=cuda, index=7), loss = 3.320857524871826
+device = device(type=cuda, index=6), loss = 19.603967666625977
+device = device(type=cuda, index=4), loss = 19.603967666625977
+device = device(type=cuda, index=7), loss = 19.603967666625977
+device = device(type=cuda, index=5), loss = 19.603967666625977
+device = device(type=cuda, index=6), loss = 6.619475364685059
+device = device(type=cuda, index=4), loss = 6.619475364685059
+device = device(type=cuda, index=5), loss = 6.619475364685059
+device = device(type=cuda, index=7), loss = 6.619475364685059
+device = device(type=cuda, index=4), loss = 6.207276344299316
+device = device(type=cuda, index=6), loss = 6.207276344299316
+device = device(type=cuda, index=7), loss = 6.207276344299316
+device = device(type=cuda, index=5), loss = 6.207276344299316
+device = device(type=cuda, index=6), loss = 5.9807939529418945
+device = device(type=cuda, index=7), loss = 5.9807939529418945
+device = device(type=cuda, index=4), loss = 5.9807939529418945
+device = device(type=cuda, index=5), loss = 5.9807939529418945
+device = device(type=cuda, index=4), loss = 5.585953235626221
+device = device(type=cuda, index=6), loss = 5.585953235626221
+device = device(type=cuda, index=7), loss = 5.585953235626221
+device = device(type=cuda, index=5), loss = 5.585953235626221
+device = device(type=cuda, index=7), loss = 6.252458572387695
+device = device(type=cuda, index=4), loss = 6.252458572387695
+device = device(type=cuda, index=6), loss = 6.252458572387695
+device = device(type=cuda, index=5), loss = 6.252458572387695
+device = device(type=cuda, index=6), loss = 6.007046222686768
+device = device(type=cuda, index=4), loss = 6.007046222686768
+device = device(type=cuda, index=5), loss = 6.007046222686768
+device = device(type=cuda, index=7), loss = 6.007046222686768
+device = device(type=cuda, index=7), loss = 5.8790364265441895
+device = device(type=cuda, index=6), loss = 5.8790364265441895
+device = device(type=cuda, index=4), loss = 5.8790364265441895
+device = device(type=cuda, index=5), loss = 5.8790364265441895
+device = device(type=cuda, index=4), loss = 5.774656772613525
+device = device(type=cuda, index=5), loss = 5.774656772613525
+device = device(type=cuda, index=6), loss = 5.774656772613525
+device = device(type=cuda, index=7), loss = 5.774656772613525
+```
+
 # Use hetu 3d-parallel to train gpt with different input shapes (currently not support parallel plan switch) and examine precision
 
 1. use `conda activate hetu-py`
@@ -22,6 +73,6 @@
 
 4. run `python lhy_train_pytorch_gpt.py` to use pytorch to train multi-shapes and multi-rounds, watching the loss
 
-5. you could compare the averge loss of hetu with the loss of pytorch at each round (e.g. at round 0, they should exactly be 3.5993 and 3.0424, whose averge is 3.32 and equals to pytorch), note that we can't guarantee they are absolutely equal, especially the case when learing rate or the num of round is larger
+5. you could compare the averge loss of hetu with the loss of pytorch at each round (e.g. at round 0, they should exactly be 3.61, almost equals to pytorch), note that we can't guarantee they are absolutely equal, especially the case when learing rate or the num of round is larger
 
 6. you could compare the model weight by running `python examine_ckpt.py`, you may add more assertion or change the learning rate (`1e-6 to 1e-2`) for double check

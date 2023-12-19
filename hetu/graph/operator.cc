@@ -125,28 +125,45 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
 
 NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                                         RuntimeContext& runtime_ctx) const {
-  auto local_device = hetu::impl::comm::GetLocalDevice(); // only for debug use
   NDArrayList outputs;
   auto output_size = op->num_outputs();
   if (output_size > 0) {
     outputs.reserve(output_size);
-    for (size_t i = 0; i < output_size; i++) {
-      // question: will tensor shape != NDArray shape happen in any situation
-      const auto& output_shape = runtime_ctx.get_runtime_shape(op->output(i)->id());
-      HT_LOG_DEBUG << local_device << ": exec op " << op
-        << " output " << i << " shape = " << output_shape;
-      outputs.push_back(NDArray::empty(output_shape,
-                                       op->instantiation_ctx().placement,
-                                       op->output(i)->dtype(),
-                                       op->instantiation_ctx().stream_index));
-      // for some ops that rely on symbolic shape
-      if (op->output(i)->symbolic()) {
-        HT_LOG_TRACE << local_device << ": exec op " << op 
-          << " output " << i << " has " << op->output(i)->symbolic_shape();
-        if (is_SyShape_leaf(op->output(i)->symbolic_shape())) {
-          op->output(i)->set_symbolic_shape(output_shape);
-          HT_LOG_TRACE << local_device << ": set symbolic shape of exec op " << op 
-            << " output " << i << " to " << output_shape;
+    // eager graph
+    if (runtime_ctx.shape_plan().empty()) {
+      HTShapeList input_shapes;
+      input_shapes.reserve(op->num_inputs());
+      for (auto& input : inputs) {
+        input_shapes.push_back(input->shape());
+      }
+      auto output_shapes = DoInferShape(op, input_shapes, runtime_ctx);
+      for (size_t i = 0; i < output_size; i++) {
+        outputs.push_back(NDArray::empty(output_shapes[i],
+                          op->instantiation_ctx().placement,
+                          op->output(i)->dtype(),
+                          op->instantiation_ctx().stream_index));
+      }
+    }
+    // exec graph & symbolic shape
+    else {
+      for (size_t i = 0; i < output_size; i++) {
+        // question: will tensor shape != NDArray shape happen in any situation
+        const auto& output_shape = runtime_ctx.get_runtime_shape(op->output(i)->id());
+        // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
+        //   << " output " << i << " shape = " << output_shape;
+        outputs.push_back(NDArray::empty(output_shape,
+                          op->instantiation_ctx().placement,
+                          op->output(i)->dtype(),
+                          op->instantiation_ctx().stream_index));
+        // for some ops that rely on symbolic shape
+        if (op->output(i)->symbolic()) {
+          HT_LOG_TRACE << "exec op " << op 
+            << " output " << i << " has " << op->output(i)->symbolic_shape();
+          if (is_SyShape_leaf(op->output(i)->symbolic_shape())) {
+            op->output(i)->set_symbolic_shape(output_shape);
+            HT_LOG_TRACE << "set symbolic shape of exec op " << op 
+              << " output " << i << " to " << output_shape;
+          }
         }
       }
     }

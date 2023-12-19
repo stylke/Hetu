@@ -9,6 +9,17 @@ tokenizer = GPT2Tokenizer.from_pretrained('./checkpoint/HuggingFace')
 model = GPT2LMHeadModel.from_pretrained('./checkpoint/HuggingFace')
 
 encoded_inputs = []
+text = ['Hello, I am',
+        "Good morning! Today",
+        "There is a question",
+        "Where can I find",
+        'Hello, I am',
+        "Good morning! Today",
+        "There is a question",
+        "Where can I find"]
+encoded_input = tokenizer(text, return_tensors='pt')
+encoded_input['labels'] = encoded_input['input_ids']
+encoded_inputs.append(encoded_input)
 text = ['Hello, I am a',
         "Good morning! Today is",
         "There is a question about",
@@ -20,17 +31,6 @@ text = ['Hello, I am a good',
         "Good morning! Today is a",
         "There is a question about whether",
         "Where can I find the best"]
-encoded_input = tokenizer(text, return_tensors='pt')
-encoded_input['labels'] = encoded_input['input_ids']
-encoded_inputs.append(encoded_input)
-text = ['Hello, I am',
-        "Good morning! Today",
-        "There is a question",
-        "Where can I find",
-        'Hello, I am',
-        "Good morning! Today",
-        "There is a question",
-        "Where can I find"]
 encoded_input = tokenizer(text, return_tensors='pt')
 encoded_input['labels'] = encoded_input['input_ids']
 encoded_inputs.append(encoded_input)

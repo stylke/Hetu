@@ -152,7 +152,13 @@ class RuntimeContext {
     _ctxs.clear();
   }
 
+  const Tensor2ShapeMap& shape_plan() const {
+    return _shape_plan;
+  }
+
   const HTShape& get_runtime_shape(const TensorId& tensor_id) const {
+    HT_ASSERT(!_shape_plan.empty())
+      << "The shape plan is empty, ensure that you've used a define graph to instantiate a exec graph";
     auto it = _shape_plan.find(tensor_id);
     HT_ASSERT(it != _shape_plan.end())
       << "Tensor " << tensor_id << " is not existed in runtime shape plan";

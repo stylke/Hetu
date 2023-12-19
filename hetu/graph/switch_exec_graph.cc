@@ -56,7 +56,7 @@ static std::unordered_set<Key> KeysUnion(const std::unordered_set<Key>& set1, co
   return result;
 }
 
-// TODO: 更好的算法（本质是一个二部图上的问题）
+// TODO: 更好的算法
 void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
                                 Device2DTListPairMap& recv_mapping) {
   auto needed_len = _needed_slice_instances.size();
@@ -118,7 +118,7 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
 
 // 遍历ParamBlock中的每个ParamSlice
 // 找到最优的ParamSliceInst的通信策略
-// TODO: 更好的算法（本质是一个二部图上的问题）
+// TODO: 更好的算法
 void ParamBlock::ParamBlockComm(Device2DTListPairMap& send_mapping,
                                 Device2DTListPairMap& recv_mapping) {
   // auto param_slices_size = _param_slices.size();

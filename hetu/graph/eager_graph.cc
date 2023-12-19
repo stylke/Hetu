@@ -37,8 +37,9 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   input_arrays.reserve(op->num_inputs());
   for (auto& input : op->inputs())
     input_arrays.push_back(_preserved_data[input->id()]);
-  // HT_LOG_INFO << op << "\nInputs:" << input_arrays;
+  // HT_LOG_INFO << op << ", inputs are:" << input_arrays;
   auto output_arrays = op->Compute(input_arrays, _runtime_ctxs);
+  // HT_LOG_INFO << op << ", outputs are:" << output_arrays;
   // Note: The usage should be marked inside kernels, 
   // but we still mark here in case we forget to do so in some kernels. 
   NDArray::MarkUsedBy(input_arrays, op->instantiation_ctx().stream());
