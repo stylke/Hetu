@@ -37,6 +37,7 @@ class ExecutableGraph : public Graph {
  protected:
   friend class Graph;
   friend class Tensor;
+  friend class SwitchExecGraph;
 
   ExecutableGraph(GraphName name, size_t init_capacity)
   : Graph(name, init_capacity) {}
@@ -153,28 +154,6 @@ class ExecutableGraph : public Graph {
   void RegisterVariableDataInner(
     const Tensor& tensor, NDArray data,
     const Initializer& init = VoidifiedInitializer()) override;
-
-  void ReplaceInput(Operator& op, size_t input_index, Tensor& new_input) {
-    auto& old_input = op->_inputs[input_index];
-    old_input->DelConsumer(op);
-    op->_inputs[input_index] = new_input;
-    new_input->AddConsumer(op);
-  }
-
-  void AddInDeps(Operator& op, const TensorList& in_deps) {
-    if (in_deps.empty()) {
-      return;
-    }
-    if (in_deps.size() == 1) {
-      op->_extra_in_dep_linkers.push_back(in_deps.front());
-    } else {
-      op->_extra_in_dep_linkers.push_back(
-        MakeGroupOp(OpMeta()
-                      .set_extra_deps(in_deps)
-                      .set_name(op->name() + "_extra_in_dep")));
-    }
-    op->_extra_in_dep_linkers.back()->AddConsumer(op);
-  }
 
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
   std::vector<DeviceGroup> _stages;

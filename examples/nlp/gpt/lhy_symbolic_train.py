@@ -115,7 +115,7 @@ def pretrain(args):
         # config.micro_batch_size_symbol = ht.IntSymbol(2)
         # config.seq_len_symbol = ht.IntSymbol(5)
         # 下面这种bind方法更好
-        config.micro_batch_size_symbol = input_ids.symbolic_shape[0] * dp_size
+        config.micro_batch_size_symbol = input_ids.symbolic_shape[0] * config.dp
         config.seq_len_symbol = input_ids.symbolic_shape[1]
         
         # ---- Hetu model definition ----
@@ -148,43 +148,40 @@ def pretrain(args):
         
         encoded_inputs = []
         seq_lens = []
-        input = ['Hello, I am',
-                "Good morning! Today",
-                "There is a question",
-                "Where can I find"]
+        input = ['Hello, I am a',
+                "Good morning! Today is",
+                "There is a question about",
+                "Where can I find the"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
-        seq_lens.append(4)
+        seq_lens.append(5)
         input = ['Hello, I am a good',
                 "Good morning! Today is a",
                 "There is a question about whether",
                 "Where can I find the best"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
         seq_lens.append(6)
-        input = ['Hello, I am a',
-                "Good morning! Today is",
-                "There is a question about",
-                "Where can I find the",
-                'Hello, I am a',
-                "Good morning! Today is",
-                "There is a question about",
-                "Where can I find the"]
-        encoded_inputs.append(tokenizer(input, return_tensors='np'))
-        seq_lens.append(5)
         input = ['Hello, I am',
+                "Good morning! Today",
+                "There is a question",
+                "Where can I find",
+                'Hello, I am',
                 "Good morning! Today",
                 "There is a question",
                 "Where can I find"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
         seq_lens.append(4)
+        input = ['Hello, I am a',
+                "Good morning! Today is",
+                "There is a question about",
+                "Where can I find the"]
+        encoded_inputs.append(tokenizer(input, return_tensors='np'))
+        seq_lens.append(5)
 
         for round in range(4):
             encoded_input = encoded_inputs[round]
             global_batch_size = len(encoded_input['input_ids'])
             seq_len = seq_lens[round]
             dp_size = global_batch_size // config.dp
-            # 不需要再在这里bind了
-            # config.micro_batch_size_symbol.set_data(dp_size)
-            # config.seq_len_symbol.set_data(seq_len)
             for i in range(config.dp):
                 # device 0, 1 读取第偶数个batch; device 2, 3 读取第奇数个batch
                 if local_device_index < devices_num / 2 and i % 2 != 0:

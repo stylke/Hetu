@@ -7,6 +7,8 @@
 namespace hetu {
 namespace graph {
 
+// 这个算子其实并不需要symbolic方法
+// 其只会在通信时使用
 Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
                    const HTShape& splits, OpMeta op_meta) {
   HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << op_meta.name << "type 1: use symbolic method";
@@ -41,7 +43,7 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
     }
   }
 
-  // 将输出的tensor设置成symbolic的（主要是因为其后可能跟着另一个symbolic算子）
+  // 将输出的tensor设置成symbolic的
   auto output = Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape),
                       {std::move(input)}, std::move(op_meta))->output(0);
   output->set_symbolic_shape(std::move(output_shape)); // not leaf
@@ -49,11 +51,43 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
   return output;
 }
 
+// 这个算子不需要symbolic方法
+// 其只会在通信时使用
+Tensor MakeSplitOp(Tensor input, const HTShape& indices,
+                   const HTShape& splits, OpMeta op_meta) {
+  HT_ASSERT(input->has_shape());
+  // get begin_pos, output_shape
+  auto len = indices.size();
+  for (int i = 0; i < len; ++i) {
+    HT_ASSERT(splits[i] >= 0);
+    HT_ASSERT(indices[i] >= 0 && indices[i] < splits[i]);
+  }
 
-// 实现与原版不同？这里只能做到在单一的dim上的切分
+  auto& ori_shape = input->shape(); 
+  HT_ASSERT(len == ori_shape.size()) << "size should be equal";
+  HTShape begin_pos(len, 0);
+  HTShape output_shape(len, 0);
+
+  for (int i = 0; i < len; ++i) {
+    auto part_size = ori_shape[i] / splits[i];
+    begin_pos[i] = part_size * indices[i];
+    if (indices[i] != splits[i] - 1) {
+      output_shape[i] = part_size;
+    } else {
+      output_shape[i] = ori_shape[i] - begin_pos[i];
+    }
+  }
+
+  auto output = Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), std::move(output_shape)),
+                      {std::move(input)}, std::move(op_meta))->output(0);
+  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 2: finish making";
+  return output;
+}
+
+// 这里只能做到在单一的dim上的切分
 TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
                        OpMeta op_meta) {
-  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 2: " 
+  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 3: " 
     << "input_shape = " << input->shape() << " and num_chunks = " << num_chunks;
   HT_ASSERT(input->has_shape());
   dim = NDArrayMeta::ParseAxis(dim, input->ndim());
@@ -62,7 +96,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
   const SyShape& ori_shape = input->symbolic_shape(); 
 
   auto chunk_size = ori_shape[dim] / num_chunks;
-  auto chunk_sum = Symbol<int64_t>(0);
+  auto chunk_sum = IntSymbol(0);
   TensorList outputs = {};
 
   for (int i = 0; i < num_chunks; ++i) {
@@ -77,7 +111,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
                          {input}, op_meta)->output(0));
     outputs[i]->set_symbolic_shape(std::move(output_shape));
   }
-  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 2: finish making";
+  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 3: finish making";
   return outputs;
 }
 

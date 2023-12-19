@@ -62,6 +62,11 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
                                                  const Initializer& init,
                                                  uint64_t seed,
                                                  const HTShape& global_shape) {
+  if (_preserved_data.find(tensor->id()) != _preserved_data.end()) {
+    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": variable " << tensor 
+      << " already has the data, so we directly return it";
+    return _preserved_data[tensor->id()];
+  }
   // TODO: check meta is valid & maybe we can use non-blocking stream?
   _preserved_data[tensor->id()] = NDArray::empty(
     tensor->shape(), tensor->placement(), tensor->dtype(), kBlockingStream);
@@ -107,7 +112,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
       auto& input_op = op->input(0)->producer();
       // TODO: special case: input_op include pp but op don't 
       if (is_comm_op(input_op)) {
-        ReplaceInput(op, 0, input_op->input(0));
+        Graph::ReplaceInput(op, 0, input_op->input(0));
         // input changes, update comm_op type
         reinterpret_cast<CommOpImpl&>(op->body()).get_comm_type(op);
       }
@@ -177,7 +182,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             if (consumer_i->id() == grad_scale_op->id()) continue;
             for (int j = 0; j < consumer_i->num_inputs(); j++) {
               if (consumer_i->input(j)->id() == grad->id()) {
-                ReplaceInput(consumer_i, j, grad_scale);
+                Graph::ReplaceInput(consumer_i, j, grad_scale);
               }
             }
           }
@@ -214,7 +219,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
                 const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
                 if (consumer_op_impl.get_dst_distributed_states().check_equal(
                   input_op_impl.get_dst_distributed_states()) && dst_group_comm == dst_group) {
-                  ReplaceInput(op, i, consumer_op.get()->output(0));
+                  Graph::ReplaceInput(op, i, consumer_op.get()->output(0));
                   reused = true;
                   break;
                 }
@@ -248,7 +253,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
               const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
               if (consumer_op_impl.get_dst_distributed_states().check_equal(
                   input->get_distributed_states()) && dst_group_comm == dst_group) {
-                ReplaceInput(op, i, consumer_op.get()->output(0));
+                Graph::ReplaceInput(op, i, consumer_op.get()->output(0));
                 reused = true;
                 break;
               }
@@ -265,7 +270,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         auto& p2p_op = p2p_input->producer();
         // will be splited into intra_comm + p2p_send(src_group) and p2p_recv(dst_group)
         p2p_op->MapToParallelDevices(input_op->placement_group());
-        ReplaceInput(op, i, p2p_input);
+        Graph::ReplaceInput(op, i, p2p_input);
         /*
         HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": add p2p between " 
           << input_op << " " << src_group << " and " << op << " " << dst_group;
@@ -330,7 +335,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         if (!input_op->placement_group().empty())
           transfer_op->MapToParallelDevices(input_op->placement_group());
         transfer_op->Instantiate(placement, transfer_stream_id);
-        ReplaceInput(op, i, transferred_input);
+        Graph::ReplaceInput(op, i, transferred_input);
       }
     }
   }
@@ -493,11 +498,13 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           // when needn't recv, MakeBatchedISendIRecvOp return out_dep_linker
           Tensor batched_isend_irecv_output = MakeBatchedISendIRecvOp(send_datas_local, dst_devices, recv_shapes_local, src_devices, comm_devices, dtype, 
             OpMeta().set_is_deduce_states(false).set_name("BatchedISendIRecvOp_for_" + comm_op->name()));
-          RecordTensorShape(batched_isend_irecv_output->id(), batched_isend_irecv_output->shape());
           auto& batched_isend_irecv_op = batched_isend_irecv_output->producer();
           batched_isend_irecv_op->MapToParallelDevices(src_group);
           batched_isend_irecv_op->Instantiate(local_device, kP2PStream);
           TensorList recv_datas_local = batched_isend_irecv_op->outputs();
+          for (const auto& recv_data_local : recv_datas_local) {
+            RecordTensorShape(recv_data_local->id(), recv_data_local->shape());
+          }
 
           HT_LOG_DEBUG << local_device << ": cross receive begin!";
           int32_t device_index = 0;
@@ -508,10 +515,10 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
 
           // add dummy link for topo sort
           if (dst_devices.size() == 0) { // connect comm_op->input producer with batchISendIRecvOp when needn't send
-            AddInDeps(batched_isend_irecv_op, {input});
+            Graph::AddInDeps(batched_isend_irecv_op, {input});
           }
           if (src_devices.size() == 0) { // connect batchISendIRecvOp with comm_op->ouput consumers when needn't recv
-            AddInDeps(result->producer(), {batched_isend_irecv_op->out_dep_linker()});
+            Graph::AddInDeps(result->producer(), {batched_isend_irecv_op->out_dep_linker()});
           }          
         }
         // add p2p send after tp
@@ -527,7 +534,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           send_op->Instantiate(local_device, kP2PStream);
           // add dummy link for topo sort
           for (int i = 0; i < comm_op->output(0)->num_consumers(); i++) {
-            AddInDeps(comm_op->output(0)->consumer(i), {send_out_dep_linker});
+            Graph::AddInDeps(comm_op->output(0)->consumer(i), {send_out_dep_linker});
           }
         }
       } else {
@@ -541,7 +548,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         recv_op->MapToParallelDevices(dst_group);
         recv_op->Instantiate(local_device, kP2PStream);
         // add dummy link for topo sort
-        AddInDeps(recv_op, {input});
+        Graph::AddInDeps(recv_op, {input});
         result = recv_output;
       }
       result->set_distributed_states(comm_op_impl.get_dst_distributed_states()); // assign distributed states for result tensor
@@ -551,7 +558,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         auto& consumer_i = comm_op->output(0)->consumer(i);
         for (int j = 0; j < consumer_i->num_inputs(); j++) {
           if (consumer_i->input(j)->id() == comm_op->output(0)->id()) {
-            ReplaceInput(consumer_i, j, result);
+            Graph::ReplaceInput(consumer_i, j, result);
           }
         }
       }

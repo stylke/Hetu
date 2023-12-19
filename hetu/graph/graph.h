@@ -5,6 +5,7 @@
 #include "hetu/graph/common.h"
 #include "hetu/graph/tensor.h"
 #include "hetu/graph/operator.h"
+#include "hetu/graph/ops/group.h"
 #include "hetu/graph/init/initializer.h"
 #include <mutex>
 #include <stack>
@@ -29,6 +30,8 @@ class Graph {
  protected:
   friend class OpDef;
   friend class TensorDef;
+  friend class SwitchExecGraph;
+  
   struct constrcutor_access_key {};
 
   Graph(GraphName name, size_t init_capacity)
@@ -70,6 +73,28 @@ class Graph {
     for (auto op_id : _sink_ops)
       sink_ops.push_back(std::ref(_op_indexing[op_id]));
     return Graph::TopoSort(sink_ops, num_ops());
+  }
+
+  TensorCRefList params() const {
+    TensorCRefList params;
+    for (auto& op_id : _parameter_ops) {
+      auto it = _op_indexing.find(op_id);
+      HT_ASSERT(it != _op_indexing.end());
+      Operator::for_each_output_tensor(it->second, 
+        [&](const Tensor& tensor) { params.emplace_back(tensor); });
+    }
+    return params;
+  }
+
+  std::unordered_set<TensorId> param_ids() const {
+    std::unordered_set<TensorId> param_ids;
+    for (auto& op_id : _parameter_ops) {
+      auto it = _op_indexing.find(op_id);
+      HT_ASSERT(it != _op_indexing.end());
+      Operator::for_each_output_tensor(it->second, 
+        [&](const Tensor& tensor) { param_ids.insert(tensor->id()); });
+    }
+    return param_ids;
   }
 
   virtual GraphType type() const = 0;
@@ -417,7 +442,7 @@ class Graph {
     return Graph::GetGraph(tensor).GetDetachedVariableDataInner(tensor);
   }
 
-    static DeviceGroup GetVariableDeviceGroup(const Tensor& tensor) {
+  static DeviceGroup GetVariableDeviceGroup(const Tensor& tensor) {
     HT_VALUE_ERROR_IF(!tensor->is_variable())
       << "'GetDetachedVariableData' does not support non-variable tensor: " << tensor;
     return Graph::GetGraph(tensor).GetVariableDeviceGroupInner(tensor);
@@ -440,6 +465,30 @@ class Graph {
       << tensor;
     return Graph::GetGraph(tensor).RegisterVariableDataInner(tensor, data,
                                                              init);
+  }
+
+  static void 
+  ReplaceInput(Operator& op, size_t input_index, Tensor& new_input) {
+    auto& old_input = op->_inputs[input_index];
+    old_input->DelConsumer(op);
+    op->_inputs[input_index] = new_input;
+    new_input->AddConsumer(op);
+  }
+
+  static void 
+  AddInDeps(Operator& op, const TensorList& in_deps) {
+    if (in_deps.empty()) {
+      return;
+    }
+    if (in_deps.size() == 1) {
+      op->_extra_in_dep_linkers.push_back(in_deps.front());
+    } else {
+      op->_extra_in_dep_linkers.push_back(
+        MakeGroupOp(OpMeta()
+                      .set_extra_deps(in_deps)
+                      .set_name(op->name() + "_extra_in_dep")));
+    }
+    op->_extra_in_dep_linkers.back()->AddConsumer(op);
   }
 
   template <class T, class... Args>

@@ -12,7 +12,7 @@ class ExecGraphPlan {
     std::shared_ptr<ExecutableGraph> exec_graph;
     Op2OpMap op_to_exec_op_mapping;
     Tensor2TensorMap tensor_to_exec_tensor_mapping;
-    TensorList fetches; // 目前暂未考虑
+    TensorList fetches;
 
     ExecGraphPlan(const std::shared_ptr<ExecutableGraph>& _exec_graph, const Op2OpMap& _op_to_exec_op_mapping, 
                   const Tensor2TensorMap& _tensor_to_exec_tensor_mapping)
@@ -31,6 +31,7 @@ class DefineAndRunGraph : public Graph {
  protected:
   friend class Graph;
   friend class Tensor;
+  friend class SwitchExecGraph;
 
   DefineAndRunGraph(GraphName name, size_t init_capacity)
   : Graph(name, init_capacity),
@@ -52,11 +53,17 @@ class DefineAndRunGraph : public Graph {
     return GraphType::DEFINE_AND_RUN;
   }
 
+  const ExecGraphPlan& GetPlan(size_t num) const {
+    HT_ASSERT(num < _exec_graph_plan_pool.size());
+    return _exec_graph_plan_pool[num];
+  }
+
  protected:
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);
 
-  void Instantiate(const Tensor2ShapeMap& shape_plan);
+  void Instantiate(const OpRefList& topo,
+                   const Tensor2ShapeMap& shape_plan);
 
   void ResetVariableDataInner(const Tensor& tensor,
                               const Initializer& init) override;
@@ -83,7 +90,7 @@ class DefineAndRunGraph : public Graph {
     Graph::Clear();
   }
   
-  void SetPlan(int num) {
+  void SetPlan(size_t num) {
     _active_plan = num;
     _is_active = true;
   }

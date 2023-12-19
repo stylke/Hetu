@@ -7,20 +7,46 @@ import ptvsd
 # ptvsd.wait_for_attach()
 tokenizer = GPT2Tokenizer.from_pretrained('./checkpoint/HuggingFace')
 model = GPT2LMHeadModel.from_pretrained('./checkpoint/HuggingFace')
-text = ['Hello, I am',
-        "Good morning! Today",
-        "There is a question",
-        "Where can I find"]
+
+encoded_inputs = []
 text = ['Hello, I am a',
         "Good morning! Today is",
         "There is a question about",
         "Where can I find the"]
 encoded_input = tokenizer(text, return_tensors='pt')
 encoded_input['labels'] = encoded_input['input_ids']
+encoded_inputs.append(encoded_input)
+text = ['Hello, I am a good',
+        "Good morning! Today is a",
+        "There is a question about whether",
+        "Where can I find the best"]
+encoded_input = tokenizer(text, return_tensors='pt')
+encoded_input['labels'] = encoded_input['input_ids']
+encoded_inputs.append(encoded_input)
+text = ['Hello, I am',
+        "Good morning! Today",
+        "There is a question",
+        "Where can I find",
+        'Hello, I am',
+        "Good morning! Today",
+        "There is a question",
+        "Where can I find"]
+encoded_input = tokenizer(text, return_tensors='pt')
+encoded_input['labels'] = encoded_input['input_ids']
+encoded_inputs.append(encoded_input)
+text = ['Hello, I am a',
+        "Good morning! Today is",
+        "There is a question about",
+        "Where can I find the"]
+encoded_input = tokenizer(text, return_tensors='pt')
+encoded_input['labels'] = encoded_input['input_ids']
+encoded_inputs.append(encoded_input)
+
+model.train()
 opt = SGD(model.parameters(), lr=0.01)
 
-for _ in range(10):
-        output = model(**encoded_input)
+for i in range(len(encoded_inputs)):
+        output = model(**encoded_inputs[i])
         loss = output.loss
         print('loss:', loss, loss.dtype)
         '''

@@ -71,6 +71,7 @@ class EagerGraph;
 class DefineByRunGraph;
 class DefineAndRunGraph;
 class ExecutableGraph;
+class SwitchExecGraph;
 
 #define HT_MAX_NUM_MICRO_BATCHES (128)
 } // namespace graph
