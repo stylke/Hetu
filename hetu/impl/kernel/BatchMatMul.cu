@@ -37,27 +37,26 @@ void BatchMatMulCuda(const NDArray& a, bool trans_a, const NDArray& b,
   HT_ASSERT_SAME_DEVICE(a, output);
   HT_ASSERT_SAME_DTYPE(a, b);
   HT_ASSERT_SAME_DTYPE(a, output);
+  HT_ASSERT_NDIM(a, 3);
+  HT_ASSERT_NDIM(b, 3);
+  HT_ASSERT_NDIM(output, 3);
 
   cublasHandle_t cublas_handle = GetCublasHandle(output->device().index());
   hetu::cuda::CUDADeviceGuard guard(output->device().index());
-  size_t ndim = a->ndim();
-  HTAxes trans_axes = HTAxes(ndim);
+  HTAxes trans_axes = HTAxes(a->ndim());
   std::iota(trans_axes.begin(), trans_axes.end(), 0);
   std::iter_swap(trans_axes.end() - 2, trans_axes.end() - 1);
   NDArray a_trans = trans_a ? NDArray::permute(a, trans_axes, stream.stream_index())
                             : a;
   NDArray b_trans = trans_b ? NDArray::permute(b, trans_axes, stream.stream_index())
                             : b;
-  int64_t m = output->shape(ndim - 1);
-  int64_t n = output->shape(ndim - 2);
-  int64_t k = b_trans->shape(ndim - 2);
-  int64_t batchCount = 1;
-  for (int i = 0; i < ndim - 2; ++i) {
-    HT_ASSERT(a_trans->shape(i) == b_trans->shape(i));
-    HT_ASSERT(a_trans->shape(i) == output->shape(i));
-    batchCount *= a_trans->shape(i);
-  }
-  int64_t lda, ldb, ldc = output->stride(ndim - 2);
+  int64_t m = output->shape(2);
+  int64_t n = output->shape(1);
+  int64_t k = b_trans->shape(1);
+  HT_ASSERT(a_trans->shape(0) == b_trans->shape(0));
+  HT_ASSERT(a_trans->shape(0) == output->shape(0));
+  int64_t batchCount = a_trans->shape(0);
+  int64_t lda, ldb, ldc = output->stride(1);
   bool trans_a_, trans_b_;
   NDArray a_ = prepare_for_cublas(b_trans, trans_a_, lda, m, k, stream);
   NDArray b_ = prepare_for_cublas(a_trans, trans_b_, ldb, k, n, stream);
@@ -69,16 +68,16 @@ void BatchMatMulCuda(const NDArray& a, bool trans_a, const NDArray& b,
       cublas_batch_gemm<spec_t>(
         cublas_handle, trans_a_ ? CUBLAS_OP_T : CUBLAS_OP_N,
         trans_b_ ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, static_cast<const void*>(&alpha_f),
-        a_->data_ptr<spec_t>(), lda, a_->stride(ndim - 3), b_->data_ptr<spec_t>(),
-        ldb, b_->stride(ndim - 3), static_cast<const void*>(&beta_f), output->data_ptr<spec_t>(), ldc, output->stride(ndim - 3),
+        a_->data_ptr<spec_t>(), lda, a_->stride(0), b_->data_ptr<spec_t>(),
+        ldb, b_->stride(0), static_cast<const void*>(&beta_f), output->data_ptr<spec_t>(), ldc, output->stride(0),
         batchCount);
     }
     else {
       cublas_batch_gemm<spec_t>(
         cublas_handle, trans_a_ ? CUBLAS_OP_T : CUBLAS_OP_N,
         trans_b_ ? CUBLAS_OP_T : CUBLAS_OP_N, m, n, k, &alpha,
-        a_->data_ptr<spec_t>(), lda, a_->stride(ndim - 3), b_->data_ptr<spec_t>(),
-        ldb, b_->stride(ndim - 3), &beta, output->data_ptr<spec_t>(), ldc, output->stride(ndim - 3),
+        a_->data_ptr<spec_t>(), lda, a_->stride(0), b_->data_ptr<spec_t>(),
+        ldb, b_->stride(0), &beta, output->data_ptr<spec_t>(), ldc, output->stride(0),
         batchCount);
     }
   });

@@ -625,18 +625,23 @@ NDArray NDArray::bmm(const NDArray& x, const NDArray& y,
     << " (shape_left) " << a << " (shape_right) " << b << " (transpose_left) "
     << trans_left << " (transpose_right) " << trans_right;
   HTShape shape = {};
+  int64_t batch_size = 1;
   for (int i = 0; i < ndims; ++i) {
     HT_ASSERT(a[i] == b[i]);
-    shape.emplace_back(a[i]);
+    batch_size *= a[i];
   }
+  output = NDArray::contiguous(output, stream_id);
+  shape.emplace_back(batch_size);
   shape.emplace_back(a.at(trans_left ? ndims + 1 : ndims));
   shape.emplace_back(b.at(trans_right ? ndims : ndims + 1));
+  auto x_ = NDArray::reshape(x, {batch_size, a.at(ndims), a.at(ndims + 1)}, stream_id);
+  auto y_ = NDArray::reshape(y, {batch_size, b.at(ndims), b.at(ndims + 1)}, stream_id);
   NDArray out = output.is_defined()
-    ? output
+    ? NDArray::reshape(output, shape, stream_id)
     : NDArray::empty(shape, x->device(), x->dtype(), stream_id);
   Stream stream(x->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(x->device().type(), __FUNCTION__,
-                                  hetu::impl::BatchMatMul, x, trans_left, y,
+                                  hetu::impl::BatchMatMul, x_, trans_left, y_,
                                   trans_right, out, stream);
   return out;
 }
