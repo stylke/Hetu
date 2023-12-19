@@ -162,29 +162,36 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       return filtered.front();
     } else {
       // Question: How to set op_meta properly?
-      // if grad in filtered are all allreduce
+      // if grad in filtered are all allreduce/reduce-scatter
       bool is_all_allreduce = true;
+      bool is_all_reduce_scatter = true;
       for (const auto& grad : filtered) {
         if (is_comm_op(grad->producer())) {
           auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(grad->producer()->body());
           uint64_t comm_type = comm_op_impl.get_comm_type(grad->producer());
           if (comm_type != ALL_REDUCE_OP) {
             is_all_allreduce = false;
+          }
+          if (comm_type != REDUCE_SCATTER_OP) {
+            is_all_reduce_scatter = false;
+          }
+          if (!is_all_allreduce && !is_all_reduce_scatter) {
             break;
           }
         } else {
           is_all_allreduce = false;
+          is_all_reduce_scatter = false;
           break;
         }
       }
       Tensor grad_sum;
-      if (is_all_allreduce) {
+      if (is_all_allreduce || is_all_reduce_scatter) {
         TensorList partial_grad_list;
         for (const auto& grad : filtered) {
           Tensor partial_grad = grad->producer()->input(0);
           partial_grad_list.push_back(partial_grad);
         }
-        // if allreduce group is different between input grads,
+        // if allreduce/reduce-scatter group is different between input grads,
         // then assert error in state deduce process.
         Tensor partial_grad_sum = MakeSumOp(partial_grad_list, OpMeta().set_name("sum_op_for_partial_grad"));
         partial_grad_sum->set_is_grad(true);
@@ -231,7 +238,15 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
           // HT_LOG_DEBUG << local_device << ": " << "grad_op: " << grad_op << ": states: " << ds_grad.ds_info() << ", shape: " << grad_inputs[i]->shape();
           if (ds_grad.get_dim(-2) > 1) { // partial->duplicate
             int32_t device_num = ds_grad.get_device_num();
-            std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
+            // std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
+            std::pair<std::vector<int32_t>, int32_t> src2dst;
+            if (is_variable_op(op->input(i)->producer()) && op->input(i)->get_distributed_states().zero()) {
+              // attention: the result tensor was dp grouped split0, not really split0!
+              // so should do allgather still within the same dp group later! 
+              src2dst = {{-2}, 0}; // reduce-scatter
+            } else {
+              src2dst = {{-2}, -1}; // allreduce
+            }
             std::unordered_map<int32_t, int32_t> res_states = ds_grad.combine_states(src2dst);
             std::vector<int32_t> res_order = ds_grad.combine_order(src2dst);
             DistributedStates ds_dst({device_num, res_states, res_order});
@@ -242,6 +257,13 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
               OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
             final_grad->set_is_grad(true);
             final_grad->producer()->set_fw_op_id(op->id());
+            // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": grad for tensor " << op->input(i) 
+            //             << ", tensor shape = " << op->input(i)->shape() 
+            //             << ", grad shape = " << final_grad->shape() 
+            //             << ", grad src = " << grad_inputs[i]
+            //             << ", grad src ds = " << grad_inputs[i]->get_distributed_states().ds_info()
+            //             << ", grad dst ds = " << final_grad->get_distributed_states().ds_info()
+            //             << ", comm type = " << reinterpret_cast<CommOpImpl&>(final_grad->producer()->body()).get_comm_type(final_grad->producer());
           }
         } 
 

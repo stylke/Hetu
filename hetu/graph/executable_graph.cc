@@ -861,6 +861,10 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
       continue;
     }
+    // adam mean, variance, step variable op only execute in last micro batch
+    if (!grad_accumulation_finished && is_variable_op(op) && is_adam_op(op->output(0)->consumer(0))) {
+      continue;
+    }
 
     HT_LOG_TRACE << "Running op " << op << " (type: " << op->type() << ")...";
 
@@ -888,6 +892,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     }
     // }
 
+    // TODO: variable can be directly fetched, needn't save in tensor2data
     NDArrayList input_vals;
     input_vals.reserve(op->num_inputs());
     for (const auto& input : op->inputs()) {
@@ -1043,7 +1048,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         if (is_sum_op(op_ref.get()->output(0)->consumer(0))) {
           auto& sum_op = op_ref.get()->output(0)->consumer(0);
           for (auto& consumer_op : sum_op->output(0)->consumers()) {
-            if (is_all_reduce_op(consumer_op)) {
+            if (is_grad_reduce_op(consumer_op)) {
               if (is_optimizer_update_op(consumer_op.get()->output(0)->consumer(0))) {
                 // HT_LOG_INFO << local_device << ": shared weight p2p bw recv: " << op_ref;
                 return true;
@@ -1070,6 +1075,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // 2 send pre-half of wte to 6, 3 send last-half of wte to 7; notice that 0 and 2 are send the same, 1 and 3 are send the same
       // so 0 can send half of pre-half to 4, 2 can send another half of pre-half to 6, then 4 and 6 do gather(at this time, 4 and 6
       // are waiting for pp bubbles, the time will be reused)
+      // todo2: in pipeline last micro batch, stage id > 0 can move grad_reduce & update & group after pipeline p2p and use bubble
+      // to do later update, but stage id = 0 can do aync grad_reduce immediately after weight grad was computed, which can be 
+      // overlapped with backward compute(no overhead for pure dp, but may make tp backward allreduce slower)
       for (auto& op_ref : _topo) {
         if (op_ref.get()->placement() == local_device) {
           // share weight p2p send op will not block anything! so treat it as commom compute op
@@ -1086,7 +1094,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           } else {
             if (is_placeholder_op(op_ref) || is_variable_op(op_ref)) {
               placehoder_variable_op_list.push_back(op_ref);
-            } else if (is_all_reduce_op(op_ref) && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0))) {
+            } else if (is_grad_reduce_op(op_ref) && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0))) {
               update_op_list.push_back(op_ref);
             } else if (is_optimizer_update_op(op_ref)) {
               update_op_list.push_back(op_ref);
@@ -1103,7 +1111,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       _local_topo.insert(_local_topo.end(), recv_op_list.begin(), recv_op_list.end());
       _local_topo.insert(_local_topo.end(), compute_op_list.begin(), compute_op_list.end());
       _local_topo.insert(_local_topo.end(), send_op_list.begin(), send_op_list.end());
-      // move move allreduce & udpate & group op after pipeline p2p, to make p2p & allreduce overlap
+      // move move allreduce/reduce-scatter & udpate & group op after pipeline p2p, to make p2p & allreduce/reduce-scatter overlap
       _local_topo.insert(_local_topo.end(), update_op_list.begin(), update_op_list.end());
     };
     get_local_topo(fw_topo, local_fw_topo);
@@ -1112,8 +1120,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     local_topo.reserve(local_fw_topo.size() + local_bw_topo.size());
     local_topo.insert(local_topo.end(), local_fw_topo.begin(), local_fw_topo.end());
     local_topo.insert(local_topo.end(), local_bw_topo.begin(), local_bw_topo.end());
-    // HT_LOG_DEBUG << local_device << ": local fw topo: " << local_fw_topo; 
-    // HT_LOG_DEBUG << local_device << ": local bw topo: " << local_bw_topo;
+    HT_LOG_DEBUG << local_device << ": local fw topo: " << local_fw_topo; 
+    HT_LOG_DEBUG << local_device << ": local bw topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo end...";
 
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get shared weights begin...";
@@ -1146,18 +1154,19 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       auto& op = op_ref.get();
       // update op placement group = variable op placement group
       // care about the placement group binding rules based on fw_op_id in autograd code (graph.cc)
+      // grad_reduce = allreduce or reduce-scatter
       // 1. compute_op -> update_op (local_group)
-      // 2. compute_op -> allreduce -> update_op (local_group)
-      // 3. compute_op -> sum_op -> allreduce -> update_op (local_group)
+      // 2. compute_op -> grad_reduce -> update_op (local_group)
+      // 3. compute_op -> sum_op -> grad_reduce -> update_op (local_group)
       // 4. compute_op -> p2p_send (group1)  p2p_recv -> update_op (group2)
-      // 5. compute_op -> allreduce -> p2p_send (group1)  p2p_recv -> update_op (group2)
-      // 6. compute_op -> p2p_send (group1)  p2p_recv -> sum_op -> allreduce -> update_op (group2)
+      // 5. compute_op -> grad_reduce -> p2p_send (group1)  p2p_recv -> update_op (group2)
+      // 6. compute_op -> p2p_send (group1)  p2p_recv -> sum_op -> grad_reduce -> update_op (group2)
 
       // local group or group2 cases (1,2,3,4,5,6)
       if (is_optimizer_update_op(op)) {
         Tensor& grad = op->input(1);
         Operator& grad_op = grad->producer();
-        if (is_all_reduce_op(grad_op)) {
+        if (is_grad_reduce_op(grad_op)) {
           // case 6
           bool is_weight_share_case = false;
           if (is_sum_op(grad_op->input(0)->producer())) {
@@ -1191,7 +1200,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           if (is_optimizer_update_op(consumer_op)) {
             Tensor& grad = op->input(0);
             Operator& grad_op = grad->producer();
-            if (is_all_reduce_op(grad_op)) {
+            if (is_grad_reduce_op(grad_op)) {
               accumulated_tensor.insert(grad_op->input(0)->id());
               accumulated_ops_deque.push_back(std::ref(grad_op));
             } else {
@@ -1204,7 +1213,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             Operator& sum_op = consumer_op.get();
             if (is_comm_op(sum_op->output(0)->consumer(0))) {
               Operator& comm_op = sum_op->output(0)->consumer(0);
-              if (reinterpret_cast<CommOpImpl&>(comm_op->body()).get_comm_type(comm_op) == ALL_REDUCE_OP 
+              auto comm_type = reinterpret_cast<CommOpImpl&>(comm_op->body()).get_comm_type(comm_op);
+              if ((comm_type == ALL_REDUCE_OP || comm_type == REDUCE_SCATTER_OP) 
                   && is_optimizer_update_op(comm_op->output(0)->consumer(0))) {
                 accumulated_tensor.insert(op->input(0)->id());
                 accumulated_ops_deque.push_back(op_ref);

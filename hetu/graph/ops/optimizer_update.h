@@ -121,6 +121,79 @@ class MomentumUpdateOpImpl : public OptimizerUpdateOpInterface {
   bool _nesterov;
 };
 
+class AdamOpImpl : public OptimizerUpdateOpInterface {
+ public:
+  AdamOpImpl(float learning_rate, bool zero = false,
+             float beta1 = 0.9, float beta2 = 0.999, 
+             float eps = 1e-8, float weight_decay = 0)
+  : OptimizerUpdateOpInterface(quote(AdamOp), learning_rate),
+    _zero(zero),
+    _beta1(beta1),
+    _beta2(beta2),
+    _eps(eps),
+    _weight_decay(weight_decay) {
+    HT_VALUE_ERROR_IF(beta1 < 0 || beta1 > 1)
+      << "Invalid beta1: " << beta1;
+    HT_VALUE_ERROR_IF(beta2 < 0 || beta1 > 2)
+      << "Invalid beta2: " << beta2;
+  }
+
+  uint64_t op_indicator() const noexcept override {
+    return OPTIMIZER_UPDATE_OP | ADAM_OP;
+  }  
+
+ protected:
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& runtime_ctx) const override;
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
+ public:
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const AdamOpImpl&>(rhs);
+      return beta1() == rhs_.beta1() && 
+             beta2() == rhs_.beta2() && 
+             eps() == rhs_.eps() && 
+             weight_decay() == rhs_.weight_decay();
+    }
+    return false;
+  }
+
+  bool zero() const {
+    return _zero;
+  }
+
+  float beta1() const {
+    return _beta1;
+  }
+
+  float beta2() const {
+    return _beta2;
+  }
+
+  float eps() const {
+    return _eps;
+  }
+
+  float weight_decay() const {
+    return _weight_decay;
+  }
+
+  const NDArray& adam_step() const {
+    return _adam_step;
+  }
+
+ protected:
+  bool _zero;
+  float _beta1;
+  float _beta2;
+  float _eps;
+  float _weight_decay;
+  NDArray _adam_step;
+};
+
 Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, float learning_rate,
                        OpMeta op_meta = OpMeta());
 
@@ -130,6 +203,13 @@ Tensor MakeSGDUpdateWithGradScalerOp(Tensor param, Tensor grad, Tensor infinite_
 Tensor MakeMomentumUpdateOp(Tensor param, Tensor grad, Tensor velocity,
                             float learning_rate, float momentum, bool nesterov,
                             OpMeta op_meta = OpMeta());
+
+Tensor MakeAdamOp(Tensor param, Tensor grad, 
+                  Tensor mean, Tensor variance,
+                  float learning_rate, Tensor step, float beta1 = 0.9,
+                  float beta2 = 0.999, float eps = 1e-8,
+                  float weight_decay = 0,
+                  OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -24,7 +24,7 @@ PyObject* PyDistributedStates_pynew(PyTypeObject* type, PyObject* args,
   HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyDistributedStates";  
   auto* self = reinterpret_cast<PyDistributedStates*>(unsafe_self);
   static PyArgParser parser({
-    "DistributedStates(int device_num, std::unordered_map<int,int> states, std::vector<int64_t> order=None)",
+    "DistributedStates(int device_num, std::unordered_map<int,int> states, std::vector<int64_t> order=None, bool zero=False)",
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
@@ -37,7 +37,8 @@ PyObject* PyDistributedStates_pynew(PyTypeObject* type, PyObject* args,
         order.push_back(static_cast<int32_t>(o));
       }
     }
-    new (&self->distributed_states) DistributedStates(device_num, states, order);
+    bool zero = parsed_args.get_bool_or_default(3);
+    new (&self->distributed_states) DistributedStates(device_num, states, order, zero);
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -77,6 +78,12 @@ PyObject* PyDistributedStates_states(PyDistributedStates* self) {
 PyObject* PyDistributedStates_order(PyDistributedStates* self) {
   HT_PY_FUNC_BEGIN
   return PyLongList_FromIntegerList(self->distributed_states.get_order());
+  HT_PY_FUNC_END
+}
+
+PyObject* PyDistributedStates_zero(PyDistributedStates* self) {
+  HT_PY_FUNC_BEGIN
+  Py_RETURN_BOOLEAN_COND(self->distributed_states.zero());
   HT_PY_FUNC_END
 }
 
@@ -146,6 +153,7 @@ PyGetSetDef PyDistributedStates_properties[] = {
   {PY_GET_SET_DEF_NAME("device_num"), (getter) PyDistributedStates_device_num, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("states"), (getter) PyDistributedStates_states, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("order"), (getter) PyDistributedStates_order, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("zero"), (getter) PyDistributedStates_zero, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("is_pure_duplicate"), (getter) PyDistributedStates_is_pure_duplicate, nullptr, nullptr, nullptr},
   {nullptr}
 };

@@ -1,5 +1,8 @@
 #include "hetu/graph/headers.h"
 #include "hetu/graph/ops/optimizer_update.h"
+#include "hetu/graph/ops/Communication.h"
+#include "hetu/impl/communication/nccl_comm_group.h"
+#include "hetu/impl/communication/comm_group.h"
 #include "hetu/graph/ops/kernel_links.h"
 
 namespace hetu {
@@ -52,6 +55,95 @@ void MomentumUpdateOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                   op->instantiation_ctx().stream());
 }
 
+void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                           NDArrayList& outputs,
+                           RuntimeContext& runtime_ctx) const {
+  NDArray& param = outputs.at(0);
+  const NDArray& grad = inputs.at(1);
+  NDArray& mean = const_cast<NDArray&>(inputs.at(2));
+  NDArray& variance = const_cast<NDArray&>(inputs.at(3));
+  NDArray& step = const_cast<NDArray&>(inputs.at(4));
+  if (!zero()) {
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
+                                    type(), hetu::impl::Adam, grad, param,
+                                    mean, variance, step, learning_rate(), 
+                                    beta1(), beta2(), eps(), weight_decay(), 
+                                    op->instantiation_ctx().stream());
+  } else {
+    // param is dup, should split as reduce-scatter
+    // partial_grad -> reduce-scatter -> scatter_grad, use partial_grad distributed states to deduce scatter info (offset, index, comm_group...)
+    HT_ASSERT(is_reduce_scatter_op(op->input(1)->producer()))
+      << "Adam: zero input grad must be reduce-scatter result!"
+      << ", grad producer = " << op->input(1)->producer()
+      << ", grad = " << op->input(1)
+      << ", param = " << op->input(0)
+      << ", grad ds = " << op->input(1)->get_distributed_states().ds_info()
+      << ", param ds = " << op->input(0)->get_distributed_states().ds_info();
+    auto& reduce_scatter_op = op->input(1)->producer();
+    auto& reduce_scatter_impl = reinterpret_cast<ReduceScatterOpImpl&>(reduce_scatter_op->body());
+    auto& partial_grad = reduce_scatter_op->input(0);
+    DeviceGroup comm_group = reduce_scatter_impl.comm_group();
+
+    auto local_device_index = op->placement_group().get_index(op->placement());
+    auto scatter_num = comm_group.num_devices();
+    HT_ASSERT(scatter_num == partial_grad->get_distributed_states().get_dim(-2))
+      << "Adam: comm_group num must equal to partial size!";
+    auto param_size = param->numel();
+    auto param_size_per_scatter = DIVUP(param_size, scatter_num); // todo: padding for reduce-scatter & all-gather
+    auto scatter_index = partial_grad->get_distributed_states().map_device_to_state_index(local_device_index)[-2];
+    auto param_start_index = param_size_per_scatter * scatter_index;
+    auto param_end_index = param_start_index + param_size_per_scatter;
+    HT_ASSERT(grad->numel() == param_size_per_scatter && param_end_index <= param_size) 
+      << "now need param size can be div by dp group size! "
+      << "got grad size = " << grad->numel() 
+      << " vs. param_size_per_scatter = " 
+      << param_size_per_scatter;
+    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": param = " << op->input(0) 
+    //             << ", ds = " << op->input(0)->get_distributed_states().ds_info() 
+    //             << ", scatter_index = " << scatter_index
+    //             << ", grad shape = " << grad->shape()
+    //             << ", param shape = " << param->shape()
+    //             << ", param_size = " << param_size
+    //             << ", param_size_per_scatter = " << param_size_per_scatter
+    //             << ", scatter_index = " << scatter_index
+    //             << ", param_start_index = " << param_start_index
+    //             << ", grad ds = " << op->input(1)->get_distributed_states().ds_info();
+    auto param_scatter = NDArray(
+      NDArrayMeta().set_shape(grad->shape())
+                   .set_dtype(param->dtype())
+                   .set_device(param->device()), 
+      param->storage(), param_start_index);
+    // only update scatter part of param
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
+                                    type(), hetu::impl::Adam, grad, param_scatter,
+                                    mean, variance, step, learning_rate(), 
+                                    beta1(), beta2(), eps(), weight_decay(), 
+                                    op->instantiation_ctx().stream());
+    // in-place allgather
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), 
+                                    hetu::impl::AllGather, param_scatter, param, 
+                                    comm_group, op->instantiation_ctx().stream());
+  }
+}
+
+// TODO: support zero
+void AdamOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                const OpMeta& op_meta) const {
+  const DistributedStates& ds_param = inputs.at(0)->get_distributed_states();
+  const DistributedStates& ds_grad = inputs.at(1)->get_distributed_states();
+  const DistributedStates& ds_mean = inputs.at(2)->get_distributed_states();
+  const DistributedStates& ds_variance = inputs.at(3)->get_distributed_states();
+  const DistributedStates& ds_step = inputs.at(4)->get_distributed_states();
+  if (!zero()) {
+    HT_ASSERT(ds_param.check_equal(ds_grad) && ds_mean.check_equal(ds_variance) && ds_param.check_equal(ds_mean))
+      << "DistributedStates for param, grad, mean, variance should be equal!";
+  } else {
+    HT_ASSERT(ds_mean.check_equal(ds_variance) && ds_grad.check_equal(ds_mean))
+      << "DistributedStates for grad, mean, variance should be equal for zero!";    
+  }
+  outputs.at(0)->set_distributed_states(ds_param);
+}
+
 Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, float learning_rate,
                        OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<SGDUpdateOpImpl>(learning_rate),
@@ -73,6 +165,19 @@ Tensor MakeMomentumUpdateOp(Tensor param, Tensor grad, Tensor velocity,
   return Graph::MakeOp(std::make_shared<MomentumUpdateOpImpl>(
                          learning_rate, momentum, nesterov),
                        {std::move(param), std::move(grad), std::move(velocity)},
+                       std::move(op_meta))
+    ->output(0);
+}
+
+Tensor MakeAdamOp(Tensor param, Tensor grad, Tensor mean, Tensor variance,
+                  float learning_rate, Tensor step, float beta1, float beta2, 
+                  float eps, float weight_decay, OpMeta op_meta) {
+  // pure tp needn't zero                     
+  bool zero = (param->get_distributed_states().get_dim(-1) > 1) && param->get_distributed_states().zero();
+  // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": MakeAdamOp: param = " << param << ", zero = " << zero;
+  return Graph::MakeOp(std::make_shared<AdamOpImpl>(
+                       learning_rate, zero, beta1, beta2, eps, weight_decay),
+                       {std::move(param), std::move(grad), std::move(mean), std::move(variance), std::move(step)},
                        std::move(op_meta))
     ->output(0);
 }

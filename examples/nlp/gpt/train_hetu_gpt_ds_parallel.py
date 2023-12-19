@@ -4,43 +4,44 @@ import math
 import logging
 import hetu as ht
 from hetu_gpt_ds_parallel import GPTLMHeadModel
+from hetu.nn.modules.parallel_ds import config2ds
 from gpt_config import GPTConfig
 from load_data import DataLoaderForGPT
 import numpy as np
 import time
 import argparse
 import json
+from queue import Queue
 
 ht.init_comm_group()
 local_device = ht.local_device()
 all_devices = ht.global_device_group()
 
-# walkaround: just give order by type(placeholder/varibale), may not include all cases
-def config2ds(config):
-    num_devices = len(config['device_group'])
-    split = {}
-    for key, value in config['split'].items():
-        split[int(key)] = value
-    states = {-1: config['dup'], **split}
-    if config['type'] == 'placeholder':
-        order = sorted(split.keys()) + [-1]
-    elif config['type'] == 'variable':
-        order = [-1] + sorted(split.keys())
-    else:
-        raise RuntimeError(f"unsupported type {config['type']}!")
-    ds = ht.DistributedStates(num_devices, states, order)
-    
-    all_devices = ht.global_device_group()
-    device_group = ht.DeviceGroup([all_devices.get(device_id) for device_id in config['device_group']])
-    return ds, device_group
-
-def pretrain(args):
+def read_ds_parallel_config(args):
     # read ds_parallel_config from json file
     ds_parallel_config = json.load(open(args.ds_parallel_config, 'r'))
     # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp2_pp2.json', 'r'))
     # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp4.json', 'r'))
     print(f'{local_device}: load ds_parallel_config from: {args.ds_parallel_config}')
-    
+    zero = ds_parallel_config['zero']
+    # assign zero to all variables
+    config_queue = Queue()
+    for value in ds_parallel_config.values():
+        config_queue.put(value)
+    while (not config_queue.empty()):
+        config = config_queue.get()
+        if type(config) == dict:
+            if 'type' in config:
+                if config['type'] == 'variable' and 'zero' not in config:
+                    config['zero'] = zero
+            else:
+                for value in config.values():
+                    config_queue.put(value)
+    # print(f'{local_device}: ds_parallel_config: {ds_parallel_config}')
+    return ds_parallel_config
+
+def pretrain(args):
+    ds_parallel_config = read_ds_parallel_config(args)
     num_epochs = args.epochs
     lr = args.lr
 
@@ -108,7 +109,8 @@ def pretrain(args):
     loss_mean = loss
 
     print(f'{local_device}: optimizer minimize begin...')
-    opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
+    # opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
+    opt = ht.AdamOptimizer(lr=args.lr)
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
 
@@ -155,8 +157,8 @@ def pretrain(args):
                 step_num += 1
                 global_step_num += 1
                 # return
-                if global_step_num == 20:
-                    return
+                # if global_step_num == 20:
+                #     return
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

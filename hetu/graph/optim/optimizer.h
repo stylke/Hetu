@@ -38,7 +38,7 @@ class Optimizer {
  protected:
   virtual Tensor ApplyDense(const GradAndVar& grad_and_var, const Tensor& infinite_count = Tensor()) { return Tensor(); }
 
-  virtual Tensor MakeStates(const Tensor& variable, const OpName& state_name);
+  virtual Tensor MakeStates(const Tensor& variable, const Tensor& grad, const OpName& state_name);
 
   TensorList _params;
   float _learning_rate;
@@ -80,6 +80,61 @@ class SGDOptimizer : public Optimizer {
 
   float _momentum;
   bool _nesterov;
+};
+
+class AdamOptimizer : public Optimizer {
+ public:
+  AdamOptimizer(): Optimizer() {};
+
+  AdamOptimizer(float learning_rate, float beta1 = 0.9,
+                float beta2 = 0.999, float eps = 1e-8,
+                float weight_decay = 0)
+  : Optimizer(learning_rate) {
+    _init(beta1, beta2, eps, weight_decay);
+  }
+
+  AdamOptimizer(TensorList params, float learning_rate, float beta1 = 0.9,
+                float beta2 = 0.999, float eps = 1e-8,
+                float weight_decay = 0)
+  : Optimizer(std::move(params), learning_rate) {
+    _init(beta1, beta2, eps, weight_decay);
+  }
+
+  Tensor ApplyDense(const GradAndVar& grad_and_var, const Tensor& infinite_count = Tensor());
+
+  float beta1() const {
+    return _beta1;
+  }
+
+  float beta2() const {
+    return _beta2;
+  }
+
+  float eps() const {
+    return _eps;
+  }
+
+  float weight_decay() const {
+    return _weight_decay;
+  }
+
+ protected:
+  void _init(float beta1, float beta2, float eps,
+             float weight_decay) {
+    HT_VALUE_ERROR_IF(beta1 < 0 || beta1 > 1)
+      << "Invalid beta1: " << beta1;
+    HT_VALUE_ERROR_IF(beta2 < 0 || beta1 > 2)
+      << "Invalid beta2: " << beta2;
+    _beta1 = beta1;
+    _beta2 = beta2;
+    _eps = eps;
+    _weight_decay = weight_decay;
+  }
+
+  float _beta1;
+  float _beta2;
+  float _eps;
+  float _weight_decay;
 };
 
 } // namespace graph

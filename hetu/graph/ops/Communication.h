@@ -412,6 +412,10 @@ class ReduceScatterOpImpl final : public OpInterface {
     return _red_type;
   }
 
+  const DeviceGroup& comm_group() const {
+    return _comm_group;
+  } 
+
  protected:
   bool DoMapToParallelDevices(Operator& op,
                               const DeviceGroup& pg) const override;

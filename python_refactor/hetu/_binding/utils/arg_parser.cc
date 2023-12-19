@@ -52,6 +52,8 @@ std::string ArgType2Str(ArgType type) {
       return "FeedDict";
     case ArgType::SGDOPTIMIZER:
       return "SGDOptimizer";
+    case ArgType::ADAMOPTIMIZER:
+      return "AdamOptimizer";
     case ArgType::DISTRIBUTED_STATES:
       return "hetu.DistributedStates";
     case ArgType::INITIALIZER:
@@ -126,6 +128,8 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::FEED_DICT;
   if (type == "Optimizer" || type == "SGDOptimizer")
     return ArgType::SGDOPTIMIZER;
+  if (type == "AdamOptimizer")
+    return ArgType::ADAMOPTIMIZER;
   if (type == "hetu.DistributedStates" || type == "DistributedStates")
     return ArgType::DISTRIBUTED_STATES;
   if (type == "hetu.Initializer" || type == "Initializer")
@@ -313,6 +317,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyFeedDict(obj);
     case ArgType::SGDOPTIMIZER:
       return CheckPySGDOptimizer(obj);
+    case ArgType::ADAMOPTIMIZER:
+      return CheckPyAdamOptimizer(obj);
     case ArgType::DISTRIBUTED_STATES:
       return CheckPyDistributedStates(obj);
     case ArgType::INITIALIZER:

@@ -21,6 +21,8 @@ namespace impl {
   DECLARE_KERNEL_CUDA(KERNEL, __VA_ARGS__)
 
 DECLARE_KERNEL_CPU_AND_CUDA(Abs, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(Adam, const NDArray&, NDArray&, NDArray&, NDArray&, NDArray&,
+                            float, float, float, float, float, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Arange, double, double, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ArraySet, NDArray&, double, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AddConst, const NDArray&, double, NDArray&,

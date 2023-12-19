@@ -3,6 +3,7 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/ndarray_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/utils/cuda_math.h"
 
 namespace hetu {
 namespace impl {
@@ -153,6 +154,55 @@ void SGDUpdateWithGradScalerCuda(const NDArray& grad, const NDArray& infinite_co
           param->data_ptr<spec_t>(), velocity->data_ptr<spec_t>(), lr, momentum, size);
     }
   });
+}
+
+template <typename spec_t>
+__global__ void adam_update_kernel(const spec_t* grad, spec_t* param, spec_t* mean,
+                                   spec_t* variance, int64_t* step, float lr, float beta1, 
+                                   float beta2, float eps, float weight_decay, size_t size) {
+  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= size)
+    return;
+  mean[idx] = mean[idx] * beta1 + grad[idx] * (1 - beta1);
+  variance[idx] = variance[idx] * beta2 + grad[idx] * grad[idx] * (1 - beta2);
+  spec_t bias1 = spec_t(1 - hetu::cuda::cuda_pow(beta1, float(step[0])));
+  spec_t bias2 = hetu::cuda::cuda_sqrt(spec_t(1 - hetu::cuda::cuda_pow(beta2, float(step[0]))));
+  param[idx] -= lr * (mean[idx] / bias1) / 
+                (hetu::cuda::cuda_sqrt(variance[idx]) / bias2 + eps);
+}
+
+void AdamCuda(const NDArray& grad, NDArray& param, NDArray& mean,
+              NDArray& variance, NDArray& step, 
+              float lr, float beta1, float beta2,
+              float eps, float weight_decay,
+              const Stream& stream) {
+  HT_ASSERT_CUDA_DEVICE(grad);
+  HT_ASSERT_CUDA_DEVICE(param);
+  HT_ASSERT_CUDA_DEVICE(mean);
+  HT_ASSERT_CUDA_DEVICE(variance);
+  HT_ASSERT_SAME_DEVICE(grad, param);
+  HT_ASSERT_SAME_DEVICE(grad, mean);
+  HT_ASSERT_SAME_DEVICE(grad, variance);
+  HT_ASSERT_EXCHANGABLE(grad, param);
+  HT_ASSERT_EXCHANGABLE(grad, mean);
+  HT_ASSERT_EXCHANGABLE(grad, variance);
+  size_t size = grad->numel();
+  if (size == 0)
+    return;
+  dim3 blocks, threads;
+  threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
+  blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
+  CUDAStream cuda_stream(stream);
+  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "AdamUpdateCuda", [&]() {
+    adam_update_kernel<spec_t>
+        <<<blocks, threads, 0, cuda_stream>>>(
+          grad->data_ptr<spec_t>(), param->data_ptr<spec_t>(), 
+          mean->data_ptr<spec_t>(), variance->data_ptr<spec_t>(), 
+          step->data_ptr<int64_t>(), lr, beta1, beta2, eps, weight_decay, size);
+  });
+  NDArray::add(step, 1, kBlockingStream, step);
+  NDArray::MarkUsedBy({grad, param, mean, variance, step}, stream);
 }
 
 } // namespace impl

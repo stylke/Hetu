@@ -74,10 +74,12 @@ class GPTAttention(ht.nn.Module):
         causal_mask = ht.from_numpy_parallel(parallel_data_provider(np.tile(self.bias[:, :, :seq_len, :seq_len], 
                                                                             (micro_batch_size, num_heads, 1, 1)),
                                                                     attn_weights.distributed_states, device_index),
-                                             attn_weights.distributed_states, device_group=self.device_group, name='causal_mask')
+                                             attn_weights.distributed_states, requires_grad=False, 
+                                             device_group=self.device_group, name='causal_mask')
         mask = ht.from_numpy_parallel(parallel_data_provider(np.full(attn_weights.global_shape, self.masked_value, dtype=np.float32),
                                                              attn_weights.distributed_states, device_index), 
-                                      attn_weights.distributed_states, device_group=self.device_group, name='mask')
+                                      attn_weights.distributed_states, requires_grad=False,
+                                      device_group=self.device_group, name='mask')
         attn_weights = ht.where(causal_mask, attn_weights, mask)
         if attention_mask is not None:
             # attn_weights: shape=[micro_batch_size, num_heads, seq_len, seq_len]

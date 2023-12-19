@@ -35,6 +35,7 @@ def get_device_index(device_group):
 # walkaround: just give order by type(placeholder/varibale), may not include all cases
 def config2ds(config):
     num_devices = len(config['device_group'])
+    zero = False
     split = {}
     for key, value in config['split'].items():
         split[int(key)] = value
@@ -43,9 +44,11 @@ def config2ds(config):
         order = sorted(split.keys()) + [-1]
     elif config['type'] == 'variable':
         order = [-1] + sorted(split.keys())
+        assert 'zero' in config, f"variable config must have zero!"
+        zero = config['zero']
     else:
         raise RuntimeError(f"unsupported type {config['type']}!")
-    ds = hetu.DistributedStates(num_devices, states, order)
+    ds = hetu.DistributedStates(num_devices, states, order, zero)
     
     all_devices = hetu.global_device_group()
     device_group = hetu.DeviceGroup([all_devices.get(device_id) for device_id in config['device_group']])
@@ -145,13 +148,16 @@ class HtColumnParallelLinear(Module):
         self.name = name
 
         ds_dup_split1, self.device_group = config2ds(ds_parallel_config)
-        dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get('1', 1), len(ds_parallel_config['device_group'])
+        dp, tp, num_devices, zero = ds_parallel_config['dup'], \
+                                    ds_parallel_config['split'].get('1', 1), \
+                                    len(ds_parallel_config['device_group']), \
+                                    ds_parallel_config['zero']
         assert dp * tp == num_devices, f'ColumnParallelLinear get wrong ds_parallel_config: {ds_parallel_config}!'        
         device_index = get_device_index(self.device_group)
         # assume num_devices=8, there exists 4 cases: dp=1 tp=8, dp=2 tp=4, dp=4 tp=2, dp=8 tp=1
         # when dp=1 tp=8, weights: ds_dup_split0->ds_split0, data: ds_split0_dup->ds_dup
         # when dp=8 tp=1, weights: ds_dup_split0->ds_dup, data: ds_split0_dup->ds_split0
-        ds_dup_split0 = hetu.DistributedStates(num_devices, {-1: dp, 0: tp}, [-1, 0]) # for weights with trans_b
+        ds_dup_split0 = hetu.DistributedStates(num_devices, {-1: dp, 0: tp}, [-1, 0], zero) # for weights with trans_b
         ds_split0_dup = hetu.DistributedStates(num_devices, {-1: tp, 0: dp}, [0, -1]) # for data
         self.ds_map = {'dup_split0': ds_dup_split0, 'split0_dup': ds_split0_dup}
         self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
@@ -208,12 +214,15 @@ class HtRowParallelLinear(Module):
         self.name = name
 
         ds_dup_split0, self.device_group = config2ds(ds_parallel_config)
-        dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get('0', 1), len(ds_parallel_config['device_group'])
+        dp, tp, num_devices, zero = ds_parallel_config['dup'], \
+                                    ds_parallel_config['split'].get('0', 1), \
+                                    len(ds_parallel_config['device_group']), \
+                                    ds_parallel_config['zero']
         assert dp * tp == num_devices, f'RowParallelLinear get wrong ds_parallel_config: {ds_parallel_config}!'        
         device_index = get_device_index(self.device_group)
         # assume num_devices=8, there exists 4 cases: dp=1 tp=8, dp=2 tp=4, dp=4 tp=2, dp=8 tp=1
-        ds_dup_split1 = hetu.DistributedStates(num_devices, {-1: dp, 1: tp}, [-1, 1]) # for weight with trans_b
-        ds_dup = hetu.DistributedStates(num_devices, {-1: num_devices}, [-1]) # for bias
+        ds_dup_split1 = hetu.DistributedStates(num_devices, {-1: dp, 1: tp}, [-1, 1], zero) # for weight with trans_b
+        ds_dup = hetu.DistributedStates(num_devices, {-1: num_devices}, [-1], zero) # for bias
         ds_split01 = hetu.DistributedStates(num_devices, {0: dp, 1: tp}, [0, 1]) # for data split in dimension 1
         ds_split0_dup = hetu.DistributedStates(num_devices, {-1: tp, 0: dp}, [0, -1]) # for data reduce partial to dup
         self.ds_map = {'dup_split1': ds_dup_split1, 'dup': ds_dup, 'split01': ds_split01, 'split0_dup': ds_split0_dup}
