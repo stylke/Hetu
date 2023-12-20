@@ -788,21 +788,16 @@ void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t
   config = setReduceConfig<arg_t, spec_t>(reduce_ndim, merge_ndim, in_merge_shape,
                                           in_strides, in_arr->data_ptr<spec_t>(), cuda_stream);
 
-  uint8_t* cta_buf = nullptr;
-  uint8_t* semaphores = nullptr;
   void* cta_buf_ptr = nullptr;
   int* semaphores_ptr = nullptr;
   NDArray cta_buf_arr, semaphores_arr;
   if (config.should_global_reduce()) {
     auto cta_buf_size = config.global_memory_size();
     auto semaphores_size = config.semaphore_size();
-    cta_buf = new uint8_t[cta_buf_size];
-    semaphores = new uint8_t[semaphores_size];
-    memset(semaphores, 0, semaphores_size);
-    cta_buf_arr = 
-      hetu::cuda::to_byte_ndarray(cta_buf, cta_buf_size, device_id);
-    semaphores_arr = 
-      hetu::cuda::to_byte_ndarray(semaphores, semaphores_size, device_id);
+    cta_buf_arr = NDArray::empty({static_cast<int64_t>(cta_buf_size)},
+                                 Device(kCUDA, stream.device_index()), kByte, stream.stream_index());
+    semaphores_arr = NDArray::zeros({static_cast<int64_t>(semaphores_size)},
+                                    Device(kCUDA, stream.device_index()), kByte, stream.stream_index());
     cta_buf_ptr = cta_buf_arr->raw_data_ptr();
     semaphores_ptr = semaphores_arr->data_ptr<int>();
   }
@@ -843,8 +838,6 @@ void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t
   free(reduce_axes);
   if (config.should_global_reduce()) {
     NDArray::MarkUsedBy({cta_buf_arr, semaphores_arr}, stream);
-    delete[] semaphores;
-    delete[] cta_buf;
   }
   NDArray::MarkUsedBy({in_arr, out_arr, in_strides_arr, out_strides_arr, in_merge_shape_arr}, stream);
   return;

@@ -399,12 +399,12 @@ TensorList ReciprocalOpImpl::DoGradient(Operator& op,
 void AddElewiseGradientOpImpl::DoCompute(Operator& op,
                                          const NDArrayList& inputs, NDArrayList& outputs,
                                          RuntimeContext& ctx) const {
-  NDArray unreduced = axes().size() == 0 ? outputs.at(0)
-                      : NDArray::empty_like(inputs.at(0));
-  NDArray::copy(inputs.at(0), op->instantiation_ctx().stream_index, unreduced);
-  if (axes().size() > 0)
-    NDArray::reduce(unreduced, ReductionType::SUM, axes(), false, op->instantiation_ctx().stream_index,
-                    outputs.at(0));
+  if (axes().size() == 0) {
+    NDArray::copy(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
+    return;
+  }
+  NDArray::reduce(inputs.at(0), ReductionType::SUM, axes(), false, op->instantiation_ctx().stream_index,
+                  outputs.at(0));
 }
 
 HTShapeList AddElewiseGradientOpImpl::DoInferShape(Operator& op,
@@ -424,15 +424,22 @@ void AddElewiseGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorLi
 void SubElewiseGradientOpImpl::DoCompute(Operator& op,
                                          const NDArrayList& inputs, NDArrayList& outputs,
                                          RuntimeContext& ctx) const {
-  NDArray unreduced = axes().size() == 0 ? outputs.at(0)
-                      : NDArray::empty_like(inputs.at(0));
-  if (index() == 0)
-    NDArray::copy(inputs.at(0), op->instantiation_ctx().stream_index, unreduced);
-  else 
-    NDArray::neg(inputs.at(0), op->instantiation_ctx().stream_index, unreduced);
-  if (axes().size() > 0)
-    NDArray::reduce(unreduced, ReductionType::SUM, axes(), false, op->instantiation_ctx().stream_index,
-                    outputs.at(0));
+  if (axes().size() == 0) {
+    if (index() == 0) {
+      NDArray::copy(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
+    } else {
+      NDArray::neg(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
+    }
+  } else {
+    if (index() == 0) {
+      NDArray::reduce(inputs.at(0), ReductionType::SUM, axes(), false, op->instantiation_ctx().stream_index,
+                      outputs.at(0));
+    } else {
+      NDArray::neg(NDArray::reduce(inputs.at(0), ReductionType::SUM, axes(), false,
+                   op->instantiation_ctx().stream_index, outputs.at(0)),
+                   op->instantiation_ctx().stream_index, outputs.at(0));
+    }
+  }
 }
 
 HTShapeList SubElewiseGradientOpImpl::DoInferShape(Operator& op,
