@@ -47,7 +47,8 @@ def pretrain(args):
                        activation_function=args.hidden_act,
                        global_batch_size=args.global_batch_size,
                        num_micro_batches=args.num_micro_batches,
-                       dp=args.dp
+                       dp=args.dp,
+                       use_flash_attn=args.use_flash_attn,
                        )
     # Input data file names definition
     # dict_seqlen2predlen = {128:20, 512:80}
@@ -87,7 +88,8 @@ def pretrain(args):
     loss_mean = loss
 
     print(f'{local_device}: optimizer minimize begin...')
-    opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
+    #opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
+    opt = ht.AdamOptimizer(lr=args.lr)
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
 
@@ -123,9 +125,7 @@ def pretrain(args):
                     print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
                 step_num += 1
                 global_step_num += 1
-                # if global_step_num == 20:
-                #     return
-                # return
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -176,7 +176,11 @@ if __name__ == '__main__':
     parser.add_argument(
         "--dropout_prob", type=float, default=0.1, help="Dropout rate."
     )
+    parser.add_argument(
+        "--use_flash_attn", type=bool, default=False, help="Use Flash Attention."
+    )
     args = parser.parse_args()
     with ht.graph("define_and_run"):
-        pretrain(args)
-        print(f'{local_device}: train hetu 3d parallel end...')
+        with ht.autocast(ht.bfloat16):
+            pretrain(args)
+            print(f'{local_device}: train hetu 3d parallel end...')

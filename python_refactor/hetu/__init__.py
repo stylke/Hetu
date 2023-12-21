@@ -104,8 +104,11 @@ def graph(g, create_new=False, prefix='default'):
     return _GraphContext(g, create_new=create_new, prefix=prefix)
 
 class _AutocastContext(object):
-    def __init__(self):
-        self.autocast = _hetu_core._internal_context.get_default_autocast()
+    def __init__(self, dtype = None):
+        if dtype is None:
+            self.autocast = _hetu_core._internal_context.get_default_autocast()
+        else:
+            self.autocast = _hetu_core._internal_context.make_new_autocast(True, dtype)
 
     def __enter__(self):
         _hetu_core._internal_context.push_autocast_ctx(self.autocast.id)
@@ -116,3 +119,6 @@ class _AutocastContext(object):
 
 def autocast():
     return _AutocastContext()
+
+def autocast(dtype):
+    return _AutocastContext(dtype)

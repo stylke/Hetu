@@ -14,7 +14,7 @@ void DistributedStates::set_placement_group(const DeviceGroup& placement_group) 
 }
 
 void DistributedStates::set_placement(const Device& placement) {
-  HT_ASSERT(_placement_group.num_devices() > 0 && _placement_group.contains(placement))
+  HT_ASSERT(_placement_group.num_devices() > 0 && (_placement_group.contains(placement) || placement == kCPU))
             << "the placement device " << placement << " must in placement group " << _placement_group;    
   _placement = placement;
 }

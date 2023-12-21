@@ -1,6 +1,7 @@
 #include "hetu/graph/define_and_run_graph.h"
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/ops/variable.h"
+#include "hetu/graph/autocast/autocast.h"
 
 namespace hetu {
 namespace graph {
@@ -143,6 +144,7 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
 
   auto topo = topo_order();
   HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << topo;
+  std::unordered_map<int, Tensor> transfer_map;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
     if (op_to_exec_op_mapping.find(op->id()) != op_to_exec_op_mapping.end())
@@ -152,6 +154,44 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
     TensorList exec_inputs, exec_in_deps;
     std::tie(exec_inputs, exec_in_deps) =
       Operator::transform_each_input_tensor(op, get_exec_input);
+
+    auto autocast_id = AutoCast::cur_autocast_ctx();
+    if (autocast_id != UINT64_MAX) {
+      auto autocast = AutoCast::GetAutoCast(autocast_id);
+      if (autocast.enabled()) {
+        DataType datatype = DataType::UNDETERMINED;
+        if (autocast.cast_type() != DataType::UNDETERMINED)
+          datatype = autocast.cast_type();
+
+        if (datatype != DataType::UNDETERMINED) {
+          auto optype = op->type();
+          if (is_optimizer_update_op(op) || is_host_to_device_op(op) || is_device_to_host_op(op) || is_data_transfer_op(op)) {}
+          else {
+            for (int i = 0; i < exec_inputs.size(); ++i) {
+              if ((is_variable_op(exec_inputs[i]->producer()) || is_placeholder_op(exec_inputs[i]->producer())) &&
+                  exec_inputs[i]->dtype() != datatype && 
+                  (exec_inputs[i]->dtype() == DataType::BFLOAT16 ||
+                  exec_inputs[i]->dtype() == DataType::FLOAT16 ||
+                  exec_inputs[i]->dtype() == DataType::FLOAT32 ||
+                  exec_inputs[i]->dtype() == DataType::FLOAT64)) {
+                if (transfer_map.find(exec_inputs[i]->id()) != transfer_map.end()) {
+                  HT_LOG_DEBUG << "Map" << &transfer_map << "ReUse:" << exec_inputs[i]->id() << "->" << transfer_map[exec_inputs[i]->id()]->id();
+                  exec_inputs[i] = transfer_map[exec_inputs[i]->id()];
+                }
+                else {
+                  auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
+                                  {exec_inputs[i]}, OpMeta().set(op->op_meta()), *exec_graph);
+                  HT_LOG_DEBUG << "Map" << &transfer_map << "Insert:" << exec_inputs[i]->id() << "->" << exec_op->output(0)->id();
+                  transfer_map[exec_inputs[i]->id()] = exec_op->output(0);
+                  exec_inputs[i] = exec_op->output(0);
+                }
+                exec_graph->RecordTensorShape(exec_inputs[i]->id(), exec_inputs[i]->shape());
+              }
+            }
+          }
+        }
+      }
+    }
 
     auto& exec_op = Graph::MakeOp(
       op->_body, std::move(exec_inputs),
@@ -182,8 +222,8 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
   
   // wrap up all of this as an exec graph plan
   _exec_graph_plan_pool.emplace_back(std::move(exec_graph), 
-                                      std::move(op_to_exec_op_mapping),
-                                      std::move(tensor_to_exec_tensor_mapping));
+                                     std::move(op_to_exec_op_mapping),
+                                     std::move(tensor_to_exec_tensor_mapping));
 
   Graph::pop_graph_ctx();
 }

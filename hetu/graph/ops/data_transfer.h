@@ -113,6 +113,10 @@ class DataTransferOpImpl final : public OpInterface {
   _dtype(datatype),
   _dev(dev) {}
 
+  uint64_t op_indicator() const noexcept {
+    return DATA_TRANSFER_OP;
+  }
+
  protected:
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {

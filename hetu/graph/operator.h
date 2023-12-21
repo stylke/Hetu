@@ -71,6 +71,11 @@ class OpMeta {
     is_deduce_states = deduce_states;
     return *this;
   }
+
+  inline OpMeta& set_is_step(bool step) {
+    is_step = step;
+    return *this;
+  }
   
   inline OpMeta& set(const OpMeta& other) {
     operator=(other);
@@ -103,6 +108,7 @@ class OpMeta {
   DeviceGroup device_group;
   TensorList extra_deps;
   bool is_deduce_states{true};  
+  bool is_step{false};
 };
 
 std::ostream& operator<<(std::ostream&, const OpMeta&);
@@ -788,6 +794,7 @@ static const uint64_t INPLACE_OP = 1ul << 17;
 static const uint64_t COMM_SPLIT_OP = 1ul << 19;
 static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t UNKNOWN_OP = 1ul << 21;
+static const uint64_t DATA_TRANSFER_OP = 1ul << 57;
 static const uint64_t SUM_OP = 1ul << 58;
 static const uint64_t SLICE_OP = 1ul << 59;
 static const uint64_t LOSS_OP = 1ul << 60;
@@ -836,6 +843,7 @@ DECLARE_OP_INDICATOR_CHECKER(communucation,
                                BROADCAST_OP | REDUCE_OP |
                                P2P_OP | BATCHED_ISEND_IRECV_OP |
                                GATHER_OP | SCATTER_OP)
+DECLARE_OP_INDICATOR_CHECKER(data_transfer, DATA_TRANSFER_OP)
 DECLARE_OP_INDICATOR_CHECKER(sum, SUM_OP)                               
 DECLARE_OP_INDICATOR_CHECKER(slice, SLICE_OP)
 DECLARE_OP_INDICATOR_CHECKER(loss, LOSS_OP)
