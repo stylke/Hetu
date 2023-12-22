@@ -117,7 +117,6 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
       }
     }
   }
-  AutoCast::Graph_AutoCast(inputs, body);
   return graph.MakeOpInner(std::move(body), std::move(inputs),
                            std::move(op_meta));
 }

@@ -69,7 +69,13 @@ class ExecutableGraph : public Graph {
   }
 
   void InitShapePlan(Tensor2ShapeMap&& shape_plan) {
-    _shape_plan = std::move(shape_plan);
+    if (_shape_plan.size() == 0)
+      _shape_plan = std::move(shape_plan);
+    else {
+      for (auto it = shape_plan.begin(); it != shape_plan.end(); ++it) {
+        RecordTensorShape(it->first, it->second);
+      }
+    }
   }
 
   void RecordTensorShape(const TensorId& key, const HTShape& value) {

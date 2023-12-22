@@ -83,6 +83,11 @@ void SGDUpdateCuda(const NDArray& grad, NDArray& param, NDArray& velocity,
     AllocOffsetCalculator(grad, stream);
   std::tie(param_offset_calculator_arr, param_offset_calculator) = 
     AllocOffsetCalculator(param, stream);
+  NDArray grad_;
+  if (grad->dtype() != param->dtype())
+    grad_ = NDArray::to(grad, param->device(), param->dtype(), stream.stream_index());
+  else
+    grad_ = grad;
   HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "SGDUpdateCuda", [&]() {
     if (momentum == 0) {
       sgd_update_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
@@ -95,14 +100,14 @@ void SGDUpdateCuda(const NDArray& grad, NDArray& param, NDArray& velocity,
         AllocOffsetCalculator(velocity, stream);
       if (!nesterov) {
         momentum_update_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-          grad->data_ptr<spec_t>(), param->data_ptr<spec_t>(),
+          grad_->data_ptr<spec_t>(), param->data_ptr<spec_t>(),
           velocity->data_ptr<spec_t>(), lr, momentum, size,
           grad_offset_calculator, param_offset_calculator,
           vel_offset_calculator);
       } else {
         nesterov_momentum_update_kernel<spec_t>
           <<<blocks, threads, 0, cuda_stream>>>(
-            grad->data_ptr<spec_t>(), param->data_ptr<spec_t>(),
+            grad_->data_ptr<spec_t>(), param->data_ptr<spec_t>(),
             velocity->data_ptr<spec_t>(), lr, momentum, size,
             grad_offset_calculator, param_offset_calculator,
             vel_offset_calculator);
@@ -110,7 +115,7 @@ void SGDUpdateCuda(const NDArray& grad, NDArray& param, NDArray& velocity,
       NDArray::MarkUsedBy({vel_offset_calculator_arr}, stream);
     }
   });
-  NDArray::MarkUsedBy({grad, param, velocity, grad_offset_calculator_arr,
+  NDArray::MarkUsedBy({grad, grad_, param, velocity, grad_offset_calculator_arr,
                        param_offset_calculator_arr}, stream);
 }
 
@@ -196,10 +201,15 @@ void SGDUpdateWithGradScalerCuda(const NDArray& grad, const NDArray& infinite_co
     AllocOffsetCalculator(grad, stream);
   std::tie(param_offset_calculator_arr, param_offset_calculator) = 
     AllocOffsetCalculator(param, stream);
+  NDArray grad_;
+  if (grad->dtype() != param->dtype())
+    grad_ = NDArray::to(grad, param->device(), param->dtype(), stream.stream_index());
+  else
+    grad_ = grad;
   HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "SGDUpdateCuda", [&]() {
     if (momentum == 0) {
       sgd_update_with_gradscaler_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        grad->data_ptr<spec_t>(), infinite_count->data_ptr<float>(), 
+        grad_->data_ptr<spec_t>(), infinite_count->data_ptr<float>(), 
         param->data_ptr<spec_t>(), lr, size, grad_offset_calculator,
         param_offset_calculator);
     } else {
@@ -209,26 +219,26 @@ void SGDUpdateWithGradScalerCuda(const NDArray& grad, const NDArray& infinite_co
         AllocOffsetCalculator(velocity, stream);
       if (!nesterov) {
         momentum_update_with_gradscaler_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-          grad->data_ptr<spec_t>(), infinite_count->data_ptr<float>(), param->data_ptr<spec_t>(),
+          grad_->data_ptr<spec_t>(), infinite_count->data_ptr<float>(), param->data_ptr<spec_t>(),
           velocity->data_ptr<spec_t>(), lr, momentum, size, grad_offset_calculator,
           param_offset_calculator, vel_offset_calculator);
       } else {
         nesterov_momentum_update_with_gradscaler_kernel<spec_t>
           <<<blocks, threads, 0, cuda_stream>>>(
-            grad->data_ptr<spec_t>(), infinite_count->data_ptr<float>(), 
+            grad_->data_ptr<spec_t>(), infinite_count->data_ptr<float>(), 
             param->data_ptr<spec_t>(), velocity->data_ptr<spec_t>(), lr, momentum, size,
             grad_offset_calculator, param_offset_calculator, vel_offset_calculator);
       }
       NDArray::MarkUsedBy({vel_offset_calculator_arr}, stream);
     }
   });
-  NDArray::MarkUsedBy({grad, param, velocity, grad_offset_calculator_arr,
+  NDArray::MarkUsedBy({grad, grad_, param, velocity, grad_offset_calculator_arr,
                       param_offset_calculator_arr}, stream);
 }
 
 template <typename spec_t>
 __global__ void adam_update_kernel(const spec_t* grad, spec_t* param, spec_t* mean,
-                                   spec_t* variance, int64_t* step, float lr, float beta1, 
+                                   spec_t* variance, int64_t step, float lr, float beta1, 
                                    float beta2, float eps, float weight_decay, size_t size,
                                    const OffsetCalculator* grad_offset_calculator,
                                    const OffsetCalculator* param_offset_calculator,
@@ -243,8 +253,8 @@ __global__ void adam_update_kernel(const spec_t* grad, spec_t* param, spec_t* me
   auto var_offset = var_offset_calculator->get(idx);
   mean[mean_offset] = mean[mean_offset] * beta1 + grad[grad_offset] * (1 - beta1);
   variance[var_offset] = variance[var_offset] * beta2 + grad[grad_offset] * grad[grad_offset] * (1 - beta2);
-  spec_t bias1 = spec_t(1 - hetu::cuda::cuda_pow(beta1, float(step[0])));
-  spec_t bias2 = hetu::cuda::cuda_sqrt(spec_t(1 - hetu::cuda::cuda_pow(beta2, float(step[0]))));
+  spec_t bias1 = spec_t(1 - hetu::cuda::cuda_pow(beta1, float(step)));
+  spec_t bias2 = hetu::cuda::cuda_sqrt(spec_t(1 - hetu::cuda::cuda_pow(beta2, float(step))));
   param[param_offset] -= lr * (mean[mean_offset] / bias1) / 
                          (hetu::cuda::cuda_sqrt(variance[var_offset]) / bias2 + eps);
 }
@@ -261,9 +271,6 @@ void AdamCuda(const NDArray& grad, NDArray& param, NDArray& mean,
   HT_ASSERT_SAME_DEVICE(grad, param);
   HT_ASSERT_SAME_DEVICE(grad, mean);
   HT_ASSERT_SAME_DEVICE(grad, variance);
-  HT_ASSERT_EXCHANGABLE(grad, param);
-  HT_ASSERT_EXCHANGABLE(grad, mean);
-  HT_ASSERT_EXCHANGABLE(grad, variance);
   size_t size = grad->numel();
   if (size == 0)
     return;
@@ -284,17 +291,22 @@ void AdamCuda(const NDArray& grad, NDArray& param, NDArray& mean,
     AllocOffsetCalculator(mean, stream);
   std::tie(variance_offset_calculator_arr, variance_offset_calculator) = 
     AllocOffsetCalculator(variance, stream);
+  NDArray grad_;
+  if (grad->dtype() != param->dtype())
+    grad_ = NDArray::to(grad, param->device(), param->dtype(), stream.stream_index());
+  else
+    grad_ = grad;
   HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "AdamUpdateCuda", [&]() {
     adam_update_kernel<spec_t>
         <<<blocks, threads, 0, cuda_stream>>>(
-          grad->data_ptr<spec_t>(), param->data_ptr<spec_t>(), 
+          grad_->data_ptr<spec_t>(), param->data_ptr<spec_t>(), 
           mean->data_ptr<spec_t>(), variance->data_ptr<spec_t>(), 
-          step->data_ptr<int64_t>(), lr, beta1, beta2, eps, weight_decay, size,
+          step->data_ptr<int64_t>()[0], lr, beta1, beta2, eps, weight_decay, size,
           grad_offset_calculator, param_offset_calculator,
           mean_offset_calculator, variance_offset_calculator);
   });
-  NDArray::add(step, 1, kBlockingStream, step);
-  NDArray::MarkUsedBy({grad, param, mean, variance, step, grad_offset_calculator_arr,
+  step->data_ptr<int64_t>()[0] = (step->data_ptr<int64_t>()[0] + 1);
+  NDArray::MarkUsedBy({grad, grad_, param, mean, variance, step, grad_offset_calculator_arr,
                       param_offset_calculator_arr, mean_offset_calculator_arr,
                       variance_offset_calculator_arr}, stream);
 }

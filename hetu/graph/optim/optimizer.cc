@@ -89,15 +89,14 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
                           .set_device_group(var->producer()->device_group())
                           .set_name("Update_" + var->name());
   NDArray step = NDArray::ones({1}, kCPU, kInt64, kBlockingStream);
-  std::vector<Device> cpus = {kCPU};
-  DeviceGroup cpu_group = DeviceGroup(cpus);
   HTShape step_shape = {1};
   Tensor step1 = MakeVariableOp(OnesInitializer(), step_shape, kInt64,
                                 false, var->get_distributed_states(), 
                                 OpMeta()
                                   .set_device_group(var->producer()->device_group())
                                   .set_eager_device(kCPU)
-                                  .set_name(var->name() + "_step"));
+                                  .set_name(var->name() + "_step")
+                                  .set_is_step(true));
   return MakeAdamOp(var, grad, MakeStates(var, "mean"),
                     MakeStates(var, "variance"),
                     learning_rate(), step1, beta1(), beta2(),

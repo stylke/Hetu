@@ -11,6 +11,7 @@ class GPTAttention(ht.nn.Module):
         super().__init__()
 
         self.config = config
+        self.use_flash_attn = config.use_flash_attn
         self.device_group = device_group
         self.add_bias = True
 
@@ -121,18 +122,22 @@ class GPTAttention(ht.nn.Module):
         value = ht.contiguous(value)
         key = ht.contiguous(key)
         '''
+
+        if self.use_flash_attn:
+            print()
+            attn_output = ht.attn(query, key, value, 0, -1, True)[0]
+        else:
+            query = query.transpose([0, 2, 1, 3], name="AttentionOp_query")
+            value = value.transpose([0, 2, 1, 3], name="AttentionOp_value")
+            # [micro_batch_size, num_heads, head_dim, seq_len]
+            key_t = key.transpose([0, 2, 3, 1], name="AttentionOp_key") # k^T
+
+            # self-attn, shape=[micro_batch_size, num_heads, seq_len, head_dim]
+            attn_output, attn_weights = self._attn(query, key_t, value, attention_mask)
+
+            # [micro_batch_size, seq_len, num_heads, head_dim]
+            attn_output = attn_output.transpose([0, 2, 1, 3])
         
-        # [micro_batch_size, num_heads, seq_len, head_dim]
-        query = query.transpose([0, 2, 1, 3])
-        value = value.transpose([0, 2, 1, 3])
-        # [micro_batch_size, num_heads, head_dim, seq_len]
-        key_t = key.transpose([0, 2, 3, 1]) # k^T
-
-        # self-attn, shape=[micro_batch_size, num_heads, seq_len, head_dim]
-        attn_output, attn_weights = self._attn(query, key_t, value, attention_mask)
-
-        # [micro_batch_size, seq_len, num_heads, head_dim]
-        attn_output = attn_output.transpose([0, 2, 1, 3])
         # [micro_batch_size*seq_len, num_heads*head_dim]
         attn_output = attn_output.reshape([-1, self.num_heads * self.head_dim])
         # row parallel, shape=[micro_batch_size*seq_len, num_heads*head_dim]
