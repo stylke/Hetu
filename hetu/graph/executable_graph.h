@@ -9,6 +9,7 @@ namespace hetu {
 namespace graph {
 
 struct ExecutePlan {
+  OpRefList local_placeholder_variable_ops;
   OpRefList local_fw_topo;
   OpRefList local_bw_topo;
   OpRefList local_topo;
@@ -18,10 +19,12 @@ struct ExecutePlan {
   TensorIdSet accumulated_tensor;
   OpIdSet accumulated_ops;
 
-  void update(OpRefList& _local_fw_topo, OpRefList& _local_bw_topo, 
+  void update(OpRefList& _local_placeholder_variable_ops, 
+              OpRefList& _local_fw_topo, OpRefList& _local_bw_topo, 
               OpRefList& _local_topo, TensorIdSet& _shared_weight_tensor,
               OpIdSet& _shared_weight_p2p, OpIdSet& _shared_weight_grad_p2p, 
               TensorIdSet& _accumulated_tensor, OpIdSet& _accumulated_ops) {
+    local_placeholder_variable_ops = _local_placeholder_variable_ops;
     local_fw_topo = _local_fw_topo;
     local_bw_topo = _local_bw_topo;
     local_topo = _local_topo;

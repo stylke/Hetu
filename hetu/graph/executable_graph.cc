@@ -906,17 +906,11 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
+    HT_ASSERT(!is_placeholder_op(op) && !is_variable_op(op))
+      << "Placeholder & Variable ops should not appear in ComputeFunc!";
     bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
       return feed_dict.find(tensor->id()) != feed_dict.end();
     });
-    // if ((op->num_inputs() > 0 && op->input(0)->device().index() == 7) || (op->num_outputs() > 0 && op->output(0)->device().index() == 7)) {
-    // HT_LOG_INFO << op->type() << "," << op->id() << " BEGIN." << op->op_meta();
-    // if (op->type() == "AdamOp")
-    // HT_LOG_INFO << op->input(4)->producer()->type() << "," << op->input(4)->producer()->id() << "," << op->input(4)->producer()->op_meta();
-    // if (op->id() == 8)
-    // HT_LOG_INFO << "giudasghiuas" << feed_dict;
-    // }
-    int detect_device = 0;
     if (computed)
       continue;
 
@@ -929,8 +923,6 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
       continue;
     }
-    // if (op->placement().index() == detect_device)
-    //   HT_LOG_INFO << op->type() << "," << op->id() << " BEGIN." << op->op_meta();
 
     HT_LOG_TRACE << "Running op " << op << " (type: " << op->type() << ")...";
 
@@ -961,26 +953,32 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     NDArrayList input_vals;
     input_vals.reserve(op->num_inputs());
     for (const auto& input : op->inputs()) {
-      auto it = tensor2data.find(input->id());
-      HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
-        << "Failed to execute the \"" << op->type() << "\" operation "
-        << "(with name \"" << op->name() << "\"): "
-        << "Cannot find input " << input;
-      auto& data = it->second;
-      if (data->device() != input->placement() ||
-          data->dtype() != input->dtype()) {
-        tensor2data[input->id()] =
-          NDArray::to(data, input->placement(), input->dtype(),
-                      op->instantiation_ctx().stream_index);
+      NDArray input_val;
+      if (is_variable_op(input->producer())) {
+        input_val = GetVariableDataInner(input);     
+      } else {
+        auto it = tensor2data.find(input->id());
+        HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
+          << "Failed to execute the \"" << op->type() << "\" operation "
+          << "(with name \"" << op->name() << "\"): "
+          << "Cannot find input " << input;
+        auto& data = it->second;
+        if (data->device() != input->placement() ||
+            data->dtype() != input->dtype()) {
+          tensor2data[input->id()] =
+            NDArray::to(data, input->placement(), input->dtype(),
+                        op->instantiation_ctx().stream_index);
+        }
+        input_val = tensor2data[input->id()];
+        // should free memory until op aync compute complete!!!
+        // recved shared weight should not be erased in first micro batch. but can be multi copied and erased in later micro batches
+        if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end() 
+            && ((micro_batch_id == 0 && shared_weight_tensor.find(input->id()) == shared_weight_tensor.end()) 
+                || micro_batch_id > 0)) {
+          tensor2data.erase(input->id());
+        }
       }
-      input_vals.push_back(tensor2data[input->id()]);
-      // should free memory until op aync compute complete!!!
-      // recved shared weight should not be erased in first micro batch. but can be multi copied and erased in later micro batches
-      if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end() 
-          && ((micro_batch_id == 0 && shared_weight_tensor.find(input->id()) == shared_weight_tensor.end()) 
-              || micro_batch_id > 0)) {
-        tensor2data.erase(input->id());
-      }
+      input_vals.push_back(input_val);
     }
     // if (is_shared_weight_or_grad_p2p(op)) {
     //   auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
@@ -988,18 +986,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     //   event->Block(Stream(op->placement(), kP2PStream));
     //   ncclGroupStart();
     // }
-    // if ((op->num_inputs() > 0 && op->input(0)->device().index() == 7) || (op->num_outputs() > 0 && op->output(0)->device().index() == 7))
-    // HT_LOG_INFO << op->type() << "," << op->id() << " BEGIN." << op->op_meta();
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
-    // if (op->num_inputs() > 0 && op->num_outputs() > 0 && op->input(0)->device().index() == 7) {
-    //   HT_LOG_INFO << op->type();
-    //   std::cout << "in" << std::endl;
-    //   for (int i = 0; i < op->num_inputs(); ++i)
-    //     std::cout << i << ":" << op->input(i)->id() << "-" << op->input(i)->dtype() << "-" << input_vals[i]->dtype() << std::endl;
-    //   std::cout << "out" << std::endl;
-    //   for (int i = 0; i < op->num_outputs(); ++i)
-    //     std::cout << i << ":" << op->output(i)->id() << "-" << op->output(i)->dtype() << "-" << output_vals[i]->dtype()  << std::endl;
-    // }
     // if (is_shared_weight_or_grad_p2p(op)) {
     //   ncclGroupEnd();
     // }
@@ -1007,16 +994,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     // but we still mark here in case we forget to do so in some kernels. 
     NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
     NDArray::MarkUsedBy(output_vals, op->instantiation_ctx().stream());
-    // if (op->num_inputs() > 0 && op->input(0)->device().index() == 7) {
-    // HT_LOG_INFO << op->type() << "," << op->id() << "," << op->input(0)->dtype() << "," << input_vals[0]->dtype() << " POD." 
-    // << op->input(0)->producer()->id() << " " << op->input(0)->producer()->type();
-    // }
-    // if (op->placement().index() == detect_device)
-    //   HT_LOG_INFO << op->type() << "," << op->id() << " MID." << op->op_meta() << " micro_batch_id-" << micro_batch_id << "\nCTX:" <<
-    //   op->instantiation_ctx().placement_group << "," << op->instantiation_ctx().placement << "," << op->instantiation_ctx().stream_index;
-    // // op->Sync(micro_batch_id);
-    // if (op->placement().index() == detect_device)
-    //   HT_LOG_INFO << op->type() << "," << op->id() << " POD." << op->op_meta();
+    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op;
     for (size_t i = 0; i < op->num_outputs(); i++) {
       const auto& output = op->output(i);
       if (accumulated_tensor.find(output->id()) != accumulated_tensor.end()) {
@@ -1147,14 +1125,13 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       return false;
     };
 
-    // get local_fw_topo and local_bw_topo
+    // get local_fw_topo and local_bw_topo, not contains placeholder & varivale ops
     // ops to substitute comm_op is in the same placement_group, but in the different placement
-    OpRefList local_fw_topo, local_bw_topo, local_topo;
-    auto get_local_topo = [&](OpRefList& _topo, OpRefList& _local_topo) {
+    OpRefList local_fw_topo, local_bw_topo, local_placeholder_variable_ops, local_topo;
+    auto get_local_topo = [&](OpRefList& _topo, OpRefList& _local_topo, OpRefList& _placeholder_variable_ops) {
       // move p2p send op to topo tail
       OpRefList send_op_list;
       OpRefList recv_op_list;
-      OpRefList placehoder_variable_op_list;
       OpRefList compute_op_list;
       OpRefList update_op_list;
       OpRefList share_weight_recv_op_list;
@@ -1163,14 +1140,10 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // so 0 can send half of pre-half to 4, 2 can send another half of pre-half to 6, then 4 and 6 do gather(at this time, 4 and 6
       // are waiting for pp bubbles, the time will be reused)
       for (auto& op_ref : _topo) {
-        if (op_ref.get()->placement() == local_device 
-            || op_ref.get()->op_meta().is_step
-            // || (op_ref.get()->placement().is_cpu() && op_ref.get()->op_meta().name.find("Comm") != std::string::npos)
-          ) {
+        if (op_ref.get()->placement() == local_device || op_ref.get()->op_meta().is_step) {
           // share weight p2p send op will not block anything! so treat it as commom compute op
-          if (is_fw_share_weight_p2p_send(op_ref)) {
-            placehoder_variable_op_list.push_back(op_ref);
-          } else if (is_bw_share_weight_grad_p2p_send(op_ref)) {
+          // fw weight share only in micro batch 0, bw weight grad share only in last micro batch
+          if (is_fw_share_weight_p2p_send(op_ref) || is_bw_share_weight_grad_p2p_send(op_ref)) {
             compute_op_list.push_back(op_ref);
           } else if (is_fw_share_weight_p2p_recv(op_ref) || is_bw_share_weight_grad_p2p_recv(op_ref)) {
             share_weight_recv_op_list.push_back(op_ref);
@@ -1180,7 +1153,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             recv_op_list.push_back(op_ref);
           } else {
             if (is_placeholder_op(op_ref) || is_variable_op(op_ref)) {
-              placehoder_variable_op_list.push_back(op_ref);
+              _placeholder_variable_ops.push_back(op_ref);
             } else if (is_all_reduce_op(op_ref) && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0))) {
               update_op_list.push_back(op_ref);
             } else if (is_optimizer_update_op(op_ref)) {
@@ -1195,18 +1168,19 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       }
       _local_topo.insert(_local_topo.end(), share_weight_recv_op_list.begin(), share_weight_recv_op_list.end());
       _local_topo.insert(_local_topo.end(), recv_op_list.begin(), recv_op_list.end());
-      _local_topo.insert(_local_topo.end(), placehoder_variable_op_list.begin(), placehoder_variable_op_list.end());
       _local_topo.insert(_local_topo.end(), compute_op_list.begin(), compute_op_list.end());
       _local_topo.insert(_local_topo.end(), send_op_list.begin(), send_op_list.end());
       // move move allreduce & udpate & group op after pipeline p2p, to make p2p & allreduce overlap
       _local_topo.insert(_local_topo.end(), update_op_list.begin(), update_op_list.end());
     };
-    get_local_topo(fw_topo, local_fw_topo);
-    get_local_topo(bw_topo, local_bw_topo);  
+    get_local_topo(fw_topo, local_fw_topo, local_placeholder_variable_ops);
+    get_local_topo(bw_topo, local_bw_topo, local_placeholder_variable_ops); 
 
-    local_topo.reserve(local_fw_topo.size() + local_bw_topo.size());
+    local_topo.reserve(local_placeholder_variable_ops.size() + local_fw_topo.size() + local_bw_topo.size());
+    local_topo.insert(local_topo.end(), local_placeholder_variable_ops.begin(), local_placeholder_variable_ops.end());
     local_topo.insert(local_topo.end(), local_fw_topo.begin(), local_fw_topo.end());
     local_topo.insert(local_topo.end(), local_bw_topo.begin(), local_bw_topo.end());
+    // HT_LOG_DEBUG << local_device << ": local placeholder & variable ops: " << local_placeholder_variable_ops;
     // HT_LOG_DEBUG << local_device << ": local fw topo: " << local_fw_topo; 
     // HT_LOG_DEBUG << local_device << ": local bw topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo end...";
@@ -1325,7 +1299,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     // HT_LOG_INFO << local_device << ": accumulated ops: " << accumulated_ops << "\nlocal_bw_topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get accumulated tensor & ops end...";
     // update & cached execute plan 
-    _execute_plan.update(local_fw_topo, local_bw_topo, local_topo, shared_weight_tensor, 
+    _execute_plan.update(local_placeholder_variable_ops, local_fw_topo, local_bw_topo, local_topo, shared_weight_tensor, 
                          shared_weight_p2p, shared_weight_grad_p2p, accumulated_tensor, accumulated_ops);
     // sync partially
     std::vector<int> ranks;
@@ -1368,7 +1342,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // flush update once for m micro batches
   Tensor2NDArrayMap grad_accumulation;
 
-  // get feed in dict & split into m micro batches
+  // placeholder ops: get feed in dict & split into m micro batches
   for (const auto& kv : feed_dict) {
     if (!kv.second.is_defined()) continue; // only feed placeholder_op in local device group
     auto micro_batches = NDArray::split(kv.second, num_micro_batches);
@@ -1378,6 +1352,15 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       tensor2data_list[i][kv.first] = micro_batches[i];
     }
   }
+
+  // // variable ops: directly get data from graph, may cost more time when params is large?
+  // for (auto& op: _execute_plan.local_placeholder_variable_ops) {
+  //   if (is_variable_op(op)) {
+  //     for (int i = 0; i < num_micro_batches; i++) {
+  //       tensor2data_list[i][op->output(0)->id()] = Graph::GetVariableData(op->output(0));
+  //     }
+  //   }
+  // }
   
   std::unordered_map<TensorId, size_t> fetch_indices;
   for (size_t i = 0; i < fetches.size(); i++)
