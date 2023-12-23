@@ -183,8 +183,16 @@ if __name__ == '__main__':
     parser.add_argument(
         "--use_flash_attn", type=bool, default=False, help="Use Flash Attention."
     )
+    parser.add_argument(
+        "--bf16", action="store_true", help="Use bfloat16."
+    )    
     args = parser.parse_args()
     with ht.graph("define_and_run"):
-        with ht.autocast(ht.bfloat16):
+        if args.bf16:
+            precision = "ht.bfloat16"
+        else:
+            precision = "ht.float32"
+        print(f'{local_device}: use precision {precision}')
+        with ht.autocast(eval(precision)):            
             pretrain(args)
             print(f'{local_device}: train hetu 3d parallel end...')

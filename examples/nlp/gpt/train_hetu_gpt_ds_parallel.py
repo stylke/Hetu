@@ -209,7 +209,16 @@ if __name__ == '__main__':
     parser.add_argument(
         "--dropout_prob", type=float, default=0.1, help="Dropout rate."
     )
+    parser.add_argument(
+        "--bf16", action="store_true", help="Use bfloat16."
+    )
     args = parser.parse_args()
     with ht.graph("define_and_run"):
-        pretrain(args)
-        print('hetu ds parallel end...')
+        if args.bf16:
+            precision = "ht.bfloat16"
+        else:
+            precision = "ht.float32"
+        print(f'{local_device}: use precision {precision}')
+        with ht.autocast(eval(precision)):            
+            pretrain(args)
+            print(f'{local_device}: train hetu ds parallel end...')    

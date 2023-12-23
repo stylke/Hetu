@@ -20,4 +20,5 @@ python train_hetu_gpt_ds_parallel.py \
 --lr 1e-6 \
 --adam_weight_decay 0.01 \
 --hidden_act relu \
---dropout_prob 0.1
+--dropout_prob 0.1 \
+# --bf16 \
