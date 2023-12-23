@@ -88,8 +88,9 @@ def pretrain(args):
     loss_mean = loss
 
     print(f'{local_device}: optimizer minimize begin...')
-    #opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
+    # opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
     opt = ht.AdamOptimizer(lr=args.lr)
+
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
 
@@ -117,7 +118,10 @@ def pretrain(args):
                     attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([dp_size, config.seq_len]),
                     masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([dp_size, config.seq_len]),
                     # loss_position_sum: np.array([np.where(batch_data['masked_lm_labels'].reshape(-1, 1)!=-1)[0].shape[0]]).astype(np.float32), # shape=[1,]
-                }                                                                                                            
+                }
+                # 统计masked_lm_labels中为-1的个数及占比
+                # print(f'{local_device}: masked_lm_labels=-1 num={np.where(batch_data["masked_lm_labels"].reshape(-1, 1)==-1)[0].shape[0]}, 
+                #       ratio={np.where(batch_data["masked_lm_labels"].reshape(-1, 1)==-1)[0].shape[0]/(batch_data["masked_lm_labels"].reshape(-1, 1).shape[0])}')
                 results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
                 end_time = time.time()
                 if device_groups[1].contains(local_device):

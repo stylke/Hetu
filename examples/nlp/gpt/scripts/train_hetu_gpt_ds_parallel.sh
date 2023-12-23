@@ -7,11 +7,11 @@ SEQ_LEN=${4:-128}
 mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python train_hetu_gpt_ds_parallel.py \
---ds_parallel_config ds_parallel_config/dp2_tp4.json \
+--ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json \
 --global_batch_size 8 \
 --num_micro_batches 2 \
 --dataset wikicorpus_en \
---vocab_size 30522 \
+--vocab_size 30592 \
 --hidden_size $HIDDEN_SIZE \
 --num_hidden_layers $NUM_LAYERS \
 --num_attention_heads $NUM_HEADS \

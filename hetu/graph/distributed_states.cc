@@ -26,6 +26,7 @@ void DistributedStates::set_distributed_states(const DistributedStates& dst_dist
   if (_device_num == -1) {
     _device_num = dst_distributed_states._device_num;
   }
+  _zero = dst_distributed_states._zero;
   set_states(dst_distributed_states._states); // set_states会检查是否和device_num相匹配
   set_order(dst_distributed_states._order); // set_order会检查是否和states相匹配
   // dst_distributed_states已经和tensor绑定过，即placement_group不为空时

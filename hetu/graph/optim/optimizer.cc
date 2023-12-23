@@ -30,19 +30,22 @@ Tensor Optimizer::ApplyGradients(const GradAndVarList& grads_and_vars,
   return MakeGroupOp(OpMeta().set_extra_deps(updated_params).set_name(name));
 }
 
-Tensor Optimizer::MakeStates(const Tensor& variable, const OpName& state_name) {
+// the distributed states for adam mean/variance was dummy, just do allgather for dp groups in later execution
+Tensor Optimizer::MakeStates(const Tensor& variable, const Tensor& grad, const OpName& state_name) {
   const auto& producer = variable->producer();
   HT_VALUE_ERROR_IF(!producer->is_parameter());
-  // special case: Varibale States should be set distributed_states
+  // special case: Varibale States should be set distributed_states as ds_grad (whether zero or not)
   const DistributedStates& ds_variable = variable->get_distributed_states(); 
-  HT_ASSERT (ds_variable.is_valid()) 
+  const DistributedStates& ds_grad = grad->get_distributed_states();
+  HT_ASSERT (ds_variable.is_valid() && ds_grad.is_valid()) 
     << "Diastributed States for varibale " << variable << " must be valid!";  
-  Tensor states = MakeVariableOp(ZerosInitializer(), variable->shape(),
-                                 variable->dtype(), false, ds_variable, 
-                                 OpMeta()
-                                   .set_device_group(producer->device_group())
-                                   .set_eager_device(producer->eager_device())
-                                   .set_name(variable->name() + "_" + state_name));
+
+  Tensor states = MakeParallelVariableOp(ZerosInitializer(), grad->global_shape(),
+                                         ds_grad, 0, grad->dtype(), false,
+                                         OpMeta()
+                                          .set_device_group(producer->device_group())
+                                          .set_eager_device(producer->eager_device())
+                                          .set_name(variable->name() + "_" + state_name));  
 
   return std::move(states);
 }
@@ -76,7 +79,7 @@ Tensor SGDOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& in
       return MakeSGDUpdateWithGradScalerOp(var, grad, infinite_count, learning_rate(), update_op_meta);
     return MakeSGDUpdateOp(var, grad, learning_rate(), update_op_meta);
   } else {
-    return MakeMomentumUpdateOp(var, grad, MakeStates(var, "velocity"),
+    return MakeMomentumUpdateOp(var, grad, MakeStates(var, grad, "velocity"),
                                 learning_rate(), momentum(), nesterov(),
                                 update_op_meta);
   }
@@ -88,18 +91,18 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
   auto update_op_meta = OpMeta()
                           .set_device_group(var->producer()->device_group())
                           .set_name("Update_" + var->name());
-  NDArray step = NDArray::ones({1}, kCPU, kInt64, kBlockingStream);
   HTShape step_shape = {1};
-  Tensor step1 = MakeVariableOp(OnesInitializer(), step_shape, kInt64,
+  Tensor step = MakeVariableOp(OnesInitializer(), step_shape, kInt64,
                                 false, var->get_distributed_states(), 
                                 OpMeta()
                                   .set_device_group(var->producer()->device_group())
                                   .set_eager_device(kCPU)
                                   .set_name(var->name() + "_step")
                                   .set_is_step(true));
-  return MakeAdamOp(var, grad, MakeStates(var, "mean"),
-                    MakeStates(var, "variance"),
-                    learning_rate(), step1, beta1(), beta2(),
+  // var: dup in dp group, grad: reduce-scatter in dp group, mean/var: same as grad
+  return MakeAdamOp(var, grad, MakeStates(var, grad, "mean"),
+                    MakeStates(var, grad, "variance"),
+                    learning_rate(), step, beta1(), beta2(),
                     eps(), weight_decay(), update_op_meta);
 }
 

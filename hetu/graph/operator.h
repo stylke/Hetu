@@ -794,7 +794,8 @@ static const uint64_t INPLACE_OP = 1ul << 17;
 static const uint64_t COMM_SPLIT_OP = 1ul << 19;
 static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t UNKNOWN_OP = 1ul << 21;
-static const uint64_t DATA_TRANSFER_OP = 1ul << 57;
+static const uint64_t DATA_TRANSFER_OP = 1ul << 56;
+static const uint64_t ADAM_OP = 1ul << 57;
 static const uint64_t SUM_OP = 1ul << 58;
 static const uint64_t SLICE_OP = 1ul << 59;
 static const uint64_t LOSS_OP = 1ul << 60;
@@ -833,6 +834,7 @@ DECLARE_OP_INDICATOR_CHECKER(batched_isend_irecv, BATCHED_ISEND_IRECV_OP)
 DECLARE_OP_INDICATOR_CHECKER(gather, GATHER_OP)
 DECLARE_OP_INDICATOR_CHECKER(scatter, SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(inplace, INPLACE_OP)
+DECLARE_OP_INDICATOR_CHECKER(grad_reduce, ALL_REDUCE_OP | REDUCE_SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm_split, COMM_SPLIT_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm, COMM_OP)
 DECLARE_OP_INDICATOR_CHECKER(unknown, UNKNOWN_OP)
@@ -844,6 +846,7 @@ DECLARE_OP_INDICATOR_CHECKER(communucation,
                                P2P_OP | BATCHED_ISEND_IRECV_OP |
                                GATHER_OP | SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(data_transfer, DATA_TRANSFER_OP)
+DECLARE_OP_INDICATOR_CHECKER(adam, ADAM_OP)
 DECLARE_OP_INDICATOR_CHECKER(sum, SUM_OP)                               
 DECLARE_OP_INDICATOR_CHECKER(slice, SLICE_OP)
 DECLARE_OP_INDICATOR_CHECKER(loss, LOSS_OP)
