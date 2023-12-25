@@ -6,39 +6,18 @@ namespace hetu {
 namespace graph {
 
 NDArrayList ArrayReshapeOpImpl::DoCompute(Operator& op,
-                                     const NDArrayList& inputs,
-                                     RuntimeContext& ctx) const {
-  if (inplace()) {
-    NDArrayList outputs = {NDArray::reshape(inputs.at(0), get_output_shape(), op->instantiation_ctx().stream_index)};
-    return outputs;
-  }
-  else {
-    NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
-    DoCompute(op, inputs, outputs, ctx);
-    return outputs;
-  }
-}
-
-void ArrayReshapeOpImpl::DoCompute(Operator& op,
-                                   const NDArrayList& inputs,
-                                   NDArrayList& outputs, 
-                                   RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-                                  hetu::impl::Reshape, inputs.at(0),
-                                  outputs.at(0), op->instantiation_ctx().stream());
+                                          const NDArrayList& inputs,
+                                          RuntimeContext& ctx) const {
+  auto output_shape = DoInferShape(op, {inputs.at(0)->shape()}, ctx).at(0);
+  NDArray output = NDArray::reshape(inputs.at(0), output_shape, op->instantiation_ctx().stream_index);
+  return {output};
 }
 
 TensorList ArrayReshapeOpImpl::DoGradient(Operator& op, 
                                           const TensorList& grad_outputs) const {
-  if (grad_outputs.at(0).is_defined() && grad_outputs.at(0))
-    if (inplace()) {
-      return {MakeViewGradientOp(grad_outputs.at(0), op->input(0), op->input(0)->shape(), op->grad_op_meta().set_name(op->grad_name()))};
-    }
-    else
-      return {MakeArrayReshapeGradientOp(grad_outputs.at(0), op->input(0),
-                                         op->grad_op_meta().set_name(op->grad_name()))};
-  else 
-    return { Tensor() };
+  return {op->requires_grad(0) ? MakeArrayReshapeGradientOp(grad_outputs.at(0), op->input(0), op->input(0)->shape(),
+                                                            op->grad_op_meta().set_name(op->grad_name()))
+                               : Tensor()};
 }
 
 HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op, 
@@ -47,9 +26,6 @@ HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op,
   int64_t input_size = 1;
   HTShape input_shape = input_shapes.at(0);
   int64_t input_len = input_shape.size();
-  // for (size_t i = 0; i < input_len; ++i) {
-  //   input_size *= input_shape[i];
-  // }
   // check if there exists -1 in output_shape
   int64_t idx = -1;
   size_t cnt = 0;
@@ -63,7 +39,6 @@ HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op,
     }
     output_shape = get_local_output_shape(global_shape, input_ds);
   }  
-  // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": DoInferShape op " << op << " output shape is " << output_shape;
   int64_t output_len = output_shape.size();
   for (size_t i = 0; i < input_len; ++i) {
     if (input_shape[i] == -1) {
@@ -94,8 +69,8 @@ HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op,
 
 // deprecated: only used in gpt inference, before symbolic shape is realized
 HTShapeList ArrayReshapeOpImpl::DoInferDynamicShape(Operator& op, 
-                                             const HTShapeList& input_shapes, 
-                                             RuntimeContext& ctx) const {
+                                                    const HTShapeList& input_shapes, 
+                                                    RuntimeContext& ctx) const {
   int64_t input_size = 1;
   HTShape input_shape = input_shapes.at(0);
   int64_t input_len = input_shape.size();
@@ -136,23 +111,8 @@ void ArrayReshapeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& ou
 NDArrayList ArrayReshapeGradientOpImpl::DoCompute(Operator& op,
                                                   const NDArrayList& inputs,
                                                   RuntimeContext& ctx) const {
-  if (inplace()) {
-    NDArrayList outputs = {NDArray::reshape(inputs.at(0), input_shape(), op->instantiation_ctx().stream_index)};
-    return outputs;
-  }
-  else {
-    NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
-    DoCompute(op, inputs, outputs, ctx);
-    return outputs;
-  }
-}
-
-void ArrayReshapeGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
-                                           NDArrayList& outputs,
-                                           RuntimeContext& ctx) const {
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-                                  hetu::impl::Reshape, inputs.at(0),
-                                  outputs.at(0), op->instantiation_ctx().stream());
+  NDArray output = NDArray::reshape(inputs.at(0), input_shape(), op->instantiation_ctx().stream_index);
+  return {output};
 }
 
 HTShapeList
@@ -196,26 +156,10 @@ Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
       std::move(op_meta))->output(0);
 }
 
-Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input,
+Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input, const HTShape& in_shape,
                                   OpMeta op_meta) {
   return Graph::MakeOp(
-      std::make_shared<ArrayReshapeGradientOpImpl>(),
-      {std::move(grad_output), std::move(ori_input)},
-      std::move(op_meta))->output(0);
-}
-
-Tensor MakeViewOp(Tensor input, const HTShape& output_shape,
-                  OpMeta op_meta) {
-  return Graph::MakeOp(
-      std::make_shared<ArrayReshapeOpImpl>(output_shape, true),
-      {std::move(input)},
-      std::move(op_meta))->output(0);
-}
-
-Tensor MakeViewGradientOp(Tensor grad_output, Tensor ori_input, const HTShape& in_shape,
-                          OpMeta op_meta) {
-  return Graph::MakeOp(
-      std::make_shared<ArrayReshapeGradientOpImpl>(true, in_shape),
+      std::make_shared<ArrayReshapeGradientOpImpl>(in_shape),
       {std::move(grad_output), std::move(ori_input)},
       std::move(op_meta))->output(0);
 }

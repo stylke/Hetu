@@ -276,11 +276,6 @@
   args: Tensor input, HTShape output_shape, int64_t padding_axis
   self: input
 
-- name: view
-  op: ViewOp
-  args: Tensor input, HTShape output_shape
-  self: input
-
 - name: slice
   op: SliceOp
   args: Tensor input, HTShape begin_pos, HTShape output_shape

@@ -23,18 +23,16 @@ class ArrayReshapeOpImpl final : public OpInterface {
 
  public:
   // symbolic shape constructor
-  ArrayReshapeOpImpl(const SyShape& output_shape, int64_t padding_axis = -1, bool is_inplace = false)
+  ArrayReshapeOpImpl(const SyShape& output_shape, int64_t padding_axis = -1)
   : OpInterface(quote(ArrayReshapeOp)),
      _global_output_shape(output_shape), 
-     _padding_axis(padding_axis), 
-     _inplace(is_inplace) { // default is global output shape, if distributed, then turn into local output shape
+     _padding_axis(padding_axis) { // default is global output shape, if distributed, then turn into local output shape
   }
   // fixed shape constructor
-  ArrayReshapeOpImpl(const HTShape& output_shape, int64_t padding_axis = -1, bool is_inplace = false)
+  ArrayReshapeOpImpl(const HTShape& output_shape, int64_t padding_axis = -1)
   : OpInterface(quote(ArrayReshapeOp)),
      _global_output_shape(output_shape.begin(), output_shape.end()), 
-     _padding_axis(padding_axis), 
-     _inplace(is_inplace) { // default is global output shape, if distributed, then turn into local output shape
+     _padding_axis(padding_axis) { // default is global output shape, if distributed, then turn into local output shape
   }
 
   HTShape get_output_shape() const {
@@ -50,17 +48,12 @@ class ArrayReshapeOpImpl final : public OpInterface {
     return _padding_axis;
   }
 
-  bool inplace() const {
-    return _inplace;
-  }
-
   HTShape get_output_shape(const HTShape& input_shape) const {
     int numel = 1;
     for (auto d : input_shape) {
       numel *= d;
     }
     HTShape output_shape = get_output_shape();
-    // HT_LOG_DEBUG << "ArrayReshapeOpImpl get_output_shape(), output_shape is" << output_shape << " and input shape is " << input_shape;
     int index = -1;
     int numel_output = 1;
     for (int i = 0; i < output_shape.size(); i++) {
@@ -164,9 +157,15 @@ class ArrayReshapeOpImpl final : public OpInterface {
       output_shape = get_local_output_shape(inputs[0]->global_shape(), 
                                             inputs[0]->get_distributed_states());                                       
     }
-    NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
-                                           .set_shape(output_shape)
-                                           .set_device(inputs[0]->device());
+    NDArrayMeta output_meta;
+    if (inputs[0]->is_contiguous()) {
+      output_meta = inputs[0]->meta();
+      output_meta.view(output_shape);
+    } else {
+      output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
+                                 .set_shape(output_shape)
+                                 .set_device(inputs[0]->device());
+    }
     return {output_meta};
   };
 
@@ -174,7 +173,7 @@ class ArrayReshapeOpImpl final : public OpInterface {
                       const OpMeta& op_meta) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const override;
+                 RuntimeContext& ctx) const {};
 
   NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
                         RuntimeContext& runtime_ctx) const override;
@@ -187,9 +186,7 @@ class ArrayReshapeOpImpl final : public OpInterface {
   HTShapeList DoInferDynamicShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
   SyShape _global_output_shape;
-  // HTShape _local_output_shape;
   int64_t _padding_axis;
-  bool _inplace;
 
  public:
   inline bool require_contig_inputs() const override {
@@ -199,8 +196,7 @@ class ArrayReshapeOpImpl final : public OpInterface {
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ArrayReshapeOpImpl&>(rhs);
-      return (get_output_shape() == rhs_.get_output_shape()
-              && inplace() == rhs_.inplace());
+      return get_output_shape() == rhs_.get_output_shape();
     }
     return false;
   }
@@ -218,18 +214,11 @@ Tensor MakeArrayReshapeOp(Tensor input, const SyShape& output_shape,
 Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
                           int64_t padding_axis, OpMeta op_meta = OpMeta());
 
-Tensor MakeViewOp(Tensor input, const HTShape& output_shape,
-                  OpMeta op_meta = OpMeta());
-
 class ArrayReshapeGradientOpImpl final : public OpInterface {
 
  public:
-  ArrayReshapeGradientOpImpl(bool is_inplace = false, const HTShape& in_shape = {})
-  : OpInterface(quote(ArrayReshapeGradientOp)), _inplace(is_inplace), _input_shape(in_shape) {
-  }
-
-  bool inplace() const {
-    return _inplace;
+  ArrayReshapeGradientOpImpl(const HTShape& in_shape)
+  : OpInterface(quote(ArrayReshapeGradientOp)), _input_shape(in_shape) {
   }
 
   HTShape input_shape() const {
@@ -246,14 +235,12 @@ class ArrayReshapeGradientOpImpl final : public OpInterface {
                       const OpMeta& op_meta) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const override;
+                 RuntimeContext& ctx) const {};
 
   NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
                         RuntimeContext& runtime_ctx) const override;
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
-
-  bool _inplace;
 
   HTShape _input_shape;
 
@@ -265,18 +252,14 @@ class ArrayReshapeGradientOpImpl final : public OpInterface {
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ArrayReshapeGradientOpImpl&>(rhs);
-      return (inplace() == rhs_.inplace()
-              && input_shape() == rhs_.input_shape());
+      return input_shape() == rhs_.input_shape();
     }
   }
 
 };
 
-Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input,
+Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input, const HTShape& in_shape,
                                   OpMeta op_meta = OpMeta());
-
-Tensor MakeViewGradientOp(Tensor grad_output, Tensor ori_input, const HTShape& in_shape,
-                          OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu
