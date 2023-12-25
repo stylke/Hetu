@@ -11,5 +11,6 @@ gpt/debug_*
 gpt/scripts/debug_*
 gpt/core_python_*
 gpt/lhy.txt
+gpt/lhy_symbolic_train_ds.py
 gpt/nsight/
 *.swp

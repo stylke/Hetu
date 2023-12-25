@@ -72,7 +72,7 @@ DistributedStates ElewiseDeduceStates(Tensor a, Tensor b) {
         last_ext_distributed = 1;
       }    
     } else {
-      HT_LOG_ERROR << "This case shouldn't be happened!"; 
+      HT_RUNTIME_ERROR << "This case shouldn't be happened!"; 
     }
   }
   if (size_a > size_b) { // [1] is only in tensor b

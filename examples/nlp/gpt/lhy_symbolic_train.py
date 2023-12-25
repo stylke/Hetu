@@ -67,9 +67,9 @@ def pretrain(args):
         num_epochs = args.epochs
         lr = args.lr
         
-        tp = 2
+        max_tp = 2
         vocab_size = args.vocab_size
-        while vocab_size % tp != 0:
+        while vocab_size % max_tp != 0:
             vocab_size += 1
 
         config = GPTConfig(vocab_size=vocab_size, 
@@ -110,12 +110,11 @@ def pretrain(args):
         token_type_ids = None
         attention_mask = None
         masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, max_len], ds=ds_split0_dup, device_group=device_groups[1], name='masked_lm_labels')
+        vocab_start_index = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, 1], ds=ds_split0_dup, device_group=device_groups[0], name='vocab_start_index')
         
         # ---- Bind symbolic shape ----
-        # config.micro_batch_size_symbol = ht.IntSymbol(2)
-        # config.seq_len_symbol = ht.IntSymbol(5)
-        # 下面这种bind方法更好
-        config.micro_batch_size_symbol = input_ids.symbolic_shape[0] * config.dp
+        # config.micro_batch_size_symbol = input_ids.symbolic_shape[0] * config.dp
+        config.micro_batch_size_symbol = ht.IntSymbol(2)
         config.seq_len_symbol = input_ids.symbolic_shape[1]
         
         # ---- Hetu model definition ----
@@ -136,7 +135,8 @@ def pretrain(args):
                                 mask=mask,
                                 attention_mask=attention_mask,
                                 token_type_ids=token_type_ids,
-                                labels=masked_lm_labels)
+                                labels=masked_lm_labels,
+                                vocab_start_index=vocab_start_index)
         print(f'{local_device}: build model end...')
 
         loss_mean = loss
@@ -146,8 +146,10 @@ def pretrain(args):
         train_op = opt.minimize(loss_mean)
         print(f'{local_device}: optimizer minimize end...')
         
+        total_devices_num = 8
         encoded_inputs = []
         seq_lens = []
+        parallel_plan = []
         input = ['Hello, I am',
                 "Good morning! Today",
                 "There is a question",
@@ -158,59 +160,66 @@ def pretrain(args):
                 "Where can I find"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
         seq_lens.append(4)
+        parallel_plan.append({'pp': 2, 'dp': 2, 'tp': 2})
         input = ['Hello, I am a',
                 "Good morning! Today is",
                 "There is a question about",
-                "Where can I find the"]
+                "Where can I find the",
+                'Cool, you are so',
+                "Well done! The thing",
+                "I have so many things",
+                "Why the child is going",
+                'I like playing tennis and',
+                "Do you think this apple",
+                "This sounds good for me",
+                "Have you ever been to",
+                'It is my pleasure to',
+                "I think people are all",
+                "Is there any chance that",
+                "We are good friends and"]
         encoded_inputs.append(tokenizer(input, return_tensors='np'))
         seq_lens.append(5)
-        input = ['Hello, I am a good',
-                "Good morning! Today is a",
-                "There is a question about whether",
-                "Where can I find the best"]
-        encoded_inputs.append(tokenizer(input, return_tensors='np'))
-        seq_lens.append(6)
-        input = ['Hello, I am a',
-                "Good morning! Today is",
-                "There is a question about",
-                "Where can I find the"]
-        encoded_inputs.append(tokenizer(input, return_tensors='np'))
-        seq_lens.append(5)
+        parallel_plan.append({'pp': 2, 'dp': 4, 'tp': 1})
 
-        for round in range(4):
+        for round in range(len(seq_lens)):
             encoded_input = encoded_inputs[round]
             global_batch_size = len(encoded_input['input_ids'])
             seq_len = seq_lens[round]
-            dp_size = global_batch_size // config.dp
-            for i in range(config.dp):
-                # device 0, 1 读取第偶数个batch; device 2, 3 读取第奇数个batch
-                if local_device_index < devices_num / 2 and i % 2 != 0:
-                    continue
-                if local_device_index >= devices_num / 2 and i % 2 != 1:
-                    continue
-                # start_time = time.time()
-                start = dp_size * i
-                end = dp_size * (i + 1)
-                feed_dict = {
-                    input_ids: encoded_input['input_ids'][start:end,:].astype(np.int64),
-                    position_ids: get_position_ids(0, seq_len, global_batch_size, ds_split0_dup), # [batch_size, seq_len]
-                    # attention_mask: np.ones((dp_size, seq_len)).astype(np.float32),
-                    masked_lm_labels: encoded_input['input_ids'][start:end,:].astype(np.int64),
-                }    
-                for device_group_num in range(2):
-                   feed_dict[causal_mask[device_group_num]] = get_causal_mask(0, seq_len, seq_len, global_batch_size, config.n_head, ds_split01) # [batch_size, num_heads, seq_len, seq_len]    
-                   feed_dict[mask[device_group_num]] = get_mask(seq_len, global_batch_size, config.n_head, ds_split01) # [batch_size, num_heads, seq_len, seq_len]                                                                                                    
-                results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
-                # end_time = time.time()
-                if device_groups[1].contains(local_device):
-                    loss_out = results[0].numpy(force=True).mean()
-                    # print(f'device = {local_device}, lm_logits = {results[1].numpy(force=True)[:, -1, :]}, loss = {loss_out}')
-                    print(f'device = {local_device}, round = {round}, loss = {loss_out}')
-            
+            pp = parallel_plan[round]['pp']
+            dp = parallel_plan[round]['dp']
+            tp = parallel_plan[round]['tp']
+            # 当前local device取第几个dp的小batch
+            dp_num = local_device_index % (total_devices_num // pp)
+            dp_num = dp_num // (total_devices_num // pp // dp)
+            dp_size = global_batch_size // dp
+            start = dp_size * dp_num
+            end = dp_size * (dp_num + 1)
+            config.micro_batch_size_symbol.set_data(global_batch_size // pp)
+            # feed_dict
+            feed_dict = {
+                input_ids: encoded_input['input_ids'][start:end,:].astype(np.int64),
+                position_ids: get_position_ids(0, seq_len, global_batch_size, ht.DistributedStates(total_devices_num // pp, {-1: tp, 0: dp}, [0, -1])), # [batch_size, seq_len]
+                # attention_mask: np.ones((dp_size, seq_len)).astype(np.float32),
+                masked_lm_labels: encoded_input['input_ids'][start:end,:].astype(np.int64),
+                vocab_start_index: np.ones((dp_size, 1)).astype(np.int64) * (vocab_size // tp * (local_device_index % tp))
+            }    
+            # for now, we only consider pp = 2
+            for device_group_num in range(2):
+                feed_dict[causal_mask[device_group_num]] = get_causal_mask(0, seq_len, seq_len, global_batch_size, config.n_head, ht.DistributedStates(4, {0: dp, 1: tp}, [0, 1])) # [batch_size, num_heads, seq_len, seq_len]    
+                feed_dict[mask[device_group_num]] = get_mask(seq_len, global_batch_size, config.n_head, ht.DistributedStates(4, {0: dp, 1: tp}, [0, 1])) # [batch_size, num_heads, seq_len, seq_len]                                                                                                    
+            # start_time = time.time()
+            results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
+            # end_time = time.time()
+            # for now, we only consider pp = 2
+            if device_groups[1].contains(local_device):
+                loss_out = results[0].numpy(force=True).mean()
+                # print(f'device = {local_device}, lm_logits = {results[1].numpy(force=True)[:, -1, :]}, loss = {loss_out}')
+                print(f'device = {local_device}, round = {round}, loss = {loss_out}')
+        
     save_checkpoint(model, "./checkpoint/temp", config=config, local_device=local_device)
     # print(f"device = {local_device}, test weight = {model.state_dict()['transformer.h.5.mlp.parallel_mlp.dense_4h_to_h.weight']}")
     print(f'device = {local_device}, save model sucessfully!')
-    
+        
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

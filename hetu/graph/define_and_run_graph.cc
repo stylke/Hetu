@@ -6,6 +6,9 @@
 namespace hetu {
 namespace graph {
 
+// changing parallel plan
+static size_t change_parallel_test_case = 0;
+
 Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
                                          TensorList inputs, OpMeta op_meta) {
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
@@ -95,7 +98,7 @@ DeviceGroup DefineAndRunGraph::GetVariableDeviceGroupInner(const Tensor& tensor)
 }
 
 void DefineAndRunGraph::Instantiate(const OpRefList& topo,
-                                    const Tensor2ShapeMap& shape_plan) {
+                                    Tensor2ShapeMap& shape_plan) {
 
   auto exec_graph_num = _exec_graph_plan_pool.size();
   Tensor2ShapeMap exec_shape_plan;
@@ -120,57 +123,71 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     return it->second;
   };
 
-  auto put_exec_output = [&](Tensor& tensor, Tensor& exec_tensor) -> void {
-    auto plan_it = shape_plan.find(tensor->id());
-    // In most cases, the tensor to instantiate is in the shape plan, 
-    // except for group op or other ops that leverage _extra_out_dep_linkers.
-    // Thus we just leave these op's _extra_out_dep_linkers shape to its default.
-    if (plan_it != shape_plan.end())
-      exec_tensor->set_shape(plan_it->second);
-    exec_tensor->set_is_grad(tensor->is_grad());
-    exec_shape_plan[exec_tensor->id()] = exec_tensor->shape();
+  auto handle_exec_output = [&](Tensor& tensor, Tensor& exec_tensor) -> void {
+    // assign tensor mapping
     tensor_to_exec_tensor_mapping[tensor->id()] = exec_tensor;
+    // assign shape
+    auto plan_it = shape_plan.find(tensor->id());
+    // The shape plan will be expanded step by step
+    if (plan_it != shape_plan.end()) {
+      exec_tensor->set_shape(plan_it->second);
+    } else {
+      shape_plan[tensor->id()] = exec_tensor->shape();
+    }
+    exec_shape_plan[exec_tensor->id()] = exec_tensor->shape();
+    exec_tensor->set_is_grad(tensor->is_grad());
     // assign symbolic shape
-    if (tensor->symbolic())
-      exec_tensor->set_symbolic_shape(tensor->symbolic_shape());
+    if (tensor->symbolic()) {
+      exec_tensor->copy_symbolic_shape(tensor->symbolic_shape());
+      if (is_SyShape_leaf(exec_tensor->symbolic_shape())) {
+        exec_tensor->set_symbolic_shape(exec_tensor->shape());
+      }
+    }
     // 冷启动
     auto it = _add_on_inits.find(tensor->id());
     if (it != _add_on_inits.end()) {
       Graph::ResetVariableData(exec_tensor, *it->second);
-      /*
-      // 所有的exec graph pool都需要共享，不能删除
-      // _add_on_inits.erase(tensor->id());
-      */
-      // 2023.12.9修改：之后考虑要切换plan，仅第一次使用_add_on_inits
+      // 考虑要切换plan，仅第一次使用_add_on_inits
       // 之后会使用热切换
       _add_on_inits.erase(tensor->id());
     }
   };
 
+  // Test Case: 切换并行方案
+  char* env = std::getenv("HETU_PARALLEL_CHANGE_TEST");
+  if (env != nullptr) {
+    change_parallel_test_case += 1;
+  }
+
   HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << topo;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
-    if (op_to_exec_op_mapping.find(op->id()) != op_to_exec_op_mapping.end())
-      continue;
     HT_LOG_DEBUG << "Creating an executable version of op " << op;
 
+    // 前处理
+    // 1、获取exec op的inputs
     TensorList exec_inputs, exec_in_deps;
-    std::tie(exec_inputs, exec_in_deps) =
-      Operator::transform_each_input_tensor(op, get_exec_input);
+    std::tie(exec_inputs, exec_in_deps) = Operator::transform_each_input_tensor(op, get_exec_input);
 
+    // 前处理
+    // 2、获取exec op的OpMeta，修正device_group
+    // Test Case: 例如修改pp
+    // 切换到新的并行方案（可以考虑之后记录一个op2dg）
     OpMeta exec_op_meta = OpMeta().set(op->op_meta()).set_extra_deps(std::move(exec_in_deps));
-    // 切换到新的并行方案（比如记录一个op2dg）
-    /*
-    // TODO: Test Case
-    // 手动让op的device group发生一下变化
-    if (!exec_op_meta.is_deduce_states) {
-      if (is_variable_op(op)) {
-        // pp = 2 -> pp = 1
+    if (change_parallel_test_case == 2) {
+      if (!exec_op_meta.is_deduce_states) {
+        // dp2tp(exec_op);
         // exec_op_meta.set_device_group(hetu::impl::comm::GetGlobalDeviceGroup());
-        ;
       }
-      if (is_placeholder_op(op)) {
-        ;
+    }
+
+    // TODO: a more elegant way 
+    // 当dp变成1时，一些gradient不需要allreduce了（自动在executable graph中做了）
+    // 当dp从1变多时，一些gradient需要allreduce
+    /*
+    if (is_comm_op(op)) {
+      if (exec_inputs[0]->has_distributed_states())
+      if (exec_inputs[0]->get_distributed_states().check_equal(op->output->get_distributed_states())) {
       }
     }
     */
@@ -181,35 +198,58 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
       exec_op_meta,
       *exec_graph);
 
-    // 切换到新的并行方案（比如记录一个tensor2ds来切换）
-    /*
-    // TODO: Test Case
-    // 手动让tensor的distributed states发生一下变化
-    if (!exec_op_meta.is_deduce_states) {
-      if (is_variable_op(op)) {
-        auto& variable = exec_op->output(0)
-        // tp = 2 -> tp = 1
-        // variable->set_distributed_states();
-        ;
-      }
-      if (is_placeholder_op(op)) {
-        auto& placeholder = exec_op->output(0)
-        // tp = 2 -> tp = 1
-        // placeholder->set_distributed_states();
-        ;
-      }
-    }
-    */
-
-    if (_parameter_ops.find(op->id()) != _parameter_ops.end())
-      Graph::MarkAsParameter(exec_op);
-
-    Operator::for_each_output_tensor_pair(op, exec_op, put_exec_output);
-    if (is_placeholder_op(op) || is_variable_op(op)) {
-      if (op->output(0)->has_distributed_states())
-        exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
-    }
+    // 后处理
+    // 1、建立op和exec_op的映射
+    // 2、修正op和tensor的distributed_states（只有placeholder/variable/comm需要，因为剩下的会在MakeOp的时候自动修正）
+    // Test Case: 例如修改tp
+    // 切换到新的并行方案（可以考虑之后记录一个tensor2ds）
+    // 3、标记parameter
     op_to_exec_op_mapping[op->id()] = exec_op;
+    if (!exec_op_meta.is_deduce_states && op->output(0)->has_distributed_states()) {
+      HT_ASSERT(is_variable_op(exec_op) || is_placeholder_op(exec_op))
+        << "some assumptions are wrong, plz inform Lhy";
+      exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
+    }
+    // Test Case: 手动让distributed_states发生一下变化
+    if (change_parallel_test_case == 2) {
+      // 这三个op需要特判并重新设置distributed_states与输出的shape
+      if ((is_variable_op(exec_op) && exec_op->_body->type() == "ParallelVariableOp")
+          || is_placeholder_op(exec_op) 
+          || is_comm_op(exec_op)) {
+        // dp2tp(op);
+        tp2dp(exec_op);
+        auto it = shape_plan.find(op->output(0)->id());
+        if (it == shape_plan.end()) {
+          HTShapeList input_shapes;
+          input_shapes.reserve(exec_op->num_inputs());
+          for (const auto& input : exec_op->inputs()) {
+            input_shapes.push_back(input->shape());
+          }
+          RuntimeContext runtime_ctx{};
+          auto output_shapes = exec_op->InferShape(input_shapes, runtime_ctx);
+          HT_ASSERT(output_shapes.size() == 1)
+            << "some assumptions are wrong, plz inform Lhy";
+          shape_plan[op->output(0)->id()] = output_shapes[0];
+          HT_LOG_DEBUG << exec_op << " InferShape: out shape is " << output_shapes[0];
+        }
+      }
+    }
+    if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
+      Graph::MarkAsParameter(exec_op);
+    }
+
+    // 后处理
+    // 4、建立tensor和exec_tensor的映射
+    // 5、修正tensor的shape（feed_dict以及依赖distributed states的部分op的新shape已在shape plan中，剩下的会在MakeOp的时候自动修正）
+    // 6、扩展define图的当前shape_plan和exec图的唯一exec_shape_plan
+    // 7、如果原tensor是symbolic的，那么直接复制其symbolic_shape（新的exec_op依赖同样的），并实例化symbolic shape，使得相关的symbol获知这一改变
+    // 8、冷启动
+    Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
+    // Test Case Log
+    if (change_parallel_test_case == 2 && exec_op->outputs().size() >= 1) {
+      HT_LOG_DEBUG << "exec op " << exec_op << " output ds states = " << exec_op->output(0)->get_distributed_states().get_states()
+        << " output shape = " << exec_op->output(0)->shape();
+    }
   }
 
   // assign fw_op_id map
@@ -340,22 +380,16 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     };
     OpRefList topo = Graph::TopoSort(fetches, -1, is_feed_dict_op);
     HT_LOG_DEBUG << local_device << ": global topo before deducing shape plan is " << topo;
+
+    // deprecated, but maybe useful some day
+    // move all the logic of inferring shape and distributed_states to Instantiate()
+    // MakeOp can handle most of the cases automatically
+    /*
     RuntimeContext runtime_ctx(topo.size());
     // std::unordered_set<TensorId> params;
     // 扫描global topo并推导新的shape plan
     for (auto& op_ref : topo) {
       auto& op = op_ref.get();
-      // 在Instantiate的时候处理param
-      /*
-      // 处理params
-      // 用户可能定义了某些params但实际在exec graph中并没有用到
-      bool handle_paramter_op = Operator::for_each_output_tensor(op, [&](Tensor& tensor) {
-        auto it = _parameter_ops.find(op->id());
-        if (it != _parameter_ops.end()) {
-          params.insert(tensor->id()); 
-        }
-      });
-      */
       // 设置placeholder（也有可能是中间的算子——具体要看feed_dict喂的是什么算子）的symbolic shape
       bool handle_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
         auto it = feed_dict.find(tensor->id());
@@ -400,7 +434,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         }
         // 不需要给DefineAndRun graph中的tensor设置shape
         // 有效的shape信息都在shape plan中
-        // HT_LOG_DEBUG << local_device << ": " << op->output(i) << " shape " << output_shapes[i];
+        HT_LOG_WARN << local_device << ": " << op->output(i) << " shape " << output_shapes[i];
         // op->output(i)->set_shape(output_shapes[i]);
         auto it = shape_plan.find(op->output(i)->id());
         HT_ASSERT(it == shape_plan.end()) 
@@ -408,9 +442,10 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         shape_plan.insert(std::make_pair(op->output(i)->id(), std::move(output_shapes[i]))); // move constructor
       }
     }
+    */
 
     // TODO
-    // 1、根据topo和shape plan，制定新的并行方案
+    // 1、根据topo和目前feed dict的shape plan，制定新的并行方案
     // Test Case: 这里我们在Instantiate中手动让所有tensor的ds发生一下变化
 
     // Instantiate会将新的exec_graph_plan加入pool中

@@ -46,7 +46,7 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
   // 将输出的tensor设置成symbolic的
   auto output = Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape),
                       {std::move(input)}, std::move(op_meta))->output(0);
-  output->set_symbolic_shape(std::move(output_shape)); // not leaf
+  output->copy_symbolic_shape(std::move(output_shape)); // not leaf
   HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 1: finish making";
   return output;
 }
@@ -109,7 +109,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
     outputs.emplace_back(Graph::MakeOp(
                          std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape),
                          {input}, op_meta)->output(0));
-    outputs[i]->set_symbolic_shape(std::move(output_shape));
+    outputs[i]->copy_symbolic_shape(std::move(output_shape));
   }
   HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 3: finish making";
   return outputs;

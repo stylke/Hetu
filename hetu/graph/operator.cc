@@ -149,8 +149,8 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
       for (size_t i = 0; i < output_size; i++) {
         // question: will tensor shape != NDArray shape happen in any situation
         const auto& output_shape = runtime_ctx.get_runtime_shape(op->output(i)->id());
-        // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
-        //   << " output " << i << " shape = " << output_shape;
+        HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
+          << " output " << i << " shape = " << output_shape << " ds = " << op->output(i)->get_distributed_states().ds_info();
         outputs.push_back(NDArray::empty(output_shape,
                           op->instantiation_ctx().placement,
                           op->output(i)->dtype(),
@@ -287,11 +287,6 @@ void OpDef::BlockOrSyncAllInputs(size_t micro_batch_id) {
 void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
   if (!input.is_defined())
     return;
-  // for pp case
-  const auto& input_placement_group = input->placement_group();
-  const auto& current_placement_group = instantiation_ctx().placement_group;
-  if (input_placement_group != current_placement_group)
-    return;
   // for commom case
   auto& input_op = input->producer();
   // in_degree=0 op should't be blocked
@@ -303,14 +298,14 @@ void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
     return;
   const auto& input_placement = input_op->instantiation_ctx().placement;
   const auto& current_placement = instantiation_ctx().placement;
-  HT_RUNTIME_ERROR_IF(input_placement.is_undetermined() ||
-                      (!input_placement.local()))
-    << "Input " << input << " is not instantiated or on a remote device. "
-    << "Please use P2P communication op to fetch it"
-    << "cur op = " << input->consumers() << ", cur device = " << hetu::impl::comm::GetLocalDevice();
-  if (input_placement != current_placement) {
-    // We cannot block different devices. Just sync here.
-    input_op->instantiation_ctx().stop[micro_batch_id]->Sync();
+  if (input_placement.is_undetermined() || input_placement != current_placement) {
+    // We cannot block different devices.
+    /*
+    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": op " << name() 
+      << " placement = " << current_placement
+      << " but input " << input_op->name() << " placement = " << input_placement;
+    */
+    return;
   } else if (input_op->instantiation_ctx().stream_index !=
              instantiation_ctx().stream_index) {
     // Both ops are on the same device. We can block the current op

@@ -54,6 +54,11 @@ class CommOpImpl final: public OpInterface {
     return _dst_ds;
   }
 
+  // Used for parallel plan changing
+  void set_dst_distributed_states(const DistributedStates& dst_ds) {
+    _dst_ds = dst_ds;
+  }
+
   ReductionType reduction_type() const {
     return _red_type;
   }

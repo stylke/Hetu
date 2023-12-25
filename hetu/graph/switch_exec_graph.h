@@ -23,8 +23,17 @@ class ParamSlice {
     friend class SwitchExecGraph;
 
   public:
-    ParamSlice(const std::vector<int32_t>& slice_num): 
-    _slice_num(slice_num) {
+    ParamSlice(const TensorName& block_name, const std::vector<int32_t>& slice_num): 
+      _block_name(block_name),
+      _slice_num(slice_num) {
+    }
+
+    const std::string name() const {
+      std::string suffix = "_slice";
+      for (const auto& x : _slice_num) {
+        suffix += "_" + std::to_string(x);
+      }
+      return _block_name + suffix;
     }
 
     const Tensor& OwnedSliceInst(size_t idx) const {
@@ -77,6 +86,7 @@ class ParamSlice {
     void ParamSliceComm(Device2DTListPairMap& send_mapping, Device2DTListPairMap& recv_mapping);
 
   protected:
+    TensorName _block_name;
     // 在一个block中的slice编号
     // 例如block有3*2*5个slice
     // 那么一个合法的_slice_num就是{2,1,3}
@@ -95,8 +105,13 @@ class ParamBlock {
     friend class SwitchExecGraph;
 
   public:
-    ParamBlock(const std::vector<int32_t>& block_shape): 
-    _block_shape(block_shape) {
+    ParamBlock(const TensorName& block_name, const std::vector<int32_t>& block_shape):
+      _block_name(block_name), 
+      _block_shape(block_shape) {
+    }
+
+    const std::string name() const {
+      return _block_name;
     }
 
     const std::vector<int32_t>& BlockShape() const {
@@ -109,14 +124,18 @@ class ParamBlock {
 
     std::shared_ptr<ParamSlice>& GetParamSlice(const std::vector<int32_t>& slice_num) {
       size_t size = slice_num.size();
-      HT_ASSERT(size == _block_shape.size() && size > 0) << "size should be equal to block shape size and non-zero";
+      HT_ASSERT(size == _block_shape.size() && size > 0) 
+        << "size should be equal to block shape size and non-zero";
       size_t cnt = 1, sum = 0;
       for (int32_t i = size - 1; i >= 0; --i) {
-        HT_ASSERT(slice_num[i] < _block_shape[i]) << "slice_num dim " << i << " is out of range";
+        HT_ASSERT(slice_num[i] < _block_shape[i]) 
+          << "slice_num dim " << i << " is out of range"
+          << ", slice_num = " << slice_num << " and block_shape = " << _block_shape;
         sum += slice_num[i] * cnt;
         cnt *= _block_shape[i];
       }
-      HT_ASSERT(sum < _param_slices.size()) << "slice is out of range";
+      HT_ASSERT(sum < _param_slices.size()) 
+        << "slice is out of range";
       return _param_slices[sum];
     }
 
@@ -124,6 +143,7 @@ class ParamBlock {
 
   protected:
     std::vector<int32_t> _block_shape;
+    TensorName _block_name;
     std::vector<std::shared_ptr<ParamSlice>> _param_slices; 
 };
 
@@ -154,6 +174,7 @@ class SwitchExecGraph {
   protected:
     void CreateParamBlock(ParamBlock& block,
                           std::vector<int32_t>& slice_num, 
+                          const TensorName& block_name,
                           int32_t dim);
 
     void MakeAllParamSlices(const Tensor& param, ParamBlock& block, 
@@ -181,6 +202,7 @@ class SwitchExecGraph {
     ExecGraphPair _switch_graph_pair; // 需要切换的两个exec graph的指针
 
     std::shared_ptr<ExecutableGraph> _comm_graph; // 为了应对切换过程中的复杂通信情况而建立的执行图 
+    std::unordered_set<Device> _comm_set; // 参与通信图的所有devices
     OpRefList _comm_topo; // 该图的local_topo
     Tensor2ShapeMap _comm_shape_plan; // 该图所有tensor的运行时的shape
     FeedDict _comm_feed_dict; // 该图的输入

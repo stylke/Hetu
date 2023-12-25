@@ -111,6 +111,8 @@ using OpRuntimeContext = ContextStore;
 
 class RuntimeContext {
  public:
+  RuntimeContext() {}
+
   RuntimeContext(size_t init_capacity) {
     _ctxs.reserve(init_capacity);
   }
@@ -375,7 +377,7 @@ class OpDef : public shared_ptr_target {
       input_sums.push_back(NDArray::sum(input));
     }
     HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
-      << ", the input vals are (may not sync) " << input_sums;
+      << ", the input vals are " << input_sums;
     */
     instantiation_ctx().start[micro_batch_id]->Record(stream());
     auto rets = _body->Compute(get_self(), inputs, runtime_ctx);
@@ -387,8 +389,8 @@ class OpDef : public shared_ptr_target {
     for (auto& ret : rets) {
       ret_sums.push_back(NDArray::sum(ret));
     }
-    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": compute op: " << name()
-      << ", the result is (may not sync) " << ret_sums;
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
+      << ", the result is " << ret_sums;
     */
     return rets;
   }

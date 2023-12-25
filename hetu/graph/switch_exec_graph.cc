@@ -9,6 +9,7 @@
 #include "hetu/graph/ops/placeholder.h"
 #include "hetu/graph/ops/Communication.h"
 #include "hetu/impl/communication/comm_group.h"
+#include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/core/device.h"
 #include "hetu/core/dtype.h"
 #include "hetu/core/ndarray_meta.h"
@@ -68,7 +69,7 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
     bool already_owned = false;
     size_t already_owned_slice_instance_num = 0;
     // 先扫一遍，如果自己已经有了，那么就不需要通信了
-    for (size_t j = 0; j < needed_len; ++j) {
+    for (size_t j = 0; j < owned_len; ++j) {
       if (needed_device == _owned_devices[j]) {
         already_owned = true;
         already_owned_slice_instance_num= j;
@@ -89,7 +90,8 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
         }
       }
       HT_LOG_DEBUG_IF(needed_device == hetu::impl::comm::GetLocalDevice())
-        << needed_device << ": can reuse a param slice instance owned by itself";
+        << needed_device << ": can reuse the " << name()
+        << " param slice instance owned by itself";
     } else {
       // TODO: 更好的算法
       // 目前使用round robin策略来使所有机器通信次数尽量平均
@@ -111,7 +113,8 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
         _round_robin = 0;
       }
       HT_LOG_DEBUG_IF(send_device == hetu::impl::comm::GetLocalDevice())
-        << send_device << ": will send a param slice instance to " << recv_device;
+        << send_device << ": will send the " << name()
+        << " param slice instance to " << recv_device;
     }
   }
 }
@@ -130,15 +133,16 @@ void ParamBlock::ParamBlockComm(Device2DTListPairMap& send_mapping,
 // 递归地为ParamBlock创建所有的ParamSlices
 void SwitchExecGraph::CreateParamBlock(ParamBlock& block,
                                       std::vector<int32_t>& slice_num, 
+                                      const TensorName& block_name,
                                       int32_t dim) {
   const auto& block_shape = block.BlockShape();
   if (dim == block_shape.size()) {
-    block.GetParamSlices().emplace_back(std::make_shared<ParamSlice>(slice_num));
+    block.GetParamSlices().emplace_back(std::make_shared<ParamSlice>(block_name, slice_num));
     return;
   }
   for (int32_t i = 0; i < block_shape[dim]; ++i) {
     slice_num[dim] = i;
-    CreateParamBlock(block, slice_num, dim + 1);
+    CreateParamBlock(block, slice_num, block_name, dim + 1);
   }
 }
 
@@ -209,7 +213,7 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
     slice_relative_num[dim] = i;
     Tensor merged_slice = MergeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1);
     merged_slices.push_back(std::move(merged_slice));
-  }   
+  }  
   auto concatenate_output = MakeConcatenateOp(std::move(merged_slices), dim, OpMeta().set_is_deduce_states(false));         
   auto& concatenate_op = concatenate_output->producer();
   // 其他device上生成的不需要map placement_group和placement
@@ -253,10 +257,12 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
   // 为当前param创建一个全局的、抽象的ParamBlock
   // 并为每个最小粒度的块划分创建一个抽象的ParamSlice
   // 其只需要知道ds的切分shape，而不需要绑定param的真实shape
-  HT_LOG_DEBUG << local_device << ": make an abstract block whose shape is " << block_shape;
-  auto param_block_ptr = std::make_shared<ParamBlock>(block_shape);
+  const TensorName& param_block_name = after_param->name();
+  HT_LOG_DEBUG << local_device << ": make an abstract block for " << param_block_name
+    << ", whose shape is " << block_shape;
+  auto param_block_ptr = std::make_shared<ParamBlock>(param_block_name, block_shape);
   std::vector<int32_t> slice_num(param_dims, 0);
-  CreateParamBlock(*param_block_ptr, slice_num, 0);
+  CreateParamBlock(*param_block_ptr, slice_num, param_block_name, 0);
   _param_blocks.push_back(param_block_ptr);
   // 每个device作为发送端
   // 求出每个device拥有的小块儿并进行切分
@@ -272,7 +278,8 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
     std::vector<int32_t> cur_slice_relative_num(param_dims, 0);
     // 进行具体的切分
     // 将ParamSliceInstance放入对应的ParamSlice
-    HT_LOG_DEBUG << local_device << ": MakeAllParamSlices for tensor " << comm_input << " at device " << src_group.get(i);
+    HT_LOG_DEBUG << local_device << ": MakeAllParamSlices for tensor " << comm_input << " at device " << src_group.get(i)
+      << ", cur_state_index = " << cur_state_index << " and src_multiple = " << src_multiple;
     MakeAllParamSlices(comm_input, *param_block_ptr, src_group.get(i), src_group, cur_slice_num, cur_slice_relative_num, 
                        cur_state_index, src_multiple, 0);
   }
@@ -292,9 +299,10 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
     // 将新的ParamSliceInstance放入对应的ParamSlice
     // 会先用placeholder（之后再用BatchedISendIRecvOp进行替换）表征ParamSliceInstance
     // 返回的result即为新exec graph中最终合并后的param
-    HT_LOG_DEBUG << local_device << ": MergeAllParamSlices for tensor " << after_param << " at device " << src_group.get(i);
+    HT_LOG_DEBUG << local_device << ": MergeAllParamSlices for tensor " << after_param << " at device " << src_group.get(i)
+      << ", cur_state_index = " << cur_state_index << " and dst_multiple = " << dst_multiple;
     auto result = MergeAllParamSlices(after_param, *param_block_ptr, dst_group.get(i), dst_group, cur_slice_num, cur_slice_relative_num, 
-                                      cur_state_index, src_multiple, 0);
+                                      cur_state_index, dst_multiple, 0);
     // 如果是local的result
     // 记录result以及其与after graph param的映射
     if (local_device == dst_group.get(i)) {
@@ -319,12 +327,17 @@ void SwitchExecGraph::MakeCommGraph() {
 
   Graph::push_graph_ctx(_comm_graph->id());
   
-  std::unordered_set<Device> comm_set;
   std::unordered_set<Device> src_set;
   std::unordered_set<Device> dst_set;
   DataType dtype = DataType::UNDETERMINED;
   for (auto& define_param_ref : _define_graph_params) {
     auto& define_param = define_param_ref.get();
+    // Test Case
+    /*
+    if ("colp_mlp_block11_weight" != define_param->name()) {
+      continue;
+    }
+    */
     auto& param_global_shape = define_param->global_shape();
     if (dtype == DataType::UNDETERMINED) {
       dtype = define_param->dtype();
@@ -384,16 +397,18 @@ void SwitchExecGraph::MakeCommGraph() {
         if (src_set.find(device) == src_set.end()) {
           src_set.insert(device);
         }
-        if (comm_set.find(device) == comm_set.end()) {
-          comm_set.insert(device);
+        // 用来之后BatchedIsendIrecv以及MPI同步的
+        if (_comm_set.find(device) == _comm_set.end()) {
+          _comm_set.insert(device);
         }
       }
       for (auto& device : dst_group.devices()) {
         if (dst_set.find(device) == dst_set.end()) {
           dst_set.insert(device);
         }
-        if (comm_set.find(device) == comm_set.end()) {
-          comm_set.insert(device);
+        // 用来之后BatchedIsendIrecv以及MPI同步的
+        if (_comm_set.find(device) == _comm_set.end()) {
+          _comm_set.insert(device);
         }
       }
       // 依据before_param生成通信图input的placeholder以及相应的feed_dict
@@ -417,7 +432,8 @@ void SwitchExecGraph::MakeCommGraph() {
       // 哪些device拥有哪些slice
       // 不进行实际的算法决策
       HT_LOG_DEBUG << local_device << ": switch param from " << before_param << " to " << after_param
-        << ", src group = " << src_group << " and dst_group = " << dst_group;
+        << ", src group = " << src_group << " and dst_group = " << dst_group 
+        << ", src ds states = " << src_ds.get_states() << " and dst states = " << dst_ds.get_states();
       SwitchParam(src_ds, src_group, dst_ds, dst_group, comm_input, after_param);
     }
   }
@@ -435,7 +451,7 @@ void SwitchExecGraph::MakeCommGraph() {
   HT_LOG_DEBUG << local_device << ": make the crucial BatchedISendIRecvOp begin...";
   std::vector<Device> src_devices(src_set.begin(), src_set.end());
   std::vector<Device> dst_devices(dst_set.begin(), dst_set.end());
-  std::vector<Device> comm_devices(comm_set.begin(), comm_set.end());
+  std::vector<Device> comm_devices(_comm_set.begin(), _comm_set.end());
   // local_device is exclusive
   auto comm_device_group = DeviceGroup(comm_devices);
   if (!comm_device_group.contains(local_device)) {
@@ -472,9 +488,11 @@ void SwitchExecGraph::MakeCommGraph() {
     HT_LOG_DEBUG << local_device << ": no recv from other devices";
     HT_ASSERT(result == batched_isend_irecv_op->out_dep_linker())
       << "something wrong, it should be the out_dep_linker";
-    _dummy_links.push_back(std::move(result));
+    _dummy_links.push_back(result);
+  } else {
+    HT_LOG_DEBUG << local_device << ": recv from devices " << recv_from_devices;
   }
-  HT_LOG_DEBUG << local_device << ": make the crucial BatchedISendIRecvOp end..";
+  HT_LOG_DEBUG << local_device << ": make the crucial " << result << " end..";
 
   // 将原先的placeholder替换为recv_tensor
   HT_ASSERT(recv_len == recv_tensors.size())
@@ -573,6 +591,7 @@ void SwitchExecGraph::SwitchParams() {
   }
   for (auto& op_ref : _comm_topo) {
     auto& op = op_ref.get();
+    HT_LOG_DEBUG << local_device << ": handling op " << op << " in comm graph";
     if (is_feed_dict_op(op)) {
       // 对于feed_dict只需要简单地设置data即可
       // 可以保证这里全都是只有一个输出的placeholder
@@ -586,28 +605,28 @@ void SwitchExecGraph::SwitchParams() {
     for (const auto& input : op->inputs()) {
       auto it = tensor2data.find(input->id());
       HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
-        << "Failed to execute the \"" << op->type() << "\" operation "
+        << local_device << ": Failed to execute the \"" << op->type() << "\" operation "
         << "(with name \"" << op->name() << "\"): "
         << "Cannot find input " << input;
       auto& data = it->second;
       HT_ASSERT(data->device() == input->placement() && data->dtype() == input->dtype())
-        << "Failed to execute the \"" << op->type() << "\" operation "
+        << local_device << ": Failed to execute the \"" << op->type() << "\" operation "
         << "(with name \"" << op->name() << "\"): "
         << "input " << input << " placement/dtype is wrong";
       input_vals.push_back(tensor2data[input->id()]);
       // free memory after op async compute complete
-      // currently the mempool doesn't support this
       if ((--tensor2degrees[input->id()]) == 0) {
-        // tensor2data.erase(input->id());
+        tensor2data.erase(input->id());
       }
-      NDArrayList output_vals = op->Compute(input_vals, runtime_ctx);
-      // Note: The usage should be marked inside kernels, 
-      // but we still mark here in case we forget to do so in some kernels. 
-      NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
-      NDArray::MarkUsedBy(output_vals, op->instantiation_ctx().stream());
-      for (size_t i = 0; i < op->num_outputs(); ++i) {
-        tensor2data[op->output(i)->id()] = output_vals[i];
-      }
+    }
+    NDArrayList output_vals = op->Compute(input_vals, runtime_ctx);
+    // Note: The usage should be marked inside kernels, 
+    // but we still mark here in case we forget to do so in some kernels. 
+    NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
+    NDArray::MarkUsedBy(output_vals, op->instantiation_ctx().stream());
+    // 记录输出值
+    for (size_t i = 0; i < op->num_outputs(); ++i) {
+      tensor2data[op->output(i)->id()] = output_vals[i];
     }
   }
 
@@ -616,13 +635,26 @@ void SwitchExecGraph::SwitchParams() {
     auto _comm_results_it = tensor2data.find(kv.first);
     HT_ASSERT(_comm_results_it != tensor2data.end())
       << "something wrong, can't find the result from the tensor2data mapping";
-    HT_LOG_DEBUG << local_device << ": comm result " << _comm_results_it->second;
+    HT_LOG_DEBUG << local_device << ": comm result sum of " << kv.second << " is " << NDArray::sum(_comm_results_it->second);
     // 给新图的_preserved_data赋上NDArray
     _switch_graph_pair.second->_preserved_data[kv.second->id()] = _comm_results_it->second;
   }
 
+  // 将before graph中保留的数据全部清除
+  // TODO: 最坏情况需要1.5倍的显存开销，后续需要分bucket进行发送并清除
+  _switch_graph_pair.first->_preserved_data.clear();
+
+  // MPI同步（其实不同步也没有问题）
+  if (!_comm_set.empty()) {
+    std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
+    DeviceGroup mpi_device_group{mpi_devices};
+    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
+    mpi_group->Barrier(true);
+    HT_LOG_DEBUG << local_device << ": params switch comm set = " << mpi_device_group;
+  }
   HT_LOG_DEBUG << local_device << ": params switch from " << _switch_graph_pair.first->name()
    << " to " << _switch_graph_pair.first->name() << " is done";
+  // HT_RUNTIME_ERROR << local_device << ": breakpoint";
 }
 
 } // namespace graph

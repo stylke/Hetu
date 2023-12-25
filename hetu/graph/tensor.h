@@ -272,7 +272,7 @@ class TensorDef : public shared_ptr_target {
   }
 
   const SyShape& symbolic_shape() const {
-    HT_ASSERT(_symbolic) << "symbolic_shape() can only work after calling set_symbolic_shape() or init_symbolic_shape()";
+    HT_ASSERT(_symbolic) << "symbolic_shape() can only work after calling copy/set/init symbolic_shape";
     return _symbolic_shape;
   }
 
@@ -282,8 +282,9 @@ class TensorDef : public shared_ptr_target {
     // since global_shape() method will automatically calc it
   }
   
-  // (most likely) not a leaf
-  void set_symbolic_shape(const SyShape& symbolic_shape) {
+  // copy constructor
+  // don't know if it is a leaf
+  void copy_symbolic_shape(const SyShape& symbolic_shape) {
     _symbolic = true;
     _symbolic_shape = symbolic_shape;
   }

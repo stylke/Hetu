@@ -244,7 +244,7 @@ class GPTModel(ht.nn.Module):
 
         self.embed_dim = config.hidden_size
         # self.wte = ht.nn.ParallelEmbedding(config.vocab_size, self.embed_dim, device_groups[0], name='wte')
-        self.wte = ht.nn.VocabParallelEmbedding(config.vocab_size, self.embed_dim, device_groups[0], dp=config.dp, name='wte')
+        self.wte = ht.nn.VocabParallelEmbedding(config.vocab_size, self.embed_dim, device_groups[0], dp=config.dp, fixed_vocab_start_index=False, name='wte')
         self.wpe = ht.nn.ParallelEmbedding(config.max_position_embeddings, self.embed_dim, device_groups[0], name='wpe')
 
         self.drop = ht.nn.Dropout(config.embd_pdrop)
@@ -261,6 +261,7 @@ class GPTModel(ht.nn.Module):
         mask,
         attention_mask=None,
         token_type_ids=None,
+        vocab_start_index=None
     ):
         # input_ids: [b, seq_len]        
         # token_type_ids: [b, seq_len]
@@ -281,7 +282,7 @@ class GPTModel(ht.nn.Module):
             attention_mask = (1.0 - attention_mask) * -10000.0 # 0为使用的值, -10000为mask的值
 
         # embeddding: [b, seq_len, embed_dim]
-        inputs_embeds = self.wte(input_ids) # [b, seq_len, embed_dim]
+        inputs_embeds = self.wte(input_ids, vocab_start_index=vocab_start_index) # [b, seq_len, embed_dim]
         position_embeds = self.wpe(position_ids) # [b, seq_len, embed_dim]
         # todo: fix backward grad tensor reduce bug for add(extension dims)
         hidden_states = inputs_embeds + position_embeds # [b, seq_len, embed_dim]
@@ -329,7 +330,8 @@ class GPTLMHeadModel(ht.nn.Module):
         mask=None,
         attention_mask=None,
         token_type_ids=None,
-        labels=None
+        labels=None,
+        vocab_start_index=None,
     ):
         # [b, seq_len, n_embd]
         hidden_states = self.transformer(
@@ -339,6 +341,7 @@ class GPTLMHeadModel(ht.nn.Module):
             mask,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
+            vocab_start_index=vocab_start_index
         )
         n_embd = hidden_states.global_shape[-1]
         # [b*seq_len, n_embd]

@@ -23,10 +23,23 @@ encoded_inputs.append(encoded_input)
 text = ['Hello, I am a',
         "Good morning! Today is",
         "There is a question about",
-        "Where can I find the"]
+        "Where can I find the",
+        'Cool, you are so',
+        "Well done! The thing",
+        "I have so many things",
+        "Why the child is going",
+        'I like playing tennis and',
+        "Do you think this apple",
+        "This sounds good for me",
+        "Have you ever been to",
+        'It is my pleasure to',
+        "I think people are all",
+        "Is there any chance that",
+        "We are good friends and"]
 encoded_input = tokenizer(text, return_tensors='pt')
 encoded_input['labels'] = encoded_input['input_ids']
 encoded_inputs.append(encoded_input)
+'''
 text = ['Hello, I am a good',
         "Good morning! Today is a",
         "There is a question about whether",
@@ -41,6 +54,7 @@ text = ['Hello, I am a',
 encoded_input = tokenizer(text, return_tensors='pt')
 encoded_input['labels'] = encoded_input['input_ids']
 encoded_inputs.append(encoded_input)
+'''
 
 model.train()
 opt = SGD(model.parameters(), lr=0.01)

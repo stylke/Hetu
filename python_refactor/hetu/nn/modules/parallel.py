@@ -77,7 +77,7 @@ class ParallelEmbedding(Module):
         return hetu.embedding_lookup(self.embedding_table, input_p, device_group=self.device_group, name=self.name)
     
 class VocabParallelEmbedding(Module):
-    def __init__(self, num_embeddings, embedding_dim, device_group, dp=1, init_method='xavier_normal_', dtype=hetu.float32, name='vocab_embedding'):
+    def __init__(self, num_embeddings, embedding_dim, device_group, dp=1, fixed_vocab_start_index=True, init_method='xavier_normal_', dtype=hetu.float32, name='vocab_embedding'):
         super(VocabParallelEmbedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -91,7 +91,8 @@ class VocabParallelEmbedding(Module):
         self.ds_map = {'split0_dup': ds_split0_dup, 'dup_split0': ds_dup_split0}
         device_index = get_device_index(device_group)
         dup_group_idx = ds_dup_split0.get_dup_group_index(device_index)
-        self.vocab_start_index = num_embeddings // (num_devices//dp) * dup_group_idx 
+        if fixed_vocab_start_index:
+            self.vocab_start_index = num_embeddings // (num_devices // dp) * dup_group_idx 
 
         # embedding_table was splited in vocab dimension
         self.embedding_table = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
@@ -99,7 +100,7 @@ class VocabParallelEmbedding(Module):
                                                        dtype=dtype, requires_grad=True, 
                                                        device_group=device_group, name=f'{name}_table')
     
-    def forward(self, input_p):
+    def forward(self, input_p, vocab_start_index=None):
         if input_p.distributed_states.check_equal(self.ds_map['split0_dup']):
             tensor_split0_dup = input_p
         else:
@@ -107,7 +108,11 @@ class VocabParallelEmbedding(Module):
             print('warning: vocab parallel embedding need extra communication for \
                   adapt input tensor distributed_states into split0_dup!')
 
-        input_offset = tensor_split0_dup - self.vocab_start_index
+        if vocab_start_index:
+            input_offset = tensor_split0_dup - vocab_start_index
+        else:
+            input_offset = tensor_split0_dup - self.vocab_start_index
+            
         lookup_split0_partial = hetu.embedding_lookup(self.embedding_table, input_offset, device_group=self.device_group, name=self.name)
         output = hetu.comm(lookup_split0_partial, self.ds_map['split0_dup'])
         return output

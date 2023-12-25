@@ -148,6 +148,9 @@ class ArrayReshapeOpImpl final : public OpInterface {
   HTShape get_local_output_shape(const HTShape& global_input_shape,
                                  const DistributedStates& input_ds) const {
     HTShape global_output_shape = get_output_shape(global_input_shape);
+    HT_LOG_TRACE << "global_input_shape = " << global_input_shape
+      << " input ds states = " << input_ds.get_states()
+      << " global output shape = " << global_output_shape;
     DistributedStates output_ds = get_output_ds(global_input_shape, input_ds, global_output_shape);
     HTShape local_shape(global_output_shape.size());
     for (size_t d = 0; d < global_output_shape.size(); d++) {

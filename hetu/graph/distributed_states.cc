@@ -88,7 +88,8 @@ void DistributedStates::set_order(const std::vector<int32_t>& order) {
     }
     std::vector<int32_t> res_order;
     for (auto o : order) {
-      if (_states[o] > 1) {
+      auto it = _states.find(o);
+      if (it != _states.end() && _states[o] > 1) {
         res_order.push_back(o);
       }
     }

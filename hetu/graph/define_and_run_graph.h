@@ -8,23 +8,23 @@ namespace hetu {
 namespace graph {
 
 class ExecGraphPlan {
-  public:
-    std::shared_ptr<ExecutableGraph> exec_graph;
-    Op2OpMap op_to_exec_op_mapping;
-    Tensor2TensorMap tensor_to_exec_tensor_mapping;
-    TensorList fetches;
+ public:
+  std::shared_ptr<ExecutableGraph> exec_graph;
+  Op2OpMap op_to_exec_op_mapping;
+  Tensor2TensorMap tensor_to_exec_tensor_mapping;
+  TensorList fetches;
 
-    ExecGraphPlan(const std::shared_ptr<ExecutableGraph>& _exec_graph, const Op2OpMap& _op_to_exec_op_mapping, 
-                  const Tensor2TensorMap& _tensor_to_exec_tensor_mapping)
-    : exec_graph(_exec_graph), 
-      op_to_exec_op_mapping(_op_to_exec_op_mapping),
-      tensor_to_exec_tensor_mapping(_tensor_to_exec_tensor_mapping) {}
-    
-    ExecGraphPlan(std::shared_ptr<ExecutableGraph>&& _exec_graph, Op2OpMap&& _op_to_exec_op_mapping, 
-                  Tensor2TensorMap&& _tensor_to_exec_tensor_mapping)
-    : exec_graph(std::move(_exec_graph)), 
-      op_to_exec_op_mapping(std::move(_op_to_exec_op_mapping)),
-      tensor_to_exec_tensor_mapping(std::move(_tensor_to_exec_tensor_mapping)) {}
+  ExecGraphPlan(const std::shared_ptr<ExecutableGraph>& _exec_graph, const Op2OpMap& _op_to_exec_op_mapping, 
+                const Tensor2TensorMap& _tensor_to_exec_tensor_mapping)
+  : exec_graph(_exec_graph), 
+    op_to_exec_op_mapping(_op_to_exec_op_mapping),
+    tensor_to_exec_tensor_mapping(_tensor_to_exec_tensor_mapping) {}
+  
+  ExecGraphPlan(std::shared_ptr<ExecutableGraph>&& _exec_graph, Op2OpMap&& _op_to_exec_op_mapping, 
+                Tensor2TensorMap&& _tensor_to_exec_tensor_mapping)
+  : exec_graph(std::move(_exec_graph)), 
+    op_to_exec_op_mapping(std::move(_op_to_exec_op_mapping)),
+    tensor_to_exec_tensor_mapping(std::move(_tensor_to_exec_tensor_mapping)) {}
 };
 
 class DefineAndRunGraph : public Graph {
@@ -63,7 +63,7 @@ class DefineAndRunGraph : public Graph {
                         OpMeta op_meta);
 
   void Instantiate(const OpRefList& topo,
-                   const Tensor2ShapeMap& shape_plan);
+                   Tensor2ShapeMap& shape_plan);
 
   void ResetVariableDataInner(const Tensor& tensor,
                               const Initializer& init) override;
@@ -103,6 +103,11 @@ class DefineAndRunGraph : public Graph {
   std::vector<Tensor2ShapeMap> _shape_plan_pool;
   size_t _active_plan;
   bool _is_active = false;
+
+ public: 
+  /* utils for parallel plan changing test case */
+  static void dp2tp(Operator& op);
+  static void tp2dp(Operator& op);
 };
 
 } // namespace graph

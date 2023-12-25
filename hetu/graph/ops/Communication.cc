@@ -110,10 +110,8 @@ bool CommOpImpl::DoInstantiate(Operator& op, const Device& placement,
   const DistributedStates& src_ds = op->input(0)->get_distributed_states();
   const DistributedStates& dst_ds = get_dst_distributed_states();
   const DeviceGroup& src_group = op->input(0)->placement_group();
-  // CommOp should be checked in Instantiate(when placement info assigned) whether it is valid  
-  HT_ASSERT(!src_ds.check_equal(dst_ds) || (!_dst_group.empty() && src_group != _dst_group))
-    << "CommOp must communicate intra/inter device group!"
-    << " src ds = " << src_ds.ds_info() << ", dst ds = " << dst_ds.ds_info()
+  HT_LOG_TRACE << op << " DoInstantiate"
+    << ", src ds = " << src_ds.ds_info() << ", dst ds = " << dst_ds.ds_info()
     << ", src_group = " << src_group << ", dst_group = " << _dst_group;
                                   
   auto& inst_ctx = op->instantiation_ctx();
@@ -160,9 +158,12 @@ HTShapeList CommOpImpl::DoInferShape(Operator& op,
   const auto& src_ds = input->get_distributed_states();
   const auto& dst_ds = get_dst_distributed_states();
   HTShape shape(input_shape.size());
+  HT_LOG_DEBUG << "CommOpImpl::DoInferShape, src_ds = " << src_ds.get_states()
+    << " and dst_ds = " << dst_ds.get_states();
   for (size_t d = 0; d < input_shape.size(); d++) {
     shape[d] = input_shape[d] * src_ds.get_dim(d) / dst_ds.get_dim(d);
   }
+  HT_LOG_DEBUG << "CommOpImpl::DoInferShape, shape = " << shape;
   return {shape};
 }
 

@@ -63,10 +63,11 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
                                                  uint64_t seed,
                                                  const HTShape& global_shape) {
   if (_preserved_data.find(tensor->id()) != _preserved_data.end()) {
-    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": variable " << tensor 
+    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": exec variable " << tensor 
       << " already has the data, so we directly return it";
     return _preserved_data[tensor->id()];
   }
+  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": alloc exec variable " << tensor;
   // TODO: check meta is valid & maybe we can use non-blocking stream?
   _preserved_data[tensor->id()] = NDArray::empty(
     tensor->shape(), tensor->placement(), tensor->dtype(), kBlockingStream);
@@ -364,7 +365,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           src_group.contains(local_device)) {
         // tp
         if (comm_type == P2P_OP) {
-          result = comm_op->input(0);
+          result = input;
         } else if (comm_type == COMM_SPLIT_OP) {
           auto local_device_index = src_group.get_index(local_device);
           const auto& dst_ds = comm_op_impl.get_dst_distributed_states();
@@ -538,18 +539,23 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           }
         }
       } else {
-        // p2p recv
-        HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group;
-        Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
-        Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->shape(),
-          dst_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
-        RecordTensorShape(recv_output->id(), recv_output->shape());
-        auto& recv_op = recv_output->producer();
-        recv_op->MapToParallelDevices(dst_group);
-        recv_op->Instantiate(local_device, kP2PStream);
-        // add dummy link for topo sort
-        Graph::AddInDeps(recv_op, {input});
-        result = recv_output;
+        if (src_group == dst_group) {
+          // no comm
+          result = input;
+        } else {
+          // p2p recv
+          HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group;
+          Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
+          Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->shape(),
+            dst_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
+          RecordTensorShape(recv_output->id(), recv_output->shape());
+          auto& recv_op = recv_output->producer();
+          recv_op->MapToParallelDevices(dst_group);
+          recv_op->Instantiate(local_device, kP2PStream);
+          // add dummy link for topo sort
+          Graph::AddInDeps(recv_op, {input});
+          result = recv_output;
+        }
       }
       result->set_distributed_states(comm_op_impl.get_dst_distributed_states()); // assign distributed states for result tensor
 

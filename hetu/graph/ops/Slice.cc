@@ -69,7 +69,7 @@ void SliceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
     }
   }
   outputs.at(0)->set_distributed_states(ds_input); 
-  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " splice op DoDeduceStates() finished";     
+  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " slice op DoDeduceStates() finished";     
 }
 
 void SliceGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,

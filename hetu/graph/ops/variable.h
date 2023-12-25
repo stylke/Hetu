@@ -216,6 +216,16 @@ class ParallelVariableOpImpl : public OpInterface {
     return _ds;
   }
 
+  // Used for parallel plan changing
+  void set_ds(const DistributedStates& ds) {
+    _ds = ds;
+    HT_ASSERT(_local_shape.size() == _global_shape.size())
+      << "something wrong, the local shape and global shape dims are mismatched";
+    for (size_t d = 0; d < _global_shape.size(); d++) {
+      _local_shape[d] = _global_shape[d] / ds.get_dim(d);
+    }
+  }
+
   int64_t local_idx() const {
     return _local_idx;
   }
