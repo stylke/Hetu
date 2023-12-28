@@ -108,6 +108,9 @@ class DefineAndRunGraph : public Graph {
   /* utils for parallel plan changing test case */
   static void dp2tp(Operator& op);
   static void tp2dp(Operator& op);
+  void SetVariableDistributedStates(Operator& op, int32_t dp, int32_t tp);
+  void InstantiateTestCase(const OpRefList& topo,
+                           Tensor2ShapeMap& shape_plan);
 };
 
 } // namespace graph

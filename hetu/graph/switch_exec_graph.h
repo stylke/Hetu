@@ -14,18 +14,33 @@ namespace hetu {
 namespace graph {
 
 using ExecGraphPair = std::pair<std::shared_ptr<ExecutableGraph>, std::shared_ptr<ExecutableGraph>>;
+using DevicePair2Val = std::unordered_map<std::pair<Device, Device>, size_t>;
 using Device2DTListPairMap = std::unordered_map<Device, std::pair<std::vector<Device>, std::vector<Tensor>>>;
 
 std::ostream& operator<<(std::ostream& os, const SwitchExecGraph& switcher);
+
+enum class SWITCH_ALGORITHM_LEVEL : int8_t {
+  ROUND_ROBIN = 0,
+  GREEDY,
+};
+
+enum class SWITCH_PROFILE_LEVEL : int8_t {
+  TRACE = 0,
+  TIME,
+  INFO,
+};
 
 class ParamSlice {
   protected:
     friend class SwitchExecGraph;
 
   public:
-    ParamSlice(const TensorName& block_name, const std::vector<int32_t>& slice_num): 
+    ParamSlice(const TensorName& block_name, 
+               const std::vector<int32_t>& slice_num,
+               SwitchExecGraph* switcher): 
       _block_name(block_name),
-      _slice_num(slice_num) {
+      _slice_num(slice_num),
+      _switcher(switcher) {
     }
 
     const std::string name() const {
@@ -48,40 +63,9 @@ class ParamSlice {
       return _needed_slice_instances[0];
     }
 
-    void AddOwnedSliceInst(const Device& device, const Tensor& tensor) {
-      if (!_owned_slice_instances.empty()) {
-        const HTShape& shape = _owned_slice_instances[0]->shape();
-        const auto shape_size = shape.size();
-        HT_ASSERT(shape_size == tensor->shape().size())
-          << "the new slice instance shape should be equal to the old slice instance shape, " 
-          << "but the new is " << tensor->shape() << " and the old is " << shape;
-        for(size_t i = 0; i < shape_size; ++i) {
-          HT_ASSERT(shape[i] == tensor->shape(i))
-            << "the new slice instance shape should be equal to the old slice instance shape, "  
-            << "but the new is " << tensor->shape() << " and the old is " << shape;
-        }
-      }
-      _owned_devices.push_back(device);
-      _owned_slice_instances.push_back(tensor);
-    }
+    void AddOwnedSliceInst(const Device& device, const Tensor& tensor);
 
-    void AddNeededSliceInst(const Device& device, const Tensor& tensor) {
-      HT_ASSERT(!_owned_slice_instances.empty())
-        << "the slice isn't owned by any devices, "
-        << "please ensure you've added a slice instance before";
-      const HTShape& shape = _owned_slice_instances[0]->shape();
-      const auto shape_size = shape.size();
-      HT_ASSERT(shape_size == tensor->shape().size())
-        << "the needed slice shape should be equal to the owned slice shape, " 
-        << "but the needed is " << tensor->shape() << " and the owned is " << shape;
-      for(size_t i = 0; i < shape_size; ++i) {
-        HT_ASSERT(shape[i] == tensor->shape(i))
-          << "the needed slice shape should be equal to the owned slice shape, " 
-          << "but the needed is " << tensor->shape() << " and the owned is " << shape;
-      }
-      _needed_devices.push_back(device);
-      _needed_slice_instances.push_back(tensor);
-    }
+    void AddNeededSliceInst(const Device& device, const Tensor& tensor);
 
     void ParamSliceComm(Device2DTListPairMap& send_mapping, Device2DTListPairMap& recv_mapping);
 
@@ -91,12 +75,14 @@ class ParamSlice {
     // 例如block有3*2*5个slice
     // 那么一个合法的_slice_num就是{2,1,3}
     std::vector<int32_t> _slice_num; 
+    SwitchExecGraph* _switcher;
 
     TensorList _owned_slice_instances;
     TensorList _needed_slice_instances;
     std::vector<Device> _owned_devices;
     std::vector<Device> _needed_devices;
 
+    // level 0, round-robin alg
     size_t _round_robin = 0;
 };
 
@@ -105,9 +91,12 @@ class ParamBlock {
     friend class SwitchExecGraph;
 
   public:
-    ParamBlock(const TensorName& block_name, const std::vector<int32_t>& block_shape):
+    ParamBlock(const TensorName& block_name, 
+               const std::vector<int32_t>& block_shape,
+               SwitchExecGraph* switcher):
       _block_name(block_name), 
-      _block_shape(block_shape) {
+      _block_shape(block_shape),
+      _switcher(switcher) {
     }
 
     const std::string name() const {
@@ -144,6 +133,8 @@ class ParamBlock {
   protected:
     std::vector<int32_t> _block_shape;
     TensorName _block_name;
+    SwitchExecGraph* _switcher;
+
     std::vector<std::shared_ptr<ParamSlice>> _param_slices; 
 };
 
@@ -151,6 +142,8 @@ class SwitchExecGraph {
   protected:
     friend class DefineAndRunGraph;
     friend class ExecutableGraph;
+    friend class ParamBlock;
+    friend class ParamSlice;
 
   public:
     SwitchExecGraph(DefineAndRunGraph* define_graph, size_t plan_before, size_t plan_after) {
@@ -163,6 +156,38 @@ class SwitchExecGraph {
       _switch_graph_params_pair = std::make_pair(plan_before.exec_graph->params()),
                                                  plan_after.exec_graph->params());
       */
+      char* algorithm_env = std::getenv("HETU_SWITCH_ALGORITHM");
+      if (algorithm_env != nullptr) {
+        std::string algorithm_level = algorithm_env;
+        std::transform(algorithm_level.begin(), algorithm_level.end(), algorithm_level.begin(), ::toupper);
+        if (algorithm_level == "GREEDY") {
+          _algorithm_level = SWITCH_ALGORITHM_LEVEL::GREEDY;
+        } else if (algorithm_level == "ROUND_ROBIN") {
+          _algorithm_level = SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN;
+        } else {
+          HT_RUNTIME_ERROR << "NotImplementedError";
+        }
+      }
+      char* profile_env = std::getenv("HETU_SWITCH_PROFILE");
+      if (profile_env != nullptr) {
+        std::string profile_level = profile_env;
+        std::transform(profile_level.begin(), profile_level.end(), profile_level.begin(), ::toupper);
+        if (profile_level == "INFO") {
+          _profile_level = SWITCH_PROFILE_LEVEL::INFO;
+        } else if (profile_level == "TIME") {
+          _profile_level = SWITCH_PROFILE_LEVEL::TIME;
+        } else if (profile_level == "TRACE") {
+          _profile_level = SWITCH_PROFILE_LEVEL::TRACE;
+        } else {
+          HT_RUNTIME_ERROR << "NotImplementedError";
+        }
+      }
+    }
+
+    void RecordTensorInfo(const Tensor& tensor, const std::string& info) {
+      HT_ASSERT(_info_mapping.find(tensor->id()) == _info_mapping.end())
+        << "tensor " << tensor << " is already existed in the info mapping of the switcher";
+      _info_mapping[tensor->id()] = info;
     }
 
     const ExecGraphPair& SwitchGraphPair() const {
@@ -195,12 +220,16 @@ class SwitchExecGraph {
 
     void MakeCommGraph();
 
+    void ProfileRunningDetails();
+
   protected:
+    // basic attributes
     DefineAndRunGraph* _define_graph; // 定义图
     TensorCRefList _define_graph_params; // 定义图的params tensor
     std::pair<size_t, size_t> _switch_plan_pair; // 需要切换的两个exec graph plan的编号
     ExecGraphPair _switch_graph_pair; // 需要切换的两个exec graph的指针
 
+    // comm graph related
     std::shared_ptr<ExecutableGraph> _comm_graph; // 为了应对切换过程中的复杂通信情况而建立的执行图 
     std::unordered_set<Device> _comm_set; // 参与通信图的所有devices
     OpRefList _comm_topo; // 该图的local_topo
@@ -211,9 +240,16 @@ class SwitchExecGraph {
     Tensor2TensorMap _comm_results_mapping; // 该图的输出到after graph的映射
     TensorList _dummy_links; // 只有send没有recv时BatchedISendIRecvOp的输出dummy tensor需要被记录并在之后fetch
 
+    // comm plan related
+    SWITCH_ALGORITHM_LEVEL _algorithm_level = SWITCH_ALGORITHM_LEVEL::GREEDY; // 采用的算法
+    DevicePair2Val _p2p_val_mapping; // 记录了每两个device之间的p2p通信通路的总value（目前value是指次数）
     Device2DTListPairMap _send_mapping; // 记录了每个device要send的(device, tensor)的pair
     Device2DTListPairMap _recv_mapping; // 记录了每个device要recv的(device, placeholder的tensor（之后会替换）)的pair
     std::vector<std::shared_ptr<ParamBlock>> _param_blocks; // 记录了graph所包含的所有的抽象ParamBlock
+
+    // profile related
+    SWITCH_PROFILE_LEVEL _profile_level = SWITCH_PROFILE_LEVEL::INFO; // profile的粒度（开启后会进行同步，因此端到端速度可能会变慢）
+    Tensor2StringMap _info_mapping; // 记录tensor到相应param slice名称的映射（只针对BatchedISendIRecvOp的send部分的tensor）
 };
 
 } // namespace graph

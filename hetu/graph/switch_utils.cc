@@ -317,5 +317,138 @@ void DefineAndRunGraph::tp2dp(Operator& op) {
   HT_RUNTIME_ERROR << "Unreachable, some assumptions are wrong, plz inform Lhy";
 }
 
+void DefineAndRunGraph::SetVariableDistributedStates(Operator& op, int32_t dp, int32_t tp) {
+  // *先split后dup，靠近的机器会在一个dup组中，切换起来通信开销期望上会更小
+  DistributedStates col_ds(4, {{-1, dp}, {0, tp}}, {0, -1});
+  DistributedStates row_ds(4, {{-1, dp}, {1, tp}}, {1, -1});
+  if (op->name().find("wte") != std::string::npos
+      || op->name().find("col") != std::string::npos) {
+    (std::dynamic_pointer_cast<ParallelVariableOpImpl>(op->_body))->set_ds(col_ds);
+    op->output(0)->set_distributed_states(col_ds);
+    return;
+  }
+  if (op->name().find("wpe") != std::string::npos
+      || op->name().find("ln") != std::string::npos
+      || (op->name().find("row") != std::string::npos && op->name().find("bias") != std::string::npos)) {
+    return;
+  }
+  if (op->name().find("row") != std::string::npos && op->name().find("weight") != std::string::npos) {
+    (std::dynamic_pointer_cast<ParallelVariableOpImpl>(op->_body))->set_ds(row_ds);
+    op->output(0)->set_distributed_states(row_ds);
+    return;
+  }
+  HT_RUNTIME_ERROR << "Unreachable, some assumptions are wrong, plz inform Lhy";
+}
+
+void DefineAndRunGraph::InstantiateTestCase(const OpRefList& topo,
+                                            Tensor2ShapeMap& shape_plan) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  static size_t instantiate_test_case = 1;
+
+  auto exec_graph_num = _exec_graph_plan_pool.size();
+  Tensor2ShapeMap exec_shape_plan;
+  Op2OpMap op_to_exec_op_mapping;
+  Tensor2TensorMap tensor_to_exec_tensor_mapping;
+  auto exec_graph = Graph::_make_new_graph<ExecutableGraph>(name() + "_executable_test_case_" + std::to_string(exec_graph_num));
+  
+  exec_shape_plan.reserve(shape_plan.size());
+  op_to_exec_op_mapping.reserve(_init_capacity);
+  tensor_to_exec_tensor_mapping.reserve(_init_capacity);
+
+  Graph::push_graph_ctx(exec_graph->id());
+
+  auto get_exec_input = [&](const Tensor& input) -> Tensor {
+    auto it = tensor_to_exec_tensor_mapping.find(input->id());
+    HT_RUNTIME_ERROR_IF(it == tensor_to_exec_tensor_mapping.end())
+      << "Cannot find the executable version of Tensor " << input;
+    return it->second;
+  };
+
+  auto handle_exec_output = [&](Tensor& tensor, Tensor& exec_tensor) -> void {
+    // assign tensor mapping
+    tensor_to_exec_tensor_mapping[tensor->id()] = exec_tensor;
+    // assign shape
+    auto plan_it = shape_plan.find(tensor->id());
+    // The shape plan will be expanded step by step
+    if (plan_it != shape_plan.end()) {
+      exec_tensor->set_shape(plan_it->second);
+    } else {
+      shape_plan[tensor->id()] = exec_tensor->shape();
+    }
+    exec_shape_plan[exec_tensor->id()] = exec_tensor->shape();
+  };
+
+  HT_LOG_DEBUG << local_device << ": Instantiating a " << type() << " graph with topo " << topo;
+  for (auto& op_ref : topo) {
+    auto& op = op_ref.get();
+
+    // 一个只有variable的exec图
+    if (!is_variable_op(op))
+      continue;
+
+    // 前处理
+    // 1、获取exec op的inputs
+    TensorList exec_inputs, exec_in_deps;
+    std::tie(exec_inputs, exec_in_deps) = Operator::transform_each_input_tensor(op, get_exec_input);
+
+    // 前处理
+    // 2、获取exec op的OpMeta，修正device_group
+    // Test Case: 例如修改pp
+    // 切换到新的并行方案（可以考虑之后记录一个op2dg）
+    OpMeta exec_op_meta = OpMeta().set(op->op_meta()).set_extra_deps(std::move(exec_in_deps));
+    if (instantiate_test_case == 1) {
+      if (!exec_op_meta.is_deduce_states) {
+        // exec_op_meta.set_device_group(hetu::impl::comm::GetGlobalDeviceGroup());
+      }
+    }
+
+    auto& exec_op = Graph::MakeOp(
+      op->_body, 
+      std::move(exec_inputs),
+      exec_op_meta,
+      *exec_graph);
+
+    // 后处理
+    // 1、建立op和exec_op的映射
+    // 2、修正op和tensor的distributed_states
+    // 3、标记parameter
+    op_to_exec_op_mapping[op->id()] = exec_op;
+    if (!exec_op_meta.is_deduce_states && op->output(0)->has_distributed_states()) {
+      exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
+    }
+    // Test Case: 手动让distributed_states发生一下变化
+    if (instantiate_test_case == 1) {
+      // 重新设置variable的distributed_states与输出的shape
+      SetVariableDistributedStates(exec_op, 4, 1);
+      RuntimeContext runtime_ctx{};
+      shape_plan[op->output(0)->id()] = exec_op->InferShape({}, runtime_ctx)[0];
+    }
+    if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
+      Graph::MarkAsParameter(exec_op);
+    }
+
+    // 后处理
+    // 4、建立tensor和exec_tensor的映射
+    // 5、修正tensor的shape
+    // 6、扩展define图的当前shape_plan和exec图的唯一exec_shape_plan
+    Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
+    // Test Case Log
+    HT_LOG_DEBUG << local_device << ": exec op " << exec_op << " output ds states = " << exec_op->output(0)->get_distributed_states().get_states()
+      << " output shape = " << exec_op->output(0)->shape();
+  }
+
+  // assign initial shape plan
+  exec_graph->InitShapePlan(std::move(exec_shape_plan));
+  
+  // wrap up all of this as an exec graph plan
+  _exec_graph_plan_pool.emplace_back(std::move(exec_graph), 
+                                     std::move(op_to_exec_op_mapping),
+                                     std::move(tensor_to_exec_tensor_mapping));
+
+  Graph::pop_graph_ctx();
+  HT_LOG_DEBUG << local_device << ": instantiate test case " << instantiate_test_case << " finished";
+  instantiate_test_case++;
+}
+
 } // namespace graph
 } // namespace hetu

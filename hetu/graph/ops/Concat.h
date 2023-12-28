@@ -17,6 +17,10 @@ class ConcatOpImpl final : public OpInterface {
   : OpInterface(quote(ConcatOp)), _axis(axis) {
   }
 
+  inline uint64_t op_indicator() const noexcept override {
+    return CONCAT_OP;
+  }
+
   size_t get_axis() const {
     return _axis;
   }

@@ -6,6 +6,7 @@
 #include "hetu/graph/operator.h"
 #include "hetu/graph/ops/Split.h"
 #include "hetu/graph/ops/Concatenate.h"
+#include "hetu/graph/ops/Contiguous.h"
 #include "hetu/graph/ops/placeholder.h"
 #include "hetu/graph/ops/Communication.h"
 #include "hetu/impl/communication/comm_group.h"
@@ -13,9 +14,12 @@
 #include "hetu/core/device.h"
 #include "hetu/core/dtype.h"
 #include "hetu/core/ndarray_meta.h"
+#include "hetu/common/timing.h"
 
 namespace hetu {
 namespace graph {
+
+
 
 std::ostream& operator<<(std::ostream& os, const SwitchExecGraph& switcher) {
   os << "switch_exec_graph(" << switcher.SwitchGraphPair().first->name() << ", " 
@@ -57,6 +61,42 @@ static std::unordered_set<Key> KeysUnion(const std::unordered_set<Key>& set1, co
   return result;
 }
 
+void ParamSlice::AddOwnedSliceInst(const Device& device, const Tensor& tensor) {
+  if (!_owned_slice_instances.empty()) {
+    const HTShape& shape = _owned_slice_instances[0]->shape();
+    const auto shape_size = shape.size();
+    HT_ASSERT(shape_size == tensor->shape().size())
+      << "the new slice instance shape should be equal to the old slice instance shape, " 
+      << "but the new is " << tensor->shape() << " and the old is " << shape;
+    for(size_t i = 0; i < shape_size; ++i) {
+      HT_ASSERT(shape[i] == tensor->shape(i))
+        << "the new slice instance shape should be equal to the old slice instance shape, "  
+        << "but the new is " << tensor->shape() << " and the old is " << shape;
+    }
+  }
+  _owned_devices.push_back(device);
+  _owned_slice_instances.push_back(tensor);
+  _switcher->RecordTensorInfo(tensor, name());
+}
+
+void ParamSlice::AddNeededSliceInst(const Device& device, const Tensor& tensor) {
+  HT_ASSERT(!_owned_slice_instances.empty())
+    << "the slice isn't owned by any devices, "
+    << "please ensure you've added a slice instance before";
+  const HTShape& shape = _owned_slice_instances[0]->shape();
+  const auto shape_size = shape.size();
+  HT_ASSERT(shape_size == tensor->shape().size())
+    << "the needed slice shape should be equal to the owned slice shape, " 
+    << "but the needed is " << tensor->shape() << " and the owned is " << shape;
+  for(size_t i = 0; i < shape_size; ++i) {
+    HT_ASSERT(shape[i] == tensor->shape(i))
+      << "the needed slice shape should be equal to the owned slice shape, " 
+      << "but the needed is " << tensor->shape() << " and the owned is " << shape;
+  }
+  _needed_devices.push_back(device);
+  _needed_slice_instances.push_back(tensor);
+}
+
 // TODO: 更好的算法
 void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
                                 Device2DTListPairMap& recv_mapping) {
@@ -93,12 +133,58 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
         << needed_device << ": can reuse the " << name()
         << " param slice instance owned by itself";
     } else {
-      // TODO: 更好的算法
-      // 目前使用round robin策略来使所有机器通信次数尽量平均
+      // 需要通信
+      // 通信关系会记录在send/recv的mapping中
+      Tensor send_tensor; // TBD
+      Device send_device; // TBD
       auto& recv_tensor = _needed_slice_instances[i];
       auto& recv_device = _needed_devices[i];
-      auto& send_tensor = _owned_slice_instances[_round_robin];
-      auto& send_device = _owned_devices[_round_robin];
+      // 不同的算法
+      // round robin
+      if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN) {
+        send_tensor = _owned_slice_instances[_round_robin];
+        send_device = _owned_devices[_round_robin];
+        // 更新轮询次数
+        _round_robin++;
+        if (_round_robin == _owned_slice_instances.size()) {
+          _round_robin = 0;
+        }
+      } 
+      // 按照已经通信的次数进行greedy（即选取已通信中p2p次数最小的）
+      if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::GREEDY) {
+        std::pair<Device, Device> best_p2p;
+        size_t best_send_num;
+        auto& p2p_val_mapping = _switcher->_p2p_val_mapping;
+        size_t min_val = std::numeric_limits<size_t>::max();
+        for (size_t j = 0; j < owned_len; ++j) {
+          // p2p是双向通路
+          // 规定device编号小的在前
+          std::pair<Device, Device> p2p;
+          if (_owned_devices[j] < recv_device) {
+            p2p = std::make_pair(_owned_devices[j], recv_device);
+          } else {
+            p2p = std::make_pair(recv_device, _owned_devices[j]);
+          }
+          auto it = p2p_val_mapping.find(p2p);
+          // 相当于通信了0次
+          if (it == p2p_val_mapping.end()) {
+            best_p2p = p2p;
+            best_send_num = j;
+            break;
+          }
+          // 选择通信次数最小的
+          if (it->second < min_val) {
+            min_val = it->second;
+            best_p2p = p2p;
+            best_send_num = j;
+          }
+        }
+        // 更新p2p_val_mapping
+        p2p_val_mapping[best_p2p] += 1;
+        send_tensor = _owned_slice_instances[best_send_num];
+        send_device = _owned_devices[best_send_num];
+      }
+      // 建立通信关系
       auto recv_it = recv_mapping.find(recv_device);
       auto send_it = send_mapping.find(send_device);
       HT_ASSERT(send_it != send_mapping.end() && recv_it != recv_mapping.end())
@@ -107,11 +193,6 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
       recv_it->second.second.push_back(recv_tensor);
       send_it->second.first.push_back(recv_device);
       send_it->second.second.push_back(send_tensor);
-      // 轮询
-      _round_robin++;
-      if (_round_robin == _owned_slice_instances.size()) {
-        _round_robin = 0;
-      }
       HT_LOG_DEBUG_IF(send_device == hetu::impl::comm::GetLocalDevice())
         << send_device << ": will send the " << name()
         << " param slice instance to " << recv_device;
@@ -137,7 +218,7 @@ void SwitchExecGraph::CreateParamBlock(ParamBlock& block,
                                       int32_t dim) {
   const auto& block_shape = block.BlockShape();
   if (dim == block_shape.size()) {
-    block.GetParamSlices().emplace_back(std::make_shared<ParamSlice>(block_name, slice_num));
+    block.GetParamSlices().emplace_back(std::make_shared<ParamSlice>(block_name, slice_num, this));
     return;
   }
   for (int32_t i = 0; i < block_shape[dim]; ++i) {
@@ -260,7 +341,7 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
   const TensorName& param_block_name = after_param->name();
   HT_LOG_DEBUG << local_device << ": make an abstract block for " << param_block_name
     << ", whose shape is " << block_shape;
-  auto param_block_ptr = std::make_shared<ParamBlock>(param_block_name, block_shape);
+  auto param_block_ptr = std::make_shared<ParamBlock>(param_block_name, block_shape, this);
   std::vector<int32_t> slice_num(param_dims, 0);
   CreateParamBlock(*param_block_ptr, slice_num, param_block_name, 0);
   _param_blocks.push_back(param_block_ptr);
@@ -387,7 +468,9 @@ void SwitchExecGraph::MakeCommGraph() {
       auto& before_param = before_it->second;
       auto& after_param = after_it->second;
       HT_ASSERT(before_param->global_shape() == after_param->global_shape())
-        << "parameter shapes in the two switching exec graphs should be equal";
+        << "parameter shapes in the two switching exec graphs should be equal"
+        << ", but find global shape of " << before_param << " in before graph is " << before_param->global_shape()
+        << " and global shape of " << after_param << " in after graph is " << after_param->global_shape();
       const auto& src_ds = before_param->get_distributed_states();
       const auto& src_group = before_param->producer()->device_group();
       const auto& dst_ds = after_param->get_distributed_states();
@@ -442,6 +525,7 @@ void SwitchExecGraph::MakeCommGraph() {
   // 选择最优的通信方案
   // TODO: 更好的算法
   // 目前采用的是对于每一个ParamBlock的每一个ParamSlice，采用round robin的算法
+  // 12.28，更新为greedy算法，选取p2p中通信次数最小的
   for (auto& param_block_ptr : _param_blocks) {
     param_block_ptr->ParamBlockComm(_send_mapping, _recv_mapping);
   }
@@ -470,11 +554,25 @@ void SwitchExecGraph::MakeCommGraph() {
   for (size_t i = 0; i < recv_len; ++i) {
     recv_tensor_shapes.push_back(_recv_mapping[local_device].second[i]->shape());
   }
-  // BatchedISendIRecv
+  // BatchedISendIRecv Part
   HT_LOG_DEBUG << local_device << ": will send " << send_tensors.size() << " tensor to device " 
     << send_to_devices << " and recv " << recv_len << " tensor from other devices"
     << ", the src devices = " << src_devices << " and comm devices = " << comm_devices;
-  auto result = MakeBatchedISendIRecvOp(send_tensors, send_to_devices, 
+  // 在通信前插入contiguous算子
+  // profile时单独计时
+  TensorList contiguous_send_tensors;
+  contiguous_send_tensors.reserve(send_tensors.size());
+  for (auto& send_tensor : send_tensors) {
+    auto contiguous_send_tensor = MakeContiguousOp(send_tensor, 
+                                                   OpMeta().set_is_deduce_states(false));
+    auto& contiguous_op = contiguous_send_tensor->producer();
+    HT_ASSERT(send_tensor->placement_group().contains(local_device))
+      << "send tensor should already be instantiated locally";
+    contiguous_op->MapToParallelDevices(send_tensor->placement_group());
+    contiguous_op->Instantiate(local_device, kComputingStream);
+    contiguous_send_tensors.push_back(std::move(contiguous_send_tensor));
+  }
+  auto result = MakeBatchedISendIRecvOp(contiguous_send_tensors, send_to_devices, 
                                         recv_tensor_shapes, recv_from_devices, 
                                         comm_devices, dtype, 
                                         OpMeta().set_is_deduce_states(false));
@@ -484,6 +582,7 @@ void SwitchExecGraph::MakeCommGraph() {
   TensorList recv_tensors = batched_isend_irecv_op->outputs();
   // we need to add dummy link for topo sort
   // 只有send没有recv
+  // 要将这种情况的dummy link放到fetch中
   if (recv_from_devices.size() == 0) {
     HT_LOG_DEBUG << local_device << ": no recv from other devices";
     HT_ASSERT(result == batched_isend_irecv_op->out_dep_linker())
@@ -543,6 +642,7 @@ void SwitchExecGraph::SwitchParams() {
       comm_feed_dict_it->second = comm_input_data_it->second;
     }
   } else {
+    TIK(switch_params_making);
     HT_ASSERT(_comm_results.empty())
       << "no comm result should exist";
     // *建图*
@@ -577,9 +677,14 @@ void SwitchExecGraph::SwitchParams() {
         _comm_shape_plan[output->id()] = output->shape();
       }
     }
+    if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
+      TOK(switch_params_making);
+      HT_LOG_INFO << local_device << ": switch params making graph & plan time = " << COST_MSEC(switch_params_making) << " ms";
+    }
   }
 
   // 启动！
+  TIK(switch_params_running);
   Tensor2NDArrayMap tensor2data;
   Tensor2IntMap tensor2degrees;
   RuntimeContext runtime_ctx(_comm_topo.size(), _comm_shape_plan);
@@ -644,6 +749,18 @@ void SwitchExecGraph::SwitchParams() {
   // TODO: 最坏情况需要1.5倍的显存开销，后续需要分bucket进行发送并清除
   _switch_graph_pair.first->_preserved_data.clear();
 
+  if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
+    // 算子同步
+    TensorList fetches(_comm_results);
+    fetches.insert(fetches.end(), _dummy_links.begin(), _dummy_links.end());
+    for (const auto fetch : fetches) {
+      fetch->producer()->Sync();
+    }     
+    TOK(switch_params_running);
+    HT_LOG_INFO << local_device << ": switch params running time = " << COST_MSEC(switch_params_running) << " ms";
+    ProfileRunningDetails();
+  }
+  
   // MPI同步（其实不同步也没有问题）
   if (!_comm_set.empty()) {
     std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
@@ -653,8 +770,77 @@ void SwitchExecGraph::SwitchParams() {
     HT_LOG_DEBUG << local_device << ": params switch comm set = " << mpi_device_group;
   }
   HT_LOG_DEBUG << local_device << ": params switch from " << _switch_graph_pair.first->name()
-   << " to " << _switch_graph_pair.first->name() << " is done";
+   << " to " << _switch_graph_pair.second->name() << " is done";
   // HT_RUNTIME_ERROR << local_device << ": breakpoint";
+}
+
+// profile details
+void SwitchExecGraph::ProfileRunningDetails() {
+
+  HT_ASSERT(_comm_graph != nullptr)
+    << "Profiler can only used after comm graph was built";
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  size_t slice_num = 0, concat_num = 0, contiguous_num = 0, comm_num = 0;
+  double slice_time = 0, concat_time = 0, contiguous_time = 0, comm_time = 0;
+  
+  // op execute time
+  for (auto& op_ref : _comm_topo) {
+    auto& op = op_ref.get();
+    // Note: only one micro batch
+    if (is_placeholder_op(op)) {
+      continue;
+    } else if (is_slice_op(op)) {
+      slice_time += op->TimeCost(0) * 1.0 / 1e6;
+      slice_num += 1;
+    } else if (is_concat_op(op)) {
+      concat_time += op->TimeCost(0) * 1.0 / 1e6;
+      concat_num += 1;
+    } else if (is_contiguous_op(op)) {
+      contiguous_time += op->TimeCost(0) * 1.0 / 1e6;
+      contiguous_num += 1;
+    } else if (is_batched_isend_irecv_op(op)) {
+      comm_time += op->TimeCost(0) * 1.0 / 1e6;
+      comm_num += 1;
+    } else {
+      HT_RUNTIME_ERROR << local_device << ": op " << op 
+        << " shouldn't exit in the comm graph";
+    }
+  }
+
+  // comm detailed info
+  std::vector<Device>& send_to_devices = _send_mapping[local_device].first;
+  TensorList& send_tensors = _send_mapping[local_device].second;
+  std::unordered_map<Device, std::vector<std::string>> send_info_mapping;
+  std::ostringstream send_info_output;
+  auto send_len = send_to_devices.size();
+  HT_ASSERT(send_tensors.size() == send_len)
+    << "something wrong with the size";
+  for (size_t i = 0; i < send_len; ++i) {
+    auto it = _info_mapping.find(send_tensors[i]->id());
+    HT_ASSERT(it != _info_mapping.end())
+      << "send tensor info is not existed";
+    send_info_mapping[send_to_devices[i]].push_back(it->second);
+  }
+  for (const auto& kv : send_info_mapping) {
+    send_info_output << "send " << kv.second.size()
+      << " tensor to " << kv.first;
+    if (_profile_level == SWITCH_PROFILE_LEVEL::TRACE) {
+      for (const auto& send_info : kv.second) {
+        send_info_output << ", " << send_info;
+      }
+    }
+    send_info_output << std::endl;
+  }
+
+  HT_LOG_INFO << local_device << ": switch params running details: " << std::endl
+    << "*********************************************" << std::endl
+    << "slice num = " << slice_num << ", time = " << slice_time << " ms" << std::endl
+    << "concat num = " << concat_num << ", time = " << concat_time << " ms" << std::endl
+    << "contiguous num = " << contiguous_num << ", time = " << contiguous_time << " ms" << std::endl
+    << "comm num = " << comm_num << ", time = " << comm_time << " ms" << std::endl
+    << "*********************************************" << std::endl
+    << send_info_output.str()
+    << "*********************************************";
 }
 
 } // namespace graph

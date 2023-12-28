@@ -274,6 +274,23 @@ struct hash<hetu::Device> {
 };
 
 template <>
+struct hash<std::pair<hetu::Device, hetu::Device>> {
+  std::size_t operator()(const std::pair<hetu::Device, hetu::Device>& device_pair) const noexcept {
+    // devices in pair need to sort
+    auto hash_op = std::hash<hetu::Device>();
+    size_t seed = 2;
+    if (device_pair.first < device_pair.second) {
+      seed ^= hash_op(device_pair.first) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+      seed ^= hash_op(device_pair.second) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    } else {
+      seed ^= hash_op(device_pair.second) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+      seed ^= hash_op(device_pair.first) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+    return seed;
+  }
+};
+
+template <>
 struct hash<hetu::DeviceGroup> {
   std::size_t operator()(const hetu::DeviceGroup& group) const noexcept {
     // devices in group are sorted, so we can hash them without re-ordering

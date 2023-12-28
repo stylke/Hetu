@@ -100,6 +100,16 @@ DeviceGroup DefineAndRunGraph::GetVariableDeviceGroupInner(const Tensor& tensor)
 void DefineAndRunGraph::Instantiate(const OpRefList& topo,
                                     Tensor2ShapeMap& shape_plan) {
 
+  // Test Case: 切换并行方案（验证切换时间）
+  char* env = std::getenv("HETU_PARALLEL_CHANGE_TEST");
+  if (env != nullptr) {
+    if (std::string(env) == "COST" && change_parallel_test_case >= 1) {
+      InstantiateTestCase(topo, shape_plan);
+      change_parallel_test_case += 1;
+      return;
+    }
+  }
+
   auto exec_graph_num = _exec_graph_plan_pool.size();
   Tensor2ShapeMap exec_shape_plan;
   Op2OpMap op_to_exec_op_mapping;
@@ -153,12 +163,6 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     }
   };
 
-  // Test Case: 切换并行方案
-  char* env = std::getenv("HETU_PARALLEL_CHANGE_TEST");
-  if (env != nullptr) {
-    change_parallel_test_case += 1;
-  }
-
   HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << topo;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
@@ -174,7 +178,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     // Test Case: 例如修改pp
     // 切换到新的并行方案（可以考虑之后记录一个op2dg）
     OpMeta exec_op_meta = OpMeta().set(op->op_meta()).set_extra_deps(std::move(exec_in_deps));
-    if (change_parallel_test_case == 2) {
+    if (change_parallel_test_case == 1) {
       if (!exec_op_meta.is_deduce_states) {
         // dp2tp(exec_op);
         // exec_op_meta.set_device_group(hetu::impl::comm::GetGlobalDeviceGroup());
@@ -211,7 +215,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
       exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
     }
     // Test Case: 手动让distributed_states发生一下变化
-    if (change_parallel_test_case == 2) {
+    if (change_parallel_test_case == 1) {
       // 这三个op需要特判并重新设置distributed_states与输出的shape
       if ((is_variable_op(exec_op) && exec_op->_body->type() == "ParallelVariableOp")
           || is_placeholder_op(exec_op) 
@@ -246,7 +250,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     // 8、冷启动
     Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
     // Test Case Log
-    if (change_parallel_test_case == 2 && exec_op->outputs().size() >= 1) {
+    if (change_parallel_test_case == 1 && exec_op->outputs().size() >= 1) {
       HT_LOG_DEBUG << "exec op " << exec_op << " output ds states = " << exec_op->output(0)->get_distributed_states().get_states()
         << " output shape = " << exec_op->output(0)->shape();
     }
@@ -270,6 +274,12 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
                                      std::move(tensor_to_exec_tensor_mapping));
 
   Graph::pop_graph_ctx();
+  // Test Case: 切换并行方案
+  if (env != nullptr) {
+    if (std::string(env) == "PRECISION" || std::string(env) == "COST") {
+      change_parallel_test_case += 1;
+    }
+  }
 }
 
 // TODO: merge two `Run` func
@@ -481,6 +491,14 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     HT_LOG_DEBUG << local_device << ": [Graph Plan] Context switch to the new exec plan end...";
   }
   HT_LOG_DEBUG << local_device << ": [Graph Plan] obtain exec graph end...";
+
+  // Test Case: 切换并行方案（验证切换时间）
+  char* env = std::getenv("HETU_PARALLEL_CHANGE_TEST");
+  if (env != nullptr) {
+    if (std::string(env) == "COST" && change_parallel_test_case >= 2) {
+      return {};
+    }
+  }
 
   // 已考虑fetches发生变化
   /*

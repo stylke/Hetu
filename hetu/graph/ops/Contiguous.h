@@ -17,6 +17,10 @@ class ContiguousOpImpl final : public OpInterface {
   : OpInterface(quote(ContiguousOp)) {
   }
 
+  inline uint64_t op_indicator() const noexcept override {
+    return CONTIGUOUS_OP;
+  }
+
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
