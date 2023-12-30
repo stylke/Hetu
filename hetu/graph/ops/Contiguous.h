@@ -25,6 +25,9 @@ class ContiguousOpImpl final : public OpInterface {
                                            .set_device(inputs[0]->device());
     return {output_meta};       
   };
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
   
   NDArrayList DoCompute(Operator& op,
                         const NDArrayList& inputs,
@@ -68,6 +71,9 @@ class ContiguousGradientOpImpl final : public OpInterface {
                                            .set_device(inputs[0]->device());
     return {output_meta};       
   };
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
   
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;

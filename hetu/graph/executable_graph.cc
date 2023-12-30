@@ -5,6 +5,7 @@
 #include "hetu/graph/ops/sum.h"
 #include "hetu/graph/ops/Concatenate.h"
 #include "hetu/graph/ops/Communication.h"
+#include "hetu/graph/ops/Contiguous.h"
 #include "hetu/graph/ops/Arithmetics.h"
 #include "hetu/graph/ops/Loss.h"
 #include "hetu/graph/autocast/autocast.h"
@@ -341,6 +342,43 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
   }
 
   return true;
+}
+
+void ExecutableGraph::InsertContiguousOp(const OpRefList& topo_order) {
+  auto& local_device = hetu::impl::comm::GetLocalDevice();
+  for (auto& op_ref : topo_order) {
+    auto& op = op_ref.get();
+    if (op->body().require_contig_inputs()) {
+      for (size_t i = 0; i < op->num_inputs(); i++) {
+        auto& input = op->input(i);
+        auto& input_op = input->producer();
+        if (!input_op->placement_group().contains(local_device))
+          continue;
+        if (!input->is_contiguous()) {
+          auto op_id = input->get_contiguous_op_id();
+          if (op_id.has_value() &&
+              _op_indexing[op_id.value()]->placement() == local_device) {
+            HT_LOG_TRACE << "Tensor " << input->name()
+                         << " is not contiguous for op " << op->body().type()
+                         << ". But it may have a contiguous copy, use it instead";
+            auto contig_op = _op_indexing[op_id.value()];
+            ReplaceInput(op, i, contig_op->output(0));
+          } else {
+            HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": Make Contiguous op for tensor " << input->name()
+                         << " while making " << op->body().type() << " op.";
+            Tensor contig_input = MakeContiguousOp(
+              input, OpMeta().set_name(input->name() + "_contig")
+                             .set_is_deduce_states(false));
+            RecordTensorShape(contig_input->id(), contig_input->shape());
+            auto& contig_op = contig_input->producer();
+            contig_op->MapToParallelDevices(input_op->placement_group());
+            contig_op->Instantiate(local_device, kComputingStream);
+            ReplaceInput(op, i, contig_input);
+          }
+        }
+      }
+    }
+  }
 }
 
 void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
@@ -1050,6 +1088,17 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       SubstituteCommOp(topo);
       Graph::pop_graph_ctx();
       HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op end...";
+
+      // update topo with substituted comm_ops
+      OpRefList updated_topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before add contiguous op: " << topo;
+
+      // insert contiguous ops
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] insert contiguous op begin...";
+      Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
+      InsertContiguousOp(updated_topo);
+      Graph::pop_graph_ctx();
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] insert contiguous op end...";
       is_execute_plan_changed = true;
       break;
     }
@@ -1418,6 +1467,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       for (auto& shared_weight_id : _execute_plan.shared_weight_tensor) {
         tensor2data[shared_weight_id] = tensor2data_list[0][shared_weight_id];
       }
+    }
+    if (is_forward) {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward begin]";
+    } else {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward begin]";
     }
     // micro batch i: execute fw/bw
     if (is_forward) {

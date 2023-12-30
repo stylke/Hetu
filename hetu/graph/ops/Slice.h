@@ -75,6 +75,7 @@ class SliceOpImpl final : public ViewsOpImpl {
     }
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(get_output_shape())
+                                           .set_stride(inputs[0]->stride())
                                            .set_device(inputs[0]->device());
     HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " splice op DoInferMeta() finished";
     return {output_meta};

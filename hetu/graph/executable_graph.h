@@ -134,6 +134,8 @@ class ExecutableGraph : public Graph {
 
   void SubstituteCommOp(const OpRefList& topo_order);
 
+  void InsertContiguousOp(const OpRefList& topo_order);
+
   void CrossSend(std::unordered_map<int32_t, int32_t> split_cur_state, 
                  std::unordered_map<int32_t, int32_t> split_target_state,
                  int32_t depth, bool need_split, int32_t& device_index, 
