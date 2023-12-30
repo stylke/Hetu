@@ -11,6 +11,7 @@ class GPTAttention(ht.nn.Module):
         super().__init__()
 
         self.config = config
+        self.use_flash_attn = config.use_flash_attn
         self.add_bias = True
 
         max_positions = config.max_position_embeddings
@@ -115,17 +116,21 @@ class GPTAttention(ht.nn.Module):
         # q,k,v shape=[micro_batch_size, seq_len, num_heads, head_dim]
         query, key, value = ht.split(qkv, 3, qkv.ndim - 1)
 
-        # [micro_batch_size, num_heads, seq_len, head_dim]
-        query = query.transpose([0, 2, 1, 3], name="AttentionOp_query")
-        value = value.transpose([0, 2, 1, 3], name="AttentionOp_value")
-        # [micro_batch_size, num_heads, head_dim, seq_len]
-        key_t = key.transpose([0, 2, 3, 1], name="AttentionOp_key") # k^T
+        if self.use_flash_attn:
+            attn_output = ht.attn(query, key, value, 0, -1, True)[0]
+        else:
+            # [micro_batch_size, num_heads, seq_len, head_dim]
+            query = query.transpose([0, 2, 1, 3], name="AttentionOp_query")
+            value = value.transpose([0, 2, 1, 3], name="AttentionOp_value")
+            # [micro_batch_size, num_heads, head_dim, seq_len]
+            key_t = key.transpose([0, 2, 3, 1], name="AttentionOp_key") # k^T
 
-        # self-attn, shape=[micro_batch_size, num_heads, seq_len, head_dim]
-        attn_output, attn_weights = self._attn(query, key_t, value, attention_mask)
+            # self-attn, shape=[micro_batch_size, num_heads, seq_len, head_dim]
+            attn_output, attn_weights = self._attn(query, key_t, value, attention_mask)
 
-        # [micro_batch_size, seq_len, num_heads, head_dim]
-        attn_output = attn_output.transpose([0, 2, 1, 3])
+            # [micro_batch_size, seq_len, num_heads, head_dim]
+            attn_output = attn_output.transpose([0, 2, 1, 3])
+        
         # [micro_batch_size*seq_len, num_heads*head_dim]
         attn_output = attn_output.reshape([-1, self.num_heads * self.head_dim])
         # row parallel, shape=[micro_batch_size*seq_len, num_heads*head_dim]
@@ -353,8 +358,15 @@ class GPTLMHeadModel(ht.nn.Module):
             # softmax cross_entropy loss = sum(-log(softmax(vocab[label])))
             # because of ignored_index, so cannot use auto distributed reduce for mean
             # need sum over distributed tensor, and divide the not ignored_index num after by hand
-            loss = ht.vocab_parallel_cross_entropy(shift_lm_logits,  
-                   shift_labels, ignored_index = -1, reduction = "mean")
+            # print(shift_lm_logits.distributed_states)
+            if shift_lm_logits.distributed_states.get_dim(1) > 1:
+                # print('use vocab parallel cross entropy')
+                loss = ht.vocab_parallel_cross_entropy(shift_lm_logits,  
+                    shift_labels, ignored_index = -1, reduction = "mean")
+            else:
+                # print('use commom cross entropy')
+                loss = ht.softmax_cross_entropy_sparse(shift_lm_logits,
+                    shift_labels, ignored_index = -1, reduction = "mean")
         output = (shift_lm_logits,)
         output = ((loss,) + output) if loss is not None else output
         return output # ((loss), (shift_lm_logits))

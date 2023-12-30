@@ -54,6 +54,7 @@ if(${USE_FLASH_ATTN})
   if(NOT CUTLASS_FOUND)
     message("cutlass not found, preparing...")
     include(${CMAKE_SOURCE_DIR}/cmake/external/cutlass.cmake)
+  target_include_directories(hetu_C PUBLIC ${CUTLASS_INCLUDE_DIR}) 
   endif()
 
   find_package(FLASH)
