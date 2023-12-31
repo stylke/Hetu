@@ -1588,40 +1588,37 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     double compute_time = 0;
     double tp_p2p_time = 0;
     double pp_p2p_time = 0;
-    double collective_time = 0;
+    double tp_collective_time = 0;
+    double dp_grad_reduce_time = 0;
     double blocking_time = 0;
     double other_time = 0;
     std::ostringstream out;
     out << "Op Execute Time: ";
+    int print_num = 30;
     for (auto& op_time : op_execute_time) {
       if (op_time.first >= 0) {
         auto op = _op_indexing[op_time.first];
-        if (is_all_reduce_op(op)) {
-          auto allreduce_op = op;
-          auto& allreduce_impl = reinterpret_cast<AllReduceOpImpl&>(allreduce_op->body());
-          out << std::endl << local_device << ": " 
-              << allreduce_op->input(0) << ", shape = "
-              << allreduce_op->input(0)->shape() << ", type = "
-              << allreduce_op->input(0)->dtype() << ", comm group = [";
-          auto comm_group = allreduce_impl.comm_group();
-          for (auto device : comm_group.devices()) {
-            out << comm_group.get_index(device) << ", ";
+        // print top 10 op
+        if (print_num-- > 0) {
+          out << std::endl << local_device << ": " << op << "(type = " << op->type() << "), " << "time = " << op_time.second * 1.0 / 1e6 << " ms";
+          if (op->num_inputs() > 0) {
+            out << "; input shapes = ";
+            for (auto& input : op->inputs()) {
+              out << input->shape() << ", ";
+            }
           }
-          out << "]";
-        } else {
-          if (op->num_inputs() > 0)
-          out << std::endl << local_device << ": " 
-              << op->input(0) << ", shape = "
-              << op->input(0)->shape() << ", type = "
-              << op->input(0)->dtype();        
+          out << "; inputs = " << op->inputs();
         }
-        out << std::endl << local_device << ": " << op << ": " << op_time.second * 1.0 / 1e6 << " ms";
         if (op->stream_index() == kComputingStream) {
           compute_time += op_time.second * 1.0 / 1e6;
         } else if (op->stream_index() == kP2PStream) {
           tp_p2p_time += op_time.second * 1.0 / 1e6;
         } else if (op->stream_index() == kCollectiveStream) {
-          collective_time += op_time.second * 1.0 / 1e6;
+          if (is_optimizer_update_op(op->output(0)->consumer(0))) {
+            dp_grad_reduce_time += op_time.second * 1.0 / 1e6;
+          } else {
+            tp_collective_time += op_time.second * 1.0 / 1e6;
+          }
         } else if (op->stream_index() == kBlockingStream) {
           blocking_time += op_time.second * 1.0 / 1e6;
         } else {
@@ -1636,8 +1633,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                 << "\ntotal run time: " << COST_MSEC(run) << " ms, "
                 << "compute time: " << compute_time << " ms, "
                 << "tp p2p time: " << tp_p2p_time << " ms, "
-                << "pp p2p time: " << pp_p2p_time << " ms, "
-                << "collective time: " << collective_time << " ms, "
+                << "tp collective time: " << tp_collective_time << " ms, "
+                << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
+                << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
                 << "blocking time: " << blocking_time << " ms, "
                 << "other time: " << other_time << " ms" << std::endl
                 << out.str();

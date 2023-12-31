@@ -59,6 +59,7 @@ def pretrain(args):
                        activation_function=args.hidden_act,
                        global_batch_size=args.global_batch_size,
                        num_micro_batches=args.num_micro_batches,
+                       use_flash_attn=args.use_flash_attn,
                        )
     # Input data file names definition
     # dict_seqlen2predlen = {128:20, 512:80}
@@ -209,6 +210,9 @@ if __name__ == '__main__':
     parser.add_argument(
         "--dropout_prob", type=float, default=0.1, help="Dropout rate."
     )
+    parser.add_argument(
+        "--use_flash_attn", action="store_true", help="Use Flash Attention."
+    )    
     parser.add_argument(
         "--bf16", action="store_true", help="Use bfloat16."
     )
