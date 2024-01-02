@@ -441,14 +441,26 @@ __forceinline__ __device__ T cuda_pow(T x, T exponent) {
   //                    << typeid(T).name();
 }
 
+__forceinline__ __device__ hetu::float16 cuda_pow(hetu::float16 x, double exponent) {
+  return static_cast<hetu::float16>(powf(float(x), float(exponent)));
+}
+
 template <>
 __forceinline__ __device__ hetu::float16 cuda_pow<hetu::float16>(hetu::float16 x, hetu::float16 exponent) {
   return static_cast<hetu::float16>(powf(float(x), float(exponent)));
 }
 
+__forceinline__ __device__ hetu::bfloat16 cuda_pow(hetu::bfloat16 x, double exponent) {
+  return static_cast<hetu::bfloat16>(powf(float(x), float(exponent)));
+}
+
 template <>
 __forceinline__ __device__ hetu::bfloat16 cuda_pow<hetu::bfloat16>(hetu::bfloat16 x, hetu::bfloat16 exponent) {
   return static_cast<hetu::bfloat16>(powf(float(x), float(exponent)));
+}
+
+__forceinline__ __device__ float cuda_pow(float x, double exponent) {
+  return powf(x, float(exponent));
 }
 
 template <>

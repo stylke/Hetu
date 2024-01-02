@@ -28,11 +28,6 @@ struct OpMathType<hetu::float16> {
 template <typename T>
 using opmath_type = typename OpMathType<T>::type;
 
-template<typename spec_t, int vec_size>
-struct alignas(sizeof(spec_t) * vec_size) aligned_vector {
-  spec_t val[vec_size];
-};
-
 template <typename spec_t, typename arg_t, typename func_t>
 struct func_wrapper_t {
   func_t combine;
@@ -90,7 +85,6 @@ int get_output_vec_size(size_t reduce_ndim, size_t ndim, const HTShape& in_shape
 
 struct ReduceConfig {
   static constexpr int input_vec_size = 4;
-  static constexpr int warp_size = 32;
 
   ReduceConfig(int element_size_bytes, int num_outputs, int num_inputs)
     : element_size_bytes(element_size_bytes)
@@ -119,7 +113,7 @@ struct ReduceConfig {
     int dim0_pow2 = dim0 < max_num_threads ? static_cast<int>(last_pow2(dim0)) : max_num_threads;
     int dim1_pow2 = dim1 < max_num_threads ? static_cast<int>(last_pow2(dim1)) : max_num_threads;
 
-    block_width = std::min(dim0_pow2, static_cast<int>(warp_size));
+    block_width = std::min(dim0_pow2, static_cast<int>(HT_WARP_SIZE));
     block_height = std::min(dim1_pow2, static_cast<int>(max_num_threads / block_width));
     block_width = std::min(dim0_pow2, static_cast<int>(max_num_threads / block_height));
     num_threads = block_width * block_height;
@@ -202,7 +196,7 @@ struct ReduceConfig {
   int shared_memory_size() const {
     if (!should_block_y_reduce() &&
         (!should_block_x_reduce() ||
-         block_width <= warp_size)) {
+         block_width <= HT_WARP_SIZE)) {
       return 0;
     }
     return element_size_bytes * num_threads * output_vec_size;

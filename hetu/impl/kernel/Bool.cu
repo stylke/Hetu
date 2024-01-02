@@ -3,21 +3,10 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/offset_calculator.cuh"
+#include "hetu/impl/kernel/Vectorized.cuh"
 
 namespace hetu {
 namespace impl {
-
-template <typename spec_t>
-__global__ void bool_kernel(const spec_t* input, size_t size, bool* output,
-                            const OffsetCalculator* in_offset_calculator,
-                            const OffsetCalculator* out_offset_calculator) {
-  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
-    return;
-  auto in_offset = in_offset_calculator->get(idx);
-  auto out_offset = out_offset_calculator->get(idx);
-  output[out_offset] = float(input[in_offset] > 0) ? 1 : 0;
-}
 
 void BoolCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(input);
@@ -27,25 +16,38 @@ void BoolCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   size_t size = input->numel();
   if (size == 0)
     return;
-  dim3 blocks, threads;
-  threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  NDArray in_offset_calculator_arr, out_offset_calculator_arr;
-  OffsetCalculator *in_offset_calculator, *out_offset_calculator;
-  std::tie(in_offset_calculator_arr, in_offset_calculator) =
-    AllocOffsetCalculator(input, stream);
-  std::tie(out_offset_calculator_arr, out_offset_calculator) = 
-    AllocOffsetCalculator(output, stream);
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-    input->dtype(), spec_t, "BoolCuda", [&]() {
-      bool_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), size, output->data_ptr<bool>(),
-        in_offset_calculator, out_offset_calculator);
+  bool contiguous = input->is_contiguous() && output->is_contiguous();
+  if (contiguous) {
+    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+      input->dtype(), spec_t, "BoolCuda", [&]() {
+        launch_vectorized_unary_kernel(input->data_ptr<spec_t>(), size,
+                                       output->data_ptr<spec_t>(), stream,
+                                       [=] __device__ (spec_t x) -> spec_t {
+                                         return float(x > 0) ? 1 : 0;
+                                       });
     });
-  NDArray::MarkUsedBy({input, output, in_offset_calculator_arr,
-                      out_offset_calculator_arr}, stream);
+  } else {
+    constexpr int unroll_factor = sizeof(DataType2Size(output->dtype())) >= 4 ? 2 : 4;
+    dim3 block(128);
+    dim3 grid(DIVUP(size, unroll_factor * block.x));
+    NDArray in_offset_calculator_arr, out_offset_calculator_arr;
+    OffsetCalculator *in_offset_calculator, *out_offset_calculator;
+    std::tie(in_offset_calculator_arr, in_offset_calculator) =
+      AllocOffsetCalculator(input, stream);
+    std::tie(out_offset_calculator_arr, out_offset_calculator) = 
+      AllocOffsetCalculator(output, stream);
+    CUDAStream cuda_stream(stream);
+    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+      input->dtype(), spec_t, "BoolCuda", [&]() {
+        unary_kernel<128, unroll_factor><<<grid, block, 0, cuda_stream>>>(
+          input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>(),
+          [=] __device__ (spec_t x) -> spec_t {
+            return float(x > 0) ? 1 : 0;
+          }, in_offset_calculator, out_offset_calculator);
+    });
+    NDArray::MarkUsedBy({in_offset_calculator_arr, out_offset_calculator_arr}, stream);
+  }
+  NDArray::MarkUsedBy({input, output}, stream);
 }
 
 } // namespace impl

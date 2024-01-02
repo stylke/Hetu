@@ -6,6 +6,11 @@
 namespace hetu {
 namespace impl {
 
+template<typename spec_t, int vec_size>
+struct alignas(sizeof(spec_t) * vec_size) aligned_vector {
+  spec_t val[vec_size];
+};
+
 inline int GetThreadNum(int cnt) {
   if (cnt >= 1048576)
     return 1024;

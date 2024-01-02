@@ -45,17 +45,20 @@ AllocOffsetCalculator(const NDArray& arr, const Stream& stream) {
     CUDAStream cuda_stream(stream);
     size_t ndim = arr->ndim();
     size_t alloc_size = ndim * sizeof(int64_t);
-    auto shape_arr = 
-        hetu::cuda::to_int64_ndarray(arr->shape(), device_id);
-    auto stride_arr =
-        hetu::cuda::to_int64_ndarray(arr->stride(), device_id);
+    HTShape offset_calculator_meta = arr->shape();
+    offset_calculator_meta.insert(offset_calculator_meta.end(),
+                                  arr->stride().begin(), arr->stride().end());
+    auto offset_calculator_meta_arr =
+      hetu::cuda::to_int64_ndarray(offset_calculator_meta, device_id);
+    int64_t *shape_ptr = offset_calculator_meta_arr->data_ptr<int64_t>();
+    int64_t *stride_ptr = shape_ptr + arr->shape().size();
     offset_calculator_arr = NDArray::empty({static_cast<int64_t>(sizeof(StridedOffsetCalculator))},
                                            Device(kCUDA, device_id), kByte, stream.stream_index());
     offset_calculator = offset_calculator_arr->data_ptr<StridedOffsetCalculator>();
     hetu::cuda::CUDADeviceGuard guard(device_id);
     strided_constructor<<<1, 1, 0, cuda_stream>>>(offset_calculator, ndim,
-                                                  shape_arr->data_ptr<int64_t>(), stride_arr->data_ptr<int64_t>());
-    NDArray::MarkUsedBy({shape_arr, stride_arr}, stream);
+                                                  shape_ptr, stride_ptr);
+    NDArray::MarkUsedBy({offset_calculator_meta_arr}, stream);
     lfu_cache.put(shape_arr_host, stride_arr_host, offset_calculator_arr, offset_calculator);
   }
   return {offset_calculator_arr, offset_calculator};
