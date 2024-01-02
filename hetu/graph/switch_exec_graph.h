@@ -20,12 +20,14 @@ using Device2DTListPairMap = std::unordered_map<Device, std::pair<std::vector<De
 std::ostream& operator<<(std::ostream& os, const SwitchExecGraph& switcher);
 
 enum class SWITCH_ALGORITHM_LEVEL : int8_t {
-  ROUND_ROBIN = 0,
+  FCFS = 0,
+  ROUND_ROBIN,
   GREEDY,
 };
 
 enum class SWITCH_PROFILE_LEVEL : int8_t {
   TRACE = 0,
+  NVLINK,
   TIME,
   INFO,
 };
@@ -164,6 +166,8 @@ class SwitchExecGraph {
           _algorithm_level = SWITCH_ALGORITHM_LEVEL::GREEDY;
         } else if (algorithm_level == "ROUND_ROBIN") {
           _algorithm_level = SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN;
+        } else if (algorithm_level == "FCFS") {
+          _algorithm_level = SWITCH_ALGORITHM_LEVEL::FCFS;
         } else {
           HT_RUNTIME_ERROR << "NotImplementedError";
         }
@@ -176,6 +180,8 @@ class SwitchExecGraph {
           _profile_level = SWITCH_PROFILE_LEVEL::INFO;
         } else if (profile_level == "TIME") {
           _profile_level = SWITCH_PROFILE_LEVEL::TIME;
+        } else if (profile_level == "NVLINK") {
+          _profile_level = SWITCH_PROFILE_LEVEL::NVLINK;
         } else if (profile_level == "TRACE") {
           _profile_level = SWITCH_PROFILE_LEVEL::TRACE;
         } else {
@@ -221,6 +227,8 @@ class SwitchExecGraph {
     void MakeCommGraph();
 
     void ProfileRunningDetails();
+    void ProfileNvlinkStart();
+    void ProfileNvlinkEnd();
 
   protected:
     // basic attributes
@@ -250,6 +258,10 @@ class SwitchExecGraph {
     // profile related
     SWITCH_PROFILE_LEVEL _profile_level = SWITCH_PROFILE_LEVEL::INFO; // profile的粒度（开启后会进行同步，因此端到端速度可能会变慢）
     Tensor2StringMap _info_mapping; // 记录tensor到相应param slice名称的映射（只针对BatchedISendIRecvOp的send部分的tensor）
+    unsigned int _device_count = 0; // 有多少个GPU
+    std::vector<unsigned int> _nvlink_counts; // 每个GPU有多少条NVLink
+    std::vector<std::vector<unsigned long long>> _nvlink_txs; // 记录执行通信代码片段前每个GPU每条NVLink的Raw Tx
+    std::vector<std::vector<unsigned long long>> _nvlink_rxs; // 记录执行通信代码片段前每个GPU每条NVLink的Raw Rx
 };
 
 } // namespace graph

@@ -35,6 +35,12 @@ if(${HETU_COMPILE_NCCL})
   target_include_directories(hetu_C PUBLIC ${NCCL_INCLUDE_DIRS})
 endif()
 
+if(${HETU_COMPILE_NVML})
+  find_package(NVML REQUIRED)
+  target_link_libraries(hetu_C PUBLIC ${NVML_LIBRARIES})
+  target_include_directories(hetu_C PUBLIC ${NVML_INCLUDE_DIRS})
+endif()
+
 if(${HETU_COMPILE_DNNL})
   find_package(DNNL)
   if(NOT DNNL_FOUND)

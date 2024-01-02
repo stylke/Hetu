@@ -14,12 +14,13 @@
 #include "hetu/core/device.h"
 #include "hetu/core/dtype.h"
 #include "hetu/core/ndarray_meta.h"
+#include "hetu/core/stream.h"
 #include "hetu/common/timing.h"
+#include <nvml.h>
+#include <nccl.h>
 
 namespace hetu {
 namespace graph {
-
-
 
 std::ostream& operator<<(std::ostream& os, const SwitchExecGraph& switcher) {
   os << "switch_exec_graph(" << switcher.SwitchGraphPair().first->name() << ", " 
@@ -140,12 +141,15 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
       auto& recv_tensor = _needed_slice_instances[i];
       auto& recv_device = _needed_devices[i];
       // 不同的算法
-      // round robin
-      if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN) {
+      // FCFS/ round-robin
+      if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::FCFS
+          || _switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN) {
         send_tensor = _owned_slice_instances[_round_robin];
         send_device = _owned_devices[_round_robin];
         // 更新轮询次数
-        _round_robin++;
+        if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN) {
+          _round_robin++;
+        }
         if (_round_robin == _owned_slice_instances.size()) {
           _round_robin = 0;
         }
@@ -415,7 +419,7 @@ void SwitchExecGraph::MakeCommGraph() {
     auto& define_param = define_param_ref.get();
     // Test Case
     /*
-    if ("colp_mlp_block11_weight" != define_param->name()) {
+    if ("wte_table" != define_param->name()) {
       continue;
     }
     */
@@ -683,8 +687,31 @@ void SwitchExecGraph::SwitchParams() {
     }
   }
 
+  // profile时需要先都同步好了
+  if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
+    // stream同步
+    SynchronizeAllStreams(local_device);
+    // rank同步
+    // 这里对全部rank进行同步
+    /*
+    if (!_comm_set.empty()) {
+      std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
+      DeviceGroup mpi_device_group{mpi_devices};
+      auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
+      mpi_group->Barrier(true);
+      HT_LOG_DEBUG << local_device << ": params switch comm set = " << mpi_device_group;
+    }
+    */
+    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+    mpi_group->Barrier(true);
+    if (_profile_level <= SWITCH_PROFILE_LEVEL::NVLINK) {
+      ProfileNvlinkStart();
+    }
+    mpi_group->Barrier(true);
+  }
+  
   // 启动！
-  TIK(switch_params_running);
+  TIK(switch_params_running); // 开始计时
   Tensor2NDArrayMap tensor2data;
   Tensor2IntMap tensor2degrees;
   RuntimeContext runtime_ctx(_comm_topo.size(), _comm_shape_plan);
@@ -750,25 +777,32 @@ void SwitchExecGraph::SwitchParams() {
   _switch_graph_pair.first->_preserved_data.clear();
 
   if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
-    // 算子同步
+    // stream同步
     TensorList fetches(_comm_results);
     fetches.insert(fetches.end(), _dummy_links.begin(), _dummy_links.end());
     for (const auto fetch : fetches) {
       fetch->producer()->Sync();
-    }     
-    TOK(switch_params_running);
+    }  
+    TOK(switch_params_running); // 结束计时
+    // rank同步（不同rank耗时不一样，因此放在TOK之后）
+    // 这里对全部rank进行同步
+    /*
+    if (!_comm_set.empty()) {
+      std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
+      DeviceGroup mpi_device_group{mpi_devices};
+      auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
+      mpi_group->Barrier(true);
+    }
+    */
+    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+    mpi_group->Barrier(true);
     HT_LOG_INFO << local_device << ": switch params running time = " << COST_MSEC(switch_params_running) << " ms";
+    if (_profile_level <= SWITCH_PROFILE_LEVEL::NVLINK) {
+      ProfileNvlinkEnd();
+    }
     ProfileRunningDetails();
   }
   
-  // MPI同步（其实不同步也没有问题）
-  if (!_comm_set.empty()) {
-    std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
-    DeviceGroup mpi_device_group{mpi_devices};
-    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
-    mpi_group->Barrier(true);
-    HT_LOG_DEBUG << local_device << ": params switch comm set = " << mpi_device_group;
-  }
   HT_LOG_DEBUG << local_device << ": params switch from " << _switch_graph_pair.first->name()
    << " to " << _switch_graph_pair.second->name() << " is done";
   // HT_RUNTIME_ERROR << local_device << ": breakpoint";
@@ -841,6 +875,138 @@ void SwitchExecGraph::ProfileRunningDetails() {
     << "*********************************************" << std::endl
     << send_info_output.str()
     << "*********************************************";
+}
+
+void SwitchExecGraph::ProfileNvlinkStart() {
+
+  // 只需要一个机器profile即可
+  if (hetu::impl::comm::GetWorldRank() != 0) {
+    return;
+  }
+  HT_LOG_INFO << "********* Profile NVLink Start *********";
+
+  // 初始化NVML库
+  nvmlReturn_t result = nvmlInit();
+  if (result != NVML_SUCCESS) {
+    HT_RUNTIME_ERROR << "Failed to initialize NVML: " << nvmlErrorString(result);
+    return;
+  }
+
+  // 获取GPU数量
+  result = nvmlDeviceGetCount(&_device_count);
+  if (result != NVML_SUCCESS) {
+    HT_RUNTIME_ERROR << "Failed to query device count: " << nvmlErrorString(result);
+    return;
+  }
+  _nvlink_counts.reserve(_device_count);
+  _nvlink_txs.reserve(_device_count);
+  _nvlink_rxs.reserve(_device_count);
+
+  for (unsigned int i = 0; i < _device_count; ++i) {
+    // Initialization
+    _nvlink_counts.emplace_back(0);
+    _nvlink_txs.emplace_back();
+    _nvlink_rxs.emplace_back();
+
+    // Get current device
+    nvmlDevice_t device;
+    result = nvmlDeviceGetHandleByIndex(i, &device);
+    if (result != NVML_SUCCESS) {
+      HT_RUNTIME_ERROR << "Failed to get handle for device " << i << ": " << nvmlErrorString(result);
+      return;
+    }
+
+    // Check the NVLink status for each possible link
+    for (unsigned int link = 0; link < NVML_NVLINK_MAX_LINKS; ++link) {
+      nvmlEnableState_t is_active;
+      result = nvmlDeviceGetNvLinkState(device, link, &is_active);
+      if (NVML_SUCCESS == result && is_active == NVML_FEATURE_ENABLED) {
+        _nvlink_counts[i]++;
+      }
+    }
+    HT_LOG_INFO << "GPU " << i << " has " << _nvlink_counts[i] << " NVLink connections active";
+    if (_nvlink_counts[i] == 0) {
+      continue;
+    }
+    _nvlink_txs.reserve(_nvlink_counts[i]);
+    _nvlink_rxs.reserve(_nvlink_counts[i]);
+
+    // 创建NVML字段值数组
+    std::vector<nvmlFieldValue_t> field_values(2 * _nvlink_counts[i]);
+    for (unsigned int link = 0; link < _nvlink_counts[i]; ++link) {
+      field_values[2 * link].fieldId = NVML_FI_DEV_NVLINK_THROUGHPUT_DATA_TX;
+      field_values[2 * link].scopeId = link; // 设置scopeId为linkId
+      field_values[2 * link + 1].fieldId = NVML_FI_DEV_NVLINK_THROUGHPUT_DATA_RX;
+      field_values[2 * link + 1].scopeId = link; // 设置scopeId为linkId
+    }
+
+    // 记录执行nccl通信代码片段前的NVLink Raw Tx和Raw Rx
+    result = nvmlDeviceGetFieldValues(device, field_values.size(), field_values.data());
+    if (result != NVML_SUCCESS) {
+      HT_RUNTIME_ERROR << "Failed to get utilization control: " << nvmlErrorString(result);
+      return;
+    }
+    for (unsigned int link = 0; link < _nvlink_counts[i]; ++link) {
+      _nvlink_txs[i].emplace_back(field_values[2 * link].value.ullVal);
+      _nvlink_rxs[i].emplace_back(field_values[2 * link + 1].value.ullVal);
+    }
+  }
+}
+
+
+void SwitchExecGraph::ProfileNvlinkEnd() {
+
+  // 只需要一个机器profile即可
+  // 如果没有NVLink则不再profile
+  if (hetu::impl::comm::GetWorldRank() != 0) {
+    return;
+  }
+
+  nvmlReturn_t result;
+  for (unsigned int i = 0; i < _device_count; ++i) {
+    if (_nvlink_counts[i] == 0) {
+      continue;
+    }
+    // Get current device
+    nvmlDevice_t device;
+    result = nvmlDeviceGetHandleByIndex(i, &device);
+    if (result != NVML_SUCCESS) {
+      HT_RUNTIME_ERROR << "Failed to get handle for device " << i << ": " << nvmlErrorString(result);
+      return;
+    }
+
+    // 创建NVML字段值数组
+    std::vector<nvmlFieldValue_t> field_values(2 * _nvlink_counts[i]);
+    for (unsigned int link = 0; link < _nvlink_counts[i]; ++link) {
+      field_values[2 * link].fieldId = NVML_FI_DEV_NVLINK_THROUGHPUT_DATA_TX;
+      field_values[2 * link].scopeId = link; // 设置scopeId为linkId
+      field_values[2 * link + 1].fieldId = NVML_FI_DEV_NVLINK_THROUGHPUT_DATA_RX;
+      field_values[2 * link + 1].scopeId = link; // 设置scopeId为linkId
+    }
+
+    // 获取执行nccl通信代码片段后的NVLink Raw Tx和Raw Rx
+    result = nvmlDeviceGetFieldValues(device, field_values.size(), field_values.data());
+    if (result != NVML_SUCCESS) {
+      HT_RUNTIME_ERROR << "Failed to get utilization control: " << nvmlErrorString(result);
+      return;
+    }
+    for (unsigned int link = 0; link < _nvlink_counts[i]; ++link) {
+      _nvlink_txs[i][link] = field_values[2 * link].value.ullVal - _nvlink_txs[i][link];
+      _nvlink_rxs[i][link] = field_values[2 * link + 1].value.ullVal - _nvlink_rxs[i][link];
+      // 打印NVLink Raw Tx和Raw Rx的变化量
+      HT_LOG_INFO << "GPU " << i << " NVLink " << link << " Data Tx Delta: " << _nvlink_txs[i][link] << " KiB";
+      HT_LOG_INFO << "GPU " << i << " NVLink " << link << " Data Rx Delta: " << _nvlink_rxs[i][link] << " KiB";
+    }
+  }
+
+  // 清理NVML资源
+  result = nvmlShutdown();
+  if (result != NVML_SUCCESS) {
+    HT_RUNTIME_ERROR << "Failed to shutdown NVML: " << nvmlErrorString(result);
+    return;
+  }
+   
+  HT_LOG_INFO << "********* Profile NVLink End *********";
 }
 
 } // namespace graph

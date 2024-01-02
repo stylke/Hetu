@@ -124,7 +124,7 @@ def pretrain(args):
         tokenizer = GPT2Tokenizer.from_pretrained('./checkpoint/HuggingFace')
         
         # ---- Load checkpoint ----
-        load_checkpoint(model, "./checkpoint/HuggingFace", config=config, local_device=local_device)
+        # load_checkpoint(model, "./checkpoint/HuggingFace", config=config, local_device=local_device)
         # print("Load the model successfully, the components are:", model.state_dict().keys())
         # You could also see the values by model.state_dict().values()
 

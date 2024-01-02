@@ -335,18 +335,18 @@ class Module(object):
         _parameters = self.__dict__.get('_parameters')
         for name, param in _parameters.items():
             if param is not None:
-                if format is 'numpy':
+                if format == 'numpy':
                     destination[prefix + name] = param.get_data()
-                elif format is 'hetu':
+                elif format == 'hetu':
                     destination[prefix + name] = param
                 else:
                     raise NotImplementedError("state_dict() can only use numpy.ndarray or hetu.Tensor.")
         _buffers = self.__dict__.get('_buffers')
         for name, buf in _buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
-                if format is 'numpy':
+                if format == 'numpy':
                     destination[prefix + name] = buf.get_data()
-                elif format is 'hetu': 
+                elif format == 'hetu': 
                     destination[prefix + name] = buf
                 else:
                     raise NotImplementedError("state_dict() can only use numpy.ndarray or hetu.Tensor.")
