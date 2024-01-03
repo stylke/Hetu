@@ -27,8 +27,8 @@ void transfer_device_to_device(const NDArray& from, NDArray& to, const Stream& s
   size_t numel = from->numel();
   CUDAStream cuda_stream(stream);
 
-  bool contiguous = from->is_contiguous() && to->is_contiguous();
-  bool memcpy_eligible = contiguous && from->dtype() == to->dtype();
+  bool memcpy_eligible = from->dtype() == to->dtype() &&
+                         from->is_contiguous() && to->is_contiguous();
   auto from_device = from->device();
   auto to_device = to->device();
   void* to_ptr = to->raw_data_ptr();
@@ -51,37 +51,14 @@ void transfer_device_to_device(const NDArray& from, NDArray& to, const Stream& s
       }
     }
   } else {
-    if (contiguous) {
-      HT_DISPATCH_PAIRED_SIGNED_INTEGER_AND_FLOATING_TYPES(
-        from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCuda",
-        [&]() {
-          launch_vectorized_unary_kernel(from->data_ptr<spec_a_t>(), numel,
-                                         to->data_ptr<spec_b_t>(), stream,
-                                         [=] __device__ (spec_a_t x) -> spec_b_t {
-                                           return static_cast<spec_b_t>(x);
-                                         });
+    HT_DISPATCH_PAIRED_SIGNED_INTEGER_AND_FLOATING_TYPES(
+      from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCuda",
+      [&]() {
+        launch_loop_kernel<spec_a_t, spec_b_t>(from, to, numel, stream,
+                                               [=] __device__ (spec_a_t x) -> spec_b_t {
+                                                 return static_cast<spec_b_t>(x);
+                                               });
       });
-    } else {
-      constexpr int unroll_factor = sizeof(DataType2Size(to->dtype())) >= 4 ? 2 : 4;
-      dim3 block(128);
-      dim3 grid(DIVUP(numel, unroll_factor * block.x));
-      NDArray from_offset_calculator_arr, to_offset_calculator_arr;
-      OffsetCalculator *from_offset_calculator, *to_offset_calculator;
-      std::tie(from_offset_calculator_arr, from_offset_calculator) =
-        AllocOffsetCalculator(from, stream);
-      std::tie(to_offset_calculator_arr, to_offset_calculator) = 
-        AllocOffsetCalculator(to, stream);
-      HT_DISPATCH_PAIRED_SIGNED_INTEGER_AND_FLOATING_TYPES(
-        from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCuda",
-        [&]() {
-          unary_kernel<128, unroll_factor><<<grid, block, 0, cuda_stream>>>(
-            from->data_ptr<spec_a_t>(), numel, to->data_ptr<spec_b_t>(),
-            [=] __device__ (spec_a_t x) -> spec_b_t {
-              return static_cast<spec_b_t>(x);
-            }, from_offset_calculator, to_offset_calculator);
-      });
-      NDArray::MarkUsedBy({from_offset_calculator_arr, to_offset_calculator_arr}, stream);
-    }
     NDArray::MarkUsedBy({from, to}, stream);
   }
 }

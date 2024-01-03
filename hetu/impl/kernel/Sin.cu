@@ -47,37 +47,13 @@ void SinCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   size_t size = output->numel();
   if (size == 0)
     return;
-  bool contiguous = input->is_contiguous() && output->is_contiguous();
-  if (contiguous) {
-    HT_DISPATCH_FLOATING_TYPES(
-      input->dtype(), spec_t, "SinCuda", [&]() {
-        launch_vectorized_unary_kernel(input->data_ptr<spec_t>(), size,
-                                       output->data_ptr<spec_t>(), stream,
-                                       [=] __device__ (spec_t x) -> spec_t {
-                                         return hetu::cuda::cuda_sin(x);
-                                       });
+  HT_DISPATCH_FLOATING_TYPES(
+    input->dtype(), spec_t, "SinCuda", [&]() {
+      launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
+                                         [=] __device__ (spec_t x) -> spec_t {
+                                           return hetu::cuda::cuda_sin(x);
+                                         });
     });
-  } else {
-    constexpr int unroll_factor = sizeof(DataType2Size(output->dtype())) >= 4 ? 2 : 4;
-    dim3 block(128);
-    dim3 grid(DIVUP(size, unroll_factor * block.x));
-    NDArray in_offset_calculator_arr, out_offset_calculator_arr;
-    OffsetCalculator *in_offset_calculator, *out_offset_calculator;
-    std::tie(in_offset_calculator_arr, in_offset_calculator) =
-      AllocOffsetCalculator(input, stream);
-    std::tie(out_offset_calculator_arr, out_offset_calculator) = 
-      AllocOffsetCalculator(output, stream);
-    CUDAStream cuda_stream(stream);
-    HT_DISPATCH_FLOATING_TYPES(
-      input->dtype(), spec_t, "SinCuda", [&]() {
-        unary_kernel<128, unroll_factor><<<grid, block, 0, cuda_stream>>>(
-          input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>(),
-          [=] __device__ (spec_t x) -> spec_t {
-            return hetu::cuda::cuda_sin(x);
-          }, in_offset_calculator, out_offset_calculator);
-    });
-    NDArray::MarkUsedBy({in_offset_calculator_arr, out_offset_calculator_arr}, stream);
-  }
   NDArray::MarkUsedBy({input, output}, stream);
 }
 
@@ -89,37 +65,13 @@ void CosCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   size_t size = output->numel();
   if (size == 0)
     return;
-  bool contiguous = input->is_contiguous() && output->is_contiguous();
-  if (contiguous) {
-    HT_DISPATCH_FLOATING_TYPES(
-      input->dtype(), spec_t, "CosCuda", [&]() {
-        launch_vectorized_unary_kernel(input->data_ptr<spec_t>(), size,
-                                       output->data_ptr<spec_t>(), stream,
-                                       [=] __device__ (spec_t x) -> spec_t {
-                                         return hetu::cuda::cuda_cos(x);
-                                       });
+  HT_DISPATCH_FLOATING_TYPES(
+    input->dtype(), spec_t, "CosCuda", [&]() {
+      launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
+                                         [=] __device__ (spec_t x) -> spec_t {
+                                           return hetu::cuda::cuda_cos(x);
+                                         });
     });
-  } else {
-    constexpr int unroll_factor = sizeof(DataType2Size(output->dtype())) >= 4 ? 2 : 4;
-    dim3 block(128);
-    dim3 grid(DIVUP(size, unroll_factor * block.x));
-    NDArray in_offset_calculator_arr, out_offset_calculator_arr;
-    OffsetCalculator *in_offset_calculator, *out_offset_calculator;
-    std::tie(in_offset_calculator_arr, in_offset_calculator) =
-      AllocOffsetCalculator(input, stream);
-    std::tie(out_offset_calculator_arr, out_offset_calculator) = 
-      AllocOffsetCalculator(output, stream);
-    CUDAStream cuda_stream(stream);
-    HT_DISPATCH_FLOATING_TYPES(
-      input->dtype(), spec_t, "CosCuda", [&]() {
-        unary_kernel<128, unroll_factor><<<grid, block, 0, cuda_stream>>>(
-          input->data_ptr<spec_t>(), size, output->data_ptr<spec_t>(),
-          [=] __device__ (spec_t x) -> spec_t {
-            return hetu::cuda::cuda_cos(x);
-          }, in_offset_calculator, out_offset_calculator);
-    });
-    NDArray::MarkUsedBy({in_offset_calculator_arr, out_offset_calculator_arr}, stream);
-  }
   NDArray::MarkUsedBy({input, output}, stream);
 }
 
