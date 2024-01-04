@@ -1,7 +1,4 @@
-from tqdm import tqdm
 import os
-import math
-import logging
 import hetu as ht
 from hetu_gpt_ds_parallel import GPTLMHeadModel
 from hetu.nn.modules.parallel_ds import config2ds
@@ -11,11 +8,28 @@ import numpy as np
 import time
 import argparse
 import json
+import socket
 from queue import Queue
 
-ht.init_comm_group()
-local_device = ht.local_device()
-all_devices = ht.global_device_group()
+local_device = None
+all_devices = None
+
+def distributed_init(use_two_node: bool = False):
+    if use_two_node:
+        hostname = socket.gethostname()
+        if hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-master-0':
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-0'
+        elif hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-worker-0':
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-1'
+        else:
+            raise ValueError(f"Unknown hostname: {hostname}")
+
+    global local_device, all_devices
+    ht.init_comm_group(8)
+    local_device = ht.local_device()
+    all_devices = ht.global_device_group()
+    if local_device.index == 0:
+        print(f'local_device: {local_device}, all_devices: {all_devices}')
 
 def read_ds_parallel_config(args):
     # read ds_parallel_config from json file
@@ -164,6 +178,9 @@ def pretrain(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
+    )
+    parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'
     )
     parser.add_argument(
@@ -217,6 +234,7 @@ if __name__ == '__main__':
         "--bf16", action="store_true", help="Use bfloat16."
     )
     args = parser.parse_args()
+    distributed_init(args.use_two_node)
     with ht.graph("define_and_run"):
         if args.bf16:
             precision = "ht.bfloat16"
@@ -225,4 +243,4 @@ if __name__ == '__main__':
         print(f'{local_device}: use precision {precision}')
         with ht.autocast(eval(precision)):            
             pretrain(args)
-            print(f'{local_device}: train hetu ds parallel end...')    
+            print(f'{local_device}: train hetu ds parallel end...')

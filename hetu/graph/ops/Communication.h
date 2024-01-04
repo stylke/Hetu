@@ -311,11 +311,11 @@ class BatchedISendIRecvOpImpl final : public OpInterface {
     std::ostringstream os;
     os << "dst devices =";
     for (auto& d : _dst_devices) {
-      os << " device_" << d.index();
+      os << " device_" << hetu::impl::comm::DeviceToWorldRank(d);
     }
     os << "src devices =";
     for (auto& s : _src_devices) {
-      os << " device_" << s.index();
+      os << " device_" << hetu::impl::comm::DeviceToWorldRank(s);
     }
     HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() 
                  << ": BatchedISendIRecvOp definition: " << op->name() << ": " << os.str();    

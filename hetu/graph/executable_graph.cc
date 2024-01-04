@@ -1357,12 +1357,15 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                          shared_weight_p2p, shared_weight_grad_p2p, accumulated_tensor, accumulated_ops);
     // sync partially
     std::vector<int> ranks;
-    for (const auto& stage : _stages)
+    for (const auto& stage : _stages) {
       for (const auto& device : stage.devices()) {
-        std::vector<int>::iterator it = find(ranks.begin(),ranks.end(),device.index());
-        if (it == ranks.end())
-          ranks.push_back(device.index());
+        auto rank = hetu::impl::comm::DeviceToWorldRank(device);
+        if (std::find(ranks.begin(), ranks.end(), rank) == ranks.end()) {
+          ranks.push_back(rank);
+        }
       }
+    }
+    std::sort(ranks.begin(), ranks.end());
     auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
     comm_group->Barrier(true);
   }

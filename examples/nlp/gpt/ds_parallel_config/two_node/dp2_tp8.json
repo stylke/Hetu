@@ -1,23 +1,23 @@
 {
-    "zero": false,
-    "devices": [0,1,2,3,4,5,6,7],
+    "zero": true,
+    "devices": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
     "input": {
-        "split": {},
+        "split": {"0": 2},
         "dup": 8,
-        "device_group": [0,1,2,3,4,5,6,7],
+        "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
         "type": "placeholder"
     },
     "gpt": {
         "wte": {
             "split": {"0": 8},
-            "dup": 1,
-            "device_group": [0,1,2,3,4,5,6,7],
+            "dup": 2,
+            "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
             "type": "variable"
         },
         "wpe": {
             "split": {},
-            "dup": 8,
-            "device_group": [0,1,2,3,4,5,6,7],
+            "dup": 16,
+            "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
             "type": "variable"
         },
         "blocks": {
@@ -25,41 +25,41 @@
                 "range": [0,31],
                 "layernorm1": {
                     "split": {},
-                    "dup": 8,
-                    "device_group": [0,1,2,3,4,5,6,7],
+                    "dup": 16,
+                    "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {"1": 8},
-                        "dup": 1,
-                        "device_group": [0,1,2,3,4,5,6,7],
+                        "dup": 2,
+                        "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {"0": 8},
-                        "dup": 1,
-                        "device_group": [0,1,2,3,4,5,6,7],
+                        "dup": 2,
+                        "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 8,
-                    "device_group": [0,1,2,3,4,5,6,7],
+                    "dup": 16,
+                    "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {"1": 8},
-                        "dup": 1,
-                        "device_group": [0,1,2,3,4,5,6,7],
+                        "dup": 2,
+                        "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {"0": 8},
-                        "dup": 1,
-                        "device_group": [0,1,2,3,4,5,6,7],
+                        "dup": 2,
+                        "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
                         "type": "variable"
                     }
                 }
@@ -67,21 +67,21 @@
         },
         "layernorm_final": {
             "split": {},
-            "dup": 8,
-            "device_group": [0,1,2,3,4,5,6,7],
+            "dup": 16,
+            "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
             "type": "variable"
         }
     },
     "lm_head": {
         "split": {"1": 8},
-        "dup": 1,
-        "device_group": [0,1,2,3,4,5,6,7],
+        "dup": 2,
+        "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
         "type": "variable"
     },
     "label": {
-        "split": {"0": 1},
+        "split": {"0": 2},
         "dup": 8,
-        "device_group": [0,1,2,3,4,5,6,7],
+        "device_group": [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
         "type": "placeholder"
     }
 }
