@@ -342,6 +342,14 @@ class BatchedISendIRecvOpImpl final : public OpInterface {
     return _dst_devices;
   }
 
+  const std::vector<Device>& comm_devices() const {
+    return _comm_devices;
+  }
+
+  std::vector<Device>& comm_devices() {
+    return _comm_devices;
+  }
+
  protected:
   bool DoInstantiate(Operator& op, const Device& placement,
                      StreamIndex stream_index) const override;

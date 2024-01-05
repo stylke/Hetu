@@ -11,6 +11,7 @@
 #include "hetu/graph/ops/Communication.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
+#include "hetu/impl/communication/nccl_comm_group.h"
 #include "hetu/core/device.h"
 #include "hetu/core/dtype.h"
 #include "hetu/core/ndarray_meta.h"
@@ -62,6 +63,32 @@ static std::unordered_set<Key> KeysUnion(const std::unordered_set<Key>& set1, co
   return result;
 }
 
+void ParamBuffer::Alloc(const Stream& stream) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();   
+#if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19)                                                    
+  ncclMemAlloc(&_raw_ptr, _buffer_size);
+  _storage = std::make_shared<NDArrayStorage>({_raw_ptr, _buffer_size, local_device, static_cast<uint64_t>(-1)}, false);
+#else
+  // Note that we need to use kP2PStream for BufferBatchedIsendIrecv
+  _storage = std::make_shared<NDArrayStorage>(AllocFromMemoryPool(local_device, _buffer_size, stream));
+  _raw_ptr = _storage->mutable_data();
+#endif
+  _stream = stream;
+  _is_allocated = true;
+}
+
+void ParamBuffer::Free() {
+  auto local_device = hetu::impl::comm::GetLocalDevice();  
+#if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19)                                                     
+  ncclMemFree(_raw_ptr);
+  // _data_ptr = DataPtr{nullptr, 0, local_device, static_cast<uint64_t>(-1)}};
+#else
+#endif
+  _storage.reset();
+  _raw_ptr = nullptr;
+  _is_allocated = false;
+}
+
 void ParamSlice::AddOwnedSliceInst(const Device& device, const Tensor& tensor) {
   if (!_owned_slice_instances.empty()) {
     const HTShape& shape = _owned_slice_instances[0]->shape();
@@ -98,7 +125,7 @@ void ParamSlice::AddNeededSliceInst(const Device& device, const Tensor& tensor) 
   _needed_slice_instances.push_back(tensor);
 }
 
-// TODO: 更好的算法
+// TODO: 修改greedy算法
 void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
                                 Device2DTListPairMap& recv_mapping) {
   auto needed_len = _needed_slice_instances.size();
@@ -141,7 +168,7 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
       auto& recv_tensor = _needed_slice_instances[i];
       auto& recv_device = _needed_devices[i];
       // 不同的算法
-      // FCFS/ round-robin
+      // FCFS or round-robin
       if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::FCFS
           || _switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN) {
         send_tensor = _owned_slice_instances[_round_robin];
@@ -206,7 +233,6 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
 
 // 遍历ParamBlock中的每个ParamSlice
 // 找到最优的ParamSliceInst的通信策略
-// TODO: 更好的算法
 void ParamBlock::ParamBlockComm(Device2DTListPairMap& send_mapping,
                                 Device2DTListPairMap& recv_mapping) {
   // auto param_slices_size = _param_slices.size();
@@ -527,9 +553,7 @@ void SwitchExecGraph::MakeCommGraph() {
 
   // 从全局的ParamBlocks视角出发
   // 选择最优的通信方案
-  // TODO: 更好的算法
-  // 目前采用的是对于每一个ParamBlock的每一个ParamSlice，采用round robin的算法
-  // 12.28，更新为greedy算法，选取p2p中通信次数最小的
+  // 目前最优的是对于每一个ParamBlock的每一个ParamSlice，采用round-robin的算法
   for (auto& param_block_ptr : _param_blocks) {
     param_block_ptr->ParamBlockComm(_send_mapping, _recv_mapping);
   }
@@ -551,6 +575,7 @@ void SwitchExecGraph::MakeCommGraph() {
   // local_device send to other devices
   std::vector<Device>& send_to_devices = _send_mapping[local_device].first;
   TensorList& send_tensors = _send_mapping[local_device].second;
+  auto send_len = send_tensors.size();
   // local_device receive from other devices
   std::vector<Device>& recv_from_devices = _recv_mapping[local_device].first;
   HTShapeList recv_tensor_shapes;
@@ -559,14 +584,19 @@ void SwitchExecGraph::MakeCommGraph() {
     recv_tensor_shapes.push_back(_recv_mapping[local_device].second[i]->shape());
   }
   // BatchedISendIRecv Part
-  HT_LOG_DEBUG << local_device << ": will send " << send_tensors.size() << " tensor to device " 
+  HT_LOG_DEBUG << local_device << ": will send " << send_len << " tensor to device " 
     << send_to_devices << " and recv " << recv_len << " tensor from other devices"
     << ", the src devices = " << src_devices << " and comm devices = " << comm_devices;
-  // 在通信前插入contiguous算子
-  // profile时单独计时
-  TensorList contiguous_send_tensors;
-  contiguous_send_tensors.reserve(send_tensors.size());
-  for (auto& send_tensor : send_tensors) {
+  // 作为发送端设置多条发送的buffer
+  // TensorList contiguous_send_tensors;
+  // contiguous_send_tensors.reserve(send_tensors.size());
+  for (size_t i = 0; i < send_len; ++i) {
+    // 我们这里不再单独插入contiguous算子
+    // 而是在处理ParamBuffer时统一进行contiguous操作
+    /*
+    // 在通信前插入contiguous算子
+    // profile时单独计时
+    auto& send_tensor = send_tensors[i];
     auto contiguous_send_tensor = MakeContiguousOp(send_tensor, 
                                                    OpMeta().set_is_deduce_states(false));
     auto& contiguous_op = contiguous_send_tensor->producer();
@@ -575,8 +605,20 @@ void SwitchExecGraph::MakeCommGraph() {
     contiguous_op->MapToParallelDevices(send_tensor->placement_group());
     contiguous_op->Instantiate(local_device, kComputingStream);
     contiguous_send_tensors.push_back(std::move(contiguous_send_tensor));
+    */
+    // 给所有发向同一个device的tensor记录一个ParamBuffer
+    // 之后通信时会发送一整个buffer
+    // 注意这里记录的都是未进行contiguous的tensor
+    auto it = _send_buffers.find(send_to_devices[i]);
+    if (it == _send_buffers.end()) {
+      _send_buffers[send_to_devices[i]] = std::make_shared<ParamBuffer>(TensorList{send_tensors[i]});
+    } else {
+      _send_buffers[send_to_devices[i]]->AddTensor(send_tensors[i]);
+    }
   }
-  auto result = MakeBatchedISendIRecvOp(contiguous_send_tensors, send_to_devices, 
+  // 这里只是记录一个BatchedISendIRecvOp
+  // 后续的实现其实是使用ParamBuffer
+  auto result = MakeBatchedISendIRecvOp(send_tensors, send_to_devices, 
                                         recv_tensor_shapes, recv_from_devices, 
                                         comm_devices, dtype, 
                                         OpMeta().set_is_deduce_states(false));
@@ -587,13 +629,22 @@ void SwitchExecGraph::MakeCommGraph() {
   // we need to add dummy link for topo sort
   // 只有send没有recv
   // 要将这种情况的dummy link放到fetch中
-  if (recv_from_devices.size() == 0) {
+  if (recv_len == 0) {
     HT_LOG_DEBUG << local_device << ": no recv from other devices";
     HT_ASSERT(result == batched_isend_irecv_op->out_dep_linker())
       << "something wrong, it should be the out_dep_linker";
     _dummy_links.push_back(result);
   } else {
     HT_LOG_DEBUG << local_device << ": recv from devices " << recv_from_devices;
+    // 作为接收端设置多条接收的buffer
+    for (size_t i = 0; i < recv_len; ++i) {
+      auto it = _recv_buffers.find(recv_from_devices[i]);
+      if (it == _recv_buffers.end()) {
+        _recv_buffers[recv_from_devices[i]] = std::make_shared<ParamBuffer>(TensorList{recv_tensors[i]});
+      } else {
+        _recv_buffers[recv_from_devices[i]]->AddTensor(recv_tensors[i]);
+      }
+    }
   }
   HT_LOG_DEBUG << local_device << ": make the crucial " << result << " end..";
 
@@ -617,6 +668,133 @@ void SwitchExecGraph::MakeCommGraph() {
   HT_LOG_DEBUG << local_device << ": make a new comm graph end...";
 }
 
+void SwitchExecGraph::BufferBatchedIsendIrecvExec(const Operator& op) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+   HT_ASSERT(is_batched_isend_irecv_op(op))
+    << "BufferBatchedIsendIrecv is merely implemented based on BatchedIsendIrecvOp";
+  BatchedISendIRecvOpImpl& op_interface = dynamic_cast<BatchedISendIRecvOpImpl&>(op->body());
+  auto stream = op->stream();
+  const auto& comm_deivces = op_interface.comm_devices();
+  std::vector<int> ranks(comm_deivces.size());
+  std::transform(comm_deivces.begin(), comm_deivces.end(), ranks.begin(), 
+                 [&](const Device& device) { return hetu::impl::comm::DeviceToWorldRank(device); });
+  std::sort(ranks.begin(), ranks.end());
+  auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, stream);
+  NDArrayList send_data_list;
+  NDArrayList recv_data_list;
+  std::vector<hetu::impl::comm::CommTask> tasks;
+  auto send_buffers_len = _send_buffers.size();
+  auto recv_buffers_len = _recv_buffers.size();
+  send_data_list.reserve(send_buffers_len);
+  recv_data_list.reserve(recv_buffers_len);
+  tasks.reserve(send_buffers_len + recv_buffers_len);
+  for (const auto& kv : _send_buffers) {
+    const auto& send_to_device = kv.first;
+    auto send_data = kv.second->AsNDArray();
+    tasks.push_back(comm_group->ISend(send_data, hetu::impl::comm::DeviceToWorldRank(send_to_device)));
+    send_data_list.push_back(std::move(send_data));
+  }
+  for (const auto& kv : _recv_buffers) {
+    const auto& recv_from_device = kv.first;
+    auto recv_data = kv.second->AsNDArray();
+    tasks.push_back(comm_group->IRecv(recv_data, hetu::impl::comm::DeviceToWorldRank(recv_from_device)));
+    recv_data_list.push_back(std::move(recv_data));
+  }
+  comm_group->BatchedISendIRecv(tasks);
+  NDArray::MarkUsedBy(send_data_list, stream);
+  NDArray::MarkUsedBy(recv_data_list, stream);
+  HT_LOG_DEBUG << local_device << ": BufferBatchedIsendIrecvExec is done";
+}
+
+void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
+                                              Tensor2NDArrayMap& tensor2data,
+                                              Tensor2IntMap& tensor2degrees) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  HT_ASSERT(is_batched_isend_irecv_op(op))
+    << "BufferBatchedIsendIrecv is merely implemented based on BatchedIsendIrecvOp";
+  BatchedISendIRecvOpImpl& op_interface = dynamic_cast<BatchedISendIRecvOpImpl&>(op->body());
+  auto op_stream = op->stream();
+  // 将原先input的NDArray移动并连续存储到各个send buffer中
+  auto input_len = op->num_inputs();
+  HT_ASSERT(input_len == op_interface.dst_devices().size())
+    << "something wrong with the BatchedIsendIrecvOp input len";
+  for (size_t i = 0; i < input_len; ++i) {
+    const auto& input = op->input(i);
+    auto it = tensor2data.find(input->id());
+    HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
+      << local_device << ": Failed to execute the \"" << op->type() << "\" operation "
+      << "(with name \"" << op->name() << "\"): "
+      << "Cannot find input " << input;
+    auto& data = it->second;
+    HT_ASSERT(data->device() == input->placement() && data->dtype() == input->dtype())
+      << local_device << ": Failed to execute the \"" << op->type() << "\" operation "
+      << "(with name \"" << op->name() << "\"): "
+      << "input " << input << " placement/dtype is wrong";
+    HT_ASSERT(_send_buffers.find(op_interface.dst_devices()[i]) != _send_buffers.end())
+      << "BufferBatchedIsendIrecv has no send buffer prepared for " << op_interface.dst_devices()[i];
+    auto& buffer = _send_buffers[op_interface.dst_devices()[i]];
+    /*
+    const size_t data_size = data->numel() * DataType2Size(data->dtype());
+    auto buffer_data_storage = std::make_shared<NDArrayStorage>({buffer->AsRawPtr() + buffer_data_offset, 
+                                                                data_size, local_device, 
+                                                                static_cast<uint64_t>(-1)}); // set id to maximum
+    */
+    HT_LOG_TRACE << local_device << ": obtain buffer data for " << _info_mapping[input->id()]
+      << ", whose shape is " << input->shape() << " and tensor offset in buffer is " << buffer->GetTensorOffest(input);
+    auto buffer_data = NDArray(input->meta(), buffer->AsStorage(), buffer->GetElementOffest(input));
+    // 将原data移动到buffer中并转化成连续存储
+    auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
+    event->Record(Stream(local_device, kComputingStream));
+    _buffer_transfer_events.emplace_back(std::move(event));
+    NDArray::contiguous(data, kComputingStream, buffer_data); // data ---> buffer_data
+    event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
+    event->Record(Stream(local_device, kComputingStream));
+    _buffer_transfer_events.emplace_back(std::move(event));
+    // free memory after op async compute complete
+    if ((--tensor2degrees[input->id()]) == 0) {
+      tensor2data.erase(input->id());
+    }
+  }
+  // 同步
+  auto buffer_transfer_events_len = _buffer_transfer_events.size() / 2;
+  for (size_t i = 0; i < buffer_transfer_events_len; ++i) {
+    // 用end event进行同步
+    _buffer_transfer_events[2 * i + 1]->Block(op_stream);
+  }
+  // 分配recv的buffer
+  // 等同步之后再分配，虽然无法overlap，会有latency上的损失，但是这样可以节省显存
+  for (auto& kv : _recv_buffers) {
+    auto& recv_buffer = kv.second;
+    HT_ASSERT(!recv_buffer->IsAllocated())
+      << "recv buffer shouldn't be allocated yet";
+    recv_buffer->Alloc(op_stream);
+  }
+  op->instantiation_ctx().start[0]->Record(op_stream);
+  BufferBatchedIsendIrecvExec(op); // 执行BufferBatchedIsendIrecv
+  op->instantiation_ctx().stop[0]->Record(op_stream);
+  // 清空send的buffer
+  for (auto& kv : _send_buffers) {
+    auto& send_buffer = kv.second;
+    HT_ASSERT(send_buffer->IsAllocated())
+      << "send buffer should be allocated";
+    send_buffer->Free();
+  }
+  // 从各个连续的recv buffer取出离散的output的NDArray
+  NDArrayList output_vals;
+  auto output_len = op->num_outputs();
+  HT_ASSERT(output_len == op_interface.src_devices().size())
+    << "something wrong with the BatchedIsendIrecvOp output len";
+  output_vals.reserve(output_len);
+  for (size_t i = 0; i < output_len; ++i) {
+    const auto& output = op->output(i);
+    HT_ASSERT(_recv_buffers.find(op_interface.src_devices()[i]) != _recv_buffers.end())
+      << "BufferBatchedIsendIrecv has no recv buffer prepared for " << op_interface.src_devices()[i];
+    auto& buffer = _recv_buffers[op_interface.src_devices()[i]];
+    auto buffer_data = NDArray(output->meta(), buffer->AsStorage(), buffer->GetElementOffest(output));
+    tensor2data[output->id()] = buffer_data;
+  }
+}
+
 // context switch
 // 将before graph中的所有params以尽量高效的方式
 // 重新分配到after graph中
@@ -636,14 +814,11 @@ void SwitchExecGraph::SwitchParams() {
     // 只需要重新设置_comm_feed_dict即可
     // 从_preserve_data中获取before graph的params的数据
     for (const auto& kv : _comm_feed_dict_mapping) {
-      auto comm_feed_dict_it = _comm_feed_dict.find(kv.first);
-      HT_ASSERT(comm_feed_dict_it != _comm_feed_dict.end())
-        << "_comm_feed_dict_mapping is wrong";
       auto comm_input_data_it = _switch_graph_pair.first->_preserved_data.find(kv.second->id());
       HT_ASSERT(comm_input_data_it != _switch_graph_pair.first->_preserved_data.end())
       << "something wrong, the data to transfer in the before graph is not available";
       // 给feed_dict赋上NDArray
-      comm_feed_dict_it->second = comm_input_data_it->second;
+      _comm_feed_dict[kv.first] = comm_input_data_it->second;
     }
   } else {
     TIK(switch_params_making);
@@ -721,17 +896,37 @@ void SwitchExecGraph::SwitchParams() {
       tensor2degrees[input->id()]++;
     }
   }
+  // 分配send的buffer
+  for (auto& kv : _send_buffers) {
+    auto& send_buffer = kv.second;
+    HT_ASSERT(!send_buffer->IsAllocated()) 
+      << "send buffer shouldn't be allocated yet";
+    send_buffer->Alloc(Stream(local_device, kP2PStream));
+  }
   for (auto& op_ref : _comm_topo) {
     auto& op = op_ref.get();
     HT_LOG_DEBUG << local_device << ": handling op " << op << " in comm graph";
+    // 特殊处理1
+    // 对于feed_dict需要清除原先的data映射并将其放在tensor2data的intermediate的映射中
     if (is_feed_dict_op(op)) {
-      // 对于feed_dict只需要简单地设置data即可
       // 可以保证这里全都是只有一个输出的placeholder
       HT_ASSERT(is_placeholder_op(op))
         << "feed dict op must be a placeholder in the comm graph";
-      tensor2data[op->output(0)->id()] = _comm_feed_dict[op->output(0)->id()];
+      auto tensor_id = op->output(0)->id();
+      tensor2data[tensor_id] = _comm_feed_dict[tensor_id];
+      // 清feed_dict
+      _comm_feed_dict.erase(tensor_id);
+      // 清before_graph的_preserved_data
+      _switch_graph_pair.first->_preserved_data.erase(_comm_feed_dict_mapping[tensor_id]->id());
       continue;
     }
+    // 特殊处理2
+    // 使用聚合的buffer进行通信
+    if (is_batched_isend_irecv_op(op)) {
+      BufferBatchedIsendIrecv(op, tensor2data, tensor2degrees);
+      continue;
+    }
+    // 正常按照算子的逻辑进行处理
     NDArrayList input_vals;
     input_vals.reserve(op->num_inputs());
     for (const auto& input : op->inputs()) {
@@ -745,7 +940,7 @@ void SwitchExecGraph::SwitchParams() {
         << local_device << ": Failed to execute the \"" << op->type() << "\" operation "
         << "(with name \"" << op->name() << "\"): "
         << "input " << input << " placement/dtype is wrong";
-      input_vals.push_back(tensor2data[input->id()]);
+      input_vals.push_back(data);
       // free memory after op async compute complete
       if ((--tensor2degrees[input->id()]) == 0) {
         tensor2data.erase(input->id());
@@ -761,20 +956,31 @@ void SwitchExecGraph::SwitchParams() {
       tensor2data[op->output(i)->id()] = output_vals[i];
     }
   }
-
   // 将结果赋值给after graph
   for (const auto& kv : _comm_results_mapping) {
-    auto _comm_results_it = tensor2data.find(kv.first);
-    HT_ASSERT(_comm_results_it != tensor2data.end())
+    auto it = tensor2data.find(kv.first);
+    HT_ASSERT(it != tensor2data.end())
       << "something wrong, can't find the result from the tensor2data mapping";
-    HT_LOG_DEBUG << local_device << ": comm result sum of " << kv.second << " is " << NDArray::sum(_comm_results_it->second);
+    HT_LOG_DEBUG << local_device << ": comm result sum of " << kv.second << " is " << NDArray::sum(it->second);
     // 给新图的_preserved_data赋上NDArray
-    _switch_graph_pair.second->_preserved_data[kv.second->id()] = _comm_results_it->second;
+    _switch_graph_pair.second->_preserved_data[kv.second->id()] = it->second;
   }
-
+  // 清空tensor2data
+  tensor2data.clear();
+  // 清空recv的buffer
+  // TODO: 按bucket发送并及时清除（虽然会提高延时，但能降低显存）
+  for (auto& kv : _recv_buffers) {
+    auto& recv_buffer = kv.second;
+    HT_ASSERT(recv_buffer->IsAllocated())
+      << "recv buffer should be allocated";
+    recv_buffer->Free();
+  }
+  // 已在处理feed_dict时自动清除
+  /*
   // 将before graph中保留的数据全部清除
   // TODO: 最坏情况需要1.5倍的显存开销，后续需要分bucket进行发送并清除
   _switch_graph_pair.first->_preserved_data.clear();
+  */
 
   if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
     // stream同步
@@ -814,8 +1020,12 @@ void SwitchExecGraph::ProfileRunningDetails() {
   HT_ASSERT(_comm_graph != nullptr)
     << "Profiler can only used after comm graph was built";
   auto local_device = hetu::impl::comm::GetLocalDevice();
-  size_t slice_num = 0, concat_num = 0, contiguous_num = 0, comm_num = 0;
-  double slice_time = 0, concat_time = 0, contiguous_time = 0, comm_time = 0;
+  size_t slice_num = 0, concat_num = 0, comm_num = 0;
+  double slice_time = 0, concat_time = 0, comm_time = 0;
+  size_t contiguous_num = 0; // deprecated
+  double contiguous_time = 0; // deprecated
+  size_t buffer_transfer_num = 0;
+  double buffer_transfer_time = 0;
   
   // op execute time
   for (auto& op_ref : _comm_topo) {
@@ -830,6 +1040,7 @@ void SwitchExecGraph::ProfileRunningDetails() {
       concat_time += op->TimeCost(0) * 1.0 / 1e6;
       concat_num += 1;
     } else if (is_contiguous_op(op)) {
+      HT_RUNTIME_ERROR << "contiguous op shouldn't exist";
       contiguous_time += op->TimeCost(0) * 1.0 / 1e6;
       contiguous_num += 1;
     } else if (is_batched_isend_irecv_op(op)) {
@@ -837,8 +1048,17 @@ void SwitchExecGraph::ProfileRunningDetails() {
       comm_num += 1;
     } else {
       HT_RUNTIME_ERROR << local_device << ": op " << op 
-        << " shouldn't exit in the comm graph";
+        << " shouldn't exist in the comm graph";
     }
+  }
+
+  // buffer transfer time
+  buffer_transfer_num = _buffer_transfer_events.size() / 2;
+  for (size_t i = 0; i < buffer_transfer_num / 2; ++i) {
+    auto& start = _buffer_transfer_events[2 * i];
+    auto& end = _buffer_transfer_events[2 * i + 1];
+    // record the time of buffer transfer
+    buffer_transfer_time += end->TimeSince(*start) * 1.0 / 1e6;
   }
 
   // comm detailed info
@@ -870,7 +1090,8 @@ void SwitchExecGraph::ProfileRunningDetails() {
     << "*********************************************" << std::endl
     << "slice num = " << slice_num << ", time = " << slice_time << " ms" << std::endl
     << "concat num = " << concat_num << ", time = " << concat_time << " ms" << std::endl
-    << "contiguous num = " << contiguous_num << ", time = " << contiguous_time << " ms" << std::endl
+    // << "contiguous num = " << contiguous_num << ", time = " << contiguous_time << " ms" << std::endl
+    << "buffer transfer num = " << buffer_transfer_num << ", time = " << buffer_transfer_time << " ms" << std::endl
     << "comm num = " << comm_num << ", time = " << comm_time << " ms" << std::endl
     << "*********************************************" << std::endl
     << send_info_output.str()

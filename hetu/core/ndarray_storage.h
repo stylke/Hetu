@@ -9,10 +9,19 @@ namespace hetu {
 class NDArrayStorage {
  public:
   
-  NDArrayStorage(DataPtr ptr): _ptr(ptr) {}
+  NDArrayStorage(DataPtr ptr, bool in_mempool = true): 
+    _ptr(ptr), 
+    _in_mempool(in_mempool) {
+  } 
 
   ~NDArrayStorage() {
-    FreeToMemoryPool(_ptr);
+    if (_in_mempool) {
+      FreeToMemoryPool(_ptr);
+    } else {
+      // 内存由外界维护
+      // 例如ncclMemAlloc和ncclMemFree
+      return;
+    }
   }
 
   inline size_t size() const {
@@ -41,6 +50,7 @@ class NDArrayStorage {
 
  protected:
   DataPtr _ptr;
+  bool _in_mempool;
   bool _writable{true};
 };
 

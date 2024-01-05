@@ -2,6 +2,7 @@
 
 #include "hetu/common/macros.h"
 #include "hetu/core/ndarray.h"
+#include "hetu/core/dtype.h"
 #include "hetu/graph/graph.h"
 #include "hetu/graph/define_and_run_graph.h"
 #include "hetu/graph/executable_graph.h"
@@ -9,6 +10,7 @@
 #include "hetu/graph/operator.h"
 #include "hetu/graph/init/initializer.h"
 #include "hetu/impl/communication/comm_group.h"
+#include <nccl.h>
 
 namespace hetu {
 namespace graph {
@@ -30,6 +32,112 @@ enum class SWITCH_PROFILE_LEVEL : int8_t {
   NVLINK,
   TIME,
   INFO,
+};
+
+class ParamBuffer {
+  public:
+    ParamBuffer(const TensorList& tensor_list = {}) {
+      _tensor_list = tensor_list;
+      for (const auto& tensor : tensor_list) {
+        if (_dtype == DataType::UNDETERMINED) {
+          _dtype = tensor->dtype();
+        } else {
+          HT_ASSERT(_dtype == tensor->dtype())
+            << "ParamBuffer dtype should be consistent";
+        }
+        HT_ASSERT(_tensor_offset_mapping.find(tensor->id()) == _tensor_offset_mapping.end())
+          << "tensor should be unique in the ParamBuffer";
+        _tensor_offset_mapping[tensor->id()] = _buffer_size;
+        _buffer_size += tensor->numel() * DataType2Size(tensor->dtype());
+      }
+    }
+
+    void AddTensor(const Tensor& tensor) {
+      HT_ASSERT(_tensor_offset_mapping.find(tensor->id()) == _tensor_offset_mapping.end())
+        << "tensor should be unique in the ParamBuffer";
+      if (_dtype == DataType::UNDETERMINED) {
+          _dtype = tensor->dtype();
+      } else {
+        HT_ASSERT(_dtype == tensor->dtype())
+          << "ParamBuffer dtype should be consistent";
+      }
+      _tensor_list.push_back(tensor);
+      _tensor_offset_mapping[tensor->id()] = _buffer_size;
+      _buffer_size += tensor->numel() * DataType2Size(tensor->dtype());
+    }
+
+    bool IsAllocated() const {
+      return _is_allocated;
+    }
+
+    DataType dtype() const {
+      return _dtype;
+    }
+
+    Stream stream() const {
+      HT_ASSERT(_is_allocated == true)
+        << "please ensure you've alloc the buffer in advance";
+      return _stream;
+    }
+
+    void* AsRawPtr() {
+      HT_ASSERT(_is_allocated == true)
+        << "please ensure you've alloc the buffer in advance";
+      return _raw_ptr;
+    }
+
+    std::shared_ptr<NDArrayStorage> AsStorage() {
+      HT_ASSERT(_is_allocated == true)
+        << "please ensure you've alloc the buffer in advance";
+      return _storage;
+    }
+
+    NDArray AsNDArray() {
+      HT_ASSERT(_is_allocated == true)
+        << "please ensure you've alloc the buffer in advance";
+      // 设置成一个一维的NDArray
+      auto meta = NDArrayMeta().set_dtype(_dtype)
+                               .set_device(_stream.device())
+                               .set_shape({_buffer_size / DataType2Size(_dtype)});
+      return NDArray(meta, _storage);
+    }
+
+    const size_t GetByteOffest(const Tensor& tensor) const {
+      auto it = _tensor_offset_mapping.find(tensor->id());
+      HT_ASSERT(it != _tensor_offset_mapping.end())
+        << "Can't find tensor " << tensor << " in the ParamBuffer";
+      return it->second;
+    }
+
+    const size_t GetElementOffest(const Tensor& tensor) const {
+      auto it = _tensor_offset_mapping.find(tensor->id());
+      HT_ASSERT(it != _tensor_offset_mapping.end())
+        << "Can't find tensor " << tensor << " in the ParamBuffer";
+      return it->second / DataType2Size(_dtype);
+    }
+
+    const size_t GetTensorOffest(const Tensor& tensor) const {
+      auto len = _tensor_list.size();
+      for (size_t i = 0; i < len; ++i) {
+        if (_tensor_list[i]->id() == tensor->id()) {
+          return i;
+        }
+      }
+      HT_RUNTIME_ERROR << "Can't find tensor " << tensor << " in the ParamBuffer";
+    }
+
+    void Alloc(const Stream& stream);
+    void Free();
+
+  protected:
+    TensorList _tensor_list;
+    bool _is_allocated{false};
+    DataType _dtype{DataType::UNDETERMINED};
+    std::unordered_map<TensorId, size_t> _tensor_offset_mapping; // 这里的offset是字节数
+    Stream _stream; // 记录在哪个stream上alloc的
+    std::shared_ptr<NDArrayStorage> _storage; // high-level cuda mempool api
+    void* _raw_ptr; // low-level nccl mem api
+    size_t _buffer_size{0};
 };
 
 class ParamSlice {
@@ -219,12 +327,18 @@ class SwitchExecGraph {
                                std::vector<int32_t>& slice_num, std::vector<int32_t>& slice_relative_num,
                                const std::unordered_map<int32_t, int32_t>& state,
                                const std::vector<int32_t>& multiple, int32_t dim);
+    
+    void MakeCommGraph();
+
+    void BufferBatchedIsendIrecvExec(const Operator& op);
+    
+    void BufferBatchedIsendIrecv(const Operator& op,
+                                 Tensor2NDArrayMap& tensor2data,
+                                 Tensor2IntMap& tensor2degrees);
 
     void SwitchParam(const DistributedStates& src_ds, const DeviceGroup& src_group,
-                const DistributedStates& dst_ds, const DeviceGroup& dst_group,
-                const Tensor& comm_input, const Tensor& after_param);
-
-    void MakeCommGraph();
+                     const DistributedStates& dst_ds, const DeviceGroup& dst_group,
+                     const Tensor& comm_input, const Tensor& after_param);
 
     void ProfileRunningDetails();
     void ProfileNvlinkStart();
@@ -247,6 +361,9 @@ class SwitchExecGraph {
     TensorList _comm_results; // 该图通信的结果，与_define_graph_params一一对应
     Tensor2TensorMap _comm_results_mapping; // 该图的输出到after graph的映射
     TensorList _dummy_links; // 只有send没有recv时BatchedISendIRecvOp的输出dummy tensor需要被记录并在之后fetch
+    std::unordered_map<Device, std::shared_ptr<ParamBuffer>> _send_buffers; // 记录通信时给每个device聚合发送时所用的buffer
+    std::unordered_map<Device, std::shared_ptr<ParamBuffer>> _recv_buffers; // 记录通信时从每个device聚合接收时所用的buffer
+    std::vector<std::unique_ptr<hetu::impl::CUDAEvent>> _buffer_transfer_events; // 记录将原先的param构成一长条buffer的events
 
     // comm plan related
     SWITCH_ALGORITHM_LEVEL _algorithm_level = SWITCH_ALGORITHM_LEVEL::GREEDY; // 采用的算法
