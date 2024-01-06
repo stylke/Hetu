@@ -3,23 +3,10 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/offset_calculator.cuh"
+#include "hetu/impl/kernel/Vectorized.cuh"
 
 namespace hetu {
 namespace impl {
-
-template <typename spec_a_t, typename spec_b_t>
-__global__ void data_transfer_kernel(const spec_a_t* src, spec_b_t* dst, size_t numel,
-                                     const OffsetCalculator* from_offset_calculator,
-                                     const OffsetCalculator* to_offset_calculator) {
-  // TODO: cuda memory access aligns to 4 bytes
-  // so we should re-consider 8- or 16-bit values
-  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= numel)
-    return;
-  auto from_offset = from_offset_calculator->get(idx);
-  auto to_offset = to_offset_calculator->get(idx);
-  dst[to_offset] = static_cast<spec_b_t>(src[from_offset]);
-}
 
 bool require_temp_storage(const NDArray& from, const NDArray& to) {
   auto from_device = from->device();
@@ -40,8 +27,8 @@ void transfer_device_to_device(const NDArray& from, NDArray& to, const Stream& s
   size_t numel = from->numel();
   CUDAStream cuda_stream(stream);
 
-  bool memcpy_eligible = from->dtype() == to->dtype()
-                      && from->is_contiguous() && to->is_contiguous();
+  bool memcpy_eligible = from->dtype() == to->dtype() &&
+                         from->is_contiguous() && to->is_contiguous();
   auto from_device = from->device();
   auto to_device = to->device();
   void* to_ptr = to->raw_data_ptr();
@@ -64,25 +51,15 @@ void transfer_device_to_device(const NDArray& from, NDArray& to, const Stream& s
       }
     }
   } else {
-    dim3 blocks, threads;
-    threads.x = MIN(numel, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-    blocks.x = DIVUP(numel, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-    NDArray from_offset_calculator_arr, to_offset_calculator_arr;
-    OffsetCalculator *from_offset_calculator, *to_offset_calculator;
-    std::tie(from_offset_calculator_arr, from_offset_calculator) =
-      AllocOffsetCalculator(from, stream);
-    std::tie(to_offset_calculator_arr, to_offset_calculator) = 
-      AllocOffsetCalculator(to, stream);
     HT_DISPATCH_PAIRED_SIGNED_INTEGER_AND_FLOATING_TYPES(
       from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCuda",
       [&]() {
-        data_transfer_kernel<spec_a_t, spec_b_t>
-          <<<blocks, threads, 0, cuda_stream>>>(
-            reinterpret_cast<spec_a_t*>(from_ptr),
-            reinterpret_cast<spec_b_t*>(to_ptr), numel,
-            from_offset_calculator, to_offset_calculator);
+        launch_loop_kernel<spec_a_t, spec_b_t>(from, to, numel, stream,
+                                               [=] __device__ (spec_a_t x) -> spec_b_t {
+                                                 return static_cast<spec_b_t>(x);
+                                               });
       });
-    NDArray::MarkUsedBy({from_offset_calculator_arr, to_offset_calculator_arr}, stream);
+    NDArray::MarkUsedBy({from, to}, stream);
   }
 }
 

@@ -5,7 +5,7 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
-#include "hetu/impl/utils/numeric_limits.h"
+#include "hetu/impl/utils/numeric_utils.h"
 #include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
