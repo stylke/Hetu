@@ -19,7 +19,7 @@ void OppositeCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "OppositeCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
-                                         [=] __device__ (spec_t x) -> spec_t {
+                                         [] __device__ (spec_t x) -> spec_t {
                                            return -x;
                                          });
     });

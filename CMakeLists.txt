@@ -46,6 +46,7 @@ if(${HETU_COMPILE_CUDA})
     set(HETU_CUDA_ARCH 50 52 60 61 70 75)
   endif()
 
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-extended-lambda")
 endif()
 

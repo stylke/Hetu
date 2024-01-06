@@ -40,16 +40,6 @@ nllloss_gradient_kernel(const spec_t* pred, const int64_t* label, const spec_t* 
   output[out_offset] = (id < 0 || id >= n_cols) ? 0 : - grad_loss[grad_loss_offset] * n_cols;
 }
 
-template <typename spec_t>
-__global__ static void array_zero_set_kernel(spec_t* input, size_t size,
-                                             const OffsetCalculator* in_offset_calculator) {
-  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
-    return;
-  auto offset = in_offset_calculator->get(idx);
-  input[offset] = 0;
-}
-
 void NLLLossCuda(const NDArray& pred, const NDArray& label,
                  NDArray& loss, const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(pred);
@@ -121,11 +111,7 @@ void NLLLossGradientCuda(const NDArray& pred, const NDArray& label,
     AllocOffsetCalculator(output, stream);
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "NLLLossGradientCuda", [&]() {
-      threads.x = MIN(n_rows * n_cols, 1024);
-      blocks.x = DIVUP(n_rows * n_cols, 1024);
-      array_zero_set_kernel<<<blocks, threads, 0, cuda_stream>>>(
-        output->data_ptr<spec_t>(), n_rows * n_cols,
-        out_offset_calculator);
+      NDArray::zeros_(output, stream.stream_index());
       threads.x = MIN(n_rows, 1024);
       blocks.x = DIVUP(n_rows, 1024);
       nllloss_gradient_kernel<<<blocks, threads, 0, cuda_stream>>>(
