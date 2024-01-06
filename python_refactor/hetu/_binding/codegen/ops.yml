@@ -414,6 +414,11 @@
   args: Tensor input, Tensor ln_scale, Tensor ln_bias, HTShape normalized_shape, double eps=0.01
   self: input
 
+- name: fused_layernorm
+  op: FusedLayerNormOp
+  args: Tensor input, Tensor ln_scale, Tensor ln_bias, HTShape normalized_shape, double eps=0.01, bool inplace=False
+  self: input
+
 #######################################################
 # Dropout
 #######################################################

@@ -38,7 +38,8 @@ __global__ void relu_gradient_kernel(const spec_t* input, const spec_t* output_g
   auto in_offset = in_offset_calculator->get(idx);
   auto out_grad_offset = out_grad_offset_calculator->get(idx);
   auto out_offset = out_offset_calculator->get(idx);
-  output[out_offset] = (double(input[in_offset]) <= 0) ? 0 : output_grad[out_grad_offset];
+  spec_t zero = 0;
+  output[out_offset] = (double(input[in_offset]) <= 0) ? zero : output_grad[out_grad_offset];
 }
 
 void ReluGradientCuda(const NDArray& input, const NDArray& output_grad,

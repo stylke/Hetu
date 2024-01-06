@@ -22,7 +22,7 @@ void PowCuda(const NDArray& input, double exponent, NDArray& output,
     input->dtype(), spec_t, "PowCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
                                          [=] __device__ (spec_t x) -> spec_t {
-                                           return hetu::cuda::cuda_pow(x, exponent);
+                                           return hetu::cuda::cuda_pow(x, spec_t(exponent));
                                          });
     });
   NDArray::MarkUsedBy({input, output}, stream);

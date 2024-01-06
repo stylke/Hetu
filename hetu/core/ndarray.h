@@ -343,6 +343,13 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                            StreamIndex stream_id = DEFAULT_STREAM,
                            NDArray& output = EMPTY);
 
+  static NDArrayList fused_layernorm(const NDArray& input, const NDArray& bn_scale, const NDArray& bn_bias, 
+                                     const HTShape& normalized_shape, double eps = 0.01,
+                                     StreamIndex stream_id = DEFAULT_STREAM,
+                                     NDArray& output = EMPTY,
+                                     NDArray& save_mean = EMPTY,
+                                     NDArray& save_var = EMPTY);
+
   static NDArray gather(const NDArray& input, const NDArray& id, int64_t dim,
                         StreamIndex stream_id = DEFAULT_STREAM,
                         NDArray& output = EMPTY);

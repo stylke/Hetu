@@ -20,7 +20,8 @@ __global__ void triutril_kernel(const spec_t* input, spec_t* output, bool lower,
   bool mask = lower ? (col - row > diagonal) : (col - row < diagonal);
   auto in_offset = in_offset_calculator->get(idx);
   auto out_offset = out_offset_calculator->get(idx);
-  output[out_offset] = mask ? 0 : input[in_offset];
+  spec_t zero = 0;
+  output[out_offset] = mask ? zero : input[in_offset];
 }
 
 void TriuTrilCuda(const NDArray& input, NDArray& output, bool lower,

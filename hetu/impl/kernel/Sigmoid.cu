@@ -21,7 +21,8 @@ void SigmoidCuda(const NDArray& input, NDArray& output, const Stream& stream) {
     input->dtype(), spec_t, "SigmoidCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
                                          [=] __device__ (spec_t x) -> spec_t {
-                                           return 1.0 / (1.0 + hetu::cuda::cuda_exp(-x));
+                                           spec_t one = 1.0;
+                                           return one / (one + hetu::cuda::cuda_exp(-x));
                                          });
     });
   NDArray::MarkUsedBy({input, output}, stream);
