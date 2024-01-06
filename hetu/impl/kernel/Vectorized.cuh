@@ -14,11 +14,6 @@ static constexpr uint32_t NUM_THREADS = HT_WARP_SIZE * 4;
 static constexpr uint32_t THREAD_WORK_SIZE = 4;
 static constexpr uint32_t BLOCK_WORK_SIZE = NUM_THREADS * THREAD_WORK_SIZE;
 
-template<typename spec_t, int vec_size>
-struct alignas(sizeof(spec_t) * vec_size) aligned_vector {
-  spec_t val[vec_size];
-};
-
 template <typename spec_t>
 inline int get_vectorize_size(spec_t* ptr) {
   uint64_t address = reinterpret_cast<uint64_t>(ptr);
