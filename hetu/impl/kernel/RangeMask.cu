@@ -19,9 +19,11 @@ void RangeMaskCuda(const NDArray& input, int64_t min, int64_t max,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "RangeMaskCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
-                                         [=] __device__ (spec_t x) -> spec_t {
+                                         [min, max] __device__ (spec_t x) -> spec_t {
+                                           spec_t zero = 0;
+                                           spec_t one = 1.0f;
                                            return ((static_cast<int64_t>(x) >= min) &&
-                                                   (static_cast<int64_t>(x) <= max)) ? 0 : 1;
+                                                   (static_cast<int64_t>(x) <= max)) ? zero : one;
                                          });
     });
   NDArray::MarkUsedBy({input, output}, stream);

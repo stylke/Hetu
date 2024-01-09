@@ -6,6 +6,7 @@
 #include "hetu/impl/utils/cuda_math.h"
 #include "hetu/impl/kernel/Binary.cuh"
 #include "hetu/impl/utils/offset_calculator.cuh"
+#include "hetu/impl/kernel/Vectorized.cuh"
 
 #include <vector>
 #include <numeric>
@@ -14,26 +15,6 @@ namespace hetu {
 namespace impl {
 
 namespace {
-
-inline size_t numel(const HTShape& shape) {
-  size_t num = 1;
-  for (auto& s : shape) {
-    num *= s;
-  }
-  return num;
-}
-
-inline HTStride Shape2Stride(const HTShape& shape) {
-  auto size = shape.size();
-  HTStride stride(size);
-  if (size > 0) {
-    stride[size - 1] = 1;
-    for (auto d = size - 1; d > 0; d--) {
-      stride[d - 1] = stride[d] * shape[d];
-    }
-  }
-  return stride;
-}
 
 inline bool maybe_overlapping_memory(const HTShape& shape, const HTStride& stride) {
   if (!shape.empty()) {
@@ -156,13 +137,6 @@ void AsStridedGradientCuda(const NDArray& output, NDArray& input,
 }
 
 // In-place version of as_strided gradient
-template <typename spec_a_t, typename spec_b_t, typename Operator>
-extern __global__ void binary_elewise_kernel(const spec_a_t* inputA, const spec_b_t* inputB,
-                                             size_t size, Operator op, spec_a_t* output,
-                                             const OffsetCalculator* A_offset_calculator,
-                                             const OffsetCalculator* B_offset_calculator,
-                                             const OffsetCalculator* out_offset_calculator);
-
 template <typename spec_t>
 __global__ void view_asstrided_gradient_kernel(const spec_t *input, spec_t *output, size_t size,
                                                const int64_t *stride_in, const int64_t *stride_out, 
@@ -261,24 +235,13 @@ void AsStridedGradientCuda(const NDArray& grad_output, NDArray& grad_input,
           in_stride_arr->data_ptr<int64_t>(),
           idim, in_storage_offset);
         });
-    NDArray grad_in_offset_calculator_arr, cnt_offset_calculator_arr;
-    OffsetCalculator *grad_in_offset_calculator, *cnt_offset_calculator;
-    std::tie(grad_in_offset_calculator_arr, grad_in_offset_calculator) =
-      AllocOffsetCalculator(grad_input, stream);
-    std::tie(cnt_offset_calculator_arr, cnt_offset_calculator) =
-      AllocOffsetCalculator(count, stream);
-    threads.x = MIN(storage_size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-    blocks.x = DIVUP(storage_size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
     HT_DISPATCH_FLOATING_TYPES(
       grad_input->dtype(), spec_t, "BinaryElewiseCuda", [&]() {
-        binary_elewise_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-          grad_input->data_ptr<spec_t>(), count->data_ptr<spec_t>(), storage_size,
-          kdivides<spec_t, spec_t>(), grad_input->data_ptr<spec_t>(),
-          grad_in_offset_calculator, cnt_offset_calculator, grad_in_offset_calculator);
-        });
-
-    NDArray::MarkUsedBy({count, in_stride_contig_arr, in_stride_arr,
-                        grad_in_offset_calculator_arr, cnt_offset_calculator_arr}, stream);
+        launch_loop_kernel<spec_t, spec_t, spec_t>(
+          grad_input, count, grad_input, storage_size, stream,
+          kdivides<spec_t, spec_t>());
+    });
+    NDArray::MarkUsedBy({count, in_stride_contig_arr, in_stride_arr}, stream);
   }
 
   auto output_meta = NDArrayMeta().set_dtype(grad_input->dtype())

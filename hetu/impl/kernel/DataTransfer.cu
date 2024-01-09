@@ -55,7 +55,7 @@ void transfer_device_to_device(const NDArray& from, NDArray& to, const Stream& s
       from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCuda",
       [&]() {
         launch_loop_kernel<spec_a_t, spec_b_t>(from, to, numel, stream,
-                                               [=] __device__ (spec_a_t x) -> spec_b_t {
+                                               [] __device__ (spec_a_t x) -> spec_b_t {
                                                  return static_cast<spec_b_t>(x);
                                                });
       });

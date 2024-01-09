@@ -31,16 +31,6 @@ __global__ void gather_kernel(const spec_t* input, const int64_t* ids, size_t si
 }
 
 template <typename spec_t>
-__global__ static void array_zero_set_kernel(spec_t* input, size_t size,
-                                             const OffsetCalculator* in_offset_calculator) {
-  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
-    return;
-  auto in_offset = in_offset_calculator->get(idx);
-  input[in_offset] = 0;
-}
-
-template <typename spec_t>
 __global__ void gather_gradient_kernel(const spec_t* grad_output, const int64_t* ids,
                                        size_t size, size_t after_stride, size_t cur_stride,
                                        size_t after_stride_out, size_t cur_stride_out,
@@ -137,14 +127,7 @@ void GatherGradientCuda(const NDArray& grad_output, const NDArray& id, NDArray& 
     AllocOffsetCalculator(id, stream);
   std::tie(grad_in_offset_calculator_arr, grad_in_offset_calculator) = 
     AllocOffsetCalculator(grad_input, stream);
-  threads.x = MIN(grad_input->numel(), HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  blocks.x = DIVUP(grad_input->numel(), HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  HT_DISPATCH_FLOATING_TYPES(
-    grad_output->dtype(), spec_t, "ArraySetZeroCuda", [&]() {
-      array_zero_set_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        grad_input->data_ptr<spec_t>(), grad_input->numel(),
-        grad_in_offset_calculator);
-    });
+  NDArray::zeros_(grad_input, stream.stream_index());
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   HT_DISPATCH_FLOATING_TYPES(

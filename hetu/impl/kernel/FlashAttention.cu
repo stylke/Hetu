@@ -247,7 +247,6 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
                    const bool is_causal,
                    const bool return_softmax,
                    const Stream& stream) {
-    std::chrono::system_clock::time_point t0 = std::chrono::system_clock::now();
     auto dprops = Device::dprop(q->device().index());
     // cudaGetDeviceProperties(&dprops, q->device().index());   
     // bool is_sm75 = dprops.major == 7 && dprops.minor == 5;

@@ -20,7 +20,7 @@ void SqrtCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "SqrtCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
-                                         [=] __device__ (spec_t x) -> spec_t {
+                                         [] __device__ (spec_t x) -> spec_t {
                                            return hetu::cuda::cuda_sqrt(x);
                                          });
     });
@@ -39,7 +39,7 @@ void ReciprocalSqrtCuda(const NDArray& input, NDArray& output,
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "ReciprocalSqrtCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
-                                         [=] __device__ (spec_t x) -> spec_t {
+                                         [] __device__ (spec_t x) -> spec_t {
                                            return hetu::cuda::cuda_rsqrt(x);
                                          });
     });
