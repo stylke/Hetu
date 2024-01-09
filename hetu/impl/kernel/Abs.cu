@@ -42,7 +42,7 @@ void AbsGradientCuda(const NDArray& input, const NDArray& output_grad, NDArray& 
     input->dtype(), spec_t, "AbsGradientCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t, spec_t>(input, output_grad, input_grad, size, stream,
                                                  [] __device__ (spec_t x, spec_t y) -> spec_t {
-                                                   spec_t zero = spec_t(0);
+                                                   spec_t zero = 0;
                                                    return x == zero ? zero
                                                             : x > zero ? y
                                                                        : - y;

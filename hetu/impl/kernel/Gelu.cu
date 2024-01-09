@@ -47,8 +47,8 @@ void GeluGradientCuda(const NDArray& input, const NDArray& output_grad,
     input->dtype(), spec_t, "GeluGradientCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t, spec_t>(input, output_grad, input_grad, size, stream,
         [] __device__ (spec_t x, spec_t y) -> spec_t {
-          return y * (0.5f + 0.5f * hetu::cuda::cuda_erf(x / hetu::cuda::cuda_sqrt(2.0)) + 
-                 0.5f * x*(hetu::cuda::cuda_sqrt(2.0f) * 
+          return y * (0.5f + 0.5f * hetu::cuda::cuda_erf(x / hetu::cuda::cuda_sqrt(2.0f)) + 
+                 0.5f * x * (hetu::cuda::cuda_sqrt(2.0f) * 
                   hetu::cuda::cuda_exp(-0.5f * hetu::cuda::cuda_pow(x, spec_t(2.0f))) /
                   hetu::cuda::cuda_sqrt(pi)));
         });

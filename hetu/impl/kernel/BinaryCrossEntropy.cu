@@ -12,7 +12,8 @@ namespace impl {
 template <typename spec_t>
 struct kBCEGradFunctor {
   __device__ spec_t operator()(spec_t pred, spec_t label, spec_t grad_loss) {
-    spec_t denominator = pred * (1 - pred);
+    spec_t one = 1.0f;
+    spec_t denominator = pred * (one - pred);
     return grad_loss * (pred - label) / MAX(denominator, spec_t(1e-12));
   }
 };
@@ -20,7 +21,8 @@ struct kBCEGradFunctor {
 template <>
 struct kBCEGradFunctor<bfloat16> {
   __device__ bfloat16 operator()(bfloat16 pred, bfloat16 label, bfloat16 grad_loss) {
-    bfloat16 denominator = pred * (1 - pred);
+    bfloat16 one = 1.0f;
+    bfloat16 denominator = pred * (one - pred);
     return grad_loss * (pred - label) / denominator;
   }
 };

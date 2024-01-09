@@ -20,7 +20,8 @@ __global__ void nllloss_kernel(const spec_t* pred, const int64_t* label,
   int64_t id = label[label_offset];
   auto pred_offset = pred_offset_calculator->get(n_cols * idx + id);
   auto loss_offset = loss_offset_calculator->get(idx);
-  loss[loss_offset] = (id < 0 || id >= n_cols) ? 0 : - pred[pred_offset];
+  spec_t zero = 0;
+  loss[loss_offset] = (id < 0 || id >= n_cols) ? zero : - pred[pred_offset];
 }
 
 template <typename spec_t>
@@ -37,7 +38,8 @@ nllloss_gradient_kernel(const spec_t* pred, const int64_t* label, const spec_t* 
   int64_t id = label[label_offset];
   auto grad_loss_offset = grad_loss_offset_calculator->get(idx);
   auto out_offset = out_offset_calculator->get(n_cols * idx + id);
-  output[out_offset] = (id < 0 || id >= n_cols) ? 0 : - grad_loss[grad_loss_offset] * n_cols;
+  spec_t zero = 0;
+  output[out_offset] = (id < 0 || id >= n_cols) ? zero : - grad_loss[grad_loss_offset] * n_cols;
 }
 
 void NLLLossCuda(const NDArray& pred, const NDArray& label,

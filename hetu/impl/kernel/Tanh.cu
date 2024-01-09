@@ -42,7 +42,8 @@ void TanhGradientCuda(const NDArray& input, const NDArray& output_grad,
     input->dtype(), spec_t, "TanhGradientCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t, spec_t>(input, output_grad, input_grad, size, stream,
                                                  [] __device__ (spec_t x, spec_t y) -> spec_t {
-                                                   return (1 - x * x) * y;
+                                                   spec_t one = 1.0f;
+                                                   return (one - x * x) * y;
                                                 });
   });
   NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);

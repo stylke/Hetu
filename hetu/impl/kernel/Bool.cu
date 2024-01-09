@@ -20,7 +20,7 @@ void BoolCuda(const NDArray& input, NDArray& output, const Stream& stream) {
     input->dtype(), spec_t, "BoolCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
                                          [] __device__ (spec_t x) -> spec_t {
-                                           return float(x > 0) ? 1 : 0;
+                                           return float(x > 0) ? spec_t(1) : spec_t(0);
                                          });
     });
   NDArray::MarkUsedBy({input, output}, stream);

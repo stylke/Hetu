@@ -16,26 +16,6 @@ namespace impl {
 
 namespace {
 
-inline size_t numel(const HTShape& shape) {
-  size_t num = 1;
-  for (auto& s : shape) {
-    num *= s;
-  }
-  return num;
-}
-
-inline HTStride Shape2Stride(const HTShape& shape) {
-  auto size = shape.size();
-  HTStride stride(size);
-  if (size > 0) {
-    stride[size - 1] = 1;
-    for (auto d = size - 1; d > 0; d--) {
-      stride[d - 1] = stride[d] * shape[d];
-    }
-  }
-  return stride;
-}
-
 inline bool maybe_overlapping_memory(const HTShape& shape, const HTStride& stride) {
   if (!shape.empty()) {
     std::vector<size_t> argsort(shape.size());

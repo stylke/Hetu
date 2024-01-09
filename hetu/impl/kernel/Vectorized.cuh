@@ -113,7 +113,7 @@ __device__ void vectorize_kernel_impl(func_t op, aligned_vector<out_t, vec_size>
   #pragma unroll
   for (int i = 0; i < loop_size; i++) {
     int index = threadIdx.x + i * NUM_THREADS;
-    int linear_idx = base_idx + index;
+    int linear_idx = base_idx + index * vec_size;
     aligned_vector<out_t, vec_size> ret;
     #pragma unroll
     for (int j = 0; j < vec_size; j++) {
