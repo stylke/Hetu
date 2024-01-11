@@ -222,6 +222,7 @@ void launch_loop_kernel(const NDArray& inputA, const NDArray& inputB,
     std::tie(out_offset_calculator_arr, out_offset_calculator) =
       AllocOffsetCalculator(output, stream);
     CUDAStream cuda_stream(stream);
+    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
     ternary_kernel<NUM_THREADS, unroll_factor><<<grid, block, 0, cuda_stream>>>(
       inputA->data_ptr<in_a_t>(), inputB->data_ptr<in_b_t>(),
       inputC->data_ptr<in_c_t>(), size, output->data_ptr<out_t>(), op,
@@ -280,6 +281,7 @@ void launch_loop_kernel(const NDArray& inputA, const NDArray& inputB,
     std::tie(out_offset_calculator_arr, out_offset_calculator) =
       AllocOffsetCalculator(output, stream);
     CUDAStream cuda_stream(stream);
+    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
     binary_kernel<NUM_THREADS, unroll_factor><<<grid, block, 0, cuda_stream>>>(
       inputA->data_ptr<in_a_t>(), inputB->data_ptr<in_b_t>(),
       size, output->data_ptr<out_t>(), op,
@@ -327,6 +329,7 @@ void launch_loop_kernel(const NDArray& input, NDArray& output, size_t size,
     std::tie(out_offset_calculator_arr, out_offset_calculator) =
       AllocOffsetCalculator(output, stream);
     CUDAStream cuda_stream(stream);
+    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
     unary_kernel<NUM_THREADS, unroll_factor><<<grid, block, 0, cuda_stream>>>(
       input->data_ptr<in_t>(), size, output->data_ptr<out_t>(), op,
       in_offset_calculator, out_offset_calculator);
@@ -366,6 +369,7 @@ void launch_loop_kernel(NDArray& output, size_t size,
     std::tie(out_offset_calculator_arr, out_offset_calculator) =
       AllocOffsetCalculator(output, stream);
     CUDAStream cuda_stream(stream);
+    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
     index_kernel<NUM_THREADS, unroll_factor><<<grid, block, 0, cuda_stream>>>(
       size, output->data_ptr<out_t>(), op, out_offset_calculator);
     NDArray::MarkUsedBy({out_offset_calculator_arr}, stream);
