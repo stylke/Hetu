@@ -322,9 +322,9 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
         << "Output tensor must be on CUDA device";
         HT_ASSERT(out->stride(-1) == 1) 
         << "Output tensor must have contiguous last dimension";
-        if (head_size_og % 8 != 0) { out = NDArray::empty_like(q_padded); }
+        if (head_size_og % 8 != 0) { out = NDArray::empty_like(q_padded, stream.stream_index()); }
     } else {
-        out = NDArray::empty_like(q_padded);
+        out = NDArray::empty_like(q_padded, stream.stream_index());
     }
 
 
@@ -345,7 +345,7 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
     if (return_softmax) {
         HT_ASSERT(p_dropout > 0.0f)
         << "return_softmax is only supported when p_dropout > 0.0";
-        p = NDArray::empty({batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded }, q->device(), q->dtype());
+        p = NDArray::empty({batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded }, q->device(), q->dtype(), stream.stream_index());
     }
 
     Flash_fwd_params params;
@@ -376,8 +376,8 @@ void FlashAttnCuda(const NDArray& q,         // batch_size x seqlen_q x num_head
     if (p_dropout == 0.0f) {  // SplitKV is not implemented for dropout
         params.num_splits = num_splits_heuristic(batch_size * num_heads * num_m_blocks, dprops.multiProcessorCount, num_n_blocks, 128);
         if (params.num_splits > 1) {
-            NDArray softmax_lse_accum = NDArray::empty({params.num_splits, batch_size, num_heads, seqlen_q}, q->device(), kFloat);
-            NDArray out_accum = NDArray::empty({params.num_splits, batch_size, num_heads, seqlen_q, head_size_rounded}, q->device(), kFloat);
+            NDArray softmax_lse_accum = NDArray::empty({params.num_splits, batch_size, num_heads, seqlen_q}, q->device(), kFloat, stream.stream_index());
+            NDArray out_accum = NDArray::empty({params.num_splits, batch_size, num_heads, seqlen_q, head_size_rounded}, q->device(), kFloat, stream.stream_index());
             params.softmax_lseaccum_ptr = softmax_lse_accum->raw_data_ptr();
             params.oaccum_ptr = out_accum->raw_data_ptr();
         }
@@ -556,7 +556,7 @@ FlashAttnGradientCuda(const NDArray& dout,  // batch_size x seqlen_q x num_heads
         << "dk must have contiguous last dimension";
         // CHECK_SHAPE(dk, batch_size, seqlen_k, num_heads_k, head_size);
     } else {
-        dk = NDArray::empty_like(k);
+        dk = NDArray::empty_like(k, stream.stream_index());
     }
     if (dv_.is_defined()) {
         dv = dv_;
@@ -568,7 +568,7 @@ FlashAttnGradientCuda(const NDArray& dout,  // batch_size x seqlen_q x num_heads
         << "dv must have contiguous last dimension";
         // CHECK_SHAPE(dv, batch_size, seqlen_k, num_heads_k, head_size);
     } else {
-        dv = NDArray::empty_like(k);
+        dv = NDArray::empty_like(k, stream.stream_index());
     }
 
     NDArray dout_padded;
@@ -589,19 +589,19 @@ FlashAttnGradientCuda(const NDArray& dout,  // batch_size x seqlen_q x num_heads
     hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
 
     // auto opts = q.options();
-    auto softmax_d = NDArray::empty({batch_size, num_heads, seqlen_q_rounded}, q->device(), kFloat);
+    auto softmax_d = NDArray::empty({batch_size, num_heads, seqlen_q_rounded}, q->device(), kFloat, stream.stream_index());
     NDArray dq_accum;
     NDArray dk_accum, dv_accum;
     if (loop) {
-        dq_accum = NDArray::empty({batch_size, num_heads, seqlen_q_rounded, head_size_rounded}, q->device(), kFloat);
+        dq_accum = NDArray::empty({batch_size, num_heads, seqlen_q_rounded, head_size_rounded}, q->device(), kFloat, stream.stream_index());
         // dk_accum = NDArray::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts->dtype(at::kFloat));
         // dv_accum = NDArray::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts->dtype(at::kFloat));
     }
 
     NDArray dk_expanded, dv_expanded;
     if (num_heads_k != num_heads) {  // MQA / GQA
-        dk_expanded = NDArray::empty({batch_size, seqlen_k, num_heads, head_size}, q->device(), q->dtype());
-        dv_expanded = NDArray::empty({batch_size, seqlen_k, num_heads, head_size}, q->device(), q->dtype());
+        dk_expanded = NDArray::empty({batch_size, seqlen_k, num_heads, head_size}, q->device(), q->dtype(), stream.stream_index());
+        dv_expanded = NDArray::empty({batch_size, seqlen_k, num_heads, head_size}, q->device(), q->dtype(), stream.stream_index());
     } else {
         dk_expanded = dk;
         dv_expanded = dv;

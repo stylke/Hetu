@@ -143,7 +143,7 @@ template <typename spec_t>
 __forceinline__ __device__ spec_t WarpReduceSum(spec_t val) {
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val += __shfl_down_sync(mask, val, k, warpSize);
+    val += hetu::cuda::shfl_down_sync(mask, val, k, warpSize);
   return val;
 }
 
@@ -152,11 +152,11 @@ __forceinline__ __device__ bfloat16 WarpReduceSum<bfloat16>(bfloat16 val) {
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   #if(__CUDA_ARCH__ >= 800)
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val += __shfl_down_sync(mask, val, k, warpSize);
+    val += hetu::cuda::shfl_down_sync(mask, val, k, warpSize);
   #else
   float val_f = float(val);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val_f += __shfl_down_sync(mask, val_f, k, warpSize); 
+    val_f += hetu::cuda::shfl_down_sync(mask, val_f, k, warpSize); 
   val = bfloat16(val_f); 
   #endif
   return val;

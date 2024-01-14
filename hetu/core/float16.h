@@ -116,11 +116,7 @@ struct alignas(2) float16 {
   // HETU_HOSTDEVICE float16(int value);
   // HETU_HOSTDEVICE operator int() const;
   HETU_HOSTDEVICE float16(float value);
-  #if defined(__CUDACC__)
-  HETU_HOSTDEVICE explicit operator float() const;
-  #else 
   HETU_HOSTDEVICE operator float() const;
-  #endif
   HETU_HOSTDEVICE float16(double value);
   HETU_HOSTDEVICE explicit operator double() const;
   HETU_HOSTDEVICE explicit operator int() const;
@@ -133,10 +129,6 @@ struct alignas(2) float16 {
   HETU_HOSTDEVICE float16(const __half& value);
   HETU_HOSTDEVICE operator __half() const;
   HETU_HOSTDEVICE __half to_half() const;
-  HETU_DEVICE bool operator<(const float16 h) { return __hlt(__half(*this), __half(h)); }
-  HETU_DEVICE bool operator>(const float16 h) { return __hgt(__half(*this), __half(h)); }
-  HETU_DEVICE bool operator<=(const float16 h) { return __hle(__half(*this), __half(h)); }
-  HETU_DEVICE bool operator>=(const float16 h) { return __hge(__half(*this), __half(h)); }
   HETU_HOSTDEVICE float16 &operator=(const __half& value) { val = *reinterpret_cast<const unsigned short*>(&value); return *this; }
   #endif
   HETU_HOSTDEVICE float16 &operator=(const float f) { val = float16(f).val; return *this; }
@@ -203,25 +195,6 @@ HETU_HOSTDEVICE __device__ float16 __ldg(const float16* ptr) {
 #endif
 
 /// Arithmetic
-#if defined(__CUDACC__)
-HETU_DEVICE float16 operator+(const float16& a, const float16& b) {
-  return __half(a) + __half(b);
-}
-
-HETU_DEVICE float16 operator-(const float16& a, const float16& b) {
-  return __half(a) - __half(b);
-}
-
-HETU_DEVICE float16 operator*(const float16& a, const float16& b) {
-  return __half(a) * __half(b);
-}
-
-HETU_DEVICE float16 operator/(const float16& a, const float16& b) {
-  // HT_ASSERT(static_cast<float>(b) != 0)
-  // << "Divided by zero.";
-  return __half(a) / __half(b);
-}
-#else
 HETU_DEVICE float16 operator+(const float16& a, const float16& b) {
   return static_cast<float>(a) + static_cast<float>(b);
 }
@@ -239,7 +212,6 @@ HETU_DEVICE float16 operator/(const float16& a, const float16& b) {
   // << "Divided by zero.";
   return static_cast<float>(a) / static_cast<float>(b);
 }
-#endif
 
 HETU_DEVICE float16 operator-(const float16& a) {
 #if (defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530)

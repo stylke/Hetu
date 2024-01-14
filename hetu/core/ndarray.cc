@@ -1031,6 +1031,32 @@ NDArray NDArray::embedding(const NDArray& input, const NDArray& id,
   return out;
 }
 
+NDArrayList NDArray::fused_layernorm(const NDArray& input, const NDArray& bn_scale, const NDArray& bn_bias, 
+                               const HTShape& normalized_shape, double eps,
+                               StreamIndex stream_id,
+                               NDArray& output,
+                               NDArray& save_mean,
+                               NDArray& save_var) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  HTShape local_shape = input->shape();
+  int ndim = local_shape.size();
+  local_shape[ndim - 1] = 1;
+  NDArray savemean = save_mean.is_defined()
+    ? save_mean
+    : NDArray::empty(normalized_shape, input->device(), input->dtype(),
+                     stream_id);
+  NDArray savevar = save_var.is_defined()
+    ? save_var
+    : NDArray::empty(normalized_shape, input->device(), input->dtype(),
+                     stream_id);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::FusedLayerNorm, input,
+                               bn_scale, bn_bias, savemean, savevar, 
+                               out, normalized_shape.size(), eps, stream);  
+  return {out, savemean, savevar};
+}
+
 NDArray NDArray::gather(const NDArray& input, const NDArray& id, int64_t dim,
                         StreamIndex stream_id,
                         NDArray& output) {

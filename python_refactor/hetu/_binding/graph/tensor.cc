@@ -311,7 +311,7 @@ PyObject* PyTensor_data_transfer(PyTensor* self, PyObject* args, PyObject* kwarg
   auto* new_self = reinterpret_cast<PyTensor*>(unsafe_self);
   
   static PyArgParser parser({
-    "to(dtype datatype, device dev=None, " OP_META_ARGS ")"
+    "to(DataType dtype, device dev=None, " OP_META_ARGS ")"
   });
   auto parsed_args = parser.parse(args, kwargs);
 
