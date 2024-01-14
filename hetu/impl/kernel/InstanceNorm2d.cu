@@ -181,10 +181,10 @@ __global__ void calculate_grad_kernel<bfloat16>(const bfloat16* out_grads,
   auto mean_offset = mean_offset_calculator->get(mo_idx);
   auto var_offset = var_offset_calculator->get(mo_idx);
   auto grad_offset = grad_offset_calculator->get(idx);
-  float16 tmp = (dbias[mo_idx] * mean_arr[mean_offset] - ds[mo_idx]) * (in_arr[in_offset] - mean_arr[mean_offset]) /
+  bfloat16 tmp = (dbias[mo_idx] * mean_arr[mean_offset] - ds[mo_idx]) * (in_arr[in_offset] - mean_arr[mean_offset]) /
                 (var_arr[var_offset] + eps);
   grad_arr[grad_offset] = out_grads[out_grads_offset] / hetu::cuda::cuda_sqrt(var_arr[var_offset] + eps) +
-    ((tmp - dbias[mo_idx]) / (float16)last2dim) / 
+    ((tmp - dbias[mo_idx]) / (bfloat16)last2dim) / 
     hetu::cuda::cuda_sqrt(var_arr[var_offset] + eps);
 }
 

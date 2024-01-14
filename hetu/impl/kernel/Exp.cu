@@ -20,7 +20,7 @@ void ExpCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "ExpCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
-                                         [=] __device__ (spec_t x) -> spec_t {
+                                         [] __device__ (spec_t x) -> spec_t {
                                            return hetu::cuda::cuda_exp(x);
                                          });
     });

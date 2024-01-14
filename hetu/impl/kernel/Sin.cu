@@ -9,36 +9,6 @@
 namespace hetu {
 namespace impl {
 
-template <typename spec_t>
-__global__ void sin_gradient_kernel(const spec_t* input, const spec_t* output_grad,
-                                    size_t size, spec_t* output,
-                                    const OffsetCalculator* in_offset_calculator,
-                                    const OffsetCalculator* out_grad_offset_calculator,
-                                    const OffsetCalculator* out_offset_calculator) {
-  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
-    return;
-  auto in_offset = in_offset_calculator->get(idx);
-  auto out_grad_offset = out_grad_offset_calculator->get(idx);
-  auto out_offset = out_offset_calculator->get(idx);
-  output[out_offset] = output_grad[out_grad_offset] * hetu::cuda::cuda_cos(input[in_offset]);
-}
-
-template <typename spec_t>
-__global__ void cos_gradient_kernel(const spec_t* input, const spec_t* output_grad,
-                                    size_t size, spec_t* output,
-                                    const OffsetCalculator* in_offset_calculator,
-                                    const OffsetCalculator* out_grad_offset_calculator,
-                                    const OffsetCalculator* out_offset_calculator) {
-  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
-    return;
-  auto in_offset = in_offset_calculator->get(idx);
-  auto out_grad_offset = out_grad_offset_calculator->get(idx);
-  auto out_offset = out_offset_calculator->get(idx);
-  output[out_offset] = -output_grad[out_grad_offset] * hetu::cuda::cuda_sin(input[in_offset]);
-}
-
 void SinCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
@@ -50,7 +20,7 @@ void SinCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "SinCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
-                                         [=] __device__ (spec_t x) -> spec_t {
+                                         [] __device__ (spec_t x) -> spec_t {
                                            return hetu::cuda::cuda_sin(x);
                                          });
     });
@@ -68,7 +38,7 @@ void CosCuda(const NDArray& input, NDArray& output, const Stream& stream) {
   HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "CosCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
-                                         [=] __device__ (spec_t x) -> spec_t {
+                                         [] __device__ (spec_t x) -> spec_t {
                                            return hetu::cuda::cuda_cos(x);
                                          });
     });
@@ -86,30 +56,14 @@ void SinGradientCuda(const NDArray& input, const NDArray& output_grad,
   size_t size = input_grad->numel();
   if (size == 0)
     return;
-  dim3 blocks, threads;
-  threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  NDArray in_offset_calculator_arr, out_grad_offset_calculator_arr,
-          in_grad_offset_calculator_arr;
-  OffsetCalculator *in_offset_calculator, *out_grad_offset_calculator,
-                   *in_grad_offset_calculator;
-  std::tie(in_offset_calculator_arr, in_offset_calculator) =
-    AllocOffsetCalculator(input, stream);
-  std::tie(out_grad_offset_calculator_arr, out_grad_offset_calculator) = 
-    AllocOffsetCalculator(output_grad, stream);
-  std::tie(in_grad_offset_calculator_arr, in_grad_offset_calculator) = 
-    AllocOffsetCalculator(input_grad, stream);
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+  HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "SinGradientCuda", [&]() {
-      sin_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(), size,
-        input_grad->data_ptr<spec_t>(), in_offset_calculator,
-        out_grad_offset_calculator, in_grad_offset_calculator);
-    });
-  NDArray::MarkUsedBy({input, output_grad, input_grad, in_offset_calculator_arr,
-                      out_grad_offset_calculator_arr, in_grad_offset_calculator_arr}, stream);
+      launch_loop_kernel<spec_t, spec_t, spec_t>(input, output_grad, input_grad, size, stream,
+                                                 [] __device__ (spec_t x, spec_t y) -> spec_t {
+                                                   return y * hetu::cuda::cuda_cos(x);
+                                                });
+  });
+  NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
 void CosGradientCuda(const NDArray& input, const NDArray& output_grad,
@@ -123,30 +77,14 @@ void CosGradientCuda(const NDArray& input, const NDArray& output_grad,
   size_t size = input_grad->numel();
   if (size == 0)
     return;
-  dim3 blocks, threads;
-  threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  NDArray in_offset_calculator_arr, out_grad_offset_calculator_arr,
-          in_grad_offset_calculator_arr;
-  OffsetCalculator *in_offset_calculator, *out_grad_offset_calculator,
-                   *in_grad_offset_calculator;
-  std::tie(in_offset_calculator_arr, in_offset_calculator) =
-    AllocOffsetCalculator(input, stream);
-  std::tie(out_grad_offset_calculator_arr, out_grad_offset_calculator) = 
-    AllocOffsetCalculator(output_grad, stream);
-  std::tie(in_grad_offset_calculator_arr, in_grad_offset_calculator) = 
-    AllocOffsetCalculator(input_grad, stream);
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+  HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "CosGradientCuda", [&]() {
-      cos_gradient_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input->data_ptr<spec_t>(), output_grad->data_ptr<spec_t>(), size,
-        input_grad->data_ptr<spec_t>(), in_offset_calculator,
-        out_grad_offset_calculator, in_grad_offset_calculator);
-    });
-  NDArray::MarkUsedBy({input, input_grad, output_grad, in_offset_calculator_arr,
-                      out_grad_offset_calculator_arr, in_grad_offset_calculator_arr}, stream);
+      launch_loop_kernel<spec_t, spec_t, spec_t>(input, output_grad, input_grad, size, stream,
+                                                 [] __device__ (spec_t x, spec_t y) -> spec_t {
+                                                   return -y * hetu::cuda::cuda_sin(x);
+                                                });
+  });
+  NDArray::MarkUsedBy({input, input_grad}, stream);
 }
 
 } // namespace impl

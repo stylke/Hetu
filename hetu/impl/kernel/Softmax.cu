@@ -134,7 +134,8 @@ __forceinline__ __device__ void BlockReduceSumExp(spec_t& val,
     shared[idx * threads_per_pos + wid] = val;
 
   __syncthreads();
-  val = (thread_id < threads_per_pos / warpSize) ? shared[idx * threads_per_pos + tid] : 0;
+  spec_t zero = 0;
+  val = (thread_id < threads_per_pos / warpSize) ? shared[idx * threads_per_pos + tid] : zero;
 
   if (wid == 0) {
     val = WarpReduceSumExp(val, used_warp_size);

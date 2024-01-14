@@ -19,7 +19,7 @@ void ReciprocalCuda(const NDArray& input, NDArray& output,
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     input->dtype(), spec_t, "ReciprocalCuda", [&]() {
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
-                                         [=] __device__ (spec_t x) -> spec_t {
+                                         [] __device__ (spec_t x) -> spec_t {
                                            return static_cast<spec_t>(1) / x;
                                          });
     });
