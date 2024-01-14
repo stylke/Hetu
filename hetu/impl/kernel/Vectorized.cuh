@@ -6,6 +6,7 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/offset_calculator.cuh"
+#include <thrust/tuple.h>
 
 namespace hetu {
 namespace impl {
@@ -33,7 +34,7 @@ int get_vectorize_size(const spec_t* ptr, const T* arg, const Args*... args) {
                   get_vectorize_size(arg, args...));
 }
 
-// TODO: Support multi-outputs for optimizer kernels
+// TODO: Merge 0-3 input kernels into one general kernel
 
 template <typename func_t, typename out_t, typename... IN_t>
 __device__ void unroll_kernel_impl(func_t op, int remaining, int base_idx, out_t* output, const IN_t*... inputs) {
@@ -374,6 +375,174 @@ void launch_loop_kernel(NDArray& output, size_t size,
       size, output->data_ptr<out_t>(), op, out_offset_calculator);
     NDArray::MarkUsedBy({out_offset_calculator_arr}, stream);
   }
+}
+
+template <typename ins_t, int end, int current=0>
+struct load_multiple_inputs {
+  __device__ static void apply(void** input_ptrs, ins_t* inputs, int linear_idx, int j) {
+    using arg_t = std::tuple_element_t<current, ins_t>;
+    std::get<current>(inputs[j]) = *(reinterpret_cast<arg_t*>(input_ptrs[current]) + linear_idx);
+    load_multiple_inputs<ins_t, end, current + 1>::apply(input_ptrs, inputs, linear_idx, j);
+  }
+
+  __device__ static void apply(void** input_ptrs, ins_t* inputs, int* linear_idx, int j) {
+    using arg_t = std::tuple_element_t<current, ins_t>;
+    std::get<current>(inputs[j]) = *(reinterpret_cast<arg_t*>(input_ptrs[current]) + linear_idx[current]);
+    load_multiple_inputs<ins_t, end, current + 1>::apply(input_ptrs, inputs, linear_idx, j);
+  }
+};
+
+template <typename ins_t, int end>
+struct load_multiple_inputs<ins_t, end, end> {
+  __device__ static void apply(void** input_ptrs, ins_t* inputs, int linear_idx, int j) {}
+
+  __device__ static void apply(void** input_ptrs, ins_t* inputs, int* linear_idx, int j) {}
+};
+
+template <typename outs_t, int num_outputs, int current=0>
+struct store_multiple_outputs {
+  __device__ static void apply(void** output_ptrs, outs_t outputs, int linear_idx) {
+    using out_t = typename thrust::tuple_element<current, outs_t>::type;
+    out_t *to = reinterpret_cast<out_t*>(output_ptrs[current]) + linear_idx;
+    *to = thrust::get<current>(outputs);
+    store_multiple_outputs<outs_t, num_outputs, current + 1>::apply(output_ptrs, outputs, linear_idx);
+  }
+
+  __device__ static void apply(void** output_ptrs, outs_t outputs, int* linear_idx) {
+    using out_t = typename thrust::tuple_element<current, outs_t>::type;
+    out_t *to = reinterpret_cast<out_t*>(output_ptrs[current]) + linear_idx[current];
+    *to = thrust::get<current>(outputs);
+    store_multiple_outputs<outs_t, num_outputs, current + 1>::apply(output_ptrs, outputs, linear_idx);
+  }
+};
+
+template <typename outs_t, int num_outputs>
+struct store_multiple_outputs<outs_t, num_outputs, num_outputs> {
+  __device__ static void apply(void** output_ptrs, outs_t outputs, int linear_idx) {}
+
+  __device__ static void apply(void** output_ptrs, outs_t outputs, int* linear_idx) {}
+};
+
+template <typename in_t, typename out_t, typename func_t>
+__device__ inline void unroll_kernel_for_multi_outputs_impl(void** input_ptrs, void** output_ptrs,
+                                                            int remaining, int base_idx, func_t op) {
+  constexpr int num_outputs = thrust::tuple_size<out_t>::value;
+  constexpr int nargs = std::tuple_size<in_t>::value;
+
+  int thread_idx = threadIdx.x;
+  out_t results[THREAD_WORK_SIZE];
+  in_t inputs[THREAD_WORK_SIZE];
+  #pragma unroll
+  for (int i = 0; i < THREAD_WORK_SIZE; i++) {
+    int index = thread_idx + i * NUM_THREADS;
+    if (index >= remaining) {
+      break;
+    }
+    int linear_idx = index + base_idx;
+    load_multiple_inputs<in_t, nargs>::apply(input_ptrs, inputs, linear_idx, i);
+    results[i] = hetu::impl::apply(op, inputs[i]);
+  }
+  #pragma unroll
+  for (int i = 0; i < THREAD_WORK_SIZE; i++) {
+    int index = thread_idx + i * NUM_THREADS;
+    if (index >= remaining) {
+      break;
+    }
+    int linear_idx = index + base_idx;
+    store_multiple_outputs<out_t, num_outputs>::apply(output_ptrs, results[i], linear_idx);
+  }
+}
+
+template <typename in_t, typename out_t, int num_outputs, int num_inputs, typename func_t>
+__global__ void unroll_kernel_for_multi_outputs(void** input_ptrs, void** output_ptrs,
+                                                size_t size, func_t op) {
+  int base_idx = BLOCK_WORK_SIZE * blockIdx.x;
+  int remaining = size - base_idx;
+  unroll_kernel_for_multi_outputs_impl<in_t, out_t>(input_ptrs, output_ptrs, remaining, base_idx, op);
+}
+
+template <int nt, int vt, int num_outputs, int num_inputs,
+          typename in_t, typename out_t, typename func_t>
+__global__ void loop_kernel_for_multi_outputs(void** input_ptrs, void** output_ptrs,
+                                              size_t size, func_t op,
+                                              OffsetCalculator** in_offset_calculators,
+                                              OffsetCalculator** out_offset_calculators) {
+  int tid = threadIdx.x;
+  int nv = nt * vt;
+  int idx = nv * blockIdx.x + tid;
+  in_t inputs[vt];
+  out_t results[vt];
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx < size) {
+      int in_offsets[num_inputs];
+      int out_offsets[num_outputs];
+      #pragma unroll
+      for (int j = 0; j < num_inputs; j++) {
+        in_offsets[j] = in_offset_calculators[j]->get(idx);
+      }
+      #pragma unroll
+      for (int j = 0; j < num_outputs; j++) {
+        out_offsets[j] = out_offset_calculators[j]->get(idx);
+      }
+      load_multiple_inputs<in_t, num_inputs>::apply(input_ptrs, inputs, in_offsets, i);
+      results[i] = hetu::impl::apply(op, inputs[i]);
+      store_multiple_outputs<out_t, num_outputs>::apply(output_ptrs, results[i], out_offsets);
+      idx += nt;
+    }
+  }
+}
+
+template <typename in_t, typename out_t, typename func_t>
+void launch_loop_kernel_multiple_outputs(const NDArrayList& inputs, const NDArrayList& outputs, size_t size,
+                                         const Stream& stream, const func_t& op) {
+  constexpr int num_outputs = thrust::tuple_size<out_t>::value;
+  constexpr int num_inputs = std::tuple_size<in_t>::value;
+  HT_ASSERT(num_outputs == outputs.size());
+  HT_ASSERT(num_inputs == inputs.size());
+  auto device_id = stream.device_index();
+  std::vector<void*> data_ptrs(num_outputs + num_inputs);
+  for (int i = 0; i < num_outputs; i++) {
+    data_ptrs[i] = outputs[i]->raw_data_ptr();
+  }
+  for (int i = 0; i < num_inputs; i++) {
+    data_ptrs[num_outputs + i] = inputs[i]->raw_data_ptr();
+  }
+  NDArray data_ptrs_arr =
+    hetu::cuda::to_ptr_ndarray(data_ptrs, device_id);
+  void** output_ptrs = data_ptrs_arr->data_ptr<void*>();
+  void** input_ptrs = output_ptrs + num_outputs;
+  bool contiguous = IsContiguous(inputs) && IsContiguous(outputs);
+  if (contiguous) {
+    int64_t grid = DIVUP(size, BLOCK_WORK_SIZE);
+    CUDAStream cuda_stream(stream);
+    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+    unroll_kernel_for_multi_outputs<in_t, out_t, num_outputs, num_inputs><<<grid, NUM_THREADS, 0, cuda_stream>>>(
+      input_ptrs, output_ptrs, size, op);
+  } else {
+    constexpr int unroll_factor = 2;
+    dim3 block(NUM_THREADS);
+    dim3 grid(DIVUP(size, unroll_factor * block.x));
+    NDArrayList data = inputs;
+    data.insert(data.end(), outputs.begin(), outputs.end());
+    NDArrayList offset_calculator_arrs(num_inputs + num_outputs);
+    std::vector<OffsetCalculator*> offset_calculators(num_inputs + num_outputs);
+    std::tie(offset_calculator_arrs, offset_calculators) =
+      AllocOffsetCalculator(data, stream);
+    NDArray offset_calculators_arr =
+      hetu::cuda::to_ptr_ndarray(offset_calculators, device_id);
+    OffsetCalculator** in_offset_calculators = offset_calculators_arr->data_ptr<OffsetCalculator*>();
+    OffsetCalculator** out_offset_calculators = in_offset_calculators + num_inputs;
+    CUDAStream cuda_stream(stream);
+    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+    loop_kernel_for_multi_outputs<NUM_THREADS, unroll_factor, num_outputs, num_inputs, in_t, out_t>
+                                 <<<grid, block, 0, cuda_stream>>>
+                                 (input_ptrs, output_ptrs, size, op,
+                                  in_offset_calculators, out_offset_calculators);
+    offset_calculator_arrs.push_back(offset_calculators_arr);
+    NDArray::MarkUsedBy(offset_calculator_arrs, stream);
+  }
+  NDArray::MarkUsedBy({data_ptrs_arr}, stream);
 }
 
 } // namespace impl

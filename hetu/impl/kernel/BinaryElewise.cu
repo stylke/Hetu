@@ -223,7 +223,8 @@ template <int nt, int vt, typename spec_a_t, typename spec_b_t, typename out_t, 
 __global__ void broadcast_elewise_kernel(const spec_a_t* inputA, const spec_b_t* inputB, size_t size,
                                          out_t* output, size_t num_dims, const int64_t idx_mask_A,
                                          const int64_t idx_mask_B, const int64_t* strideA,
-                                         const int64_t* strideB, const int64_t* out_stride, func_t op) {
+                                         const int64_t* strideB, const int64_t* out_stride, func_t op,
+                                         const OffsetCalculator* out_offset_calculator) {
   int tid = threadIdx.x;
   int nv = nt * vt;
   int idx = nv * blockIdx.x + tid;
@@ -242,7 +243,8 @@ __global__ void broadcast_elewise_kernel(const spec_a_t* inputA, const spec_b_t*
       }
       offset_A += bool(idx_mask_A & (1 << (num_dims - 1))) ? remainder * strideA[num_dims - 1] : 0;
       offset_B += bool(idx_mask_B & (1 << (num_dims - 1))) ? remainder * strideB[num_dims - 1] : 0;
-      output[idx] = op(inputA[offset_A], inputB[offset_B]);
+      auto out_offset = out_offset_calculator->get(idx);
+      output[out_offset] = op(inputA[offset_A], inputB[offset_B]);
       idx += nt;
     }
   }
@@ -272,6 +274,15 @@ void launch_broadcast_loop_kernel(const NDArray& inputA, const NDArray& inputB, 
       idx_mask_A |= (shapeA[i] == 1 ? 0 : (1 << i));
       idx_mask_B |= (shapeB[i] == 1 ? 0 : (1 << i));
     }
+    NDArrayMeta broadcast_out_meta = output->meta();
+    broadcast_out_meta.set_shape(out_shape)
+                      .set_stride(out_stride);
+    auto broadcast_output = NDArray(broadcast_out_meta, output->storage(), output->storage_offset());
+    NDArray out_offset_calculator_arr;
+    OffsetCalculator *out_offset_calculator;
+    std::tie(out_offset_calculator_arr, out_offset_calculator) =
+      AllocOffsetCalculator(broadcast_output, stream);
+    out_stride = Shape2Stride(out_shape);
     std::vector<int64_t> broadcast_metadata;
     broadcast_metadata.insert(broadcast_metadata.end(), strideA.begin(), strideA.end());
     broadcast_metadata.insert(broadcast_metadata.end(), strideB.begin(), strideB.end());
@@ -283,8 +294,9 @@ void launch_broadcast_loop_kernel(const NDArray& inputA, const NDArray& inputB, 
     hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
     broadcast_elewise_kernel<NUM_THREADS, unroll_factor><<<grid, block, 0, cuda_stream>>>(
       inputA->data_ptr<spec_a_t>(), inputB->data_ptr<spec_b_t>(), size, output->data_ptr<out_t>(),
-      num_dims, idx_mask_A, idx_mask_B, strideA_ptr, strideB_ptr, out_stride_ptr, op);
-    NDArray::MarkUsedBy(broadcast_metadata_arr, stream);
+      num_dims, idx_mask_A, idx_mask_B, strideA_ptr, strideB_ptr,
+      out_stride_ptr, op, out_offset_calculator);
+    NDArray::MarkUsedBy({broadcast_metadata_arr, out_offset_calculator_arr}, stream);
   }
 }
 

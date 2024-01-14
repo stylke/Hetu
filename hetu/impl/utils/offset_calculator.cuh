@@ -79,6 +79,9 @@ __global__ static void strided_constructor(StridedOffsetCalculator* dst, int dim
 std::tuple<NDArray, OffsetCalculator*>
 AllocOffsetCalculator(const NDArray& arr, const Stream& stream);
 
+std::tuple<NDArrayList, std::vector<OffsetCalculator*>>
+AllocOffsetCalculator(const NDArrayList& arr_list, const Stream& stream);
+
 // TODO: Find a suitable capacity for LFU cache
 constexpr size_t HT_LFU_CAPACITY = 32;
 
