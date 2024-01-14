@@ -1,5 +1,4 @@
 #include "hetu/graph/distributed_states.h"
-
 namespace hetu {
 namespace graph {
 
@@ -389,6 +388,7 @@ std::string DistributedStates::ds_info() const {
       os << "}";
     }
   }
+  os << ", zero = " << _zero;
   return os.str();    
 }
 }

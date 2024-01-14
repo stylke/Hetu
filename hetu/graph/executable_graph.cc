@@ -98,20 +98,45 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
   OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_instantiated);
   HT_LOG_TRACE << "Instantiating ops: " << topo;
 
+  HT_LOG_DEBUG << "global info for all devices begin...";
   // global info for all devices
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
     if (!op->placement().is_undetermined())
       continue;
 
-    // remove redundant comm ops
+    // remove unuse or redundant comm ops
     if (is_comm_op(op)) {
+      auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(op->body());
+      // 1. remove redundant comm ops
       auto& input_op = op->input(0)->producer();
-      // TODO: special case: input_op include pp but op don't 
       if (is_comm_op(input_op)) {
         ReplaceInput(op, 0, input_op->input(0));
         // input changes, update comm_op type
-        reinterpret_cast<CommOpImpl&>(op->body()).get_comm_type(op);
+        comm_op_impl.get_comm_type(op);
+      }
+
+      // 2. remove unuse comm ops
+      // p2p op can only be inserted in exec_graph instantiate
+      // otherwise, it must be an unuse op for multi_ds[cur_strategy_id]
+      // attention: if comm op was removed here, the placement group for 
+      // fw op should also be changed!!!
+      if (comm_op_impl.get_comm_type(op) == P2P_OP) {
+        HT_LOG_DEBUG << op << ": remove unuse or redundant comm op begin...";
+        // should remove consumer of unused comm_op from end to begin
+        for (int i = op->output(0)->num_consumers() - 1; i >= 0; i--) {
+          auto& consumer_i = op->output(0)->consumer(i);
+          for (int j = 0; j < consumer_i->num_inputs(); j++) {
+            if (consumer_i->input(j)->id() == op->output(0)->id()) {
+              ReplaceInput(consumer_i, j, op->input(0));
+              HT_LOG_DEBUG << consumer_i << " input[]" << i << "]: from " 
+                << op->output(0) << " to " << op->input(0)
+                << "; inputs new = " << consumer_i->inputs();
+            }
+          }
+        }
+        HT_LOG_DEBUG << op << ": remove unuse or redundant comm op end...";
+        continue;
       }
     }
     
@@ -134,31 +159,19 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
           << "Currently we cannot infer the devices "
           << "for operators with zero in-degree. : " << op;
         if (op->fw_op_id() != -1) {
-          inferred = _op_indexing[op->fw_op_id()]->placement_group();
+          auto& fw_op = _op_indexing[op->fw_op_id()]; 
+          // fw_op may be unused comm_op for multi ds, will be removed be map placement group
+          inferred = fw_op->placement_group().empty() ? fw_op->input(0)->placement_group() : fw_op->placement_group();
         } else {
           // is it a proper assumption?
           // i.e. attn_weights = ht.where(causal_mask, attn_weights, mask)
           // while causal_mask is on g0 but attn_weights is expected to be on g1
-          inferred = op->input(0)->placement_group();
+          inferred = op->input(0)->placement_group();        
         }
       }
       op->MapToParallelDevices(inferred);
       // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": op " << op << " inferred placement group = " << inferred;
     }
-    // udpate stages
-    DeviceGroup stage_group;
-    if (is_comm_op(op)) {
-      auto& op_impl = reinterpret_cast<CommOpImpl&>(op->body());
-      stage_group = op_impl.src_group(op);
-    } else if (!is_group_op(op)) {
-      stage_group = op->placement_group();
-    }
-    // the stage groups may have a random order after topo sort
-    /*
-    if (!stage_group.empty() && std::find(_stages.begin(), _stages.end(), stage_group) == _stages.end()) {
-      _stages.push_back(stage_group);
-    }
-    */
 
     // loss & grad should div by num_micro_batches when reduction type = MEAN!!! 
     if (is_loss_gradient_op(op) && op->input(0)->has_distributed_states()) {
@@ -214,8 +227,8 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
               if (consumer_op.get()->id() != input_op->id() && is_comm_op(consumer_op)) {
                 auto& consumer_op_impl = reinterpret_cast<CommOpImpl&>(consumer_op.get()->body());
                 const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
-                if (consumer_op_impl.get_dst_distributed_states().check_equal(
-                  input_op_impl.get_dst_distributed_states()) && dst_group_comm == dst_group) {
+                if (consumer_op_impl.get_dst_distributed_states(consumer_op).check_equal(
+                  input_op_impl.get_dst_distributed_states(input_op)) && dst_group_comm == dst_group) {
                   ReplaceInput(op, i, consumer_op.get()->output(0));
                   reused = true;
                   break;
@@ -225,7 +238,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             if (reused)
               continue;
 
-            p2p_input = MakeCommOp(input_op->input(0), input_op_impl.get_dst_distributed_states(), dst_group);
+            p2p_input = MakeCommOp(input_op->input(0), {input_op_impl.get_dst_distributed_states(input_op)}, dst_group);
             // since comm op will be substitued eventually, recording its shape is unnecessary
             // but here we still do it to make the code looks more consistent
             RecordTensorShape(p2p_input->id(), p2p_input->shape());
@@ -248,7 +261,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             if (consumer_op.get()->id() != op->id() && is_comm_op(consumer_op)) {
               auto& consumer_op_impl = reinterpret_cast<CommOpImpl&>(consumer_op.get()->body());
               const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
-              if (consumer_op_impl.get_dst_distributed_states().check_equal(
+              if (consumer_op_impl.get_dst_distributed_states(consumer_op).check_equal(
                   input->get_distributed_states()) && dst_group_comm == dst_group) {
                 ReplaceInput(op, i, consumer_op.get()->output(0));
                 reused = true;
@@ -259,7 +272,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
           if (reused)
             continue;
 
-          p2p_input = MakeCommOp(input, input->get_distributed_states(), dst_group);
+          p2p_input = MakeCommOp(input, {input->get_distributed_states()}, dst_group);
           // since comm op will be substitued eventually, recording its shape is unnecessary
           // but here we still do it to make the code looks more consistent
           RecordTensorShape(p2p_input->id(), p2p_input->shape());
@@ -275,12 +288,12 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
       }
     }
   }
-
+  HT_LOG_DEBUG << "global info for all devices end...";
   // get updated topo
   OpRefList updated_topo = Graph::TopoSort(fetches, num_ops(), is_op_instantiated);
 
   // HT_LOG_DEBUG << preferred_device << ": updated topo after map placement_group: " << updated_topo; 
-
+  HT_LOG_DEBUG << "local info for local_device begin...";
   // local info for local_device
   for (auto& op_ref : updated_topo) {
     auto& op = op_ref.get();
@@ -340,7 +353,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
       }
     }
   }
-
+  HT_LOG_DEBUG << "local info for local_device end...";
   return true;
 }
 
@@ -405,7 +418,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           result = comm_op->input(0);
         } else if (comm_type == COMM_SPLIT_OP) {
           auto local_device_index = src_group.get_index(local_device);
-          const auto& dst_ds = comm_op_impl.get_dst_distributed_states();
+          const auto& dst_ds = comm_op_impl.get_dst_distributed_states(comm_op);
           auto cur_state_index = dst_ds.map_device_to_state_index(local_device_index);
           const auto& order = dst_ds.get_order();
           const auto& states = dst_ds.get_states();
@@ -430,7 +443,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           Tensor all_reduce_output = MakeAllReduceOp(
             input, comm_group, // comm_group is a subset of placement_group
             comm_op_impl.reduction_type(), false,
-            OpMeta().set_device_group(src_group)
+            OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllReduce"));
           RecordTensorShape(all_reduce_output->id(), all_reduce_output->shape());
@@ -443,7 +456,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
           Tensor all_gather_output = MakeAllGatherOp(
             input, comm_group,
-            OpMeta().set_device_group(src_group)
+            OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllGather"));
           RecordTensorShape(all_gather_output->id(), all_gather_output->shape());
@@ -457,7 +470,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           Tensor reduce_scatter_output =  MakeReduceScatterOp(
             input, comm_group,
             comm_op_impl.reduction_type(), false,
-            OpMeta().set_device_group(src_group)
+            OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_ReduceScatter"));
           RecordTensorShape(reduce_scatter_output->id(), reduce_scatter_output->shape());
@@ -587,7 +600,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         AddInDeps(recv_op, {input});
         result = recv_output;
       }
-      result->set_distributed_states(comm_op_impl.get_dst_distributed_states()); // assign distributed states for result tensor
+      result->set_distributed_states(comm_op_impl.get_dst_distributed_states(comm_op)); // assign distributed states for result tensor
 
       // find all comm_op->output consumers, and replace the correspond input tensor with result tensor
       for (int i = comm_op->output(0)->num_consumers() - 1; i >= 0; i--) {
@@ -616,7 +629,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
   const auto& prev_order = prev_distributed_states.get_order();
   auto loop_sizes = prev_distributed_states.get_loop_sizes();
 
-  const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states();
+  const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states(comm_op);
   auto target_duplicate = target_distributed_states.get_dim(-1);
   auto local_device_index = src_group.get_index(local_device);
   auto cur_state_index = target_distributed_states.map_device_to_state_index(used_device_index); // 指定的device需要的是tensor的哪一部分数据
@@ -735,7 +748,7 @@ void ExecutableGraph::CrossSend(std::unordered_map<int32_t, int32_t> split_cur_s
   auto local_device_index = src_group.get_index(local_device);  
   auto cur_state_index = prev_distributed_states.map_device_to_state_index(used_device_index);
 
-  const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states();
+  const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states(comm_op);
   auto target_duplicate = target_distributed_states.get_dim(-1);
   const auto& target_order = target_distributed_states.get_order();
   auto loop_sizes = target_distributed_states.get_loop_sizes();                  

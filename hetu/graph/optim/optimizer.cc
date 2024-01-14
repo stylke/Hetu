@@ -27,7 +27,8 @@ Tensor Optimizer::ApplyGradients(const GradAndVarList& grads_and_vars,
     grads_and_vars.begin(), grads_and_vars.end(),
     std::back_inserter(updated_params),
     [&](const GradAndVar& grad_and_var) { return ApplyDense(grad_and_var, infinite_count); });
-  return MakeGroupOp(OpMeta().set_extra_deps(updated_params).set_name(name));
+  return MakeGroupOp(OpMeta().set_extra_deps(updated_params)
+                      .set_name(name).set_is_deduce_states(false)); // group op needn't deduce states
 }
 
 // the distributed states for adam mean/variance was dummy, just do allgather for dp groups in later execution
@@ -35,15 +36,17 @@ Tensor Optimizer::MakeStates(const Tensor& variable, const Tensor& grad, const O
   const auto& producer = variable->producer();
   HT_VALUE_ERROR_IF(!producer->is_parameter());
   // special case: Varibale States should be set distributed_states as ds_grad (whether zero or not)
-  const DistributedStates& ds_variable = variable->get_distributed_states(); 
-  const DistributedStates& ds_grad = grad->get_distributed_states();
-  HT_ASSERT (ds_variable.is_valid() && ds_grad.is_valid()) 
-    << "Diastributed States for varibale " << variable << " must be valid!";  
+  // const DistributedStates& ds_variable = variable->get_distributed_states(); 
+  // const DistributedStates& ds_grad = grad->get_distributed_states();
+  const DistributedStatesList& multi_ds_variable = variable->multi_distributed_states(); 
+  const DistributedStatesList& multi_ds_grad = grad->multi_distributed_states(); 
+  // HT_ASSERT (ds_variable.is_valid() && ds_grad.is_valid()) 
+  //   << "Diastributed States for varibale " << variable << " must be valid!";  
 
   Tensor states = MakeParallelVariableOp(ZerosInitializer(), grad->global_shape(),
-                                         ds_grad, 0, grad->dtype(), false,
+                                         multi_ds_grad, {0}, grad->dtype(), false,
                                          OpMeta()
-                                          .set_device_group(producer->device_group())
+                                          .set_device_groups(producer->device_groups())
                                           .set_eager_device(producer->eager_device())
                                           .set_name(variable->name() + "_" + state_name));  
 
@@ -72,8 +75,9 @@ Tensor SGDOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& in
   const Tensor& grad = grad_and_var.first;
   const Tensor& var = grad_and_var.second;
   auto update_op_meta = OpMeta()
-                          .set_device_group(var->producer()->device_group())
-                          .set_name("Update_" + var->name());
+                          .set_device_groups(var->producer()->device_groups())
+                          .set_name("Update_" + var->name())
+                          .set_is_deduce_states(false);
   if (momentum() == 0) {
     if (infinite_count != Tensor())
       return MakeSGDUpdateWithGradScalerOp(var, grad, infinite_count, learning_rate(), update_op_meta);
@@ -89,13 +93,14 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
   const Tensor& grad = grad_and_var.first;
   const Tensor& var = grad_and_var.second;
   auto update_op_meta = OpMeta()
-                          .set_device_group(var->producer()->device_group())
-                          .set_name("Update_" + var->name());
+                          .set_device_groups(var->producer()->device_groups())
+                          .set_name("Update_" + var->name())
+                          .set_is_deduce_states(false); // update op needn't deduce states
   HTShape step_shape = {1};
   Tensor step = MakeVariableOp(OnesInitializer(), step_shape, kInt64,
                                 false, var->get_distributed_states(), 
                                 OpMeta()
-                                  .set_device_group(var->producer()->device_group())
+                                  .set_device_groups(var->producer()->device_groups())
                                   .set_eager_device(kCPU)
                                   .set_name(var->name() + "_step")
                                   .set_is_step(true));

@@ -121,6 +121,22 @@ bool CheckNumpyArray(PyObject* obj) {
   return PyArray_Check(obj);
 }
 
+bool CheckNumpyArrayList(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  if (is_tuple || PyList_Check(obj)) {
+    size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+    if (size > 0) {
+      // only check for the first item for efficiency
+      auto* item = is_tuple ? PyTuple_GET_ITEM(obj, 0) \
+                            : PyList_GET_ITEM(obj, 0);
+      if (!CheckNumpyArray(item))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 DataType GetNumpyArrayDataType(PyObject* obj) {
   auto* numpy_array = reinterpret_cast<PyArrayObject*>(obj);
   auto element_size = static_cast<size_t>(PyArray_ITEMSIZE(numpy_array));
@@ -161,6 +177,17 @@ NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape) {
     }));
 
   return NDArray(meta, storage);
+}
+
+NDArrayList NDArrayListFromNumpyList(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  NDArrayList ret(size);
+  for (size_t i = 0; i < size; i++) {
+    auto* item = is_tuple ? PyTuple_GET_ITEM(obj, i) : PyList_GET_ITEM(obj, i);
+    ret[i] = NDArrayFromNumpy(item);
+  }
+  return ret;  
 }
 
 PyObject* NDArrayToNumpy(NDArray ndarray, bool force) {

@@ -2,6 +2,7 @@
 
 #include "hetu/graph/operator.h"
 #include "hetu/graph/init/initializer.h"
+#include "hetu/graph/distributed_states.h"
 
 namespace hetu {
 namespace graph {
@@ -130,21 +131,30 @@ class VariableOpImpl : public OpInterface {
 class ParallelVariableOpImpl : public OpInterface {
  public:
   ParallelVariableOpImpl(const Initializer& init, HTShape global_shape, 
-                         const DistributedStates& ds, int64_t local_idx,
+                         const DistributedStatesList& multi_ds, std::vector<int64_t> local_idx,
                          DataType dtype = kFloat32, bool requires_grad = false)
   : OpInterface(quote(ParallelVariableOp)), _init(init.copy()), 
-    _global_shape(global_shape), _local_idx(local_idx), 
-    _dtype(dtype), _ds(ds), _requires_grad(requires_grad) {
-      _local_shape = get_local_shape(global_shape, ds);
+    _global_shape(std::move(global_shape)), _local_idx(std::move(local_idx)), 
+    _dtype(dtype), _multi_ds(multi_ds), _requires_grad(requires_grad) {
+      _local_shape = get_local_shape(_global_shape, _multi_ds[0]); // deduce local shape default by ds[0]
     }
 
   ParallelVariableOpImpl(NDArray provided_data, bool copy_provided_data, 
-                         const DistributedStates& ds, DataType dtype, bool requires_grad) 
+                         const DistributedStatesList& multi_ds, DataType dtype, bool requires_grad) 
   : OpInterface(quote(ParallelVariableOp)), _provided_data(provided_data),
     _copy_provided_data(copy_provided_data), _local_shape(provided_data->shape()),
-    _dtype(_InferDataType(provided_data, dtype)), _ds(ds), _requires_grad(requires_grad) {
-      _global_shape = get_global_shape(_local_shape, ds);
-    }                         
+    _dtype(_InferDataType(provided_data, dtype)), _multi_ds(multi_ds), _requires_grad(requires_grad) {
+      _global_shape = get_global_shape(_local_shape, _multi_ds[0]);
+    }
+
+  // todo: if need provide multi shape for multi ds?
+  ParallelVariableOpImpl(NDArrayList multi_provided_data, bool copy_provided_data, 
+                         const DistributedStatesList& multi_ds, DataType dtype, bool requires_grad) 
+  : OpInterface(quote(ParallelVariableOp)), _multi_provided_data(std::move(multi_provided_data)),
+    _copy_provided_data(copy_provided_data), _local_shape(_multi_provided_data[0]->shape()), // use the first strategy shape
+    _dtype(_InferDataType(_multi_provided_data[0], dtype)), _multi_ds(multi_ds), _requires_grad(requires_grad) {
+      _global_shape = get_global_shape(_local_shape, _multi_ds[0]);
+    }    
 
   HTShape get_global_shape(HTShape& local_shape, const DistributedStates& ds) {
     if (!_global_shape.empty())
@@ -212,14 +222,6 @@ class ParallelVariableOpImpl : public OpInterface {
     return _local_shape;
   }
 
-  const DistributedStates& ds() const {
-    return _ds;
-  }
-
-  int64_t local_idx() const {
-    return _local_idx;
-  }
-
   DataType dtype() const {
     return _dtype;
   }
@@ -230,11 +232,12 @@ class ParallelVariableOpImpl : public OpInterface {
 
   std::shared_ptr<Initializer> _init;
   mutable NDArray _provided_data; // local_data
+  mutable NDArrayList _multi_provided_data; // local_data
   bool _copy_provided_data;  
   HTShape _global_shape;
   HTShape _local_shape;
-  DistributedStates _ds;
-  int64_t _local_idx{-1}; // _local_idx only be assigned when op is in pipeline device_group, and return local_device index in the device_group
+  DistributedStatesList _multi_ds;
+  std::vector<int64_t> _local_idx; // _local_idx only be assigned when op is in pipeline device_group, and return local_device index in the device_group
   DataType _dtype;
   bool _requires_grad;
 };
@@ -260,20 +263,29 @@ Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data = false,
                        OpMeta op_meta = OpMeta());
 
 Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape, 
-                              const DistributedStates& ds, int64_t local_idx = -1,
+                              const DistributedStatesList& multi_ds, std::vector<int64_t> local_idx={-1},
                               DataType dtype = kFloat32, bool requires_grad = false,
                               OpMeta op_meta = OpMeta());
 
-Tensor MakeParallelVariableOp(NDArray provided_data, const DistributedStates& ds, 
+Tensor MakeParallelVariableOp(NDArray provided_data, const DistributedStatesList& multi_ds, 
+                              bool copy_provided_data = false, DataType dtype = kUndeterminedDataType, 
+                              bool requires_grad = false, OpMeta op_meta = OpMeta());
+
+Tensor MakeParallelVariableOp(NDArrayList multi_provided_data, DistributedStatesList multi_ds, 
                               bool copy_provided_data = false, DataType dtype = kUndeterminedDataType, 
                               bool requires_grad = false, OpMeta op_meta = OpMeta());
 
 Tensor MakeParallelParameterOp(const Initializer& init, HTShape global_shape, 
-                               const DistributedStates& ds, int64_t local_idx = -1,
+                               const DistributedStatesList& multi_ds, std::vector<int64_t> local_idx={-1},
                                DataType dtype = kFloat32, bool requires_grad = false,
                                OpMeta op_meta = OpMeta());
 // provided_data is local_data!
-Tensor MakeParallelParameterOp(NDArray provided_data, const DistributedStates& ds, 
+Tensor MakeParallelParameterOp(NDArray provided_data, const DistributedStatesList& multi_ds, 
+                               bool copy_provided_data = false, DataType dtype = kUndeterminedDataType, 
+                               bool requires_grad = false, OpMeta op_meta = OpMeta());
+
+// provided_data is local_data!
+Tensor MakeParallelParameterOp(NDArrayList multi_provided_data, DistributedStatesList multi_ds, 
                                bool copy_provided_data = false, DataType dtype = kUndeterminedDataType, 
                                bool requires_grad = false, OpMeta op_meta = OpMeta());
 

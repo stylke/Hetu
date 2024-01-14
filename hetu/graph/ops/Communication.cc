@@ -12,13 +12,14 @@ using namespace hetu::impl::comm;
 
 uint64_t CommOpImpl::get_comm_type(Operator& op) {
   // input may be inplaced, so comm_type should be updated for each call
-  Tensor& input = op->input(0); 
+  Tensor& input = op->input(0);
+  auto& graph = input->graph();
   const auto& src_ds = input->get_distributed_states();
-  const auto& dst_ds = _dst_ds;
+  const auto& dst_ds = get_dst_distributed_states(op);
   // 1. pp 2. tp 3. tp+pp 
   if (src_ds.check_equal(dst_ds)) {
-    _comm_type = P2P_OP; // pp
-    HT_LOG_DEBUG << "P2P_OP";
+    _comm_type = P2P_OP; // P2P OP: in define_and_run_graph: unuse comm op(p2p to self); in exec_graph: real p2p op
+    HT_LOG_DEBUG << "P2P_OP"; // need to carefully check in exec_graph!!!
   } 
   // tp (now also included tp+pp case, simplely add p2p op after tp result)
   else if (src_ds.check_pure_duplicate()) {
@@ -74,15 +75,15 @@ DeviceGroup CommOpImpl::get_devices_by_dim(Operator& op, int32_t dim) const {
 void CommOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                 const OpMeta& op_meta) const {
   const Tensor& input = inputs.at(0);
+  Tensor& output = outputs.at(0);
   const auto& ds_input = input->get_distributed_states();
-  const auto& ds_dst = get_dst_distributed_states();
+  const auto& ds_dst = get_dst_distributed_states(input->producer());
   // TODO: check states/order between src and dst
   HT_ASSERT(ds_input.is_valid() && ds_dst.is_valid())
-           << "distributed states for input and dst tensor must be valid!";
+          << "distributed states for input and dst tensor must be valid!";
   HT_ASSERT(ds_input.get_device_num() == ds_dst.get_device_num())
-           << "cannot convert src distributed states to unpaired dst distributed states!";
-  Tensor& output = outputs.at(0);
-  output->set_distributed_states(ds_dst);  
+          << "cannot convert src distributed states to unpaired dst distributed states!";
+  output->set_distributed_states(ds_dst);
 }
 
 bool CommOpImpl::DoMapToParallelDevices(Operator& op,
@@ -105,29 +106,33 @@ bool CommOpImpl::DoMapToParallelDevices(Operator& op,
   return true;  
 }
 
+// todo: unuse comm ops should be removed before do intantiate
 bool CommOpImpl::DoInstantiate(Operator& op, const Device& placement,
                                StreamIndex stream_index) const {
   const DistributedStates& src_ds = op->input(0)->get_distributed_states();
-  const DistributedStates& dst_ds = get_dst_distributed_states();
+  const DistributedStates& dst_ds = get_dst_distributed_states(op);
   const DeviceGroup& src_group = op->input(0)->placement_group();
   // CommOp should be checked in Instantiate(when placement info assigned) whether it is valid  
-  HT_ASSERT(!src_ds.check_equal(dst_ds) || (!_dst_group.empty() && src_group != _dst_group))
-    << "CommOp must communicate intra/inter device group!"
-    << " src ds = " << src_ds.ds_info() << ", dst ds = " << dst_ds.ds_info()
-    << ", src_group = " << src_group << ", dst_group = " << _dst_group;
-                                  
-  auto& inst_ctx = op->instantiation_ctx();
-  inst_ctx.placement = placement;
-  inst_ctx.stream_index = stream_index;
-  if (placement.is_cuda()) {
-    for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) { 
-      inst_ctx.start[i] = std::make_unique<hetu::impl::CUDAEvent>(placement);
-      inst_ctx.stop[i] = std::make_unique<hetu::impl::CUDAEvent>(placement);
-    }
-  } else {
-    for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) {     
-      inst_ctx.start[i] = std::make_unique<hetu::impl::CPUEvent>();
-      inst_ctx.stop[i] = std::make_unique<hetu::impl::CPUEvent>();
+  // HT_ASSERT(!src_ds.check_equal(dst_ds) || (!_dst_group.empty() && src_group != _dst_group))
+  //   << "CommOp must communicate intra/inter device group!"
+  //   << " src ds = " << src_ds.ds_info() << ", dst ds = " << dst_ds.ds_info()
+  //   << ", src_group = " << src_group << ", dst_group = " << _dst_group;
+
+  // create cuda events for used comm ops; if unused comm ops, will be substitute into None, just ignore here
+  if (!src_ds.check_equal(dst_ds) || (!_dst_group.empty() && src_group != _dst_group)) {
+    auto& inst_ctx = op->instantiation_ctx();
+    inst_ctx.placement = placement;
+    inst_ctx.stream_index = stream_index;
+    if (placement.is_cuda()) {
+      for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) { 
+        inst_ctx.start[i] = std::make_unique<hetu::impl::CUDAEvent>(placement);
+        inst_ctx.stop[i] = std::make_unique<hetu::impl::CUDAEvent>(placement);
+      }
+    } else {
+      for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) {     
+        inst_ctx.start[i] = std::make_unique<hetu::impl::CPUEvent>();
+        inst_ctx.stop[i] = std::make_unique<hetu::impl::CPUEvent>();
+      }
     }
   }
   Operator::for_each_output_tensor(op, [&](Tensor& tensor) {
@@ -143,7 +148,7 @@ CommOpImpl::DoInferMeta(const TensorList& inputs) const {
   const Tensor& input = inputs.at(0);
   const HTShape& input_shape = input->shape();
   const DistributedStates& src_ds = input->get_distributed_states();
-  const DistributedStates& dst_ds = get_dst_distributed_states();
+  const DistributedStates& dst_ds = get_dst_distributed_states(input->producer());
   HTShape shape(input_shape.size());
   for (size_t d = 0; d < input_shape.size(); d++) {
     shape[d] = input_shape[d] * src_ds.get_dim(d) / dst_ds.get_dim(d);
@@ -158,7 +163,7 @@ HTShapeList CommOpImpl::DoInferShape(Operator& op,
   const HTShape& input_shape = input_shapes.at(0);
   Tensor& input = op->input(0);
   const auto& src_ds = input->get_distributed_states();
-  const auto& dst_ds = get_dst_distributed_states();
+  const auto& dst_ds = get_dst_distributed_states(op);
   HTShape shape(input_shape.size());
   for (size_t d = 0; d < input_shape.size(); d++) {
     shape[d] = input_shape[d] * src_ds.get_dim(d) / dst_ds.get_dim(d);
@@ -166,34 +171,46 @@ HTShapeList CommOpImpl::DoInferShape(Operator& op,
   return {shape};
 }
 
+// todo: need to support multi ds
 TensorList CommOpImpl::DoGradient(Operator& op,
                                   const TensorList& grad_outputs) const {
   // if input not requires grad, then grad_output also will be Tensor()                                    
   if (!op->requires_grad(0))
     return {Tensor()};                                    
   Tensor& input = op->input(0);
-  const auto& ds_input = input->get_distributed_states();
   Tensor& output = op->output(0);
-  const auto& ds_output = output->get_distributed_states();
   const Tensor& grad_output = grad_outputs.at(0);
-  const auto& ds_grad_output = grad_output->get_distributed_states();
-  HT_ASSERT(ds_input.is_valid() && ds_output.is_valid())
-           << "distributed states for input and output tensor must be valid!";
-  HT_ASSERT(ds_input.get_device_num() == ds_output.get_device_num())
-           << "distributed states for input and output tensor must be matched!";
-  DistributedStates ds_grad_input(ds_input);
-  if (ds_grad_input.get_dim(-2) > 1) { // partial->duplicate
-    std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
-    auto res_states = ds_grad_input.combine_states(src2dst);
-    auto res_order = ds_grad_input.combine_order(src2dst);
-    auto device_num = ds_grad_input.get_device_num();
-    ds_grad_input.set_distributed_states({device_num, res_states, res_order});
+  auto& graph = input->graph();
+  DistributedStatesList multi_dst_ds;
+  bool is_need_comm_op = false;
+  for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
+    graph.CUR_STRATEGY_ID = cur_strategy_id;
+    const auto& ds_input = input->get_distributed_states();
+    const auto& ds_output = output->get_distributed_states();
+    const auto& ds_grad_output = grad_output->get_distributed_states();
+    HT_ASSERT(ds_input.is_valid() && ds_output.is_valid())
+            << "distributed states for input and output tensor must be valid!";
+    HT_ASSERT(ds_input.get_device_num() == ds_output.get_device_num())
+            << "distributed states for input and output tensor must be matched!";
+    DistributedStates ds_grad_input(ds_input);
+    if (ds_grad_input.get_dim(-2) > 1) { // partial->duplicate
+      std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
+      auto res_states = ds_grad_input.combine_states(src2dst);
+      auto res_order = ds_grad_input.combine_order(src2dst);
+      auto device_num = ds_grad_input.get_device_num();
+      ds_grad_input.set_distributed_states({device_num, res_states, res_order});
+    }
+    multi_dst_ds.push_back(ds_grad_input);
+    if (!ds_grad_input.check_equal(ds_grad_output)) {
+      is_need_comm_op = true;
+    }
   }
+  graph.CUR_STRATEGY_ID = 0;
   // if forward just make partial into dup, then backward was dup to dup, needn't new comm_op
-  if (ds_grad_input.check_equal(ds_grad_output)) {
+  if (!is_need_comm_op) {
     return {grad_output};
   } else {
-    Tensor grad_input = MakeCommOp(grad_output, ds_grad_input, OpMeta().set_name("grad_" + op->name()));
+    Tensor grad_input = MakeCommOp(grad_output, multi_dst_ds, OpMeta().set_name("grad_" + op->name()));
     return {grad_input};
   }
 }
@@ -526,50 +543,63 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
 //                                   _comm_group, op->instantiation_ctx().stream());
 // }
 
-Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
                   ReductionType red_type, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds, DeviceGroup(), red_type), 
-                      {std::move(input)}, std::move(op_meta))->output(0);
+  return Graph::MakeOp(std::make_shared<CommOpImpl>(std::move(multi_dst_ds), DeviceGroup(), red_type), 
+                      {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
+Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds,
                   const std::string& mode, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds, DeviceGroup(), Str2ReductionType(mode)), 
-                      {std::move(input)}, std::move(op_meta))->output(0);
+  return Graph::MakeOp(std::make_shared<CommOpImpl>(std::move(multi_dst_ds), DeviceGroup(), Str2ReductionType(mode)), 
+                      {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, DeviceGroup dst_group, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds, dst_group), 
-                      {std::move(input)}, std::move(op_meta))->output(0);
+Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, DeviceGroup dst_group, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<CommOpImpl>(std::move(multi_dst_ds), std::move(dst_group)), 
+                      {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<CommOpImpl>(dst_ds), 
-                      {std::move(input)}, std::move(op_meta))->output(0);
+Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<CommOpImpl>(std::move(multi_dst_ds)), 
+                      {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, bool inplace, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<AllReduceOpImpl>(comm_group, kSUM, inplace, 
-                       op_meta.device_group), {std::move(input)}, std::move(op_meta))->output(0);
+// for comm ops created in exec_graph, the device_groups only contains one device_group!!!
+Tensor MakeAllReduceOp(Tensor input, DeviceGroup comm_group, bool inplace, OpMeta op_meta) {
+  HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
+    && op_meta.device_groups[0].is_subset(comm_group))) << "comm_group must be subset of device_group!";
+  return Graph::MakeOp(std::make_shared<AllReduceOpImpl>(std::move(comm_group), kSUM, inplace), 
+                      {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeAllReduceOp(Tensor input, DeviceGroup comm_group, 
                        ReductionType red_type, bool inplace, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<AllReduceOpImpl>(comm_group, red_type, inplace, 
-                       op_meta.device_group), {std::move(input)}, std::move(op_meta))->output(0);
+  HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
+    && op_meta.device_groups[0].is_subset(comm_group))) << "comm_group must be subset of device_group!";
+  return Graph::MakeOp(std::make_shared<AllReduceOpImpl>(std::move(comm_group), red_type, inplace), 
+                      {input}, std::move(op_meta))->output(0);
 }
 
 // p2p send no output
-Tensor MakeP2PSendOp(Tensor input, const DeviceGroup& dst_group, 
+Tensor MakeP2PSendOp(Tensor input, DeviceGroup dst_group, 
                      int dst_device_index, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<P2PSendOpImpl>(dst_group, dst_device_index, op_meta.device_group),
-                      {std::move(input)}, std::move(op_meta))->out_dep_linker();
+  HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
+    && op_meta.device_groups[0].num_devices() == dst_group.num_devices()))
+    << "Currently we require equal tensor parallelism degree across "
+    << "P2P communication. Got " << op_meta.device_groups[0] << " vs. " << dst_group;
+  return Graph::MakeOp(std::make_shared<P2PSendOpImpl>(std::move(dst_group), 
+                       dst_device_index), {input}, std::move(op_meta))->out_dep_linker();
 }
 
-Tensor MakeP2PRecvOp(const DeviceGroup& src_group, DataType dtype,
-                     const HTShape& shape, int src_device_index, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<P2PRecvOpImpl>(src_group, dtype, shape, 
-                       src_device_index, op_meta.device_group), {}, std::move(op_meta))->output(0);
+Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
+                     HTShape shape, int src_device_index, OpMeta op_meta) {
+  HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
+    && op_meta.device_groups[0].num_devices() ==src_group.num_devices()))
+    << "Currently we require equal tensor parallelism degree across "
+    << "P2P communication. Got " << op_meta.device_groups[0] << " vs. " << src_group;
+  return Graph::MakeOp(std::make_shared<P2PRecvOpImpl>(std::move(src_group), dtype, std::move(shape), 
+                       src_device_index), {}, std::move(op_meta))->output(0);
 }
 
 /*
@@ -591,35 +621,41 @@ Tensor MakeBatchedISendIRecvOp(TensorList inputs,
 
 // fixed shape
 Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
-                               const std::vector<Device>& dst_devices, 
-                               const HTShapeList& outputs_shape, 
-                               const std::vector<Device>& src_devices, 
-                               const std::vector<Device>& comm_devices, 
+                               std::vector<Device> dst_devices, 
+                               HTShapeList outputs_shape, 
+                               std::vector<Device> src_devices, 
+                               std::vector<Device> comm_devices, 
                                DataType dtype, OpMeta op_meta) {
   if (src_devices.size() == 0)
-    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(dst_devices, outputs_shape,
-                        src_devices, comm_devices, dtype), std::move(inputs), std::move(op_meta))->out_dep_linker();
+    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(std::move(dst_devices), std::move(outputs_shape),
+                        std::move(src_devices), std::move(comm_devices), dtype), std::move(inputs), std::move(op_meta))->out_dep_linker();
   else
-    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(dst_devices, outputs_shape,
-                        src_devices, comm_devices, dtype), inputs, std::move(op_meta))->output(0);  
+    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(std::move(dst_devices), std::move(outputs_shape),
+                        std::move(src_devices), std::move(comm_devices), dtype), std::move(inputs), std::move(op_meta))->output(0);  
 }
 
-Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeAllGatherOp(Tensor input, DeviceGroup comm_group, 
                        OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<AllGatherOpImpl>(comm_group, op_meta.device_group), 
-                      {std::move(input)}, std::move(op_meta))->output(0);
+  HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
+    && op_meta.device_groups[0].is_subset(comm_group))) << "comm_group must be subset of device_group!";
+  return Graph::MakeOp(std::make_shared<AllGatherOpImpl>(std::move(comm_group)), 
+                      {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, 
                            bool inplace, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, kSUM, inplace, op_meta.device_group), 
-                      {std::move(input)}, std::move(op_meta))->output(0);
+  HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
+    && op_meta.device_groups[0].is_subset(comm_group))) << "comm_group must be subset of device_group!";
+  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(std::move(comm_group), kSUM, inplace), 
+                      {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, 
                            ReductionType red_type, bool inplace, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, red_type, inplace, op_meta.device_group), 
-                      {std::move(input)}, std::move(op_meta))->output(0);
+  HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
+    && op_meta.device_groups[0].is_subset(comm_group))) << "comm_group must be subset of device_group!";
+  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(std::move(comm_group), red_type, inplace), 
+                      {input}, std::move(op_meta))->output(0);
 }
 
 } // namespace graph

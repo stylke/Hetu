@@ -98,16 +98,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
       << "got grad size = " << grad->numel() 
       << " vs. param_size_per_scatter = " 
       << param_size_per_scatter;
-    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": param = " << op->input(0) 
-    //             << ", ds = " << op->input(0)->get_distributed_states().ds_info() 
-    //             << ", scatter_index = " << scatter_index
-    //             << ", grad shape = " << grad->shape()
-    //             << ", param shape = " << param->shape()
-    //             << ", param_size = " << param_size
-    //             << ", param_size_per_scatter = " << param_size_per_scatter
-    //             << ", scatter_index = " << scatter_index
-    //             << ", param_start_index = " << param_start_index
-    //             << ", grad ds = " << op->input(1)->get_distributed_states().ds_info();
+
     auto param_scatter = NDArray(
       NDArrayMeta().set_shape(grad->shape())
                    .set_dtype(param->dtype())

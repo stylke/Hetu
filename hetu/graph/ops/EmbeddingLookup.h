@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hetu/graph/graph.h"
 #include "hetu/graph/operator.h"
 #include "hetu/graph/utils/tensor_utils.h"
 
@@ -13,8 +14,8 @@ class EmbeddingLookupGradientOp;
 
 class EmbeddingLookupOpImpl : public OpInterface {
  public:
-  EmbeddingLookupOpImpl()
-  : OpInterface(quote(EmbeddingLookupOp)) {
+  EmbeddingLookupOpImpl(std::vector<int64_t> multi_offset = {0})
+  : OpInterface(quote(EmbeddingLookupOp)), _multi_offset(multi_offset) {
   }
 
 protected:
@@ -51,14 +52,29 @@ protected:
   bool operator==(const OpInterface& rhs) const override {
     return OpInterface::operator==(rhs);
   }
+
+  // for multi ds
+  int offset(Operator& op) const {
+    auto& graph = op->graph();
+    HT_ASSERT(_multi_offset.size() == 1 || _multi_offset.size() == graph.NUM_STRATEGY)
+      << "EmbeddingLookupOp get offset error!";
+    if (_multi_offset.size() == 1) {
+      return _multi_offset[0];
+    } else {
+      return _multi_offset[graph.CUR_STRATEGY_ID];
+    }
+  }
+
+ protected:
+  std::vector<int64_t> _multi_offset;
 };
 
-Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, OpMeta op_meta = OpMeta());
+Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, std::vector<int64_t> multi_offset={0}, OpMeta op_meta = OpMeta());
 
 class EmbeddingLookupGradientOpImpl : public OpInterface {
  public:
-  EmbeddingLookupGradientOpImpl(OpMeta op_meta = OpMeta())
-  : OpInterface(quote(EmbeddingLookupGradientOp)) {
+  EmbeddingLookupGradientOpImpl(std::vector<int64_t> multi_offset, OpMeta op_meta = OpMeta())
+  : OpInterface(quote(EmbeddingLookupGradientOp)), _multi_offset(multi_offset) {
   }
 
 protected:
@@ -86,10 +102,24 @@ protected:
     return OpInterface::operator==(rhs);
   }
 
+  // for multi ds
+  int offset(Operator& op) const {
+    auto& graph = op->graph();
+    HT_ASSERT(_multi_offset.size() == 1 || _multi_offset.size() == graph.NUM_STRATEGY)
+      << "EmbeddingLookupOp get offset error!";
+    if (_multi_offset.size() == 1) {
+      return _multi_offset[0];
+    } else {
+      return _multi_offset[graph.CUR_STRATEGY_ID];
+    }
+  }
+
+ protected:
+  std::vector<int64_t> _multi_offset;
 };
 
 Tensor MakeEmbeddingLookupGradientOp(Tensor grad_output, Tensor id, Tensor ori_input, Tensor input,
-                                     OpMeta op_meta = OpMeta());
+                                     std::vector<int64_t> multi_offset, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

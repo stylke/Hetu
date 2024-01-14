@@ -18,6 +18,18 @@ PyObject* PyDistributedStates_New(const DistributedStates& ds) {
   HT_PY_FUNC_END  
 }
 
+PyObject* PyDistributedStatesList_New(const DistributedStatesList& multi_ds) {
+  HT_PY_FUNC_BEGIN
+  PyObject* ret = PyList_New(multi_ds.size());
+  HT_RUNTIME_ERROR_IF(!ret) << "Failed to alloc list";
+  for (size_t i = 0; i < multi_ds.size(); i++) {
+    auto* distributed_states_obj = PyDistributedStates_New(multi_ds[i]);
+    PyList_SET_ITEM(ret, i, distributed_states_obj);
+  }
+  return ret;
+  HT_PY_FUNC_END
+}
+
 PyObject* PyDistributedStates_pynew(PyTypeObject* type, PyObject* args, 
                                     PyObject* kwargs) {
   HT_PY_FUNC_BEGIN

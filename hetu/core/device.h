@@ -199,6 +199,9 @@ class Device {
 
 std::ostream& operator<<(std::ostream&, const Device&);
 
+class DeviceGroup;
+using DeviceGroupList = std::vector<DeviceGroup>;
+
 class DeviceGroup {
  public:
   DeviceGroup(const std::vector<Device>& devices) : _devices(devices) {
@@ -256,6 +259,15 @@ class DeviceGroup {
   inline bool contains(const Device& device) const {
     auto it = std::find(_devices.begin(), _devices.end(), device);
     return it != _devices.end();
+  }
+
+  inline bool is_subset(const DeviceGroup& device_group) const {
+    for (auto& device : device_group.devices()) {
+      if (!contains(device)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   inline const Device& get(size_t i) const {

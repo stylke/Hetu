@@ -563,15 +563,15 @@
 
 - name: name
   op: CommOp
-  args: Tensor input, DistributedStates dst_ds, std::string mode
+  args: Tensor input, DistributedStatesList multi_dst_ds, std::string mode
 
 - name: comm
   op: CommOp
-  args: Tensor input, DistributedStates dst_ds, DeviceGroup dst_group
+  args: Tensor input, DistributedStatesList multi_dst_ds, DeviceGroup dst_group
 
 - name: comm
   op: CommOp
-  args: Tensor input, DistributedStates dst_ds  
+  args: Tensor input, DistributedStatesList multi_dst_ds  
 
 #######################################################
 # Others
@@ -583,7 +583,12 @@
 
 - name: embedding_lookup
   op: EmbeddingLookupOp
-  args: Tensor input, Tensor id
+  args: Tensor input, Tensor id, List[int] multi_offset=[0]
+  self: input
+
+- name: embedding_lookup
+  op: EmbeddingLookupOp
+  args: Tensor input, Tensor id, List[int] multi_offset
   self: input
 
 - name: gather

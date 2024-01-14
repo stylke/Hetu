@@ -1,4 +1,5 @@
 #include "hetu/graph/headers.h"
+#include "hetu/graph/graph.h"
 #include "hetu/graph/ops/group.h"
 #include "hetu/graph/ops/variable.h"
 #include "hetu/impl/stream/CPUStream.h"
@@ -232,24 +233,52 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
   
   // Deduce states for output tensor
   if (op_meta.is_deduce_states) {
-    bool exist_ds = false;
-    bool exist_none_ds = false;
-    for (auto& input : _inputs) {
-      if (input->has_distributed_states()) {
-        exist_ds = true;
-      } else {
-        exist_none_ds = true;
+    auto deduce_states = [&]() {
+      bool exist_ds = false;
+      bool exist_none_ds = false;
+      for (auto& input : _inputs) {
+        if (input->has_distributed_states()) {
+          exist_ds = true;
+        } else {
+          exist_none_ds = true;
+        }
       }
-    }
-    // if ds of all inputs are not none, then do deduce states;
-    // if ds of all inputs are none, then do not deduce states; 
-    // if ds of partial inputs are none, return error
-    if (!exist_none_ds) {
-      _body->DeduceStates(_inputs, _outputs, _op_meta);
-    } else if (exist_ds) {
-      HT_LOG_ERROR << "Only part of " << name() << " inputs has distributed states!";
+      // if ds of all inputs are not none, then do deduce states;
+      // if ds of all inputs are none, then do not deduce states; 
+      // if ds of partial inputs are none, return error
+      if (!exist_none_ds) {
+        _body->DeduceStates(_inputs, _outputs, _op_meta);
+      } else if (exist_ds) {
+        HT_LOG_ERROR << "Only part of " << name() << " inputs has distributed states!";
+      }
+    };
+    if (graph.type() == GraphType::DEFINE_AND_RUN) {
+      for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
+        graph.CUR_STRATEGY_ID = cur_strategy_id;
+        deduce_states();
+      }
+      graph.CUR_STRATEGY_ID = 0;
+    } else if (graph.type() == GraphType::EXECUTABLE) {
+      deduce_states();
+    } else {
+      HT_LOG_ERROR << "deduce states do not support this graph type: " << graph.type();
     }
   }
+}
+
+const Graph& OpDef::graph() const {
+  return Graph::GetGraph(graph_id());
+}
+
+Graph& OpDef::graph() {
+  return Graph::GetGraph(graph_id());
+}
+
+const DeviceGroup& OpDef::device_group() {
+  while (graph().CUR_STRATEGY_ID >= _op_meta.device_groups.size()) {
+    _op_meta.device_groups.push_back(DeviceGroup());
+  }
+  return _op_meta.device_groups[graph().CUR_STRATEGY_ID];
 }
 
 Operator& OpDef::get_self() {
@@ -331,10 +360,13 @@ std::ostream& operator<<(std::ostream& os, const OpMeta& meta) {
     os << "eager_device=" << meta.eager_device;
     first = false;
   }
-  if (!meta.device_group.empty()) {
+  if (!meta.device_groups.empty()) {
     if (!first)
       os << ", ";
-    os << "device_group=" << meta.device_group;
+    os << "device_group=";
+    for (auto& device_group : meta.device_groups) {
+      os << device_group << "; ";
+    }
     first = false;
   }
   if (!meta.extra_deps.empty()) {

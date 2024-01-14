@@ -3,6 +3,7 @@
 #include <Python.h>
 #include "hetu/_binding/utils/pybind_common.h"
 #include "hetu/_binding/utils/python_primitives.h"
+#include "hetu/_binding/utils/numpy.h"
 #include "hetu/_binding/core/dtype.h"
 #include "hetu/_binding/core/device.h"
 #include "hetu/_binding/core/stream.h"
@@ -36,6 +37,7 @@ enum class ArgType : uint8_t {
   
   /* NumPy arrays (NumPy scalars will be treated as primitives) */
   PY_ARRAY, 
+  PY_ARRAY_LIST,
 
   /* Python objects (for new tensors from lists or tuples, 
                      please use sparingly) */
@@ -45,6 +47,7 @@ enum class ArgType : uint8_t {
   DATA_TYPE, 
   DEVICE, 
   DEVICE_GROUP, 
+  DEVICE_GROUP_LIST, 
   STREAM, 
   ND_ARRAY, 
   ND_ARRAY_LIST, 
@@ -54,6 +57,7 @@ enum class ArgType : uint8_t {
   OPERATOR_LIST,
   FEED_DICT,
   DISTRIBUTED_STATES,
+  DISTRIBUTED_STATES_LIST,
   INT_SYMBOL,
   SYMBOLIC_SHAPE,
   INITIALIZER,
@@ -266,6 +270,10 @@ class ParsedPyArgs {
     return _args[i];
   }
 
+  inline NDArrayList get_numpy_array_list(size_t i) const {
+    return NDArrayListFromNumpyList(_args[i]);
+  }
+
   inline PyObject* get_numpy_array_optional(size_t i) const {
     return has(i) ? get_numpy_array(i) : nullptr;
   }
@@ -302,9 +310,13 @@ class ParsedPyArgs {
     return DeviceGroup_FromPyObject(_args[i]);
   }
 
-  inline optional<DeviceGroup> get_device_group_or_peek(size_t i) const {
-    return has(i) ? optional<DeviceGroup>(get_device_group(i)) \
-                  : get_device_group_ctx().peek();
+  inline DeviceGroupList get_device_groups(size_t i) const {
+    return DeviceGroupList_FromPyObject(_args[i]);
+  }
+
+  inline optional<DeviceGroupList> get_device_groups_or_peek(size_t i) const {
+    return has(i) ? optional<DeviceGroupList>(get_device_groups(i)) \
+                  : get_device_groups_ctx().peek();
   }
 
   inline StreamIndex get_stream_index(size_t i) const {
@@ -396,6 +408,14 @@ class ParsedPyArgs {
     return DistributedStates_FromPyObject(_args[i]);
   }
 
+  inline DistributedStatesList get_distributed_states_list_or_empty(size_t i) {
+    return has(i) ? DistributedStatesList_FromPyObject(_args[i]) : DistributedStatesList();
+  }
+
+  inline DistributedStatesList get_distributed_states_list(size_t i) {
+    return DistributedStatesList_FromPyObject(_args[i]);
+  }
+
   inline IntSymbol get_int_symbol_or_empty(size_t i) {
     return has(i) ? IntSymbol_FromPyObject(_args[i]) : IntSymbol();
   }
@@ -443,14 +463,14 @@ class PyArgParser {
 
 #define OP_META_ARGS                                                           \
   "int stream_index=None, "                                                    \
-  "DeviceGroup device_group=None, "                                            \
+  "List[DeviceGroup] device_groups=None, "                                     \
   "List[Tensor] extra_deps=None, "                                             \
   "OpName name=None"
 
 inline OpMeta parse_op_meta(const ParsedPyArgs& parsed_args, size_t offset) {
   OpMeta ret = CurrentOpMetaCtx();
   if (parsed_args.has(offset + 1))
-    ret.set_device_group(parsed_args.get_device_group(offset + 1));
+    ret.set_device_groups(parsed_args.get_device_groups(offset + 1));
   if (parsed_args.has(offset + 2))
     ret.set_extra_deps(parsed_args.get_tensor_list(offset + 2));
   if (parsed_args.has(offset + 3))

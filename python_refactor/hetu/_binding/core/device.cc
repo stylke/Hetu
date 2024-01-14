@@ -452,9 +452,9 @@ ContextManager<Device>& get_eager_device_ctx() {
   return eager_device_ctx;
 }
 
-ContextManager<DeviceGroup>& get_device_group_ctx() {
-  static ContextManager<DeviceGroup> device_group_ctx;
-  return device_group_ctx;
+ContextManager<DeviceGroupList>& get_device_groups_ctx() {
+  static ContextManager<DeviceGroupList> device_groups_ctx;
+  return device_groups_ctx;
 }
 
 } // namespace hetu

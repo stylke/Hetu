@@ -47,13 +47,13 @@ class OpMeta {
     return *this;
   }
 
-  inline OpMeta& set_device_group(const DeviceGroup& group) {
-    device_group = group;
+  inline OpMeta& set_device_groups(const DeviceGroupList& groups) {
+    device_groups = groups;
     return *this;
   }
 
-  inline OpMeta& set_device_group(DeviceGroup&& group) {
-    device_group = std::move(group);
+  inline OpMeta& set_device_groups(DeviceGroupList&& groups) {
+    device_groups = std::move(groups);
     return *this;
   }
 
@@ -95,8 +95,8 @@ class OpMeta {
       ret.set_stream_index(new_meta.stream_index);
     if (!new_meta.eager_device.is_undetermined())
       ret.set_eager_device(new_meta.eager_device);
-    if (!new_meta.device_group.empty())
-      ret.set_device_group(new_meta.device_group);
+    if (!new_meta.device_groups.empty())
+      ret.set_device_groups(new_meta.device_groups);
     if (!new_meta.extra_deps.empty())
       ret.set_extra_deps(new_meta.extra_deps);
     return ret;
@@ -105,7 +105,7 @@ class OpMeta {
   OpName name;
   StreamIndex stream_index{kUndeterminedStream};
   Device eager_device{kUndeterminedDevice};
-  DeviceGroup device_group;
+  DeviceGroupList device_groups; // for multi ds deduce
   TensorList extra_deps;
   bool is_deduce_states{true};  
   bool is_step{false};
@@ -410,6 +410,10 @@ class OpDef : public shared_ptr_target {
     return _ids.graph_id;
   }
 
+  const Graph& graph() const;
+
+  Graph& graph();
+
   const OpType& type() const noexcept {
     return _body->type();
   }
@@ -435,9 +439,15 @@ class OpDef : public shared_ptr_target {
     return _op_meta.eager_device;
   }
 
-  const DeviceGroup& device_group() const noexcept {
-    return _op_meta.device_group;
+  const DeviceGroupList& device_groups() const noexcept {
+    return _op_meta.device_groups;
   }
+
+  bool is_deduce_states() const noexcept {
+    return _op_meta.is_deduce_states;
+  }
+
+  const DeviceGroup& device_group();
 
   const OpMeta& op_meta() const noexcept {
     return _op_meta;
@@ -446,7 +456,7 @@ class OpDef : public shared_ptr_target {
   OpMeta grad_op_meta() const {
     return OpMeta()
       .set_stream_index(stream_index())
-      .set_device_group(device_group());
+      .set_device_groups(device_groups());
   }
 
   void set_fw_op_id(OpId id) {

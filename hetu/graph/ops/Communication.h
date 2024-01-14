@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hetu/graph/operator.h"
+#include "hetu/graph/graph.h"
 #include "hetu/graph/utils/tensor_utils.h"
 #include "hetu/graph/distributed_states.h"
 #include "hetu/impl/communication/comm_group.h"
@@ -19,9 +20,11 @@ class ScatterOpImpl;
 
 class CommOpImpl final: public OpInterface {
  public:
-  CommOpImpl(DistributedStates dst_ds, DeviceGroup dst_group = DeviceGroup(), 
-    ReductionType red_type = kSUM) : OpInterface(quote(CommOp)), 
-      _dst_ds(dst_ds), _dst_group(dst_group), _red_type(red_type) {}
+  // dst_group is only for exec graph instantiate, at this time there will only exists one ds strategy
+  // also, multi_dst_ds should contains only one dst_ds for comm op which created in exec graph instantiate
+  CommOpImpl(DistributedStatesList multi_dst_ds, DeviceGroup dst_group = DeviceGroup(), 
+             ReductionType red_type = kSUM) : OpInterface(quote(CommOp)), 
+             _multi_dst_ds(std::move(multi_dst_ds)), _dst_group(std::move(dst_group)), _red_type(red_type) {}      
 
   uint64_t op_indicator() const noexcept override {
     return COMM_OP;
@@ -50,14 +53,22 @@ class CommOpImpl final: public OpInterface {
                  RuntimeContext& runtime_ctx) const {}
 
  public: 
-  const DistributedStates& get_dst_distributed_states() const {
-    return _dst_ds;
+  const DistributedStates& get_dst_distributed_states(Operator& op) const {
+    auto& graph = op->graph();
+    HT_ASSERT(_multi_dst_ds.size() == 1 || _multi_dst_ds.size() == graph.NUM_STRATEGY)
+      << "CommOp get dst ds error!";
+    if (_multi_dst_ds.size() == 1) { // for comm op created in exec_graph, without multi ds
+      return _multi_dst_ds[0];
+    } else { // for comm op created in define_and_run_graph, with multi ds
+      return _multi_dst_ds[graph.CUR_STRATEGY_ID];
+    }
   }
 
   ReductionType reduction_type() const {
     return _red_type;
   }
   
+  // placement group only for exec_graph
   const DeviceGroup& src_group(Operator& op) const {
     return op->input(0)->placement_group();
   }
@@ -84,37 +95,30 @@ class CommOpImpl final: public OpInterface {
 
  protected:
   uint64_t _comm_type{UNKNOWN_OP};
-  DistributedStates _dst_ds;
+  // DistributedStates _dst_ds;
+  DistributedStatesList _multi_dst_ds;
   DeviceGroup _dst_group;
   ReductionType _red_type{kNONE}; // only used for AllReduce, ReduceScatter
 };
 
-Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
                   ReductionType red_type, OpMeta op_meta = OpMeta());
 
-Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
+Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds,
                   const std::string& mode, OpMeta op_meta = OpMeta());
 
-Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
                   DeviceGroup dst_group, OpMeta op_meta = OpMeta());
 
-Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
                   OpMeta op_meta = OpMeta());
 
 class AllReduceOpImpl final : public OpInterface {
  public:
-  AllReduceOpImpl(const DeviceGroup& comm_group, ReductionType red_type = kSUM,
-                  bool inplace = false, const DeviceGroup& device_group = DeviceGroup())
+  AllReduceOpImpl(DeviceGroup comm_group, ReductionType red_type = kSUM, bool inplace = false)
   : OpInterface(quote(AllReduceOp)), _comm_group(comm_group), _red_type(red_type), _inplace(inplace) {
     HT_ASSERT(_comm_group.num_devices() >= 2)
              << "AllReduce requires two or more comm devices. Got " << _comm_group;
-    if (!device_group.empty()) {
-      for (int i = 0; i < comm_group.num_devices(); i++) {
-        HT_ASSERT(device_group.contains(comm_group.get(i))) 
-          << "AllReduceOp: device in comm_group: " << comm_group.get(i) 
-          << " must in device_group: " << device_group;
-      }
-    }
   }
 
   inline uint64_t op_indicator() const noexcept override {
@@ -161,25 +165,20 @@ class AllReduceOpImpl final : public OpInterface {
   ReductionType _red_type{kNONE};
 };
 
-Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeAllReduceOp(Tensor input, DeviceGroup comm_group, 
                        bool inplace = false, OpMeta op_meta = OpMeta());
 
-Tensor MakeAllReduceOp(Tensor input, const DeviceGroup& comm_group, ReductionType red_type, 
+Tensor MakeAllReduceOp(Tensor input, DeviceGroup comm_group, ReductionType red_type, 
                        bool inplace = false, OpMeta op_meta = OpMeta());
 
 class P2PSendOpImpl final : public OpInterface {
  public:
-  P2PSendOpImpl(const DeviceGroup& dst_group, int dst_device_index = -1, 
-                const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(P2PSendOp)), _dst_group(dst_group), 
+  P2PSendOpImpl(DeviceGroup dst_group, int dst_device_index = -1)
+  : OpInterface(quote(P2PSendOp)), _dst_group(std::move(dst_group)), 
     _dst_device_index(dst_device_index) {
-    HT_ASSERT(!dst_group.empty())
+    HT_ASSERT(!_dst_group.empty())
       << "Please provide the \"dst_group\" argument to indicate "
       << "the destination devices for P2PSend";
-    HT_ASSERT(device_group.empty() ||
-              device_group.num_devices() == dst_group.num_devices())
-      << "Currently we require equal tensor parallelism degree across "
-      << "P2P communication. Got " << device_group << " vs. " << dst_group;
   }
 
   uint64_t op_indicator() const noexcept override {
@@ -216,26 +215,21 @@ class P2PSendOpImpl final : public OpInterface {
   int _dst_device_index{-1};
 };
 
-Tensor MakeP2PSendOp(Tensor input, const DeviceGroup& dst_group, 
+Tensor MakeP2PSendOp(Tensor input, DeviceGroup dst_group, 
                      int dst_device_index = -1, OpMeta op_meta = OpMeta());
 
 class P2PRecvOpImpl final : public OpInterface {
  public:
-  P2PRecvOpImpl(const DeviceGroup& src_group, DataType dtype,
-                const HTShape& shape, int src_device_index = -1,
-                const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(P2PRecvOp)), _src_group(src_group), _dtype(dtype),
-                _shape(shape), _src_device_index(src_device_index) {
-    HT_ASSERT(!src_group.empty())
+  P2PRecvOpImpl(DeviceGroup src_group, DataType dtype,
+                HTShape shape, int src_device_index = -1)
+  : OpInterface(quote(P2PRecvOp)), _src_group(std::move(src_group)), _dtype(dtype),
+                _shape(std::move(shape)), _src_device_index(src_device_index) {
+    HT_ASSERT(!_src_group.empty())
       << "Please provide the \"src_group\" argument to indicate "
       << "the source devices for P2PRecv";
-    HT_ASSERT(device_group.empty() ||
-              src_group.num_devices() == device_group.num_devices())
-      << "Currently we require equal tensor parallelism degree across "
-      << "P2P communication. Got " << src_group << " vs. " << device_group;
-    HT_ASSERT(!shape.empty())
+    HT_ASSERT(!_shape.empty())
       << "P2P RecvOp require determined tensor shape to recv. Got empty shape param!";
-    HT_ASSERT(dtype != kUndeterminedDataType)
+    HT_ASSERT(_dtype != kUndeterminedDataType)
       << "Please specify data type for P2P communication";
   }
 
@@ -275,8 +269,8 @@ class P2PRecvOpImpl final : public OpInterface {
   HTShape _shape;           
 };
 
-Tensor MakeP2PRecvOp(const DeviceGroup& src_group, DataType dtype,
-                     const HTShape& shape, int src_device_index = -1, 
+Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
+                     HTShape shape, int src_device_index = -1, 
                      OpMeta op_meta = OpMeta());
 
 class BatchedISendIRecvOpImpl final : public OpInterface {
@@ -293,14 +287,14 @@ class BatchedISendIRecvOpImpl final : public OpInterface {
   _comm_devices(comm_devices), _dtype(dtype) {}
   */
   // fixed shape constructor
-  BatchedISendIRecvOpImpl(const std::vector<Device>& dst_devices, 
-                          const HTShapeList& outputs_shape,
-                          const std::vector<Device>& src_devices, 
-                          const std::vector<Device>& comm_devices,
+  BatchedISendIRecvOpImpl(std::vector<Device> dst_devices, 
+                          HTShapeList outputs_shape,
+                          std::vector<Device> src_devices, 
+                          std::vector<Device> comm_devices,
                           DataType dtype)
-  : OpInterface(quote(BatchedISendIRecvOp)), _dst_devices(dst_devices), 
-  _outputs_shape(outputs_shape), _src_devices(src_devices), 
-  _comm_devices(comm_devices), _dtype(dtype) {}
+  : OpInterface(quote(BatchedISendIRecvOp)), _dst_devices(std::move(dst_devices)), 
+  _outputs_shape(std::move(outputs_shape)), _src_devices(std::move(src_devices)), 
+  _comm_devices(std::move(comm_devices)), _dtype(dtype) {}
 
   uint64_t op_indicator() const noexcept override {
     return BATCHED_ISEND_IRECV_OP;
@@ -362,25 +356,18 @@ class BatchedISendIRecvOpImpl final : public OpInterface {
 };
 
 Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
-                               const std::vector<Device>& dst_devices, 
-                               const HTShapeList& outputs_shape, 
-                               const std::vector<Device>& src_devices, 
-                               const std::vector<Device>& comm_devices, 
+                               std::vector<Device> dst_devices, 
+                               HTShapeList outputs_shape, 
+                               std::vector<Device> src_devices, 
+                               std::vector<Device> comm_devices, 
                                DataType dtype, OpMeta op_meta = OpMeta());
 
 class AllGatherOpImpl final : public OpInterface {
  public:
-  AllGatherOpImpl(const DeviceGroup& comm_group, const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(AllGatherOp)), _comm_group(comm_group) {
-    HT_ASSERT(comm_group.num_devices() >= 2)
-      << "AllGather requires two or more devices. Got " << comm_group;
-    if (!device_group.empty()) {
-      for (int i = 0; i < comm_group.num_devices(); i++) {
-        HT_ASSERT(device_group.contains(comm_group.get(i)))
-          << "AllGather: device in comm_group: " << comm_group.get(i) 
-          << " must in device group: " << device_group;
-      }
-    }
+  AllGatherOpImpl(DeviceGroup comm_group)
+  : OpInterface(quote(AllGatherOp)), _comm_group(std::move(comm_group)) {
+    HT_ASSERT(_comm_group.num_devices() >= 2)
+      << "AllGather requires two or more devices. Got " << _comm_group;
   }
 
   uint64_t op_indicator() const noexcept override {
@@ -407,23 +394,16 @@ class AllGatherOpImpl final : public OpInterface {
   DeviceGroup _comm_group;
 };
 
-Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group,
+Tensor MakeAllGatherOp(Tensor input, DeviceGroup comm_group,
                        OpMeta op_meta = OpMeta());
 
 class ReduceScatterOpImpl final : public OpInterface {
  public:
-  ReduceScatterOpImpl(const DeviceGroup& comm_group, ReductionType red_type = kSUM,
-                      bool inplace = false, const DeviceGroup& device_group = DeviceGroup())
-  : OpInterface(quote(ReduceScatterOp)), _comm_group(comm_group), _red_type(red_type), _inplace(inplace) {
-    HT_ASSERT(comm_group.num_devices() >= 2)
-      << "ReduceScatter requires two or more devices. Got " << comm_group;          
-    if (!device_group.empty()) {
-      for (int i = 0; i < comm_group.num_devices(); i++) {
-        HT_ASSERT(device_group.contains(comm_group.get(i)))
-          << "ReduceScatter: device in comm_group: " << comm_group.get(i) 
-          << " must in device group: " << device_group;
-      }
-    }    
+  ReduceScatterOpImpl(DeviceGroup comm_group, ReductionType red_type = kSUM,
+                      bool inplace = false) : OpInterface(quote(ReduceScatterOp)), 
+    _comm_group(std::move(comm_group)), _red_type(red_type), _inplace(inplace) {
+    HT_ASSERT(_comm_group.num_devices() >= 2)
+      << "ReduceScatter requires two or more devices. Got " << _comm_group;          
   }
 
   inline bool inplace() const {
@@ -477,10 +457,10 @@ class ReduceScatterOpImpl final : public OpInterface {
   ReductionType _red_type{kNONE};
 };
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group,  
+Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group,  
                            bool inplace = false, OpMeta op_meta = OpMeta());
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, ReductionType red_type, 
+Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, ReductionType red_type, 
                            bool inplace = false, OpMeta op_meta = OpMeta());
 }
 }

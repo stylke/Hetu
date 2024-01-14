@@ -49,6 +49,32 @@ PyObject* PyGraph_name(PyGraph* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyGraph_num_strategy(PyGraph* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLong_FromInteger(Graph::GetGraph(self->graph_id).NUM_STRATEGY);
+  HT_PY_FUNC_END
+}
+
+PyObject* PyGraph_cur_strategy_id(PyGraph* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLong_FromInteger(Graph::GetGraph(self->graph_id).CUR_STRATEGY_ID);
+  HT_PY_FUNC_END
+}
+
+PyObject* PyGraph_set_num_strategy(PyGraph* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({"set_num_strategy(int num_strategy)"});
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    Graph::GetGraph(self->graph_id).NUM_STRATEGY = parsed_args.get_int64(0);
+    return PyLong_FromInteger(Graph::GetGraph(self->graph_id).NUM_STRATEGY);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }  
+  HT_PY_FUNC_END
+}
+
 PyObject* PyGraph_run(PyGraph* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -215,12 +241,15 @@ PyMethodDef PyGraphCtx_methods[] = {
 PyGetSetDef PyGraph_properties[] = {
   {PY_GET_SET_DEF_NAME("name"), (getter) PyGraph_name, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("id"), (getter) PyGraph_id, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("num_strategy"), (getter) PyGraph_num_strategy, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("cur_strategy_id"), (getter) PyGraph_cur_strategy_id, nullptr, nullptr, nullptr}, 
   {nullptr}
 };
 
 // NOLINTNEXTLINE
 PyMethodDef PyGraph_methods[] = {
   {"run", (PyCFunction) PyGraph_run, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+  {"set_num_strategy", (PyCFunction) PyGraph_set_num_strategy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {nullptr}
 };
 

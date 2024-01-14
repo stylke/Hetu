@@ -5,7 +5,10 @@
 
 namespace hetu {
 namespace graph {
-  
+
+class DistributedStates;
+using DistributedStatesList = std::vector<DistributedStates>;
+
 class DistributedStates {
  public:
   DistributedStates() : _device_num(-1), _states({}), _order({}), _zero(false) {};
@@ -28,6 +31,7 @@ class DistributedStates {
   }
   DistributedStates(const DistributedStates& ds) {
     _device_num = -1;
+    if (ds._device_num == -1) return; // do nothing if ds is invalid
     set_distributed_states(ds);
   }
 

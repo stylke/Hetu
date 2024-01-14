@@ -9,8 +9,17 @@ namespace graph {
 Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
                                          TensorList inputs, OpMeta op_meta) {
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
-  if (!op_meta.device_group.empty() && std::find(_device_groups.begin(), _device_groups.end(), op_meta.device_group) == _device_groups.end())
-    _device_groups.push_back(op_meta.device_group);
+  // init multi device_groups for multi ds
+  if (op_meta.device_groups.size() == NUM_STRATEGY) {
+    if (_multi_device_groups.empty()) {
+      _multi_device_groups.resize(NUM_STRATEGY, DeviceGroupList());
+    }
+    for (size_t i = 0; i < NUM_STRATEGY; i++) {
+      if (!op_meta.device_groups[i].empty() && std::find(_multi_device_groups[i].begin(), _multi_device_groups[i].end(), op_meta.device_groups[i]) == _multi_device_groups[i].end())
+        _multi_device_groups[i].push_back(op_meta.device_groups[i]);
+    }
+  }
+
   // HT_LOG_TRACE << name() << " make op: " << op_meta.name;
   return MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
 }
@@ -101,6 +110,8 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
   Op2OpMap op_to_exec_op_mapping;
   Tensor2TensorMap tensor_to_exec_tensor_mapping;
   auto exec_graph = Graph::_make_new_graph<ExecutableGraph>(name() + "_executable_" + std::to_string(exec_graph_num));
+  exec_graph->NUM_STRATEGY = NUM_STRATEGY;
+  exec_graph->CUR_STRATEGY_ID = CUR_STRATEGY_ID;
   
   exec_shape_plan.reserve(shape_plan.size());
   op_to_exec_op_mapping.reserve(_init_capacity);
@@ -109,7 +120,7 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
   Graph::push_graph_ctx(exec_graph->id());
 
   // assign pp stages
-  exec_graph->SetStages(_device_groups);
+  exec_graph->SetStages(_multi_device_groups[CUR_STRATEGY_ID]);
 
   auto get_exec_input = [&](const Tensor& input) -> Tensor {
     auto it = tensor_to_exec_tensor_mapping.find(input->id());
@@ -118,6 +129,8 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
     return it->second;
   };
 
+  // todo: just use multi_ds[cur_strategy_id] which was deduced in define_and_run_graph
+  // executable_graph needn't deduce states again!
   auto put_exec_output = [&](Tensor& tensor, Tensor& exec_tensor) -> void {
     auto plan_it = shape_plan.find(tensor->id());
     if (plan_it != shape_plan.end())
@@ -125,6 +138,10 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
     // Else: if the tensor to instantiate is not in the shape plan, 
     // then the tensor won't be used in the exec graph.
     // So we just leave its shape to its default.
+
+    // just copy distributed_states here
+    exec_tensor->set_multi_distributed_states(tensor->multi_distributed_states());
+    
     exec_tensor->set_is_grad(tensor->is_grad());
     exec_shape_plan[exec_tensor->id()] = exec_tensor->shape();
     tensor_to_exec_tensor_mapping[tensor->id()] = exec_tensor;
@@ -155,6 +172,7 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
     std::tie(exec_inputs, exec_in_deps) =
       Operator::transform_each_input_tensor(op, get_exec_input);
 
+    // todo: move autocast insert add op to suitable place
     auto autocast_id = AutoCast::cur_autocast_ctx();
     if (autocast_id != UINT64_MAX) {
       auto autocast = AutoCast::GetAutoCast(autocast_id);
@@ -180,8 +198,9 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
                 }
                 else {
                   auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
-                                  {exec_inputs[i]}, OpMeta().set(op->op_meta()), *exec_graph);
+                                  {exec_inputs[i]}, OpMeta().set(op->op_meta()).set_name(op->name() + "_datatransfer").set_is_deduce_states(false), *exec_graph);
                   HT_LOG_DEBUG << "Map" << &transfer_map << "Insert:" << exec_inputs[i]->id() << "->" << exec_op->output(0)->id();
+                  exec_op->output(0)->set_multi_distributed_states(op->input(i)->multi_distributed_states()); // walkaround: set here by hand
                   transfer_map[exec_inputs[i]->id()] = exec_op->output(0);
                   exec_inputs[i] = exec_op->output(0);
                 }
@@ -193,21 +212,21 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
       }
     }
 
+    // only deduce multi ds for define_and_run_graph, and copy directly for executable_graph
     auto& exec_op = Graph::MakeOp(
       op->_body, std::move(exec_inputs),
-      OpMeta().set(op->op_meta()).set_extra_deps(std::move(exec_in_deps)),
+      OpMeta().set(op->op_meta()).set_is_deduce_states(false).set_extra_deps(std::move(exec_in_deps)),
       *exec_graph);
     if (_parameter_ops.find(op->id()) != _parameter_ops.end())
       Graph::MarkAsParameter(exec_op);
 
     Operator::for_each_output_tensor_pair(op, exec_op, put_exec_output);
-    if (is_placeholder_op(op) || is_variable_op(op)) {
-      if (op->output(0)->has_distributed_states())
-        exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
-    }
+    // if (is_placeholder_op(op) || is_variable_op(op)) {
+    //   if (op->output(0)->has_distributed_states())
+    //     exec_op->output(0)->set_distributed_states(op->output(0)->get_distributed_states());
+    // }
     op_to_exec_op_mapping[op->id()] = exec_op;
   }
-
   // assign fw_op_id map
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
@@ -216,7 +235,6 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
       exec_op->set_fw_op_id(op_to_exec_op_mapping[op->fw_op_id()]->id());
     } 
   }
-
   // assign initial shape plan
   exec_graph->InitShapePlan(std::move(exec_shape_plan));
   
@@ -294,6 +312,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     plan_scanned++;
   }
 
+  // todo: 确定distributed states后，再推导shape，再根据{ds + shape}来判断是否要创建新的exec_graph
   // 需要新增shape plan到shape plan pools
   // 同时也需要新增exec graph plan到exec graph plan pools
   if (plan_scanned == _shape_plan_pool.size()) {
@@ -366,6 +385,10 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         shape_plan.insert(std::make_pair(op->output(i)->id(), std::move(output_shapes[i]))); // move constructor
       }
     }
+    // set define_and_run_graph.CUR_STRATEGY_ID = dst id, 
+    // and then do instantiate, if not set, use default id = 0
+    // CUR_STRATEGY_ID = 0;
+    HT_LOG_INFO << "use default CUR_STRATEGY_ID = " << CUR_STRATEGY_ID << " for new executable graph...";
     Instantiate(shape_plan);
     // TODO
     // 1、根据topo和shape plan，指定新的并行方案

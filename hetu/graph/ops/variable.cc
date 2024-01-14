@@ -33,7 +33,9 @@ NDArrayList VariableOpImpl::DoAllocOutputs(Operator& op,
 bool ParallelVariableOpImpl::DoInstantiate(Operator& op, 
                                            const Device& placement,
                                            StreamIndex stream_id) const {
-  HT_ASSERT(_init == nullptr || _local_idx != -1)
+  auto ds = _multi_ds[op->graph().CUR_STRATEGY_ID];
+  auto local_idx = _local_idx.empty() ? -1 : _local_idx[op->graph().CUR_STRATEGY_ID];
+  HT_ASSERT(_init == nullptr || local_idx != -1)
     << "ParallelVariableOp: when use initializer, local_idx "
     << "must be assigned when local_device is in pipeline device_group!";
                                               
@@ -41,22 +43,24 @@ bool ParallelVariableOpImpl::DoInstantiate(Operator& op,
     return false;
 
   if (_init != nullptr) {
-    int32_t dup_group_idx = _ds.get_dup_group_index(_local_idx);
+    int32_t dup_group_idx = ds.get_dup_group_index(local_idx);
     // support 100 different duplicate group to set different seed
     uint64_t seed = 2023 + op->id() * 100 + dup_group_idx;
     HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " << op << " inits by initializer.";
     // TODO: reset variable data also need parallel version
     Graph::AllocVariableData(op->output(0), *_init, seed, _global_shape);
   } else {
-    if (_copy_provided_data || dtype() != _provided_data->dtype() ||
-        placement != _provided_data->device()) {
+    auto& provided_data = _multi_provided_data.empty() ? 
+      _provided_data : _multi_provided_data[op->graph().CUR_STRATEGY_ID]; 
+    if (_copy_provided_data || dtype() != provided_data->dtype() ||
+        placement != provided_data->device()) {
       HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " << op << " inits by provided data.";
       Graph::AllocVariableData(op->output(0),
-                               ProvidedInitializer(_provided_data));
+                               ProvidedInitializer(provided_data));
       // free the provided data in order to save memory, may still have some problem?
-      _provided_data = hetu::NDArray();
+      provided_data = hetu::NDArray();
     } else {
-      Graph::RegisterVariableData(op->output(0), _provided_data);
+      Graph::RegisterVariableData(op->output(0), provided_data);
     }
   }
   return true;
@@ -120,61 +124,103 @@ Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data,
 }
 
 Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape, 
-                              const DistributedStates& ds, int64_t local_idx,
+                              const DistributedStatesList& multi_ds, std::vector<int64_t> local_idx,
                               DataType dtype, bool requires_grad, OpMeta op_meta) {
-  // auto placement_group = op_meta.device_group;
+  // init local_idx vector
+  if (local_idx.size() == 1) {
+    local_idx.resize(multi_ds.size(), local_idx[0]);
+  } else {
+    HT_ASSERT(local_idx.size() == multi_ds.size()) 
+      << "ParallelVariableOp: local_idx size must equal to multi_ds!";
+  }
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
-                           init, std::move(global_shape), ds, 
-                           local_idx, dtype, requires_grad),
+                           init, std::move(global_shape), multi_ds, 
+                           std::move(local_idx), dtype, requires_grad),
                            TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
-  HT_ASSERT(ds.is_valid() && ds.get_dim(-2) == 1)
-    << "DistributedStates for ParallelVariableOp must be valid! got: " 
-    << ds.ds_info();
-  out->set_distributed_states(ds);
-  // deprecated
-  // If we set the placement group right now,
-  // we can load the checkpoint easier in 3D parallel situation.
-  // out->set_placement_group(placement_group); 
-  // HT_LOG_TRACE << "MakeParallelVariableOp, placement group is: " << out->placement_group();
+  // assign multi ds for variable
+  auto& graph = out->graph();
+  for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
+    const auto& ds = multi_ds[cur_strategy_id];
+    HT_ASSERT(ds.is_valid() && ds.get_dim(-2) == 1)
+      << "DistributedStates for ParallelVariableOp must be valid! got: " 
+      << ds.ds_info();
+    graph.CUR_STRATEGY_ID = cur_strategy_id;
+    out->set_distributed_states(ds);
+  }
+  graph.CUR_STRATEGY_ID = 0;
   return out;
 }
 
-Tensor MakeParallelVariableOp(NDArray provided_data, const DistributedStates& ds, 
+Tensor MakeParallelVariableOp(NDArray provided_data, 
+                              const DistributedStatesList& multi_ds, 
                               bool copy_provided_data, DataType dtype, 
                               bool requires_grad, OpMeta op_meta) {
   // auto placement_group = op_meta.device_group;
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
                            provided_data, copy_provided_data, 
-                           ds, dtype, requires_grad),
+                           multi_ds, dtype, requires_grad),
                            TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
-  HT_ASSERT(ds.is_valid() && ds.get_dim(-2) == 1)
-    << "DistributedStates for ParallelVariableOp must be valid! got: " 
-    << ds.ds_info();
-  out->set_distributed_states(ds);
-  // deprecated
-  // If we set the placement group right now,
-  // we can load the checkpoint easier in 3D parallel situation.
-  // out->set_placement_group(placement_group);
-  // HT_LOG_TRACE << "MakeParallelVariableOp, placement group is: " << out->placement_group();
+  // assign multi ds for variable
+  auto& graph = out->graph();
+  for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
+    auto& ds = multi_ds[cur_strategy_id];
+    HT_ASSERT(ds.is_valid() && ds.get_dim(-2) == 1)
+      << "DistributedStates for ParallelVariableOp must be valid! got: " 
+      << ds.ds_info();
+    graph.CUR_STRATEGY_ID = cur_strategy_id;
+    out->set_distributed_states(ds);
+  }
+  graph.CUR_STRATEGY_ID = 0;
+  return out;  
+}
+
+Tensor MakeParallelVariableOp(NDArrayList multi_provided_data, 
+                              DistributedStatesList multi_ds, 
+                              bool copy_provided_data, DataType dtype, 
+                              bool requires_grad, OpMeta op_meta) {
+  auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
+                           std::move(multi_provided_data), copy_provided_data, 
+                           std::move(multi_ds), dtype, requires_grad),
+                           TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
+  // assign multi ds for variable
+  auto& graph = out->graph();
+  for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
+    auto& ds = multi_ds[cur_strategy_id];
+    HT_ASSERT(ds.is_valid() && ds.get_dim(-2) == 1)
+      << "DistributedStates for ParallelVariableOp must be valid! got: " 
+      << ds.ds_info();
+    graph.CUR_STRATEGY_ID = cur_strategy_id;
+    out->set_distributed_states(ds);
+  }
+  graph.CUR_STRATEGY_ID = 0;
   return out;  
 }
 
 Tensor MakeParallelParameterOp(const Initializer& init, HTShape global_shape, 
-                               const DistributedStates& ds, int64_t local_idx,
+                               const DistributedStatesList& multi_ds, std::vector<int64_t> local_idx,
                                DataType dtype, bool requires_grad, OpMeta op_meta) {
-  auto out = MakeParallelVariableOp(init, std::move(global_shape), ds, local_idx, 
+  auto out = MakeParallelVariableOp(init, std::move(global_shape), multi_ds, std::move(local_idx), 
                                     dtype, requires_grad, std::move(op_meta));
-  // HT_LOG_INFO << out->producer() << ": device group = " << op_meta.device_group;                                    
   Graph::MarkAsParameter(out);
   return out;                                    
 }
 
-Tensor MakeParallelParameterOp(NDArray provided_data, const DistributedStates& ds, 
+Tensor MakeParallelParameterOp(NDArray provided_data, 
+                               const DistributedStatesList& multi_ds, 
                                bool copy_provided_data, DataType dtype, 
                                bool requires_grad, OpMeta op_meta) {    
-  auto out = MakeParallelVariableOp(std::move(provided_data), ds, copy_provided_data, 
+  auto out = MakeParallelVariableOp(std::move(provided_data), multi_ds, copy_provided_data, 
                                     dtype, requires_grad, std::move(op_meta));
-  // HT_LOG_INFO << out->producer() << ": device group = " << op_meta.device_group;                                    
+  Graph::MarkAsParameter(out);
+  return out;
+}
+
+Tensor MakeParallelParameterOp(NDArrayList multi_provided_data, 
+                               DistributedStatesList multi_ds, 
+                               bool copy_provided_data, DataType dtype, 
+                               bool requires_grad, OpMeta op_meta) {    
+  auto out = MakeParallelVariableOp(std::move(multi_provided_data), std::move(multi_ds), 
+                                    copy_provided_data, dtype, requires_grad, std::move(op_meta));
   Graph::MarkAsParameter(out);
   return out;
 }

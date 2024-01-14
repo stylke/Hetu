@@ -42,6 +42,8 @@ class Graph {
 
  public:
   static constexpr size_t DEFAULT_GRAPH_INITIAL_CAPACITY = 4096;
+  size_t NUM_STRATEGY = 1;
+  size_t CUR_STRATEGY_ID = 0;
 
   // disable copy constructor and move constructor
   Graph(const Graph&) = delete;

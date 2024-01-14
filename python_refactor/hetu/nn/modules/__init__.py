@@ -13,6 +13,7 @@ from .sparse import *
 
 from .parallel import *
 from .parallel_ds import *
+from .parallel_multi_ds import *
 
 __all__ = [
     'Module', 
@@ -35,5 +36,7 @@ __all__ = [
     # parallel
     'ParallelLayerNorm', 'ParallelEmbedding', 'VocabParallelEmbedding', 'ColumnParallelLinear', 'RowParallelLinear',
     # parallel_ds
-    'HtParallelLayerNorm', 'HtParallelEmbedding', 'HtVocabParallelEmbedding', 'HtColumnParallelLinear', 'HtRowParallelLinear',    
+    'HtParallelLayerNorm', 'HtParallelEmbedding', 'HtVocabParallelEmbedding', 'HtColumnParallelLinear', 'HtRowParallelLinear',
+    # parallel_multi_ds
+    'HtMultiParallelLayerNorm', 'HtMultiParallelEmbedding', 'HtMultiVocabParallelEmbedding', 'HtMultiColumnParallelLinear', 'HtMultiRowParallelLinear',
 ]

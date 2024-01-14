@@ -19,9 +19,13 @@ bool CheckNumpyBool(PyObject* obj);
 
 bool CheckNumpyArray(PyObject* obj);
 
+bool CheckNumpyArrayList(PyObject* obj);
+
 DataType GetNumpyArrayDataType(PyObject* obj);
 
 NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape  = {});
+
+NDArrayList NDArrayListFromNumpyList(PyObject* obj);
 
 PyObject* NDArrayToNumpy(NDArray ndarray, bool force);
 
