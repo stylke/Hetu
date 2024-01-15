@@ -546,7 +546,7 @@ __device__ void block_x_reduce(arg_t* value, char* shared_memory, const op_t& op
   for (int offset = 1; offset < dim_x; offset <<= 1) {
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
-      arg_t other = __shfl_down_sync(mask, value[i], offset, warpSize);
+      arg_t other = hetu::cuda::shfl_down_sync(mask, value[i], offset, warpSize);
       value[i] = ops.reduce(value[i], other);
     }
   }

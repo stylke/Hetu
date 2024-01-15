@@ -7,9 +7,40 @@
 #include <cuda_bf16.hpp>
 #include "hetu/core/float16.h"
 #include "hetu/core/bfloat16.h"
+#include "hetu/impl/utils/numeric_utils.h"
 
 namespace hetu {
 namespace cuda {
+
+template <typename T>
+__forceinline__ __device__ T shfl_down_sync(const unsigned mask, T var, const unsigned int delta, const int width) {
+  // HT_NOT_IMPLEMENTED << "cuda_log is not implemented for type ";
+  return var;
+}
+
+template <>
+__forceinline__ __device__ hetu::bfloat16 shfl_down_sync<hetu::bfloat16>(const unsigned mask, hetu::bfloat16 var, const unsigned int delta, const int width) {
+  #if(__CUDA_ARCH__ >= 800)
+  return __shfl_down_sync(mask, __nv_bfloat16(var), delta, width);
+  #else
+  return __shfl_down_sync(mask, float(var), delta, width);
+  #endif
+}
+
+template <>
+__forceinline__ __device__ hetu::float16 shfl_down_sync<hetu::float16>(const unsigned mask, hetu::float16 var, const unsigned int delta, const int width) {
+  return __shfl_down_sync(mask, __half(var), delta, width);
+}
+
+template <>
+__forceinline__ __device__ float shfl_down_sync<float>(const unsigned mask, float var, const unsigned int delta, const int width) {
+  return __shfl_down_sync(mask, float(var), delta, width);
+}
+
+template <>
+__forceinline__ __device__ double shfl_down_sync<double>(const unsigned mask, double var, const unsigned int delta, const int width) {
+  return __shfl_down_sync(mask, double(var), delta, width);
+}
 
 template <typename T>
 __forceinline__ __device__ T cuda_max(T x, T y) {
@@ -542,7 +573,7 @@ template <typename spec_t>
 __forceinline__ __device__ spec_t WarpReduceSum(spec_t val) {
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val += __shfl_down_sync(mask, val, k, warpSize);
+    val += shfl_down_sync(mask, val, k, warpSize);
   return val;
 }
 
@@ -551,11 +582,11 @@ __forceinline__ __device__ bfloat16 WarpReduceSum<bfloat16>(bfloat16 val) {
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   #if(__CUDA_ARCH__ >= 800)
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val += __shfl_down_sync(mask, val, k, warpSize);
+    val += shfl_down_sync(mask, val, k, warpSize);
   #else
   float val_f = float(val);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val_f += __shfl_down_sync(mask, val_f, k, warpSize); 
+    val_f += shfl_down_sync(mask, val_f, k, warpSize); 
   val = bfloat16(val_f); 
   #endif
   return val;
@@ -573,7 +604,8 @@ __forceinline__ __device__ void BlockReduceSum(spec_t& val, spec_t* shared) {
     shared[wid] = val;
 
   __syncthreads();
-  val = (threadIdx.x < blockDim.x / warpSize) ? shared[tid] : 0;
+  spec_t zero = 0;
+  val = (threadIdx.x < blockDim.x / warpSize) ? shared[tid] : zero;
 
   if (wid == 0)
     val = WarpReduceSum(val);
@@ -585,7 +617,7 @@ __forceinline__ __device__ void WarpReduceArgmax(spec_t& val) {
   spec_t tmp_val;
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
-    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    tmp_val = shfl_down_sync(mask, val, k, warpSize);
     if (tmp_val > val) {
       val = tmp_val;
     }
@@ -598,7 +630,7 @@ __forceinline__ __device__ void WarpReduceArgmax(bfloat16& val) {
   #if defined(__CUDACC__) && (__CUDA_ARCH__ >= 800)
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
-    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    tmp_val = shfl_down_sync(mask, val, k, warpSize);
     if (tmp_val > val) {
       val = tmp_val;
     }
@@ -642,7 +674,8 @@ __forceinline__ __device__ void BlockReduceArgmax(spec_t& val,
   }
 
   __syncthreads();
-  val = (threadIdx.x < blockDim.x / warpSize) ? shared_value[tid] : -SIZE_MAX;
+  spec_t inf = numeric_limits<spec_t>::lowest();
+  val = (threadIdx.x < blockDim.x / warpSize) ? shared_value[tid] : inf;
 
   if (wid == 0)
     WarpReduceArgmax(val);
@@ -656,7 +689,7 @@ __forceinline__ __device__ void WarpReduceArgmin(spec_t& val) {
   spec_t tmp_val;
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
-    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    tmp_val = shfl_down_sync(mask, val, k, warpSize);
     if (tmp_val < val) {
       val = tmp_val;
     }
@@ -669,7 +702,7 @@ __forceinline__ __device__ void WarpReduceArgmin(bfloat16& val) {
   #if defined(__CUDACC__) && (__CUDA_ARCH__ >= 800)
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1) {
-    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    tmp_val = shfl_down_sync(mask, val, k, warpSize);
     if (tmp_val < val) {
       val = tmp_val;
     }
