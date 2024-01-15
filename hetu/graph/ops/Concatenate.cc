@@ -5,6 +5,18 @@
 namespace hetu {
 namespace graph {
 
+NDArrayList ConcatenateOpImpl::DoCompute(Operator& op,
+                                         const NDArrayList& inputs,
+                                         RuntimeContext& runtime_ctx) const {
+  // inplace
+  if (inputs.size() == 1) {
+    return inputs;
+  }
+  auto outputs = DoAllocOutputs(op, inputs, runtime_ctx);
+  DoCompute(op, inputs, outputs, runtime_ctx);
+  return outputs;
+}
+
 void ConcatenateOpImpl::DoCompute(Operator& op,
                                   const NDArrayList& inputs,
                                   NDArrayList& outputs, RuntimeContext& ctx) const {

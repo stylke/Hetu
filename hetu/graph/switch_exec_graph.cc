@@ -63,11 +63,39 @@ static std::unordered_set<Key> KeysUnion(const std::unordered_set<Key>& set1, co
   return result;
 }
 
+// nccl存在一些冷启动的开销
+// 先简单地进行一个小的allreduce
+void static WarmUpComm(const std::unordered_set<Device>& comm_set) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  std::vector<int> ranks(comm_set.size());
+  std::transform(comm_set.begin(), comm_set.end(), ranks.begin(), 
+                 [&](const Device& device) { return hetu::impl::comm::DeviceToWorldRank(device); });
+  std::sort(ranks.begin(), ranks.end());
+  auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, Stream(local_device, kP2PStream));
+  auto data = NDArray::empty({comm_set.size()}, local_device, kFloat32, kP2PStream);
+  comm_group->AlltoAll(data, data);
+}
+
+// 递归查找
+// 判断某一个concat算子是否需要concat buffer
+bool static NeedConcatBuffer(const Operator& op) {
+  if (is_batched_isend_irecv_op(op)) {
+    return true;
+  }
+  for (const auto& input : op->inputs()) {
+    if (NeedConcatBuffer(input->producer())) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void ParamBuffer::Alloc(const Stream& stream) {
   auto local_device = hetu::impl::comm::GetLocalDevice();   
 #if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19)                                                    
   ncclMemAlloc(&_raw_ptr, _buffer_size);
   _storage = std::make_shared<NDArrayStorage>({_raw_ptr, _buffer_size, local_device, static_cast<uint64_t>(-1)}, false);
+  HT_RUNTIME_ERROR << "NotImplementedError";
 #else
   // Note that we need to use kP2PStream for BufferBatchedIsendIrecv
   _storage = std::make_shared<NDArrayStorage>(AllocFromMemoryPool(local_device, _buffer_size, stream));
@@ -82,6 +110,7 @@ void ParamBuffer::Free() {
 #if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19)                                                     
   ncclMemFree(_raw_ptr);
   // _data_ptr = DataPtr{nullptr, 0, local_device, static_cast<uint64_t>(-1)}};
+  HT_RUNTIME_ERROR << "NotImplementedError";
 #else
 #endif
   _storage.reset();
@@ -123,6 +152,7 @@ void ParamSlice::AddNeededSliceInst(const Device& device, const Tensor& tensor) 
   }
   _needed_devices.push_back(device);
   _needed_slice_instances.push_back(tensor);
+  _switcher->RecordTensorInfo(tensor, name());
 }
 
 // TODO: 修改greedy算法
@@ -270,7 +300,10 @@ void SwitchExecGraph::MakeAllParamSlices(const Tensor& param, ParamBlock& block,
     HTShape indices(slice_relative_num.begin(), slice_relative_num.end()); // int32_t -> int64_t
     HTShape splits(multiple.begin(), multiple.end()); // int32_t -> int64_t
     // 都先进行split
-    auto split_output = MakeSplitOp(param, indices, splits, OpMeta().set_is_deduce_states(false));
+    auto split_output = MakeSplitOp(param, 
+                                    indices, 
+                                    splits, 
+                                    OpMeta().set_name(param_slice->name()).set_is_deduce_states(false));
     auto& split_op = split_output->producer();
     // 其他device上生成的不需要map placement_group和placement
     if (hetu::impl::comm::GetLocalDevice() == device) { 
@@ -325,7 +358,9 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
     Tensor merged_slice = MergeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1);
     merged_slices.push_back(std::move(merged_slice));
   }  
-  auto concatenate_output = MakeConcatenateOp(std::move(merged_slices), dim, OpMeta().set_is_deduce_states(false));         
+  auto concatenate_name = "concat_" + param->name() + "_at_dim_" + std::to_string(dim);
+  auto concatenate_output = MakeConcatenateOp(std::move(merged_slices), dim, 
+                                              OpMeta().set_name(concatenate_name).set_is_deduce_states(false));         
   auto& concatenate_op = concatenate_output->producer();
   // 其他device上生成的不需要map placement_group和placement
   if (hetu::impl::comm::GetLocalDevice() == device) { 
@@ -656,6 +691,10 @@ void SwitchExecGraph::MakeCommGraph() {
     auto& new_tensor = recv_tensors[i];
     HT_ASSERT(old_tensor->num_consumers() == 1)
       << "the slice instance should only used once (by a single concatenate op)";
+    auto it = _info_mapping.find(old_tensor->id());
+    HT_ASSERT(it != _info_mapping.end())
+      << "the info of the old tensor is not recorded";
+    RecordTensorInfo(new_tensor, it->second);
     auto& consumer = old_tensor->consumer(0);
     for (size_t j = 0; j < consumer->num_inputs(); ++j) {
       if (consumer->input(j)->id() == old_tensor->id()) {
@@ -756,6 +795,7 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
     }
   }
   // 同步
+  // 保证op_stream在kComputingStream之后
   auto buffer_transfer_events_len = _buffer_transfer_events.size() / 2;
   for (size_t i = 0; i < buffer_transfer_events_len; ++i) {
     // 用end event进行同步
@@ -856,6 +896,32 @@ void SwitchExecGraph::SwitchParams() {
         _comm_shape_plan[output->id()] = output->shape();
       }
     }
+    // 计算concat后param在buffer中的偏移
+    // 此时并不实际分配buffer
+    if (_use_concat_buffer) {
+      HT_ASSERT(_concat_buffer == nullptr)
+        << "_concat_buffer shouldn't be initialized yet";
+      // 我们不对本地已经拥有的param去做buffer
+      TensorList buffer_comm_results;
+      for (auto& comm_result : _comm_results) {
+        HT_ASSERT(is_concat_op(comm_result->producer()))
+          << "comm result should be concat op only";
+        // ****TODO: A more general way! We need to find the mapping of all concat op and NDArray output (non-contiguous)
+        // now only support buffer for dim = 2 and concat on a single axis while the other axis is not
+        if (comm_result->producer()->num_inputs() == 1) {
+          if (NeedConcatBuffer(comm_result->producer()->input(0)->producer())) {
+            buffer_comm_results.push_back(comm_result->producer()->input(0));
+          }
+        } else {
+          if (NeedConcatBuffer(comm_result->producer())) {
+            buffer_comm_results.push_back(comm_result);
+          }
+        }
+      }
+      _concat_buffer = std::make_shared<ParamBuffer>(buffer_comm_results);
+      // HT_LOG_INFO << local_device << ": concat buffer has " << _concat_buffer->_tensor_list.size() << " tensor";
+    }
+    // 结束对准备工作的profile
     if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
       TOK(switch_params_making);
       HT_LOG_INFO << local_device << ": switch params making graph & plan time = " << COST_MSEC(switch_params_making) << " ms";
@@ -864,6 +930,8 @@ void SwitchExecGraph::SwitchParams() {
 
   // profile时需要先都同步好了
   if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
+    // warm up the comm group
+    WarmUpComm(_comm_set);
     // stream同步
     SynchronizeAllStreams(local_device);
     // rank同步
@@ -926,6 +994,23 @@ void SwitchExecGraph::SwitchParams() {
       BufferBatchedIsendIrecv(op, tensor2data, tensor2degrees);
       continue;
     }
+    // 特殊处理3
+    // after graph的param已经被分配（_concat_buffer)
+    // 即指定>=2输入的concat算子的输出的allocation
+    if (_use_concat_buffer && is_concat_op(op) && _concat_buffer->HasTensor(op->output(0))) {
+      HT_ASSERT(_concat_buffer != nullptr)
+        << "_concat_buffer should be initialized";
+      // Alloc on-the-fly
+      if (!_concat_buffer->IsAllocated()) {
+        // 分配concat的buffer
+        // TODO: 目前可能显存溢出，之后应该考虑在溢出时扫描mempool中的free_event
+        // 这样kComputingStream的concat_buffer的显存可以重用刚刚在op_stream上send_buffer释放出的显存
+        _concat_buffer->Alloc(Stream(local_device, kComputingStream));
+      }
+      auto& concat_output = op->output(0);
+      auto concat_output_data = NDArray(concat_output->meta(), _concat_buffer->AsStorage(), _concat_buffer->GetElementOffest(concat_output));
+      runtime_ctx.add_runtime_allocation(concat_output->id(), concat_output_data);
+    }
     // 正常按照算子的逻辑进行处理
     NDArrayList input_vals;
     input_vals.reserve(op->num_inputs());
@@ -967,6 +1052,10 @@ void SwitchExecGraph::SwitchParams() {
   }
   // 清空tensor2data
   tensor2data.clear();
+  // 清空concat的buffer（让_concat_buffer的storage的所有权转交给_preserved_data）
+  if (_use_concat_buffer) {
+    _concat_buffer->Free();
+  }
   // 清空recv的buffer
   // TODO: 按bucket发送并及时清除（虽然会提高延时，但能降低显存）
   for (auto& kv : _recv_buffers) {
@@ -1037,6 +1126,10 @@ void SwitchExecGraph::ProfileRunningDetails() {
       slice_time += op->TimeCost(0) * 1.0 / 1e6;
       slice_num += 1;
     } else if (is_concat_op(op)) {
+      // inplace and no concat
+      if (op->num_inputs() == 1) {
+        continue;
+      }
       concat_time += op->TimeCost(0) * 1.0 / 1e6;
       concat_num += 1;
     } else if (is_contiguous_op(op)) {
@@ -1063,17 +1156,30 @@ void SwitchExecGraph::ProfileRunningDetails() {
 
   // comm detailed info
   std::vector<Device>& send_to_devices = _send_mapping[local_device].first;
+  std::vector<Device>& recv_from_devices = _recv_mapping[local_device].first;
   TensorList& send_tensors = _send_mapping[local_device].second;
+  TensorList& recv_tensors = _recv_mapping[local_device].second;
   std::unordered_map<Device, std::vector<std::string>> send_info_mapping;
+  std::unordered_map<Device, std::vector<std::string>> recv_info_mapping;
   std::ostringstream send_info_output;
+  std::ostringstream recv_info_output;
   auto send_len = send_to_devices.size();
+  auto recv_len = recv_from_devices.size();
   HT_ASSERT(send_tensors.size() == send_len)
-    << "something wrong with the size";
+    << "something wrong with the send size";
+  HT_ASSERT(recv_tensors.size() == recv_len)
+    << "something wrong with the recv size";
   for (size_t i = 0; i < send_len; ++i) {
     auto it = _info_mapping.find(send_tensors[i]->id());
     HT_ASSERT(it != _info_mapping.end())
       << "send tensor info is not existed";
     send_info_mapping[send_to_devices[i]].push_back(it->second);
+  }
+  for (size_t i = 0; i < recv_len; ++i) {
+    auto it = _info_mapping.find(recv_tensors[i]->id());
+    HT_ASSERT(it != _info_mapping.end())
+      << "recv tensor info is not existed";
+    recv_info_mapping[recv_from_devices[i]].push_back(it->second);
   }
   for (const auto& kv : send_info_mapping) {
     send_info_output << "send " << kv.second.size()
@@ -1085,6 +1191,16 @@ void SwitchExecGraph::ProfileRunningDetails() {
     }
     send_info_output << std::endl;
   }
+  for (const auto& kv : recv_info_mapping) {
+    recv_info_output << "recv " << kv.second.size()
+      << " tensor from " << kv.first;
+    if (_profile_level == SWITCH_PROFILE_LEVEL::TRACE) {
+      for (const auto& recv_info : kv.second) {
+        recv_info_output << ", " << recv_info;
+      }
+    }
+    recv_info_output << std::endl;
+  }
 
   HT_LOG_INFO << local_device << ": switch params running details: " << std::endl
     << "*********************************************" << std::endl
@@ -1095,6 +1211,8 @@ void SwitchExecGraph::ProfileRunningDetails() {
     << "comm num = " << comm_num << ", time = " << comm_time << " ms" << std::endl
     << "*********************************************" << std::endl
     << send_info_output.str()
+    << "---------------------------------------------" << std::endl
+    << recv_info_output.str()
     << "*********************************************";
 }
 

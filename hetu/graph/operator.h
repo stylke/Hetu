@@ -167,9 +167,32 @@ class RuntimeContext {
     return it->second;
   }
 
+  const Tensor2NDArrayMap& allocation_plan() const {
+    return _allocation_plan;
+  }
+
+  bool has_runtime_allocation(const TensorId& tensor_id) const {
+    return _allocation_plan.find(tensor_id) != _allocation_plan.end();
+  }
+
+  void add_runtime_allocation(const TensorId& tensor_id, const NDArray& allocation) {
+    auto it = _allocation_plan.find(tensor_id);
+    HT_ASSERT(it == _allocation_plan.end())
+      << "Tensor " << tensor_id << " is already existed in runtime allocation plan";
+    _allocation_plan[tensor_id] = allocation;
+  }
+
+  const NDArray& get_runtime_allocation(const TensorId& tensor_id) const {
+    auto it = _allocation_plan.find(tensor_id);
+    HT_ASSERT(it != _allocation_plan.end())
+      << "Tensor " << tensor_id << " is not existed in runtime allocation plan";
+    return it->second;
+  }
+
  private:
-  std::unordered_map<OpId, OpRuntimeContext*> _ctxs;
-  Tensor2ShapeMap _shape_plan;
+  std::unordered_map<OpId, OpRuntimeContext*> _ctxs; // 初始化时进行赋值
+  Tensor2ShapeMap _shape_plan; // 初始化时进行赋值，每个tensor必须有一个对应的shape，没有则报错
+  Tensor2NDArrayMap _allocation_plan; // 初始化后进行赋值，部分tensor可以有一个对应的allocation，没有则临时分配
 };
 
 struct OpInstantiationContext {

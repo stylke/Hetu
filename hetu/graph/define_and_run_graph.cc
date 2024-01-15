@@ -161,6 +161,15 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
       // 之后会使用热切换
       _add_on_inits.erase(tensor->id());
     }
+    //////////
+    auto local_device = hetu::impl::comm::GetLocalDevice();
+    if (is_variable_op(exec_tensor->producer()) 
+        && exec_tensor->producer()->device_group().contains(local_device)) {
+      exec_tensor->set_placement_group(exec_tensor->producer()->device_group());
+      exec_tensor->set_placement(local_device);
+      Graph::AllocVariableData(exec_tensor);
+    }
+    /////////
   };
 
   HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << topo;
@@ -495,7 +504,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   // Test Case: 切换并行方案（验证切换时间）
   char* env = std::getenv("HETU_PARALLEL_CHANGE_TEST");
   if (env != nullptr) {
-    if (std::string(env) == "COST" && change_parallel_test_case >= 2) {
+    if (std::string(env) == "COST" && change_parallel_test_case >= 1) {
       return {};
     }
   }

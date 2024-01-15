@@ -148,13 +148,18 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     else {
       for (size_t i = 0; i < output_size; i++) {
         // question: will tensor shape != NDArray shape happen in any situation
-        const auto& output_shape = runtime_ctx.get_runtime_shape(op->output(i)->id());
+        auto output_id = op->output(i)->id();
+        const auto& output_shape = runtime_ctx.get_runtime_shape(output_id);
         HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
           << " output " << i << " shape = " << output_shape << " ds = " << op->output(i)->get_distributed_states().ds_info();
-        outputs.push_back(NDArray::empty(output_shape,
-                          op->instantiation_ctx().placement,
-                          op->output(i)->dtype(),
-                          op->instantiation_ctx().stream_index));
+        if (runtime_ctx.has_runtime_allocation(output_id)) {
+          outputs.push_back(runtime_ctx.get_runtime_allocation(output_id));
+        } else {
+          outputs.push_back(NDArray::empty(output_shape,
+                            op->instantiation_ctx().placement,
+                            op->output(i)->dtype(),
+                            op->instantiation_ctx().stream_index));
+        }
         // for some ops that rely on symbolic shape
         if (op->output(i)->symbolic()) {
           HT_LOG_TRACE << "exec op " << op 

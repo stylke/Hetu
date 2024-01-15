@@ -35,6 +35,9 @@ enum class SWITCH_PROFILE_LEVEL : int8_t {
 };
 
 class ParamBuffer {
+  protected:
+    friend class SwitchExecGraph;
+
   public:
     ParamBuffer(const TensorList& tensor_list = {}) {
       _tensor_list = tensor_list;
@@ -46,15 +49,21 @@ class ParamBuffer {
             << "ParamBuffer dtype should be consistent";
         }
         HT_ASSERT(_tensor_offset_mapping.find(tensor->id()) == _tensor_offset_mapping.end())
-          << "tensor should be unique in the ParamBuffer";
+          << "tensor should be unique in the ParamBuffer"
+          << ", but there are multiple " << tensor;
         _tensor_offset_mapping[tensor->id()] = _buffer_size;
         _buffer_size += tensor->numel() * DataType2Size(tensor->dtype());
       }
     }
 
+    bool HasTensor(const Tensor& tensor) {
+      return _tensor_offset_mapping.find(tensor->id()) != _tensor_offset_mapping.end();
+    }
+
     void AddTensor(const Tensor& tensor) {
       HT_ASSERT(_tensor_offset_mapping.find(tensor->id()) == _tensor_offset_mapping.end())
-        << "tensor should be unique in the ParamBuffer";
+        << "tensor should be unique in the ParamBuffer"
+        << ", but there are multiple " << tensor;
       if (_dtype == DataType::UNDETERMINED) {
           _dtype = tensor->dtype();
       } else {
@@ -299,8 +308,11 @@ class SwitchExecGraph {
     }
 
     void RecordTensorInfo(const Tensor& tensor, const std::string& info) {
-      HT_ASSERT(_info_mapping.find(tensor->id()) == _info_mapping.end())
-        << "tensor " << tensor << " is already existed in the info mapping of the switcher";
+      if (_info_mapping.find(tensor->id()) != _info_mapping.end()) {
+        HT_ASSERT(_info_mapping[tensor->id()] == info)
+          << "tensor " << tensor << " is already existed in the info mapping of the switcher"
+          << ", the new info is conflicted with the existed info";
+      }
       _info_mapping[tensor->id()] = info;
     }
 
@@ -361,9 +373,6 @@ class SwitchExecGraph {
     TensorList _comm_results; // 该图通信的结果，与_define_graph_params一一对应
     Tensor2TensorMap _comm_results_mapping; // 该图的输出到after graph的映射
     TensorList _dummy_links; // 只有send没有recv时BatchedISendIRecvOp的输出dummy tensor需要被记录并在之后fetch
-    std::unordered_map<Device, std::shared_ptr<ParamBuffer>> _send_buffers; // 记录通信时给每个device聚合发送时所用的buffer
-    std::unordered_map<Device, std::shared_ptr<ParamBuffer>> _recv_buffers; // 记录通信时从每个device聚合接收时所用的buffer
-    std::vector<std::unique_ptr<hetu::impl::CUDAEvent>> _buffer_transfer_events; // 记录将原先的param构成一长条buffer的events
 
     // comm plan related
     SWITCH_ALGORITHM_LEVEL _algorithm_level = SWITCH_ALGORITHM_LEVEL::GREEDY; // 采用的算法
@@ -371,6 +380,13 @@ class SwitchExecGraph {
     Device2DTListPairMap _send_mapping; // 记录了每个device要send的(device, tensor)的pair
     Device2DTListPairMap _recv_mapping; // 记录了每个device要recv的(device, placeholder的tensor（之后会替换）)的pair
     std::vector<std::shared_ptr<ParamBlock>> _param_blocks; // 记录了graph所包含的所有的抽象ParamBlock
+
+    // memory optimization related
+    std::unordered_map<Device, std::shared_ptr<ParamBuffer>> _send_buffers; // 记录通信时给每个device聚合发送时所用的buffer
+    std::unordered_map<Device, std::shared_ptr<ParamBuffer>> _recv_buffers; // 记录通信时从每个device聚合接收时所用的buffer
+    std::vector<std::unique_ptr<hetu::impl::CUDAEvent>> _buffer_transfer_events; // 记录将原先的param构成一长条buffer的events
+    bool _use_concat_buffer = true; // 是否对concat算子的输出做一个buffer
+    std::shared_ptr<ParamBuffer> _concat_buffer; // 通信后从_recv_buffers里concat形成的所有param构成的buffer
 
     // profile related
     SWITCH_PROFILE_LEVEL _profile_level = SWITCH_PROFILE_LEVEL::INFO; // profile的粒度（开启后会进行同步，因此端到端速度可能会变慢）

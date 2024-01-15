@@ -88,6 +88,9 @@ class ConcatenateOpImpl final : public OpInterface {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;
 
+  NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
+                        RuntimeContext& runtime_ctx) const override;
+  
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
 
