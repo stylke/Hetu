@@ -84,7 +84,7 @@ class DefineAndRunGraph : public Graph {
 
   void Clear() override {
     _add_on_inits.clear();
-    _device_groups.clear();
+    _multi_device_groups.clear();
     _exec_graph_plan_pool.clear();
     _shape_plan_pool.clear();
     Graph::Clear();
@@ -97,7 +97,7 @@ class DefineAndRunGraph : public Graph {
 
   size_t _init_capacity;
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
-  std::vector<DeviceGroup> _device_groups; // all the device groups of ops, in the order of MakeOp calls
+  std::vector<DeviceGroupList> _multi_device_groups; // all the device groups of ops, in the order of MakeOp calls
 
   std::vector<ExecGraphPlan> _exec_graph_plan_pool;
   std::vector<Tensor2ShapeMap> _shape_plan_pool;

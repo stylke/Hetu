@@ -138,14 +138,14 @@ void AddPyOperatorTypeToModule(py::module_& module) {
 PyObject* PyPushOpCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "push_op_ctx(Device eager_device=None, DeviceGroup device_group=None, int stream_index=None, DataType dtype=None, List[Tensor] extra_deps=None)"
+    "push_op_ctx(Device eager_device=None, DeviceGroupList device_groups=None, int stream_index=None, DataType dtype=None, List[Tensor] extra_deps=None)"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     if (parsed_args.has(0))
       get_eager_device_ctx().push(parsed_args.get_device(0));
     if (parsed_args.has(1))
-      get_device_group_ctx().push(parsed_args.get_device_group(1));
+      get_device_groups_ctx().push(parsed_args.get_device_groups(1));
     if (parsed_args.has(2))
       get_stream_index_ctx().push(parsed_args.get_stream_index(2));
     if (parsed_args.has(3))
@@ -163,14 +163,14 @@ PyObject* PyPushOpCtx(PyObject*, PyObject* args, PyObject* kwargs) {
 PyObject* PyPopOpCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "pop_op_ctx(bool pop_eager_device=False, bool pop_device_group=False, bool pop_stream_index=False, bool pop_dtype=False, bool pop_extra_deps=False)"
+    "pop_op_ctx(bool pop_eager_device=False, bool pop_device_groups=False, bool pop_stream_index=False, bool pop_dtype=False, bool pop_extra_deps=False)"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     if (parsed_args.get_bool_or_default(0))
       get_eager_device_ctx().pop();
     if (parsed_args.get_bool_or_default(1))
-      get_device_group_ctx().pop();
+      get_device_groups_ctx().pop();
     if (parsed_args.get_bool_or_default(2))
       get_stream_index_ctx().pop();
     if (parsed_args.get_bool_or_default(3))

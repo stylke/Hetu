@@ -6,6 +6,31 @@
 namespace hetu {
 namespace impl {
 
+template<typename spec_t, int vec_size>
+struct alignas(sizeof(spec_t) * vec_size) aligned_vector {
+  spec_t val[vec_size];
+};
+
+inline size_t numel(const HTShape& shape) {
+  size_t num = 1;
+  for (auto& s : shape) {
+    num *= s;
+  }
+  return num;
+}
+
+inline HTStride Shape2Stride(const HTShape& shape) {
+  auto size = shape.size();
+  HTStride stride(size);
+  if (size > 0) {
+    stride[size - 1] = 1;
+    for (auto d = size - 1; d > 0; d--) {
+      stride[d - 1] = stride[d] * shape[d];
+    }
+  }
+  return stride;
+}
+
 inline int GetThreadNum(int cnt) {
   if (cnt >= 1048576)
     return 1024;

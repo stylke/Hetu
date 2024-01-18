@@ -5,27 +5,33 @@
 
 namespace hetu {
 namespace graph {
-  
+
+class DistributedStates;
+using DistributedStatesList = std::vector<DistributedStates>;
+
 class DistributedStates {
  public:
-  DistributedStates() : _device_num(-1), _states({}), _order({}) {};
+  DistributedStates() : _device_num(-1), _states({}), _order({}), _zero(false) {};
   DistributedStates(DeviceGroup placement_group, std::unordered_map<int32_t, int32_t> states, 
-                    std::vector<int32_t> order = {}) {
+                    std::vector<int32_t> order = {}, bool zero = false) {
     _placement_group = placement_group;
     _device_num = placement_group.num_devices();
+    _zero = zero;
     set_states(states);
     set_order(order); 
   }
   // independent distributed states, the placement_group should be assigned when binding with tensor
   DistributedStates(int32_t device_num, std::unordered_map<int32_t, int32_t> states, 
-                    std::vector<int32_t> order = {}) {
+                    std::vector<int32_t> order = {}, bool zero = false) {
     _placement_group = DeviceGroup();
     _device_num = device_num;
+    _zero = zero;
     set_states(states);
     set_order(order); 
   }
   DistributedStates(const DistributedStates& ds) {
     _device_num = -1;
+    if (ds._device_num == -1) return; // do nothing if ds is invalid
     set_distributed_states(ds);
   }
 
@@ -57,6 +63,14 @@ class DistributedStates {
 
   bool has_placement_group() const {
     return !_placement_group.empty();
+  }
+  
+  bool zero() const {
+    return _zero;
+  }
+
+  void set_zero(bool zero) {
+    _zero = zero;
   }
 
   const DeviceGroup& get_placement_group() const {
@@ -110,6 +124,7 @@ class DistributedStates {
 
   void set_order(const std::vector<int32_t>& order);
 
+  bool _zero;
   std::unordered_map<int32_t, int32_t> _states; // {dimension: split_num}, {-2: partial, -1: duplicate, 0~n-1: dimension}
   std::vector<int32_t> _order; // for device mapping
   DeviceGroup _placement_group; // must be assigned when binding with tensor

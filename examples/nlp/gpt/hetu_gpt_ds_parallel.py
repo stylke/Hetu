@@ -11,6 +11,7 @@ class GPTAttention(ht.nn.Module):
         super().__init__()
 
         self.config = config
+        self.use_flash_attn = config.use_flash_attn
         self.add_bias = True
 
         max_positions = config.max_position_embeddings
@@ -71,10 +72,12 @@ class GPTAttention(ht.nn.Module):
         causal_mask = ht.from_numpy_parallel(parallel_data_provider(np.tile(self.bias[:, :, :seq_len, :seq_len], 
                                                                             (micro_batch_size, num_heads, 1, 1)),
                                                                     attn_weights.distributed_states, device_index),
-                                             attn_weights.distributed_states, device_group=self.qkv_dense.device_group, name='causal_mask')
+                                             attn_weights.distributed_states, requires_grad=False,
+                                             device_group=self.qkv_dense.device_group, name='causal_mask')
         mask = ht.from_numpy_parallel(parallel_data_provider(np.full(attn_weights.global_shape, self.masked_value, dtype=np.float32),
                                                              attn_weights.distributed_states, device_index), 
-                                      attn_weights.distributed_states, device_group=self.qkv_dense.device_group, name='mask')
+                                      attn_weights.distributed_states, requires_grad=False,
+                                      device_group=self.qkv_dense.device_group, name='mask')
         attn_weights = ht.where(causal_mask, attn_weights, mask)
         if attention_mask is not None:
             # attn_weights: shape=[micro_batch_size, num_heads, seq_len, seq_len]
@@ -87,7 +90,7 @@ class GPTAttention(ht.nn.Module):
         # softmax
         attn_weights = ht.softmax(attn_weights, 3)
         # dropout
-        attn_weights = self.attn_dropout(attn_weights)
+        # attn_weights = self.attn_dropout(attn_weights)
         # weight sum, shape=[micro_batch_size, num_heads, seq_len, head_dim]
         attn_output = ht.bmm(attn_weights, value)
 
@@ -109,29 +112,33 @@ class GPTAttention(ht.nn.Module):
         qkv = self.qkv_dense(hidden_states)
         # print(f'qkv.global_shape={qkv.global_shape}, qkv.shape={qkv.shape}, qkv.distributed_states={qkv.distributed_states}')        
         # [micro_batch_size, seq_len, num_heads, 3*head_dim]
-        qkv = qkv.reshape([micro_batch_size, seq_len, self.num_heads, 3 * self.head_dim])
+        qkv = qkv.reshape([micro_batch_size, -1, self.num_heads, 3 * self.head_dim])
         # q,k,v shape=[micro_batch_size, seq_len, num_heads, head_dim]
         query, key, value = ht.split(qkv, 3, qkv.ndim - 1)
 
-        # [micro_batch_size, num_heads, seq_len, head_dim]
-        query = query.transpose([0, 2, 1, 3])
-        value = value.transpose([0, 2, 1, 3])
-        # [micro_batch_size, num_heads, head_dim, seq_len]
-        key_t = key.transpose([0, 2, 3, 1]) # k^T
+        if self.use_flash_attn:
+            attn_output = ht.attn(query, key, value, 0, -1, True)[0]
+        else:
+            # [micro_batch_size, num_heads, seq_len, head_dim]
+            query = query.transpose([0, 2, 1, 3], name="AttentionOp_query")
+            value = value.transpose([0, 2, 1, 3], name="AttentionOp_value")
+            # [micro_batch_size, num_heads, head_dim, seq_len]
+            key_t = key.transpose([0, 2, 3, 1], name="AttentionOp_key") # k^T
 
-        # self-attn, shape=[micro_batch_size, num_heads, seq_len, head_dim]
-        attn_output, attn_weights = self._attn(query, key_t, value, attention_mask)
+            # self-attn, shape=[micro_batch_size, num_heads, seq_len, head_dim]
+            attn_output, attn_weights = self._attn(query, key_t, value, attention_mask)
 
-        # [micro_batch_size, seq_len, num_heads, head_dim]
-        attn_output = attn_output.transpose([0, 2, 1, 3])
+            # [micro_batch_size, seq_len, num_heads, head_dim]
+            attn_output = attn_output.transpose([0, 2, 1, 3])
+        
         # [micro_batch_size*seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([micro_batch_size * seq_len, self.num_heads * self.head_dim])
+        attn_output = attn_output.reshape([-1, self.num_heads * self.head_dim])
         # row parallel, shape=[micro_batch_size*seq_len, num_heads*head_dim]
         attn_output = self.dense(attn_output)
         # [micro_batch_size, seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([micro_batch_size, seq_len, self.num_heads * self.head_dim])
+        attn_output = attn_output.reshape([micro_batch_size, -1, self.num_heads * self.head_dim])
         # dropout
-        attn_output = self.resid_dropout(attn_output)
+        # attn_output = self.resid_dropout(attn_output)
 
         # [micro_batch_size, seq_len, num_heads*head_dim]
         return attn_output
@@ -175,7 +182,7 @@ class ParallelMLP(ht.nn.Module):
 
         # [b*seq_len, 4h] -> [b*seq_len, h]
         output = self.dense_4h_to_h(intermediate_parallel)
-        output = self.dropout(output)
+        # output = self.dropout(output)
         return output
 
 class GPTMLP(ht.nn.Module):
@@ -278,7 +285,7 @@ class GPTModel(ht.nn.Module):
             assert attention_mask.global_shape == input_ids.global_shape \
                 and attention_mask.distributed_states.check_equal(attention_mask.distributed_states), \
                 'attention_mask global_shape and distributed_states should be equal to input_ids!'
-            attention_mask = attention_mask.reshape([micro_batch_size, 1, 1, seq_len])
+            attention_mask = attention_mask.reshape([micro_batch_size, 1, 1, -1])
             # 原attention_mask: 1为使用的值, 0为mask的值
             # attention_mask = attention_mask.to(dtype=self.dtype)  # fp16 compatibility
             attention_mask = (1.0 - attention_mask) * -10000.0 # 0为使用的值, -10000为mask的值
@@ -292,7 +299,7 @@ class GPTModel(ht.nn.Module):
             token_type_embeds = self.wte(token_type_ids) # [b, seq_len, embed_dim]
             hidden_states = hidden_states + token_type_embeds
         # dropout
-        hidden_states = self.drop(hidden_states)
+        # hidden_states = self.drop(hidden_states)
 
         # 12 x multihead self-attn
         for i, block in enumerate(self.h):
@@ -351,8 +358,15 @@ class GPTLMHeadModel(ht.nn.Module):
             # softmax cross_entropy loss = sum(-log(softmax(vocab[label])))
             # because of ignored_index, so cannot use auto distributed reduce for mean
             # need sum over distributed tensor, and divide the not ignored_index num after by hand
-            loss = ht.vocab_parallel_cross_entropy(shift_lm_logits,  
-                   shift_labels, ignored_index = -1, reduction = "mean")
+            # print(shift_lm_logits.distributed_states)
+            if shift_lm_logits.distributed_states.get_dim(1) > 1:
+                # print('use vocab parallel cross entropy')
+                loss = ht.vocab_parallel_cross_entropy(shift_lm_logits,  
+                    shift_labels, ignored_index = -1, reduction = "mean")
+            else:
+                # print('use commom cross entropy')
+                loss = ht.softmax_cross_entropy_sparse(shift_lm_logits,
+                    shift_labels, ignored_index = -1, reduction = "mean")
         output = (shift_lm_logits,)
         output = ((loss,) + output) if loss is not None else output
         return output # ((loss), (shift_lm_logits))

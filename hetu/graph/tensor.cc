@@ -102,6 +102,14 @@ NDArray TensorDef::get_or_compute() {
   return graph().GetOrCompute(get_self());
 }
 
+size_t TensorDef::num_strategy() const {
+  return graph().NUM_STRATEGY;
+}
+
+size_t TensorDef::cur_strategy_id() const {
+  return graph().CUR_STRATEGY_ID;
+}
+
 std::ostream& operator<<(std::ostream& os, const Tensor& tensor) {
   if (tensor.is_defined())
     os << tensor->name();

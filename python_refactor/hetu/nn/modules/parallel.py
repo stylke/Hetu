@@ -55,7 +55,7 @@ class ParallelLayerNorm(Module):
                                               dtype=dtype, requires_grad=True, device_group=device_group, name=f'{name}_bias')
 
     def forward(self, input_p):
-        return hetu.layer_norm(input_p, self.weight, self.bias, self.normalized_shape, self.eps, device_group=self.device_group, name=self.name)[0]
+        return hetu.fused_layernorm(input_p, self.weight, self.bias, self.normalized_shape, self.eps, device_group=self.device_group, name=self.name)[0]
 
 class ParallelEmbedding(Module):
     def __init__(self, num_embeddings, embedding_dim, device_group, init_method='xavier_normal_', dtype=hetu.float32, name='embedding'):

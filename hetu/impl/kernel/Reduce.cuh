@@ -7,6 +7,7 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
+#include <numeric>
 
 namespace hetu {
 namespace impl {
@@ -27,15 +28,10 @@ struct OpMathType<hetu::float16> {
 template <typename T>
 using opmath_type = typename OpMathType<T>::type;
 
-template<typename spec_t, int vec_size>
-struct alignas(sizeof(spec_t) * vec_size) aligned_vector {
-  spec_t val[vec_size];
-};
-
 template <typename spec_t, typename arg_t, typename func_t>
-struct functor_wrapper_t {
+struct func_wrapper_t {
   func_t combine;
-  functor_wrapper_t(const func_t& op) : combine(op) {}
+  func_wrapper_t(const func_t& op) : combine(op) {}
 
   static inline __device__ spec_t project(arg_t val) {
     return static_cast<spec_t>(val);
@@ -47,9 +43,11 @@ struct functor_wrapper_t {
 };
 
 template <typename spec_t, typename arg_t, typename func_t>
-functor_wrapper_t<spec_t, arg_t, func_t> functor_wrapper(const func_t& op) {
-  return functor_wrapper_t<spec_t, arg_t, func_t> { op };
+func_wrapper_t<spec_t, arg_t, func_t> func_wrapper(const func_t& op) {
+  return func_wrapper_t<spec_t, arg_t, func_t> { op };
 }
+
+static constexpr int MAX_NUM_THREADS = 512;
 
 // Return floor(log2(n))
 static inline int last_pow2(int n) {
@@ -87,8 +85,6 @@ int get_output_vec_size(size_t reduce_ndim, size_t ndim, const HTShape& in_shape
 
 struct ReduceConfig {
   static constexpr int input_vec_size = 4;
-  static constexpr int warp_size = 32;
-  static constexpr int MAX_NUM_THREADS = 512;
 
   ReduceConfig(int element_size_bytes, int num_outputs, int num_inputs)
     : element_size_bytes(element_size_bytes)
@@ -117,7 +113,7 @@ struct ReduceConfig {
     int dim0_pow2 = dim0 < max_num_threads ? static_cast<int>(last_pow2(dim0)) : max_num_threads;
     int dim1_pow2 = dim1 < max_num_threads ? static_cast<int>(last_pow2(dim1)) : max_num_threads;
 
-    block_width = std::min(dim0_pow2, static_cast<int>(warp_size));
+    block_width = std::min(dim0_pow2, static_cast<int>(HT_WARP_SIZE));
     block_height = std::min(dim1_pow2, static_cast<int>(max_num_threads / block_width));
     block_width = std::min(dim0_pow2, static_cast<int>(max_num_threads / block_height));
     num_threads = block_width * block_height;
@@ -200,8 +196,8 @@ struct ReduceConfig {
   int shared_memory_size() const {
     if (!should_block_y_reduce() &&
         (!should_block_x_reduce() ||
-         block_width <= warp_size)) {
-          return 0;
+         block_width <= HT_WARP_SIZE)) {
+      return 0;
     }
     return element_size_bytes * num_threads * output_vec_size;
   }
@@ -254,6 +250,7 @@ static ReduceConfig setReduceConfig(size_t reduce_ndim, size_t ndim, const HTSha
   // NOTE: dim0 & dim1 does not guarantee any reduce config
   int64_t dim0;
   int64_t dim1;
+  int64_t fastest_moving_stride;
   bool contiguous_reduction;
 
   if (ndim > 0) {
@@ -267,25 +264,30 @@ static ReduceConfig setReduceConfig(size_t reduce_ndim, size_t ndim, const HTSha
       // block_x_reduce is required
       dim0 = inputs_per_output;
       dim1 = num_outputs;
+      fastest_moving_stride = in_strides[0];
     } else {
       // Map block.x to every output
       dim0 = num_outputs;
       dim1 = inputs_per_output;
+      fastest_moving_stride = in_strides[reduce_ndim];
     }
   } else {
     contiguous_reduction = true;
+    fastest_moving_stride = 1;
     dim0 = 1;
     dim1 = 1;
   }
 
   // We do vectorization to gain better memory access
-  if (contiguous_reduction && dim0 > 128 && reduce_ndim == 1) {
-    config.vectorize_input = true;
-    dim0 /= config.input_vec_size;
-  } else if (!contiguous_reduction) {
-    config.output_vec_size = get_output_vec_size<spec_t>(reduce_ndim, ndim, in_shape,
-                                                         in_strides, input);
-    dim0 /= config.output_vec_size;
+  if (fastest_moving_stride == 1) {
+    if (contiguous_reduction && dim0 > 128 && reduce_ndim == 1) {
+      config.vectorize_input = true;
+      dim0 /= config.input_vec_size;
+    } else if (!contiguous_reduction) {
+      config.output_vec_size = get_output_vec_size<spec_t>(reduce_ndim, ndim, in_shape,
+                                                          in_strides, input);
+      dim0 /= config.output_vec_size;
+    }
   }
   
   // Adjust block_width and block_height
@@ -294,7 +296,7 @@ static ReduceConfig setReduceConfig(size_t reduce_ndim, size_t ndim, const HTSha
   int block_width = config.block_width;
   int block_height = config.block_height;
 
-  if (contiguous_reduction) {
+  if (ndim == 0 || contiguous_reduction) {
     config.input_mult[0] = config.split_input(block_width);
   } else {
     config.output_mult[0] = config.split_output(block_width);
@@ -513,7 +515,7 @@ __device__ void thread_reduce(const spec_t* data, const int64_t* in_strides, con
   }
 }
 
-template <typename spec_t, typename arg_t, int output_vec_size, typename op_t>
+template <typename arg_t, int output_vec_size, typename op_t>
 __device__ void block_x_reduce(arg_t* value, char* shared_memory, const op_t& ops) {
   using args_vec_t = arg_t[output_vec_size];
   args_vec_t* shared = reinterpret_cast<args_vec_t*>(shared_memory);
@@ -544,13 +546,13 @@ __device__ void block_x_reduce(arg_t* value, char* shared_memory, const op_t& op
   for (int offset = 1; offset < dim_x; offset <<= 1) {
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
-      arg_t other = __shfl_down_sync(mask, value[i], offset, warpSize);
+      arg_t other = hetu::cuda::shfl_down_sync(mask, value[i], offset, warpSize);
       value[i] = ops.reduce(value[i], other);
     }
   }
 }
 
-template <typename spec_t, typename arg_t, int output_vec_size, typename op_t>
+template <typename arg_t, int output_vec_size, typename op_t>
 __device__ void block_y_reduce(arg_t* value, char* shared_memory, ReduceConfig config,
                                const op_t& ops) {
   using args_vec_t = arg_t[output_vec_size];
@@ -572,22 +574,22 @@ __device__ void block_y_reduce(arg_t* value, char* shared_memory, ReduceConfig c
   }
 }
 
-template <typename spec_t, typename arg_t, int output_vec_size, typename op_t, typename ident_t=double>
+template <typename spec_t, typename arg_t, typename out_t, int output_vec_size, typename op_t, typename ident_t=double>
 __device__ void global_reduce(arg_t* value, char* shared_memory, void* cta_buf, const int64_t* out_strides,
                               const int64_t* in_shape, size_t reduce_ndim, size_t ndim,
-                              spec_t* output, int* semaphores, ReduceConfig config,
+                              out_t* output, int* semaphores, ReduceConfig config,
                               const op_t& ops, ident_t ident) {
   using args_vec_t = arg_t[output_vec_size];
   args_vec_t* reduce_buffer = reinterpret_cast<args_vec_t*>(cta_buf);
   int64_t output_idx = config.output_idx<output_vec_size>();
   int64_t out_base_offsets[output_vec_size];
-  spec_t* out_addr[output_vec_size];
+  out_t* out_addr[output_vec_size];
 
   #pragma unroll
   for (int i = 0; i < output_vec_size; i++) {
     out_base_offsets[i] = calc_offset(output_idx + i, out_strides, in_shape,
                                   reduce_ndim, ndim);
-    out_addr[i] = reinterpret_cast<spec_t*>((char*)output + out_base_offsets[i] * sizeof(spec_t));
+    out_addr[i] = reinterpret_cast<out_t*>((char*)output + out_base_offsets[i] * sizeof(out_t));
   }
 
   bool should_store = config.should_store(output_idx);
@@ -625,9 +627,9 @@ __device__ void global_reduce(arg_t* value, char* shared_memory, void* cta_buf, 
         value[i] = ops.reduce(value[i], reduce_buffer[idx][i]);
       }
     }
-    block_y_reduce<spec_t, arg_t, output_vec_size>(value, shared_memory, config, ops);
+    block_y_reduce<arg_t, output_vec_size>(value, shared_memory, config, ops);
     if (config.should_block_x_reduce()) {
-      block_x_reduce<spec_t, arg_t, output_vec_size>(value, shared_memory, ops);
+      block_x_reduce<arg_t, output_vec_size>(value, shared_memory, ops);
     }
     if (should_store) {
       #pragma unroll
@@ -701,47 +703,48 @@ static void setReduceMeta(const NDArray& in_arr, size_t in_ndim, int64_t num_ax,
   }
 }
 
-template <typename spec_t, typename arg_t, int output_vec_size, typename op_t, typename ident_t=double>
+template <typename spec_t, typename arg_t, typename out_t, int output_vec_size, typename op_t, typename ident_t=double>
 __global__ void reduce_kernel(const int64_t* in_strides, const int64_t* out_strides, const int64_t* in_shape, const op_t& ops,
                               size_t reduce_ndim, size_t ndim, ident_t ident, const spec_t* input,
-                              spec_t* output, void* cta_buf, int* semaphores, ReduceConfig config) {
+                              out_t* output, void* cta_buf, int* semaphores, ReduceConfig config) {
   extern __shared__ char shared_memory[];
 
   int64_t output_idx = config.output_idx<output_vec_size>();
   int64_t input_idx = config.input_idx();
   int64_t in_base_offset = calc_offset(output_idx, in_strides, in_shape,
-                                    reduce_ndim, ndim);
-  arg_t value[output_vec_size];
+                                       reduce_ndim, ndim);
+  using arg_vec_t = arg_t[output_vec_size];
+  arg_vec_t value;
 
   if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
     const spec_t* input_slice = reinterpret_cast<const spec_t*>((const char*)input + in_base_offset * sizeof(spec_t));
     thread_reduce<spec_t, arg_t, output_vec_size>(input_slice, in_strides, in_shape,
-                                                                 reduce_ndim, value, config, ops, ident);
+                                                  reduce_ndim, value, config, ops, ident);
   }
 
   if (config.should_block_y_reduce()) {
-    block_y_reduce<spec_t, arg_t, output_vec_size>(value, shared_memory, config, ops);
+    block_y_reduce<arg_t, output_vec_size>(value, shared_memory, config, ops);
   }
 
   if (config.should_block_x_reduce()) {
-    block_x_reduce<spec_t, arg_t, output_vec_size>(value, shared_memory, ops);
+    block_x_reduce<arg_t, output_vec_size>(value, shared_memory, ops);
   }
 
   int64_t out_base_offsets[output_vec_size];
-  spec_t* out_addr[output_vec_size];
+  out_t* out_addr[output_vec_size];
 
   #pragma unroll
   for (int i = 0; i < output_vec_size; i++) {
     out_base_offsets[i] = calc_offset(output_idx + i, out_strides, in_shape,
-                             reduce_ndim, ndim);
-    out_addr[i] = reinterpret_cast<spec_t*>((char*)output + out_base_offsets[i] * sizeof(spec_t));
+                                      reduce_ndim, ndim);
+    out_addr[i] = reinterpret_cast<out_t*>((char*)output + out_base_offsets[i] * sizeof(out_t));
   }
 
   if (config.should_global_reduce()) {
     // global_reduce will write back to output
-    global_reduce<spec_t, arg_t, output_vec_size, op_t, ident_t>(value, shared_memory, cta_buf, out_strides,
-                                                                 in_shape, reduce_ndim, ndim, output,
-                                                                 semaphores, config, ops, ident);
+    global_reduce<spec_t, arg_t, out_t, output_vec_size, op_t, ident_t>(value, shared_memory, cta_buf, out_strides,
+                                                                        in_shape, reduce_ndim, ndim, output,
+                                                                        semaphores, config, ops, ident);
   } else if (config.should_store(output_idx)) {
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
@@ -750,7 +753,7 @@ __global__ void reduce_kernel(const int64_t* in_strides, const int64_t* out_stri
   }
 }
 
-template <typename spec_t, typename arg_t, typename op_t, typename ident_t=double>
+template <typename spec_t, typename out_t, typename arg_t, typename op_t, typename ident_t=double>
 void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t* axes,
                           int64_t num_ax, const op_t& ops, ident_t ident, const Stream& stream) {
   if (num_ax <= 0)
@@ -778,31 +781,28 @@ void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t
   CUDAStream cuda_stream(stream);
 
   ReduceConfig config;
-  auto in_merge_shape_arr =
-    hetu::cuda::to_int64_ndarray(in_merge_shape, device_id);
-  auto in_strides_arr = 
-    hetu::cuda::to_int64_ndarray(in_strides, device_id);
-  auto out_strides_arr = 
-    hetu::cuda::to_int64_ndarray(out_strides, device_id);
+  // Merge into one H2D data transfer
+  auto reduce_meta = in_merge_shape;
+  reduce_meta.insert(reduce_meta.end(), in_strides.begin(), in_strides.end());
+  reduce_meta.insert(reduce_meta.end(), out_strides.begin(), out_strides.end());
+  auto reduce_meta_arr = hetu::cuda::to_int64_ndarray(reduce_meta, device_id);
+  int64_t *in_merge_shape_ptr = reduce_meta_arr->data_ptr<int64_t>();
+  int64_t *in_strides_ptr = in_merge_shape_ptr + in_merge_shape.size();
+  int64_t *out_strides_ptr = in_strides_ptr + in_strides.size();
 
   config = setReduceConfig<arg_t, spec_t>(reduce_ndim, merge_ndim, in_merge_shape,
                                           in_strides, in_arr->data_ptr<spec_t>(), cuda_stream);
 
-  uint8_t* cta_buf = nullptr;
-  uint8_t* semaphores = nullptr;
   void* cta_buf_ptr = nullptr;
   int* semaphores_ptr = nullptr;
   NDArray cta_buf_arr, semaphores_arr;
   if (config.should_global_reduce()) {
     auto cta_buf_size = config.global_memory_size();
     auto semaphores_size = config.semaphore_size();
-    cta_buf = new uint8_t[cta_buf_size];
-    semaphores = new uint8_t[semaphores_size];
-    memset(semaphores, 0, semaphores_size);
-    cta_buf_arr = 
-      hetu::cuda::to_byte_ndarray(cta_buf, cta_buf_size, device_id);
-    semaphores_arr = 
-      hetu::cuda::to_byte_ndarray(semaphores, semaphores_size, device_id);
+    cta_buf_arr = NDArray::empty({static_cast<int64_t>(cta_buf_size)},
+                                 Device(kCUDA, stream.device_index()), kByte, stream.stream_index());
+    semaphores_arr = NDArray::zeros({static_cast<int64_t>(semaphores_size)},
+                                    Device(kCUDA, stream.device_index()), kByte, stream.stream_index());
     cta_buf_ptr = cta_buf_arr->raw_data_ptr();
     semaphores_ptr = semaphores_arr->data_ptr<int>();
   }
@@ -813,40 +813,32 @@ void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t
 
   switch(config.output_vec_size) {
     case 4:
-      reduce_kernel<spec_t, arg_t, 4><<<grid, block, shared_memory, cuda_stream>>>(
-        in_strides_arr->data_ptr<int64_t>(),
-        out_strides_arr->data_ptr<int64_t>(),
-        in_merge_shape_arr->data_ptr<int64_t>(),
+      reduce_kernel<spec_t, arg_t, out_t, 4><<<grid, block, shared_memory, cuda_stream>>>(
+        in_strides_ptr, out_strides_ptr, in_merge_shape_ptr,
         ops, reduce_ndim, merge_ndim, ident,
-        in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
+        in_arr->data_ptr<spec_t>(), out_arr->data_ptr<out_t>(),
         cta_buf_ptr, semaphores_ptr, config);
       break;
     case 2:
-      reduce_kernel<spec_t, arg_t, 2><<<grid, block, shared_memory, cuda_stream>>>(
-        in_strides_arr->data_ptr<int64_t>(),
-        out_strides_arr->data_ptr<int64_t>(),
-        in_merge_shape_arr->data_ptr<int64_t>(),
+      reduce_kernel<spec_t, arg_t, out_t, 2><<<grid, block, shared_memory, cuda_stream>>>(
+        in_strides_ptr, out_strides_ptr, in_merge_shape_ptr,
         ops, reduce_ndim, merge_ndim, ident,
-        in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
+        in_arr->data_ptr<spec_t>(), out_arr->data_ptr<out_t>(),
         cta_buf_ptr, semaphores_ptr, config);
       break;
     default:
-      reduce_kernel<spec_t, arg_t, 1><<<grid, block, shared_memory, cuda_stream>>>(
-        in_strides_arr->data_ptr<int64_t>(),
-        out_strides_arr->data_ptr<int64_t>(),
-        in_merge_shape_arr->data_ptr<int64_t>(),
+      reduce_kernel<spec_t, arg_t, out_t, 1><<<grid, block, shared_memory, cuda_stream>>>(
+        in_strides_ptr, out_strides_ptr, in_merge_shape_ptr,
         ops, reduce_ndim, merge_ndim, ident,
-        in_arr->data_ptr<spec_t>(), out_arr->data_ptr<spec_t>(),
+        in_arr->data_ptr<spec_t>(), out_arr->data_ptr<out_t>(),
         cta_buf_ptr, semaphores_ptr, config);
   }
 
   free(reduce_axes);
   if (config.should_global_reduce()) {
     NDArray::MarkUsedBy({cta_buf_arr, semaphores_arr}, stream);
-    delete[] semaphores;
-    delete[] cta_buf;
   }
-  NDArray::MarkUsedBy({in_arr, out_arr, in_strides_arr, out_strides_arr, in_merge_shape_arr}, stream);
+  NDArray::MarkUsedBy({in_arr, out_arr, reduce_meta_arr}, stream);
   return;
 }
 

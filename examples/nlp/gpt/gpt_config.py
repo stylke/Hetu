@@ -29,6 +29,7 @@ class GPTConfig(object):
         global_batch_size = 100,
         num_micro_batches = 1,
         dp = 1,
+        use_flash_attn = False,
     ):
         self.vocab_size = vocab_size
         self.n_ctx = n_ctx
@@ -70,3 +71,4 @@ class GPTConfig(object):
         self.use_return_dict = False
         self.output_attentions = False
         self.output_hidden_states= False
+        self.use_flash_attn = use_flash_attn

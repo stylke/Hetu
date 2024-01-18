@@ -403,7 +403,7 @@ void DefineAndRunGraph::InstantiateTestCase(const OpRefList& topo,
     if (instantiate_test_case == 1) {
       HT_ASSERT(!exec_op_meta.is_deduce_states) 
         << "varaiable op is not supposed to deduce states";
-      exec_op_meta.set_device_group(hetu::impl::comm::GetGlobalDeviceGroup());
+      // exec_op_meta.set_device_group(hetu::impl::comm::GetGlobalDeviceGroup());
     }
 
     auto& exec_op = Graph::MakeOp(

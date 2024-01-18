@@ -9,14 +9,19 @@ void EmbeddingLookupOpImpl::DoCompute(Operator& op,
                                       const NDArrayList& inputs,
                                       NDArrayList& outputs,
                                       RuntimeContext& ctx) const {
-  NDArray::embedding(inputs.at(0), inputs.at(1), 
+  // do offset for vocab parallel emebedding
+  NDArray id_offset = inputs.at(1);
+  if (offset(op) != 0) 
+    id_offset = NDArray::sub(inputs.at(1), offset(op), op->instantiation_ctx().stream_index);
+                      
+  NDArray::embedding(inputs.at(0), id_offset, 
                      op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList EmbeddingLookupOpImpl::DoGradient(Operator& op,
                                              const TensorList& grad_outputs) const {
-  auto grad_input = op->requires_grad(0) ? MakeEmbeddingLookupGradientOp(grad_outputs.at(0), op->input(1), op->output(0), op->input(0),
-                                          op->grad_op_meta().set_name(op->grad_name()))
+  auto grad_input = op->requires_grad(0) ? MakeEmbeddingLookupGradientOp(grad_outputs.at(0), op->input(1), op->output(0), op->input(0), 
+                                           _multi_offset, op->grad_op_meta().set_name(op->grad_name()))
                                         : Tensor();
   return {grad_input, Tensor()};
 }
@@ -63,9 +68,13 @@ void EmbeddingLookupGradientOpImpl::DoCompute(Operator& op,
                                               const NDArrayList& inputs,
                                               NDArrayList& outputs,
                                               RuntimeContext& ctx) const {
+  // do offset for vocab parallel emebedding
+  NDArray id_offset = inputs.at(1);
+  if (offset(op) != 0) 
+    id_offset = NDArray::sub(inputs.at(1), offset(op), op->instantiation_ctx().stream_index);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::EmbeddingLookupGradient,
-    inputs.at(0), inputs.at(1), outputs.at(0), op->instantiation_ctx().stream());
+    inputs.at(0), id_offset, outputs.at(0), op->instantiation_ctx().stream());
 }
 
 HTShapeList
@@ -101,17 +110,17 @@ void EmbeddingLookupGradientOpImpl::DoDeduceStates(const TensorList& inputs, Ten
   outputs.at(0)->set_distributed_states(ds_tb_grad);
 }
 
-Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, OpMeta op_meta) {
+Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, std::vector<int64_t> multi_offset, OpMeta op_meta) {
   return Graph::MakeOp(
-          std::make_shared<EmbeddingLookupOpImpl>(),
+          std::make_shared<EmbeddingLookupOpImpl>(std::move(multi_offset)),
           {std::move(input), std::move(id)},
           std::move(op_meta))->output(0);
 }
 
 Tensor MakeEmbeddingLookupGradientOp(Tensor grad_output, Tensor id, Tensor ori_input, Tensor input,
-                                     OpMeta op_meta) {
+                                     std::vector<int64_t> multi_offset, OpMeta op_meta) {
   return Graph::MakeOp(
-          std::make_shared<EmbeddingLookupGradientOpImpl>(),
+          std::make_shared<EmbeddingLookupGradientOpImpl>(multi_offset),
           {std::move(grad_output), std::move(id), std::move(ori_input), std::move(input)},
           std::move(op_meta))->output(0);
 }

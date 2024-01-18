@@ -5,8 +5,10 @@
 #include "hetu/graph/ops/sum.h"
 #include "hetu/graph/ops/Concatenate.h"
 #include "hetu/graph/ops/Communication.h"
+#include "hetu/graph/ops/Contiguous.h"
 #include "hetu/graph/ops/Arithmetics.h"
 #include "hetu/graph/ops/Loss.h"
+#include "hetu/graph/autocast/autocast.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/core/symbol.h"
@@ -102,20 +104,45 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
   OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_instantiated);
   HT_LOG_TRACE << "Instantiating ops: " << topo;
 
+  HT_LOG_DEBUG << "global info for all devices begin...";
   // global info for all devices
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
     if (!op->placement().is_undetermined())
       continue;
 
-    // remove redundant comm ops
+    // remove unuse or redundant comm ops
     if (is_comm_op(op)) {
+      auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(op->body());
+      // 1. remove redundant comm ops
       auto& input_op = op->input(0)->producer();
-      // TODO: special case: input_op include pp but op don't 
       if (is_comm_op(input_op)) {
         Graph::ReplaceInput(op, 0, input_op->input(0));
         // input changes, update comm_op type
-        reinterpret_cast<CommOpImpl&>(op->body()).get_comm_type(op);
+        comm_op_impl.get_comm_type(op);
+      }
+
+      // 2. remove unuse comm ops
+      // p2p op can only be inserted in exec_graph instantiate
+      // otherwise, it must be an unuse op for multi_ds[cur_strategy_id]
+      // attention: if comm op was removed here, the placement group for 
+      // fw op should also be changed!!!
+      if (comm_op_impl.get_comm_type(op) == P2P_OP) {
+        HT_LOG_DEBUG << op << ": remove unuse or redundant comm op begin...";
+        // should remove consumer of unused comm_op from end to begin
+        for (int i = op->output(0)->num_consumers() - 1; i >= 0; i--) {
+          auto& consumer_i = op->output(0)->consumer(i);
+          for (int j = 0; j < consumer_i->num_inputs(); j++) {
+            if (consumer_i->input(j)->id() == op->output(0)->id()) {
+              ReplaceInput(consumer_i, j, op->input(0));
+              HT_LOG_DEBUG << consumer_i << " input[]" << i << "]: from " 
+                << op->output(0) << " to " << op->input(0)
+                << "; inputs new = " << consumer_i->inputs();
+            }
+          }
+        }
+        HT_LOG_DEBUG << op << ": remove unuse or redundant comm op end...";
+        continue;
       }
     }
     
@@ -138,31 +165,19 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
           << "Currently we cannot infer the devices "
           << "for operators with zero in-degree. : " << op;
         if (op->fw_op_id() != -1) {
-          inferred = _op_indexing[op->fw_op_id()]->placement_group();
+          auto& fw_op = _op_indexing[op->fw_op_id()]; 
+          // fw_op may be unused comm_op for multi ds, will be removed be map placement group
+          inferred = fw_op->placement_group().empty() ? fw_op->input(0)->placement_group() : fw_op->placement_group();
         } else {
           // is it a proper assumption?
           // i.e. attn_weights = ht.where(causal_mask, attn_weights, mask)
           // while causal_mask is on g0 but attn_weights is expected to be on g1
-          inferred = op->input(0)->placement_group();
+          inferred = op->input(0)->placement_group();        
         }
       }
       op->MapToParallelDevices(inferred);
       // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": op " << op << " inferred placement group = " << inferred;
     }
-    // udpate stages
-    DeviceGroup stage_group;
-    if (is_comm_op(op)) {
-      auto& op_impl = reinterpret_cast<CommOpImpl&>(op->body());
-      stage_group = op_impl.src_group(op);
-    } else if (!is_group_op(op)) {
-      stage_group = op->placement_group();
-    }
-    // the stage groups may have a random order after topo sort
-    /*
-    if (!stage_group.empty() && std::find(_stages.begin(), _stages.end(), stage_group) == _stages.end()) {
-      _stages.push_back(stage_group);
-    }
-    */
 
     // loss & grad should div by num_micro_batches when reduction type = MEAN!!! 
     if (is_loss_gradient_op(op) && op->input(0)->has_distributed_states()) {
@@ -218,9 +233,9 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
               if (consumer_op.get()->id() != input_op->id() && is_comm_op(consumer_op)) {
                 auto& consumer_op_impl = reinterpret_cast<CommOpImpl&>(consumer_op.get()->body());
                 const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
-                if (consumer_op_impl.get_dst_distributed_states().check_equal(
-                  input_op_impl.get_dst_distributed_states()) && dst_group_comm == dst_group) {
-                  Graph::ReplaceInput(op, i, consumer_op.get()->output(0));
+                if (consumer_op_impl.get_dst_distributed_states(consumer_op).check_equal(
+                  input_op_impl.get_dst_distributed_states(input_op)) && dst_group_comm == dst_group) {
+                  ReplaceInput(op, i, consumer_op.get()->output(0));
                   reused = true;
                   break;
                 }
@@ -229,7 +244,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             if (reused)
               continue;
 
-            p2p_input = MakeCommOp(input_op->input(0), input_op_impl.get_dst_distributed_states(), dst_group);
+            p2p_input = MakeCommOp(input_op->input(0), {input_op_impl.get_dst_distributed_states(input_op)}, dst_group);
             // since comm op will be substitued eventually, recording its shape is unnecessary
             // but here we still do it to make the code looks more consistent
             RecordTensorShape(p2p_input->id(), p2p_input->shape());
@@ -252,7 +267,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             if (consumer_op.get()->id() != op->id() && is_comm_op(consumer_op)) {
               auto& consumer_op_impl = reinterpret_cast<CommOpImpl&>(consumer_op.get()->body());
               const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
-              if (consumer_op_impl.get_dst_distributed_states().check_equal(
+              if (consumer_op_impl.get_dst_distributed_states(consumer_op).check_equal(
                   input->get_distributed_states()) && dst_group_comm == dst_group) {
                 Graph::ReplaceInput(op, i, consumer_op.get()->output(0));
                 reused = true;
@@ -263,7 +278,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
           if (reused)
             continue;
 
-          p2p_input = MakeCommOp(input, input->get_distributed_states(), dst_group);
+          p2p_input = MakeCommOp(input, {input->get_distributed_states()}, dst_group);
           // since comm op will be substitued eventually, recording its shape is unnecessary
           // but here we still do it to make the code looks more consistent
           RecordTensorShape(p2p_input->id(), p2p_input->shape());
@@ -279,23 +294,25 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
       }
     }
   }
-
+  HT_LOG_DEBUG << "global info for all devices end...";
   // get updated topo
   OpRefList updated_topo = Graph::TopoSort(fetches, num_ops(), is_op_instantiated);
 
   // HT_LOG_DEBUG << preferred_device << ": updated topo after map placement_group: " << updated_topo; 
-
+  HT_LOG_DEBUG << "local info for local_device begin...";
   // local info for local_device
   for (auto& op_ref : updated_topo) {
     auto& op = op_ref.get();
     if (!op->placement().is_undetermined())
       continue;  
-
-    // for local compute: op->placement + tensor->placement
-    if (!op->placement_group().contains(preferred_device))
+    
+    Device preferred_device_ = preferred_device;
+    if (op->op_meta().is_step)
+      preferred_device_ = kCPU;
+    else if (!op->placement_group().contains(preferred_device_)) // for local compute: op->placement + tensor->placement
       continue;
     Device placement =
-      is_device_to_host_op(op) ? Device(kCPU) : preferred_device;
+      is_device_to_host_op(op) ? Device(kCPU) : preferred_device_;
     StreamIndex stream_id = get_suggested_stream_index(op);
     HT_LOG_TRACE << "Instantiating op " << op << " (placement=" << placement
                  << ", stream_index=" << stream_id << ")";
@@ -312,6 +329,8 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     // add transfer ops
     for (size_t i = 0; i < op->num_inputs(); i++) {
       auto& input = op->input(i);
+      if (op->type() == "AdamOp" && i == 4)
+        continue;
       if (input->placement() != placement && !is_comm_op(op)) {
         HT_RUNTIME_ERROR_IF(!input->placement().local())
           << "Please use P2P communication to fetch remote input";
@@ -328,7 +347,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
           transfer_stream_id = kD2HStream;
         } else {
           // TODO: support cuda memcpy across processes
-          HT_NOT_IMPLEMENTED << "We should use NCCL for P2P communication.";
+          HT_NOT_IMPLEMENTED << "We should use NCCL for P2P communication." << op->type();
           __builtin_unreachable();
         }
         RecordTensorShape(transferred_input->id(), transferred_input->shape());
@@ -340,8 +359,45 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
       }
     }
   }
-
+  HT_LOG_DEBUG << "local info for local_device end...";
   return true;
+}
+
+void ExecutableGraph::InsertContiguousOp(const OpRefList& topo_order) {
+  auto& local_device = hetu::impl::comm::GetLocalDevice();
+  for (auto& op_ref : topo_order) {
+    auto& op = op_ref.get();
+    if (op->body().require_contig_inputs()) {
+      for (size_t i = 0; i < op->num_inputs(); i++) {
+        auto& input = op->input(i);
+        auto& input_op = input->producer();
+        if (!input_op->placement_group().contains(local_device))
+          continue;
+        if (!input->is_contiguous()) {
+          auto op_id = input->get_contiguous_op_id();
+          if (op_id.has_value() &&
+              _op_indexing[op_id.value()]->placement() == local_device) {
+            HT_LOG_TRACE << "Tensor " << input->name()
+                         << " is not contiguous for op " << op->body().type()
+                         << ". But it may have a contiguous copy, use it instead";
+            auto contig_op = _op_indexing[op_id.value()];
+            ReplaceInput(op, i, contig_op->output(0));
+          } else {
+            HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": Make Contiguous op for tensor " << input->name()
+                         << " while making " << op->body().type() << " op.";
+            Tensor contig_input = MakeContiguousOp(
+              input, OpMeta().set_name(input->name() + "_contig")
+                             .set_is_deduce_states(false));
+            RecordTensorShape(contig_input->id(), contig_input->shape());
+            auto& contig_op = contig_input->producer();
+            contig_op->MapToParallelDevices(input_op->placement_group());
+            contig_op->Instantiate(local_device, kComputingStream);
+            ReplaceInput(op, i, contig_input);
+          }
+        }
+      }
+    }
+  }
 }
 
 void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
@@ -368,7 +424,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           result = input;
         } else if (comm_type == COMM_SPLIT_OP) {
           auto local_device_index = src_group.get_index(local_device);
-          const auto& dst_ds = comm_op_impl.get_dst_distributed_states();
+          const auto& dst_ds = comm_op_impl.get_dst_distributed_states(comm_op);
           auto cur_state_index = dst_ds.map_device_to_state_index(local_device_index);
           const auto& order = dst_ds.get_order();
           const auto& states = dst_ds.get_states();
@@ -393,7 +449,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           Tensor all_reduce_output = MakeAllReduceOp(
             input, comm_group, // comm_group is a subset of placement_group
             comm_op_impl.reduction_type(), false,
-            OpMeta().set_device_group(src_group)
+            OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllReduce"));
           RecordTensorShape(all_reduce_output->id(), all_reduce_output->shape());
@@ -406,7 +462,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
           Tensor all_gather_output = MakeAllGatherOp(
             input, comm_group,
-            OpMeta().set_device_group(src_group)
+            OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllGather"));
           RecordTensorShape(all_gather_output->id(), all_gather_output->shape());
@@ -420,7 +476,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           Tensor reduce_scatter_output =  MakeReduceScatterOp(
             input, comm_group,
             comm_op_impl.reduction_type(), false,
-            OpMeta().set_device_group(src_group)
+            OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_ReduceScatter"));
           RecordTensorShape(reduce_scatter_output->id(), reduce_scatter_output->shape());
@@ -557,7 +613,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           result = recv_output;
         }
       }
-      result->set_distributed_states(comm_op_impl.get_dst_distributed_states()); // assign distributed states for result tensor
+      result->set_distributed_states(comm_op_impl.get_dst_distributed_states(comm_op)); // assign distributed states for result tensor
 
       // find all comm_op->output consumers, and replace the correspond input tensor with result tensor
       for (int i = comm_op->output(0)->num_consumers() - 1; i >= 0; i--) {
@@ -586,7 +642,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
   const auto& prev_order = prev_distributed_states.get_order();
   auto loop_sizes = prev_distributed_states.get_loop_sizes();
 
-  const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states();
+  const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states(comm_op);
   auto target_duplicate = target_distributed_states.get_dim(-1);
   auto local_device_index = src_group.get_index(local_device);
   auto cur_state_index = target_distributed_states.map_device_to_state_index(used_device_index); // 指定的device需要的是tensor的哪一部分数据
@@ -705,7 +761,7 @@ void ExecutableGraph::CrossSend(std::unordered_map<int32_t, int32_t> split_cur_s
   auto local_device_index = src_group.get_index(local_device);  
   auto cur_state_index = prev_distributed_states.map_device_to_state_index(used_device_index);
 
-  const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states();
+  const auto& target_distributed_states = comm_op_impl.get_dst_distributed_states(comm_op);
   auto target_duplicate = target_distributed_states.get_dim(-1);
   const auto& target_order = target_distributed_states.get_order();
   auto loop_sizes = target_distributed_states.get_loop_sizes();                  
@@ -914,6 +970,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
+    HT_ASSERT(!is_placeholder_op(op) && !is_variable_op(op))
+      << "Placeholder & Variable ops should not appear in ComputeFunc!";
     bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
       return feed_dict.find(tensor->id()) != feed_dict.end();
     });
@@ -929,7 +987,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
       continue;
     }
-
+    
     HT_LOG_TRACE << "Running op " << op << " (type: " << op->type() << ")...";
 
     // if (!is_shared_weight_or_grad_p2p(op)) {
@@ -956,29 +1014,36 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     }
     // }
 
+    // variable can be directly fetched, needn't save in tensor2data
     NDArrayList input_vals;
     input_vals.reserve(op->num_inputs());
     for (const auto& input : op->inputs()) {
-      auto it = tensor2data.find(input->id());
-      HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
-        << "Failed to execute the \"" << op->type() << "\" operation "
-        << "(with name \"" << op->name() << "\"): "
-        << "Cannot find input " << input;
-      auto& data = it->second;
-      if (data->device() != input->placement() ||
-          data->dtype() != input->dtype()) {
-        tensor2data[input->id()] =
-          NDArray::to(data, input->placement(), input->dtype(),
-                      op->instantiation_ctx().stream_index);
+      NDArray input_val;
+      if (is_variable_op(input->producer())) {
+        input_val = GetVariableDataInner(input);     
+      } else {
+        auto it = tensor2data.find(input->id());
+        HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
+          << "Failed to execute the \"" << op->type() << "\" operation "
+          << "(with name \"" << op->name() << "\"): "
+          << "Cannot find input " << input;
+        auto& data = it->second;
+        if (data->device() != input->placement() ||
+            data->dtype() != input->dtype()) {
+          tensor2data[input->id()] =
+            NDArray::to(data, input->placement(), input->dtype(),
+                        op->instantiation_ctx().stream_index);
+        }
+        input_val = tensor2data[input->id()];
+        // should free memory until op aync compute complete!!!
+        // recved shared weight should not be erased in first micro batch. but can be multi copied and erased in later micro batches
+        if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end() 
+            && ((micro_batch_id == 0 && shared_weight_tensor.find(input->id()) == shared_weight_tensor.end()) 
+                || micro_batch_id > 0)) {
+          tensor2data.erase(input->id());
+        }
       }
-      input_vals.push_back(tensor2data[input->id()]);
-      // should free memory until op aync compute complete!!!
-      // recved shared weight should not be erased in first micro batch. but can be multi copied and erased in later micro batches
-      if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end() 
-          && ((micro_batch_id == 0 && shared_weight_tensor.find(input->id()) == shared_weight_tensor.end()) 
-              || micro_batch_id > 0)) {
-        tensor2data.erase(input->id());
-      }
+      input_vals.push_back(input_val);
     }
     // if (is_shared_weight_or_grad_p2p(op)) {
     //   auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
@@ -994,14 +1059,14 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     // but we still mark here in case we forget to do so in some kernels. 
     NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
     NDArray::MarkUsedBy(output_vals, op->instantiation_ctx().stream());
-    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op;
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": op execute " << op;
     for (size_t i = 0; i < op->num_outputs(); i++) {
       const auto& output = op->output(i);
       if (accumulated_tensor.find(output->id()) != accumulated_tensor.end()) {
         if (grad_accumulation.find(output->id()) == grad_accumulation.end()) {
           grad_accumulation[output->id()] = output_vals[i];
         } else {
-          grad_accumulation[output->id()] = NDArray::add(grad_accumulation[output->id()], output_vals[i]);
+          grad_accumulation[output->id()] = NDArray::add(grad_accumulation[output->id()], output_vals[i], op->instantiation_ctx().stream_index);
         }
         if (grad_accumulation_finished) {
           tensor2data[output->id()] = grad_accumulation[output->id()];
@@ -1049,6 +1114,17 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       SubstituteCommOp(topo);
       Graph::pop_graph_ctx();
       HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op end...";
+
+      // update topo with substituted comm_ops
+      OpRefList updated_topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before add contiguous op: " << topo;
+
+      // insert contiguous ops
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] insert contiguous op begin...";
+      Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
+      InsertContiguousOp(updated_topo);
+      Graph::pop_graph_ctx();
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] insert contiguous op end...";
       is_execute_plan_changed = true;
       break;
     }
@@ -1113,7 +1189,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         if (is_sum_op(op_ref.get()->output(0)->consumer(0))) {
           auto& sum_op = op_ref.get()->output(0)->consumer(0);
           for (auto& consumer_op : sum_op->output(0)->consumers()) {
-            if (is_all_reduce_op(consumer_op)) {
+            if (is_grad_reduce_op(consumer_op)) {
               if (is_optimizer_update_op(consumer_op.get()->output(0)->consumer(0))) {
                 // HT_LOG_INFO << local_device << ": shared weight p2p bw recv: " << op_ref;
                 return true;
@@ -1125,10 +1201,10 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       return false;
     };
 
-    // get local_fw_topo and local_bw_topo
+    // get local_fw_topo and local_bw_topo, not contains placeholder & varivale ops
     // ops to substitute comm_op is in the same placement_group, but in the different placement
-    OpRefList local_fw_topo, local_bw_topo, local_topo;
-    auto get_local_topo = [&](OpRefList& _topo, OpRefList& _local_topo) {
+    OpRefList local_fw_topo, local_bw_topo, local_placeholder_variable_ops, local_topo;
+    auto get_local_topo = [&](OpRefList& _topo, OpRefList& _local_topo, OpRefList& _placeholder_variable_ops) {
       // move p2p send op to topo tail
       OpRefList send_op_list;
       OpRefList recv_op_list;
@@ -1140,12 +1216,14 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // 2 send pre-half of wte to 6, 3 send last-half of wte to 7; notice that 0 and 2 are send the same, 1 and 3 are send the same
       // so 0 can send half of pre-half to 4, 2 can send another half of pre-half to 6, then 4 and 6 do gather(at this time, 4 and 6
       // are waiting for pp bubbles, the time will be reused)
+      // todo2: in pipeline last micro batch, stage id > 0 can move grad_reduce & update & group after pipeline p2p and use bubble
+      // to do later update, but stage id = 0 can do aync grad_reduce immediately after weight grad was computed, which can be 
+      // overlapped with backward compute(no overhead for pure dp, but may make tp backward allreduce slower)
       for (auto& op_ref : _topo) {
-        if (op_ref.get()->placement() == local_device) {
+        if (op_ref.get()->placement() == local_device || op_ref.get()->op_meta().is_step) {
           // share weight p2p send op will not block anything! so treat it as commom compute op
-          if (is_fw_share_weight_p2p_send(op_ref)) {
-            placehoder_variable_op_list.push_back(op_ref);
-          } else if (is_bw_share_weight_grad_p2p_send(op_ref)) {
+          // fw weight share only in micro batch 0, bw weight grad share only in last micro batch
+          if (is_fw_share_weight_p2p_send(op_ref) || is_bw_share_weight_grad_p2p_send(op_ref)) {
             compute_op_list.push_back(op_ref);
           } else if (is_fw_share_weight_p2p_recv(op_ref) || is_bw_share_weight_grad_p2p_recv(op_ref)) {
             share_weight_recv_op_list.push_back(op_ref);
@@ -1155,8 +1233,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             recv_op_list.push_back(op_ref);
           } else {
             if (is_placeholder_op(op_ref) || is_variable_op(op_ref)) {
-              placehoder_variable_op_list.push_back(op_ref);
-            } else if (is_all_reduce_op(op_ref) && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0))) {
+              _placeholder_variable_ops.push_back(op_ref);
+            } else if (is_grad_reduce_op(op_ref) && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0))) {
               update_op_list.push_back(op_ref);
             } else if (is_optimizer_update_op(op_ref)) {
               update_op_list.push_back(op_ref);
@@ -1168,22 +1246,22 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           }
         }
       }
-      _local_topo.insert(_local_topo.end(), placehoder_variable_op_list.begin(), placehoder_variable_op_list.end());
       _local_topo.insert(_local_topo.end(), share_weight_recv_op_list.begin(), share_weight_recv_op_list.end());
       _local_topo.insert(_local_topo.end(), recv_op_list.begin(), recv_op_list.end());
       _local_topo.insert(_local_topo.end(), compute_op_list.begin(), compute_op_list.end());
       _local_topo.insert(_local_topo.end(), send_op_list.begin(), send_op_list.end());
-      // move move allreduce & udpate & group op after pipeline p2p, to make p2p & allreduce overlap
+      // move move allreduce/reduce-scatter & udpate & group op after pipeline p2p, to make p2p & allreduce/reduce-scatter overlap
       _local_topo.insert(_local_topo.end(), update_op_list.begin(), update_op_list.end());
     };
-    get_local_topo(fw_topo, local_fw_topo);
-    get_local_topo(bw_topo, local_bw_topo);  
+    get_local_topo(fw_topo, local_fw_topo, local_placeholder_variable_ops);
+    get_local_topo(bw_topo, local_bw_topo, local_placeholder_variable_ops); 
 
-    local_topo.reserve(local_fw_topo.size() + local_bw_topo.size());
+    local_topo.reserve(local_placeholder_variable_ops.size() + local_fw_topo.size() + local_bw_topo.size());
+    local_topo.insert(local_topo.end(), local_placeholder_variable_ops.begin(), local_placeholder_variable_ops.end());
     local_topo.insert(local_topo.end(), local_fw_topo.begin(), local_fw_topo.end());
     local_topo.insert(local_topo.end(), local_bw_topo.begin(), local_bw_topo.end());
-    // HT_LOG_DEBUG << local_device << ": local fw topo: " << local_fw_topo; 
-    // HT_LOG_DEBUG << local_device << ": local bw topo: " << local_bw_topo;
+    HT_LOG_DEBUG << local_device  << ": local placeholder & variable ops: " << local_placeholder_variable_ops
+                 << "\nlocal fw topo: " << local_fw_topo << "\nlocal bw topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo end...";
 
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get shared weights begin...";
@@ -1216,18 +1294,19 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       auto& op = op_ref.get();
       // update op placement group = variable op placement group
       // care about the placement group binding rules based on fw_op_id in autograd code (graph.cc)
+      // grad_reduce = allreduce or reduce-scatter
       // 1. compute_op -> update_op (local_group)
-      // 2. compute_op -> allreduce -> update_op (local_group)
-      // 3. compute_op -> sum_op -> allreduce -> update_op (local_group)
+      // 2. compute_op -> grad_reduce -> update_op (local_group)
+      // 3. compute_op -> sum_op -> grad_reduce -> update_op (local_group)
       // 4. compute_op -> p2p_send (group1)  p2p_recv -> update_op (group2)
-      // 5. compute_op -> allreduce -> p2p_send (group1)  p2p_recv -> update_op (group2)
-      // 6. compute_op -> p2p_send (group1)  p2p_recv -> sum_op -> allreduce -> update_op (group2)
+      // 5. compute_op -> grad_reduce -> p2p_send (group1)  p2p_recv -> update_op (group2)
+      // 6. compute_op -> p2p_send (group1)  p2p_recv -> sum_op -> grad_reduce -> update_op (group2)
 
       // local group or group2 cases (1,2,3,4,5,6)
       if (is_optimizer_update_op(op)) {
         Tensor& grad = op->input(1);
         Operator& grad_op = grad->producer();
-        if (is_all_reduce_op(grad_op)) {
+        if (is_grad_reduce_op(grad_op)) {
           // case 6
           bool is_weight_share_case = false;
           if (is_sum_op(grad_op->input(0)->producer())) {
@@ -1261,7 +1340,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           if (is_optimizer_update_op(consumer_op)) {
             Tensor& grad = op->input(0);
             Operator& grad_op = grad->producer();
-            if (is_all_reduce_op(grad_op)) {
+            if (is_grad_reduce_op(grad_op)) {
               accumulated_tensor.insert(grad_op->input(0)->id());
               accumulated_ops_deque.push_back(std::ref(grad_op));
             } else {
@@ -1274,7 +1353,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             Operator& sum_op = consumer_op.get();
             if (is_comm_op(sum_op->output(0)->consumer(0))) {
               Operator& comm_op = sum_op->output(0)->consumer(0);
-              if (reinterpret_cast<CommOpImpl&>(comm_op->body()).get_comm_type(comm_op) == ALL_REDUCE_OP 
+              auto comm_type = reinterpret_cast<CommOpImpl&>(comm_op->body()).get_comm_type(comm_op);
+              if ((comm_type == ALL_REDUCE_OP || comm_type == REDUCE_SCATTER_OP) 
                   && is_optimizer_update_op(comm_op->output(0)->consumer(0))) {
                 accumulated_tensor.insert(op->input(0)->id());
                 accumulated_ops_deque.push_back(op_ref);
@@ -1300,13 +1380,19 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     // HT_LOG_INFO << local_device << ": accumulated ops: " << accumulated_ops << "\nlocal_bw_topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get accumulated tensor & ops end...";
     // update & cached execute plan 
-    _execute_plan.update(local_fw_topo, local_bw_topo, local_topo, shared_weight_tensor, 
+    _execute_plan.update(local_placeholder_variable_ops, local_fw_topo, local_bw_topo, local_topo, shared_weight_tensor, 
                          shared_weight_p2p, shared_weight_grad_p2p, accumulated_tensor, accumulated_ops);
     // sync partially
     std::vector<int> ranks;
-    for (const auto& stage : _stages)
-      for (const auto& device : stage.devices()) 
-        ranks.push_back(device.index());
+    for (const auto& stage : _stages) {
+      for (const auto& device : stage.devices()) {
+        auto rank = hetu::impl::comm::DeviceToWorldRank(device);
+        if (std::find(ranks.begin(), ranks.end(), rank) == ranks.end()) {
+          ranks.push_back(rank);
+        }
+      }
+    }
+    std::sort(ranks.begin(), ranks.end());
     auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
     comm_group->Barrier(true);
   }
@@ -1340,7 +1426,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // flush update once for m micro batches
   Tensor2NDArrayMap grad_accumulation;
 
-  // get feed in dict & split into m micro batches
+  // placeholder ops: get feed in dict & split into m micro batches
   for (const auto& kv : feed_dict) {
     if (!kv.second.is_defined()) continue; // only feed placeholder_op in local device group
     auto micro_batches = NDArray::split(kv.second, num_micro_batches);
@@ -1350,6 +1436,15 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       tensor2data_list[i][kv.first] = micro_batches[i];
     }
   }
+
+  // // variable ops: directly get data from graph, may cost more time when params is large?
+  // for (auto& op: _execute_plan.local_placeholder_variable_ops) {
+  //   if (is_variable_op(op)) {
+  //     for (int i = 0; i < num_micro_batches; i++) {
+  //       tensor2data_list[i][op->output(0)->id()] = Graph::GetVariableData(op->output(0));
+  //     }
+  //   }
+  // }
   
   std::unordered_map<TensorId, size_t> fetch_indices;
   for (size_t i = 0; i < fetches.size(); i++)
@@ -1402,6 +1497,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       for (auto& shared_weight_id : _execute_plan.shared_weight_tensor) {
         tensor2data[shared_weight_id] = tensor2data_list[0][shared_weight_id];
       }
+    }
+    if (is_forward) {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward begin]";
+    } else {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward begin]";
     }
     // micro batch i: execute fw/bw
     if (is_forward) {
@@ -1518,40 +1618,37 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     double compute_time = 0;
     double tp_p2p_time = 0;
     double pp_p2p_time = 0;
-    double collective_time = 0;
+    double tp_collective_time = 0;
+    double dp_grad_reduce_time = 0;
     double blocking_time = 0;
     double other_time = 0;
     std::ostringstream out;
     out << "Op Execute Time: ";
+    int print_num = 30;
     for (auto& op_time : op_execute_time) {
       if (op_time.first >= 0) {
         auto op = _op_indexing[op_time.first];
-        if (is_all_reduce_op(op)) {
-          auto allreduce_op = op;
-          auto& allreduce_impl = reinterpret_cast<AllReduceOpImpl&>(allreduce_op->body());
-          out << std::endl << local_device << ": " 
-              << allreduce_op->input(0) << ", shape = "
-              << allreduce_op->input(0)->shape() << ", type = "
-              << allreduce_op->input(0)->dtype() << ", comm group = [";
-          auto comm_group = allreduce_impl.comm_group();
-          for (auto device : comm_group.devices()) {
-            out << comm_group.get_index(device) << ", ";
+        // print top 10 op
+        if (print_num-- > 0) {
+          out << std::endl << local_device << ": " << op << "(type = " << op->type() << "), " << "time = " << op_time.second * 1.0 / 1e6 << " ms";
+          if (op->num_inputs() > 0) {
+            out << "; input shapes = ";
+            for (auto& input : op->inputs()) {
+              out << input->shape() << ", ";
+            }
           }
-          out << "]";
-        } else {
-          if (op->num_inputs() > 0)
-          out << std::endl << local_device << ": " 
-              << op->input(0) << ", shape = "
-              << op->input(0)->shape() << ", type = "
-              << op->input(0)->dtype();        
+          out << "; inputs = " << op->inputs();
         }
-        out << std::endl << local_device << ": " << op << ": " << op_time.second * 1.0 / 1e6 << " ms";
         if (op->stream_index() == kComputingStream) {
           compute_time += op_time.second * 1.0 / 1e6;
         } else if (op->stream_index() == kP2PStream) {
           tp_p2p_time += op_time.second * 1.0 / 1e6;
         } else if (op->stream_index() == kCollectiveStream) {
-          collective_time += op_time.second * 1.0 / 1e6;
+          if (is_optimizer_update_op(op->output(0)->consumer(0))) {
+            dp_grad_reduce_time += op_time.second * 1.0 / 1e6;
+          } else {
+            tp_collective_time += op_time.second * 1.0 / 1e6;
+          }
         } else if (op->stream_index() == kBlockingStream) {
           blocking_time += op_time.second * 1.0 / 1e6;
         } else {
@@ -1566,8 +1663,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                 << "\ntotal run time: " << COST_MSEC(run) << " ms, "
                 << "compute time: " << compute_time << " ms, "
                 << "tp p2p time: " << tp_p2p_time << " ms, "
-                << "pp p2p time: " << pp_p2p_time << " ms, "
-                << "collective time: " << collective_time << " ms, "
+                << "tp collective time: " << tp_collective_time << " ms, "
+                << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
+                << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
                 << "blocking time: " << blocking_time << " ms, "
                 << "other time: " << other_time << " ms" << std::endl
                 << out.str();

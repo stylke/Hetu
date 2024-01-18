@@ -45,6 +45,8 @@ class Graph {
 
  public:
   static constexpr size_t DEFAULT_GRAPH_INITIAL_CAPACITY = 4096;
+  size_t NUM_STRATEGY = 1;
+  size_t CUR_STRATEGY_ID = 0;
 
   // disable copy constructor and move constructor
   Graph(const Graph&) = delete;
@@ -563,6 +565,9 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
     traverse_queue.pop_front();
     auto& op = op_ref.get();
     auto op_in_degrees = (stop_at && stop_at(op)) ? 0 : op->in_degrees();
+    if (op_in_degrees != op->in_degrees()) {
+      HT_LOG_DEBUG << "make topo: " << op << " is forced to be stopped";
+    }
     in_degrees[op->id()] = op_in_degrees;
     if (op_in_degrees == 0) {
       topo_queue.push_back(op_ref);

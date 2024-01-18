@@ -31,16 +31,6 @@ __global__ void embedding_lookup_kernel(const spec_t* input, const int64_t* ids,
 }
 
 template <typename spec_t>
-__global__ static void array_zero_set_kernel(spec_t* input, size_t size,
-                                             const OffsetCalculator* in_offset_calculator) {
-  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
-    return;
-  auto offset = in_offset_calculator->get(idx);
-  input[offset] = 0;
-}
-
-template <typename spec_t>
 __global__ void embedding_lookup_gradient_kernel(const spec_t* output_grad,
                                                  const int64_t* ids, size_t size,
                                                  size_t length, size_t input_row,
@@ -128,8 +118,6 @@ void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
   if (size == 0 || length == 0)
     return;
   dim3 blocks, threads;
-  threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
   NDArray in_grad_offset_calculator_arr, id_offset_calculator_arr,
@@ -142,11 +130,7 @@ void EmbeddingLookupGradientCuda(const NDArray& output_grad, const NDArray& id,
     AllocOffsetCalculator(id, stream);
   std::tie(out_grad_offset_calculator_arr, out_grad_offset_calculator) = 
     AllocOffsetCalculator(output_grad, stream);
-  HT_DISPATCH_FLOATING_TYPES(
-    input_grad->dtype(), spec_t, "ArrayZeroSet", [&]() {
-      array_zero_set_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        input_grad->data_ptr<spec_t>(), size, in_grad_offset_calculator);
-    });
+  NDArray::zeros_(input_grad, stream.stream_index());
   size_t size2 = output_grad->numel();
   threads.x = MIN(size2, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size2, HT_DEFAULT_NUM_THREADS_PER_BLOCK);

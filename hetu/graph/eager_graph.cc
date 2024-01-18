@@ -35,9 +35,22 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   
   NDArrayList input_arrays;
   input_arrays.reserve(op->num_inputs());
-  for (auto& input : op->inputs())
-    input_arrays.push_back(_preserved_data[input->id()]);
-  // HT_LOG_INFO << op << ", inputs are:" << input_arrays;
+  // Insert Contiguous ops
+  if (op->body().require_contig_inputs()) {
+    for (auto& input : op->inputs()) {
+      if (!input->is_contiguous()) {
+        input_arrays.push_back(
+          NDArray::contiguous(_preserved_data[input->id()],
+                              op->instantiation_ctx().stream_index));
+      } else {
+        input_arrays.push_back(_preserved_data[input->id()]);
+      }
+    }
+  } else {
+    for (auto& input : op->inputs())
+      input_arrays.push_back(_preserved_data[input->id()]);
+  }
+  // HT_LOG_INFO << op << "\nInputs:" << input_arrays;
   auto output_arrays = op->Compute(input_arrays, _runtime_ctxs);
   // HT_LOG_INFO << op << ", outputs are:" << output_arrays;
   // Note: The usage should be marked inside kernels, 

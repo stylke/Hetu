@@ -9,6 +9,7 @@ namespace hetu {
 namespace graph {
 
 struct ExecutePlan {
+  OpRefList local_placeholder_variable_ops;
   OpRefList local_fw_topo;
   OpRefList local_bw_topo;
   OpRefList local_topo;
@@ -18,10 +19,12 @@ struct ExecutePlan {
   TensorIdSet accumulated_tensor;
   OpIdSet accumulated_ops;
 
-  void update(OpRefList& _local_fw_topo, OpRefList& _local_bw_topo, 
+  void update(OpRefList& _local_placeholder_variable_ops, 
+              OpRefList& _local_fw_topo, OpRefList& _local_bw_topo, 
               OpRefList& _local_topo, TensorIdSet& _shared_weight_tensor,
               OpIdSet& _shared_weight_p2p, OpIdSet& _shared_weight_grad_p2p, 
               TensorIdSet& _accumulated_tensor, OpIdSet& _accumulated_ops) {
+    local_placeholder_variable_ops = _local_placeholder_variable_ops;
     local_fw_topo = _local_fw_topo;
     local_bw_topo = _local_bw_topo;
     local_topo = _local_topo;
@@ -70,7 +73,13 @@ class ExecutableGraph : public Graph {
   }
 
   void InitShapePlan(Tensor2ShapeMap&& shape_plan) {
-    _shape_plan = std::move(shape_plan);
+    if (_shape_plan.size() == 0)
+      _shape_plan = std::move(shape_plan);
+    else {
+      for (auto it = shape_plan.begin(); it != shape_plan.end(); ++it) {
+        RecordTensorShape(it->first, it->second);
+      }
+    }
   }
 
   void RecordTensorShape(const TensorId& key, const HTShape& value) {
@@ -125,6 +134,8 @@ class ExecutableGraph : public Graph {
                   bool& is_continuous_p2p);
 
   void SubstituteCommOp(const OpRefList& topo_order);
+
+  void InsertContiguousOp(const OpRefList& topo_order);
 
   void CrossSend(std::unordered_map<int32_t, int32_t> split_cur_state, 
                  std::unordered_map<int32_t, int32_t> split_target_state,

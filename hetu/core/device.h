@@ -11,6 +11,7 @@ struct DeviceProp {
   int minor;
   int multiProcessorCount;
   int maxThreadsPerMultiProcessor;
+  int maxGridSize[3];
 
   DeviceProp() {
     major = 0;
@@ -24,6 +25,9 @@ struct DeviceProp {
     minor = dprop.minor;
     multiProcessorCount = dprop.multiProcessorCount;
     maxThreadsPerMultiProcessor = dprop.maxThreadsPerMultiProcessor;
+    for (int i = 0; i < 3; ++i) {
+      maxGridSize[i] = dprop.maxGridSize[i];
+    }
   }
 };
 
@@ -70,7 +74,8 @@ class Device {
 
   inline bool operator==(const Device& device) const {
     return type() == device.type() && index() == device.index() &&
-      hostname() == device.hostname() && multiplex() == device.multiplex();
+      Device::_compare_hostname(*this, device) == 0 &&
+      multiplex() == device.multiplex();
   }
 
   inline bool operator!=(const Device& device) const {
@@ -78,8 +83,9 @@ class Device {
   }
 
   inline bool operator<(const Device& device) const {
-    if (hostname() != device.hostname())
-      return hostname() < device.hostname();
+    auto tmp = Device::_compare_hostname(*this, device);
+    if (tmp != 0)
+      return tmp < 0;
     if (type() != device.type())
       return type() < device.type();
     if (index() != device.index())
@@ -173,6 +179,18 @@ class Device {
     }
   }
 
+  static int _compare_hostname(const Device& d1, const Device& d2) {
+    if (d1.local() && d2.local()) {
+      return 0;
+    } else if (d1.local()) {
+      return GetLocalHostname().compare(d2.hostname());
+    } else if (d2.local()) {
+      return d1.hostname().compare(GetLocalHostname());
+    } else {
+      return d1.hostname().compare(d2.hostname());
+    }
+  }
+
   DeviceType _type;
   DeviceIndex _index;
   std::string _hostname;
@@ -180,6 +198,9 @@ class Device {
 };
 
 std::ostream& operator<<(std::ostream&, const Device&);
+
+class DeviceGroup;
+using DeviceGroupList = std::vector<DeviceGroup>;
 
 class DeviceGroup {
  public:
@@ -238,6 +259,15 @@ class DeviceGroup {
   inline bool contains(const Device& device) const {
     auto it = std::find(_devices.begin(), _devices.end(), device);
     return it != _devices.end();
+  }
+
+  inline bool is_subset(const DeviceGroup& device_group) const {
+    for (auto& device : device_group.devices()) {
+      if (!contains(device)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   inline const Device& get(size_t i) const {

@@ -211,7 +211,7 @@ def pretrain(args):
             results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
             # end_time = time.time()
             # for now, we only consider pp = 2
-            if device_groups[1].contains(local_device) and round == 0:
+            if device_groups[1].contains(local_device) and round == -1:
                 loss_out = results[0].numpy(force=True).mean()
                 # print(f'device = {local_device}, lm_logits = {results[1].numpy(force=True)[:, -1, :]}, loss = {loss_out}')
                 print(f'device = {local_device}, round = {round}, loss = {loss_out}')

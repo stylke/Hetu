@@ -57,6 +57,10 @@ class TensorDef : public shared_ptr_target {
   const Graph& graph() const;
 
   Graph& graph();
+
+  size_t num_strategy() const;
+
+  size_t cur_strategy_id() const;
   
   const Operator& producer() const;
 
@@ -184,13 +188,13 @@ class TensorDef : public shared_ptr_target {
     return _global_shape.size() > 0;
   }
 
-  const Device& placement() const noexcept {
-    return _distributed_states.get_placement();
+  const Device& placement() noexcept {
+    return cur_distributed_states().get_placement();
   }
 
   void set_placement(const Device& p) {
     _meta.set_device(p);
-    _distributed_states.set_placement(p);
+    cur_distributed_states().set_placement(p);
   }
 
   const bool requires_grad() const noexcept {
@@ -231,16 +235,43 @@ class TensorDef : public shared_ptr_target {
 
   NDArray get_or_compute();
 
-  bool has_distributed_states() const {
-    return !_distributed_states.is_none();
-  }
-
-  const DistributedStates& get_distributed_states() const {
+  const DistributedStatesList& multi_distributed_states() const {
     return _distributed_states;
   }
 
+  void set_multi_distributed_states(const DistributedStatesList& multi_ds) {
+    _distributed_states = multi_ds;
+  }
+
+  bool check_multi_ds_equal(const DistributedStatesList& multi_ds) {
+    HT_ASSERT(_distributed_states.size() == multi_ds.size())
+      << "multi_ds size should equal the same as tensor has: " 
+      << _distributed_states.size();
+    for (size_t i = 0; i < _distributed_states.size(); i++) {
+      if (!_distributed_states[i].check_equal(multi_ds[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  DistributedStates& cur_distributed_states() {
+    while (cur_strategy_id() >= _distributed_states.size()) {
+      _distributed_states.push_back(DistributedStates());
+    }
+    return _distributed_states[cur_strategy_id()];
+  }
+
+  bool has_distributed_states() {
+    return !cur_distributed_states().is_none();
+  }
+
+  const DistributedStates& get_distributed_states() {
+    return cur_distributed_states();
+  }
+
   void set_distributed_states(const DistributedStates& distributed_states) {
-    _distributed_states.set_distributed_states(distributed_states);
+    cur_distributed_states().set_distributed_states(distributed_states);
   }
 
   const HTShape& global_shape() {
@@ -253,18 +284,18 @@ class TensorDef : public shared_ptr_target {
     }
     HTShape global_shape(local_shape.size());
     for (size_t d = 0; d < local_shape.size(); d++) {
-      global_shape[d] = local_shape[d] * _distributed_states.get_dim(d);
+      global_shape[d] = local_shape[d] * cur_distributed_states().get_dim(d);
     }
     _global_shape = global_shape;
     return _global_shape;
   }
 
-  const DeviceGroup& placement_group() const {
-    return _distributed_states.get_placement_group();
+  const DeviceGroup& placement_group() {
+    return cur_distributed_states().get_placement_group();
   }
 
   void set_placement_group(const DeviceGroup& placement_group) {
-    _distributed_states.set_placement_group(placement_group);
+    cur_distributed_states().set_placement_group(placement_group);
   }  
 
   bool symbolic() const {
@@ -329,7 +360,7 @@ class TensorDef : public shared_ptr_target {
   NDArrayMeta _meta;
   OpRefList _consumers;
   bool _inform_graph_on_destruction;
-  DistributedStates _distributed_states;
+  DistributedStatesList _distributed_states; // for multi ds deduce
   HTShape _global_shape;
   bool _is_grad{false};
 

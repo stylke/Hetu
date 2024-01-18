@@ -26,6 +26,8 @@ std::string ArgType2Str(ArgType type) {
       return "List[string]";
     case ArgType::PY_ARRAY:
       return "numpy.array";
+    case ArgType::PY_ARRAY_LIST:
+      return "List[numpy.array]";
     case ArgType::PY_OBJECT:
       return "py_obj";
     case ArgType::DATA_TYPE:
@@ -34,6 +36,8 @@ std::string ArgType2Str(ArgType type) {
       return "hetu.device";
     case ArgType::DEVICE_GROUP:
       return "hetu.DeviceGroup";
+    case ArgType::DEVICE_GROUP_LIST:
+      return "List[hetu.DeviceGroup]";
     case ArgType::STREAM:
       return "hetu.stream";
     case ArgType::ND_ARRAY:
@@ -56,6 +60,8 @@ std::string ArgType2Str(ArgType type) {
       return "AdamOptimizer";
     case ArgType::DISTRIBUTED_STATES:
       return "hetu.DistributedStates";
+    case ArgType::DISTRIBUTED_STATES_LIST:
+      return "List[hetu.DistributedStates]";
     case ArgType::INITIALIZER:
       return "hetu.Initializer";
     default:
@@ -93,6 +99,9 @@ ArgType Str2ArgType(const std::string& type) {
   if (type == "numpy.array" || type == "numpy.ndarray" || 
       type == "PyArray" || type == "NumpyArray")
     return ArgType::PY_ARRAY;
+  if (type == "List[numpy.array]" || type == "List[numpy.ndarray]" || 
+      type == "List[PyArray]" || type == "List[NumpyArray]")
+    return ArgType::PY_ARRAY_LIST;
   if (type == "PyObject*" || type == "py_object" || type == "py_obj") 
     return ArgType::PY_OBJECT;
   if (type == "hetu.dtype" || type == "dtype" || type == "DataType")
@@ -101,6 +110,8 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::DEVICE;
   if (type == "hetu.DeviceGroup" || type == "DeviceGroup")
     return ArgType::DEVICE_GROUP;
+  if (type == "List[hetu.DeviceGroup]" || type == "List[DeviceGroup]")
+    return ArgType::DEVICE_GROUP_LIST;
   if (type == "hetu.stream" || type == "stream" || type == "Stream") 
     return ArgType::STREAM;
   if (type == "hetu.NDArray" || type == "NDArray" || 
@@ -132,6 +143,9 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::ADAMOPTIMIZER;
   if (type == "hetu.DistributedStates" || type == "DistributedStates")
     return ArgType::DISTRIBUTED_STATES;
+  if (type == "List[hetu.DistributedStates]" || type == "DistributedStatesList" ||
+      type == "List[DistributedStates]")
+    return ArgType::DISTRIBUTED_STATES_LIST;   
   if (type == "hetu.IntSymbol" || type == "IntSymbol")
     return ArgType::INT_SYMBOL;
   if (type == "List[hetu.IntSymbol]" || type == "List[IntSymbol]" || type == "SyShape")
@@ -246,10 +260,12 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
         break;
       case ArgType::STRING_LIST:
       case ArgType::PY_ARRAY:
+      case ArgType::PY_ARRAY_LIST:
       case ArgType::PY_OBJECT:
       case ArgType::DATA_TYPE:
       case ArgType::DEVICE:
       case ArgType::DEVICE_GROUP:
+      case ArgType::DEVICE_GROUP_LIST:
       case ArgType::STREAM:
       case ArgType::ND_ARRAY:
       case ArgType::ND_ARRAY_LIST:
@@ -259,6 +275,7 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
       case ArgType::OPERATOR_LIST:
       case ArgType::FEED_DICT:
       case ArgType::DISTRIBUTED_STATES:
+      case ArgType::DISTRIBUTED_STATES_LIST:
       case ArgType::INITIALIZER:
         if (!_default_as_none) {
           HT_VALUE_ERROR << "Default " << _arg_type << " can only be None";
@@ -297,12 +314,16 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyDataType(obj);
     case ArgType::PY_ARRAY:
       return CheckNumpyArray(obj);
+    case ArgType::PY_ARRAY_LIST:
+      return CheckNumpyArrayList(obj);
     case ArgType::PY_OBJECT:
       return true;
     case ArgType::DEVICE:
       return CheckPyDevice(obj);
     case ArgType::DEVICE_GROUP:
       return CheckPyDeviceGroup(obj);
+    case ArgType::DEVICE_GROUP_LIST:
+      return CheckPyDeviceGroupList(obj);
     case ArgType::STREAM:
       return CheckPyStream(obj);
     case ArgType::ND_ARRAY:
@@ -325,6 +346,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyAdamOptimizer(obj);
     case ArgType::DISTRIBUTED_STATES:
       return CheckPyDistributedStates(obj);
+    case ArgType::DISTRIBUTED_STATES_LIST:
+      return CheckPyDistributedStatesList(obj);
     case ArgType::INT_SYMBOL:
       return CheckPyIntSymbol(obj);
     case ArgType::SYMBOLIC_SHAPE:

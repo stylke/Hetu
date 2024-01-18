@@ -91,4 +91,68 @@ struct numeric_limits<double> {
   static inline __host__ __device__ double upper_bound() { return INFINITY; }
 };
 
+template <
+  typename T,
+  typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+inline __host__ __device__ bool _isnan(T /*val*/) {
+  return false;
+}
+
+template <
+  typename T,
+  typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+inline __host__ __device__ bool _isnan(T val) {
+#if defined(__CUDACC__)
+  return ::isnan(val);
+#else
+  return std::isnan(val);
+#endif
+}
+
+template <
+  typename T,
+  typename std::enable_if<std::is_same<T, hetu::float16>::value, int>::type = 0>
+inline __host__ __device__ bool _isnan(T val) {
+  return hetu::_isnan(static_cast<float>(val));
+}
+
+template <
+  typename T,
+  typename std::enable_if<std::is_same<T, hetu::bfloat16>::value, int>::type = 0>
+inline __host__ __device__ bool _isnan(T val) {
+  return hetu::_isnan(static_cast<float>(val));
+}
+
+template <
+  typename T,
+  typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+inline __host__ __device__ bool _isinf(T /*val*/) {
+  return false;
+}
+
+template <
+  typename T,
+  typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
+inline __host__ __device__ bool _isinf(T val) {
+#if defined(__CUDACC__)
+  return ::isinf(val);
+#else
+  return std::isinf(val);
+#endif
+}
+
+template <
+  typename T,
+  typename std::enable_if<std::is_same<T, hetu::float16>::value, int>::type = 0>
+inline __host__ __device__ bool _isinf(T val) {
+  return hetu::_isinf(static_cast<float>(val));
+}
+
+template <
+  typename T,
+  typename std::enable_if<std::is_same<T, hetu::bfloat16>::value, int>::type = 0>
+inline __host__ __device__ bool _isinf(T val) {
+  return hetu::_isinf(static_cast<float>(val));
+}
+
 } // namespace hetu

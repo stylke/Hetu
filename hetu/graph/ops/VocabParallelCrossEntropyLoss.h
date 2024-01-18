@@ -25,10 +25,6 @@ class VocabParallelCrossEntropyOpImpl : public LossOpImpl {
     return _ignored_index;
   }
 
-  // DeviceGroup comm_group() const {
-  //   return _comm_group;
-  // }
-
   static DeviceGroup get_devices_by_dim(const Tensor& input, int32_t dim);
   
  protected:

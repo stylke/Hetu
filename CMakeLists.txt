@@ -42,10 +42,13 @@ if(${HETU_COMPILE_CUDA})
   include_directories(SYSTEM ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
   if (${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL "11")
-    set(HETU_CUDA_ARCH 80 86 89)
+    set(HETU_CUDA_ARCH 80 86)
   else()
     set(HETU_CUDA_ARCH 50 52 60 61 70 75)
   endif()
+
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-extended-lambda")
 endif()
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/hetu)

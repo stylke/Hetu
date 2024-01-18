@@ -5,24 +5,10 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/offset_calculator.cuh"
+#include "hetu/impl/kernel/Vectorized.cuh"
 
 namespace hetu {
 namespace impl {
-
-template <typename spec_t>
-__global__ void softmax_cross_entropy_kernel(const spec_t* logsoftmax, const spec_t* label,
-                                             spec_t* output, size_t size,
-                                             const OffsetCalculator* logsoftmax_offset_calculator,
-                                             const OffsetCalculator* label_offset_calculator,
-                                             const OffsetCalculator* out_offset_calculator) {
-  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= size)
-    return;
-  auto logsoftmax_offset = logsoftmax_offset_calculator->get(idx);
-  auto label_offset = label_offset_calculator->get(idx);
-  auto out_offset = out_offset_calculator->get(idx);
-  output[out_offset] = -logsoftmax[logsoftmax_offset] * label[label_offset];
-}
 
 void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
                              NDArray& output, const Stream& stream) {
@@ -76,17 +62,12 @@ void SoftmaxCrossEntropyCuda(const NDArray& input, const NDArray& label,
           (const void*) contig_input->data_ptr<spec_t>(), &beta, desc, (void*)temp_->data_ptr<spec_t>()));             
       }   
 
-      NDArray label_offset_calculator_arr, temp_offset_calculator_arr;
-      std::tie(label_offset_calculator_arr, label_offset_calculator) =
-        AllocOffsetCalculator(label, stream);
-      std::tie(temp_offset_calculator_arr, temp_offset_calculator) =
-        AllocOffsetCalculator(temp_, stream);
-      softmax_cross_entropy_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-        temp_->data_ptr<spec_t>(), label->data_ptr<spec_t>(),
-        temp_->data_ptr<spec_t>(), size, temp_offset_calculator,
-        label_offset_calculator, temp_offset_calculator);
+      launch_loop_kernel<spec_t, spec_t, spec_t>(temp_, label, temp_, size, stream,
+                                                 [] __device__ (spec_t a, spec_t b) {
+                                                   return -a * b;
+                                                });
       NDArray::sum(temp_, {1}, false, stream.stream_index(), output);
-      NDArray::MarkUsedBy({contig_input, label_offset_calculator_arr, temp_offset_calculator_arr}, stream);
+      NDArray::MarkUsedBy({contig_input}, stream);
     });
   NDArray::MarkUsedBy({input, label, output}, stream);
 }

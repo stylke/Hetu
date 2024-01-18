@@ -21,6 +21,7 @@ DECLARE_HT_EXCEPTION(cuda_error);
 #define HT_MAX_GPUS_COMPILE_TIME (16)
 #define HT_MAX_GPUS_RUN_TIME (8)
 #define HT_DEFAULT_NUM_THREADS_PER_BLOCK (1024)
+#define HT_WARP_SIZE (32)
 
 #define CUDA_CALL(f)                                                           \
   for (cudaError_t status = (f); status != cudaSuccess; status = cudaSuccess)  \

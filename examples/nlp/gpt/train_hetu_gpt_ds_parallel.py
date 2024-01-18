@@ -1,46 +1,61 @@
-from tqdm import tqdm
 import os
-import math
-import logging
 import hetu as ht
 from hetu_gpt_ds_parallel import GPTLMHeadModel
+from hetu.nn.modules.parallel_ds import config2ds
 from gpt_config import GPTConfig
 from load_data import DataLoaderForGPT
 import numpy as np
 import time
 import argparse
 import json
+import socket
+from queue import Queue
 
-ht.init_comm_group()
-local_device = ht.local_device()
-all_devices = ht.global_device_group()
+local_device = None
+all_devices = None
 
-# walkaround: just give order by type(placeholder/varibale), may not include all cases
-def config2ds(config):
-    num_devices = len(config['device_group'])
-    split = {}
-    for key, value in config['split'].items():
-        split[int(key)] = value
-    states = {-1: config['dup'], **split}
-    if config['type'] == 'placeholder':
-        order = sorted(split.keys()) + [-1]
-    elif config['type'] == 'variable':
-        order = [-1] + sorted(split.keys())
-    else:
-        raise RuntimeError(f"unsupported type {config['type']}!")
-    ds = ht.DistributedStates(num_devices, states, order)
-    
+def distributed_init(use_two_node: bool = False):
+    if use_two_node:
+        hostname = socket.gethostname()
+        if hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-master-0':
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-0'
+        elif hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-worker-0':
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-1'
+        else:
+            raise ValueError(f"Unknown hostname: {hostname}")
+
+    global local_device, all_devices
+    ht.init_comm_group(8)
+    local_device = ht.local_device()
     all_devices = ht.global_device_group()
-    device_group = ht.DeviceGroup([all_devices.get(device_id) for device_id in config['device_group']])
-    return ds, device_group
+    if local_device.index == 0:
+        print(f'local_device: {local_device}, all_devices: {all_devices}')
 
-def pretrain(args):
+def read_ds_parallel_config(args):
     # read ds_parallel_config from json file
     ds_parallel_config = json.load(open(args.ds_parallel_config, 'r'))
     # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp2_pp2.json', 'r'))
     # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp4.json', 'r'))
     print(f'{local_device}: load ds_parallel_config from: {args.ds_parallel_config}')
-    
+    zero = ds_parallel_config['zero']
+    # assign zero to all variables
+    config_queue = Queue()
+    for value in ds_parallel_config.values():
+        config_queue.put(value)
+    while (not config_queue.empty()):
+        config = config_queue.get()
+        if type(config) == dict:
+            if 'type' in config:
+                if config['type'] == 'variable' and 'zero' not in config:
+                    config['zero'] = zero
+            else:
+                for value in config.values():
+                    config_queue.put(value)
+    # print(f'{local_device}: ds_parallel_config: {ds_parallel_config}')
+    return ds_parallel_config
+
+def pretrain(args):
+    ds_parallel_config = read_ds_parallel_config(args)
     num_epochs = args.epochs
     lr = args.lr
 
@@ -58,6 +73,7 @@ def pretrain(args):
                        activation_function=args.hidden_act,
                        global_batch_size=args.global_batch_size,
                        num_micro_batches=args.num_micro_batches,
+                       use_flash_attn=args.use_flash_attn,
                        )
     # Input data file names definition
     # dict_seqlen2predlen = {128:20, 512:80}
@@ -108,7 +124,8 @@ def pretrain(args):
     loss_mean = loss
 
     print(f'{local_device}: optimizer minimize begin...')
-    opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
+    # opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
+    opt = ht.AdamOptimizer(lr=args.lr)
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
 
@@ -155,11 +172,14 @@ def pretrain(args):
                 step_num += 1
                 global_step_num += 1
                 # return
-                if global_step_num == 20:
-                    return
+                # if global_step_num == 20:
+                #     return
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
+    )
     parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'
     )
@@ -207,7 +227,20 @@ if __name__ == '__main__':
     parser.add_argument(
         "--dropout_prob", type=float, default=0.1, help="Dropout rate."
     )
+    parser.add_argument(
+        "--use_flash_attn", action="store_true", help="Use Flash Attention."
+    )    
+    parser.add_argument(
+        "--bf16", action="store_true", help="Use bfloat16."
+    )
     args = parser.parse_args()
+    distributed_init(args.use_two_node)
     with ht.graph("define_and_run"):
-        pretrain(args)
-        print('hetu ds parallel end...')
+        if args.bf16:
+            precision = "ht.bfloat16"
+        else:
+            precision = "ht.float32"
+        print(f'{local_device}: use precision {precision}')
+        with ht.autocast(eval(precision)):            
+            pretrain(args)
+            print(f'{local_device}: train hetu ds parallel end...')

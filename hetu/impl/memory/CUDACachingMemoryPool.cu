@@ -183,11 +183,23 @@ void CUDACachingMemoryPool::EmptyCache() {
 
 DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
                                                DataPtrDeleter deleter) {
-  // TODO: support customized deleter when freeing the memory 
-  // so that we can support borrowing on CUDA devices
-  HT_NOT_IMPLEMENTED << name()
-                     << ": Borrowing CUDA memory is not supported yet";
-  __builtin_unreachable();
+  HT_VALUE_ERROR_IF(ptr == nullptr || num_bytes == 0)
+    << "Borrowing an empty storage is not allowed";
+  HT_VALUE_ERROR_IF(!deleter)
+    << "Deleter must not be empty when borrowing storages";
+
+  std::lock_guard<std::mutex> lock(_mtx);
+  // Note: The borrowed memory must be ready, so we use blocking stream here
+  DataPtr data_ptr{ptr, num_bytes, device(), next_id()};
+  Stream borrow_stream = Stream(device(), kBlockingStream);
+  uint64_t borrow_at = next_clock();
+  auto insertion = _data_ptr_info.emplace(data_ptr.id,
+                                          CudaDataPtrInfo(data_ptr.ptr, data_ptr.size,
+                                          borrow_stream, borrow_at, std::move(deleter)));
+  HT_RUNTIME_ERROR_IF(!insertion.second)
+    << "Failed to insert data " << data_ptr << " to info";
+
+  return data_ptr;
 }
 
 void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
@@ -203,6 +215,13 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   info.free_at = free_at;
 
   if (info.status == OccupationStatus::OCCUPIED_BY_ALLOC_STREAM) {
+    // for borrow data
+    // we free it directly
+    if (info.deleter) {
+      _data_ptr_info.erase(it);
+      info.deleter(data_ptr);
+      return;
+    }
     info.status = OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM;
     InsertAvailableToLookupTable(
       data_ptr, *(_available_for_single_stream[info.alloc_stream]));
@@ -254,11 +273,18 @@ void CUDACachingMemoryPool::WatchEvents() {
         << "Cannot find data " << data_ptr_id << " from info";
       auto& info = it->second;
       if ((--info.free_event_cnt) == 0) {
-        InsertAvailableToLookupTable(
-          DataPtr{info.ptr, info.num_bytes, device(), data_ptr_id},
-          *_available_for_all_streams);
-        _allocated -= info.num_bytes;
-        _data_ptr_info.erase(it);
+        // for borrow data
+        // we free it directly
+        if (info.deleter) {
+          _data_ptr_info.erase(it);
+          info.deleter(DataPtr{info.ptr, info.num_bytes, device(), data_ptr_id});
+        } else {
+          InsertAvailableToLookupTable(
+            DataPtr{info.ptr, info.num_bytes, device(), data_ptr_id},
+            *_available_for_all_streams);
+          _allocated -= info.num_bytes;
+          _data_ptr_info.erase(it);
+        }
       }
       stream_free_events.pop_front();
     }

@@ -731,6 +731,9 @@ void SetUpDeviceMappingAndAssignLocalDevice(
   for (int i = 0; i < comm->rank(); i++)
     if (hostnames[i] == local_hostname)
       local_rank++;
+  HT_LOG_DEBUG << "local host = " << local_hostname << ", rank = " << comm->rank() 
+               << ", all hosts = " << hostnames << ", world ranks = " << comm->world_ranks()
+               << ", world size = " << GetWorldSize() << ", local rank = " << local_rank;
   Device local_device;
   if (resources.find(kCUDA) == resources.end() || resources.at(kCUDA) == 0) {
     // Question: do we need to set the multiplex field for CPU?
@@ -738,7 +741,7 @@ void SetUpDeviceMappingAndAssignLocalDevice(
   } else {
     auto device_id = local_rank % resources.at(kCUDA);
     auto multiplex = local_rank / resources.at(kCUDA);
-    local_device = Device(kCUDA, device_id, "", multiplex);
+    local_device = Device(kCUDA, device_id, local_hostname, multiplex);
   }
   SetUpDeviceMappingWithAssignedLocalDevice(local_device);
 }

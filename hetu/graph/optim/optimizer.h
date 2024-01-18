@@ -39,7 +39,7 @@ class Optimizer {
  protected:
   virtual Tensor ApplyDense(const GradAndVar& grad_and_var, const Tensor& infinite_count = Tensor()) { return Tensor(); }
 
-  virtual Tensor MakeStates(const Tensor& variable, const OpName& state_name);
+  virtual Tensor MakeStates(const Tensor& variable, const Tensor& grad, const OpName& state_name);
 
   TensorList _params;
   float _learning_rate;

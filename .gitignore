@@ -11,6 +11,7 @@ CIFAR_10/
 CIFAR_100/
 update.sh
 cmake/config.cmake
+.hypothesis/
 
 # Python
 .mypy_cache

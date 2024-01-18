@@ -127,10 +127,11 @@ class MomentumUpdateOpImpl final : public OptimizerUpdateOpInterface {
 
 class AdamOpImpl : public OptimizerUpdateOpInterface {
  public:
-  AdamOpImpl(float learning_rate, float beta1 = 0.9,
-             float beta2 = 0.999, float eps = 1e-8,
-             float weight_decay = 0)
+  AdamOpImpl(float learning_rate, bool zero = false,
+             float beta1 = 0.9, float beta2 = 0.999, 
+             float eps = 1e-8, float weight_decay = 0)
   : OptimizerUpdateOpInterface(quote(AdamOp), learning_rate),
+    _zero(zero),
     _beta1(beta1),
     _beta2(beta2),
     _eps(eps),
@@ -140,6 +141,10 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
     HT_VALUE_ERROR_IF(beta2 < 0 || beta1 > 2)
       << "Invalid beta2: " << beta2;
   }
+
+  uint64_t op_indicator() const noexcept override {
+    return OPTIMIZER_UPDATE_OP | ADAM_OP;
+  }  
 
  protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
@@ -158,6 +163,10 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
              weight_decay() == rhs_.weight_decay();
     }
     return false;
+  }
+
+  bool zero() const {
+    return _zero;
   }
 
   float beta1() const {
@@ -181,6 +190,7 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
   }
 
  protected:
+  bool _zero;
   float _beta1;
   float _beta2;
   float _eps;

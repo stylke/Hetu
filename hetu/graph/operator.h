@@ -47,13 +47,13 @@ class OpMeta {
     return *this;
   }
 
-  inline OpMeta& set_device_group(const DeviceGroup& group) {
-    device_group = group;
+  inline OpMeta& set_device_groups(const DeviceGroupList& groups) {
+    device_groups = groups;
     return *this;
   }
 
-  inline OpMeta& set_device_group(DeviceGroup&& group) {
-    device_group = std::move(group);
+  inline OpMeta& set_device_groups(DeviceGroupList&& groups) {
+    device_groups = std::move(groups);
     return *this;
   }
 
@@ -69,6 +69,11 @@ class OpMeta {
 
   inline OpMeta& set_is_deduce_states(bool deduce_states) {
     is_deduce_states = deduce_states;
+    return *this;
+  }
+
+  inline OpMeta& set_is_step(bool step) {
+    is_step = step;
     return *this;
   }
   
@@ -90,8 +95,8 @@ class OpMeta {
       ret.set_stream_index(new_meta.stream_index);
     if (!new_meta.eager_device.is_undetermined())
       ret.set_eager_device(new_meta.eager_device);
-    if (!new_meta.device_group.empty())
-      ret.set_device_group(new_meta.device_group);
+    if (!new_meta.device_groups.empty())
+      ret.set_device_groups(new_meta.device_groups);
     if (!new_meta.extra_deps.empty())
       ret.set_extra_deps(new_meta.extra_deps);
     return ret;
@@ -100,9 +105,10 @@ class OpMeta {
   OpName name;
   StreamIndex stream_index{kUndeterminedStream};
   Device eager_device{kUndeterminedDevice};
-  DeviceGroup device_group;
+  DeviceGroupList device_groups; // for multi ds deduce
   TensorList extra_deps;
   bool is_deduce_states{true};  
+  bool is_step{false};
 };
 
 std::ostream& operator<<(std::ostream&, const OpMeta&);
@@ -435,6 +441,10 @@ class OpDef : public shared_ptr_target {
     return _ids.graph_id;
   }
 
+  const Graph& graph() const;
+
+  Graph& graph();
+
   const OpType& type() const noexcept {
     return _body->type();
   }
@@ -460,9 +470,15 @@ class OpDef : public shared_ptr_target {
     return _op_meta.eager_device;
   }
 
-  const DeviceGroup& device_group() const noexcept {
-    return _op_meta.device_group;
+  const DeviceGroupList& device_groups() const noexcept {
+    return _op_meta.device_groups;
   }
+
+  bool is_deduce_states() const noexcept {
+    return _op_meta.is_deduce_states;
+  }
+
+  const DeviceGroup& device_group();
 
   const OpMeta& op_meta() const noexcept {
     return _op_meta;
@@ -471,7 +487,7 @@ class OpDef : public shared_ptr_target {
   OpMeta grad_op_meta() const {
     return OpMeta()
       .set_stream_index(stream_index())
-      .set_device_group(device_group());
+      .set_device_groups(device_groups());
   }
 
   void set_fw_op_id(OpId id) {
@@ -819,10 +835,12 @@ static const uint64_t INPLACE_OP = 1ul << 17;
 static const uint64_t COMM_SPLIT_OP = 1ul << 19;
 static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t UNKNOWN_OP = 1ul << 21;
-static const uint64_t SUM_OP = 1ul << 56;
-static const uint64_t SLICE_OP = 1ul << 57;
-static const uint64_t CONCAT_OP = 1ul << 58;
-static const uint64_t CONTIGUOUS_OP = 1ul << 59;
+static const uint64_t CONCAT_OP = 1ul << 54;
+static const uint64_t CONTIGUOUS_OP = 1ul << 55;
+static const uint64_t DATA_TRANSFER_OP = 1ul << 56;
+static const uint64_t ADAM_OP = 1ul << 57;
+static const uint64_t SUM_OP = 1ul << 58;
+static const uint64_t SLICE_OP = 1ul << 59;
 static const uint64_t LOSS_OP = 1ul << 60;
 static const uint64_t LOSS_GRADIENT_OP = 1ul << 61;
 static const uint64_t OPTIMIZER_UPDATE_OP = 1ul << 62;
@@ -859,6 +877,7 @@ DECLARE_OP_INDICATOR_CHECKER(batched_isend_irecv, BATCHED_ISEND_IRECV_OP)
 DECLARE_OP_INDICATOR_CHECKER(gather, GATHER_OP)
 DECLARE_OP_INDICATOR_CHECKER(scatter, SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(inplace, INPLACE_OP)
+DECLARE_OP_INDICATOR_CHECKER(grad_reduce, ALL_REDUCE_OP | REDUCE_SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm_split, COMM_SPLIT_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm, COMM_OP)
 DECLARE_OP_INDICATOR_CHECKER(unknown, UNKNOWN_OP)
@@ -869,6 +888,8 @@ DECLARE_OP_INDICATOR_CHECKER(communucation,
                                BROADCAST_OP | REDUCE_OP |
                                P2P_OP | BATCHED_ISEND_IRECV_OP |
                                GATHER_OP | SCATTER_OP)
+DECLARE_OP_INDICATOR_CHECKER(data_transfer, DATA_TRANSFER_OP)
+DECLARE_OP_INDICATOR_CHECKER(adam, ADAM_OP)
 DECLARE_OP_INDICATOR_CHECKER(sum, SUM_OP)                               
 DECLARE_OP_INDICATOR_CHECKER(slice, SLICE_OP)
 DECLARE_OP_INDICATOR_CHECKER(concat, CONCAT_OP)

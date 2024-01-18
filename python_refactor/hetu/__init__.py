@@ -57,7 +57,7 @@ def control_dependencies(control_inputs):
     return _OpContext(extra_deps=control_inputs)
 
 class _GraphContext(object):
-    def __init__(self, g, create_new=False, prefix='default'):
+    def __init__(self, g, create_new=False, prefix='default', num_strategy=-1):
         if isinstance(g, Graph):
             assert create_new == False, f"Using type {type(g).__name__} to create a hetu.Graph is not allowed, please use a str instead."
             self.graph = g
@@ -82,6 +82,10 @@ class _GraphContext(object):
             self.graph = _hetu_core._internal_context.get_graph(g)
         else:
             raise ValueError(f"Cannot parse type '{type(g).__name__}' as hetu.Graph")
+        if num_strategy >= 1:
+          # print(f'before set num_startegy: {self.graph.num_strategy}')
+          self.graph.set_num_strategy(num_strategy)
+          # print(f'after set num_startegy: {self.graph.num_strategy}, cur_strategy_id: {self.graph.cur_strategy_id}')
 
     def __enter__(self):
         if len(cur_graph_contexts) > 0:
@@ -100,12 +104,15 @@ class _GraphContext(object):
         _hetu_core._internal_context.pop_graph_ctx()
         cur_graph_contexts.remove(self)
 
-def graph(g, create_new=False, prefix='default'):
-    return _GraphContext(g, create_new=create_new, prefix=prefix)
+def graph(g, create_new=False, prefix='default', num_strategy=-1):
+    return _GraphContext(g, create_new=create_new, prefix=prefix, num_strategy=num_strategy)
 
 class _AutocastContext(object):
-    def __init__(self):
-        self.autocast = _hetu_core._internal_context.get_default_autocast()
+    def __init__(self, dtype = None):
+        if dtype is None:
+            self.autocast = _hetu_core._internal_context.get_default_autocast()
+        else:
+            self.autocast = _hetu_core._internal_context.make_new_autocast(True, dtype)
 
     def __enter__(self):
         _hetu_core._internal_context.push_autocast_ctx(self.autocast.id)
@@ -116,3 +123,6 @@ class _AutocastContext(object):
 
 def autocast():
     return _AutocastContext()
+
+def autocast(dtype):
+    return _AutocastContext(dtype)

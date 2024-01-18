@@ -7,6 +7,7 @@ namespace {
 thread_local int current_device_id = -1;
 } // namespace
 
+#if CUDA_VERSION >= 12000
 void CudaTryGetDevice(int* device_id) {
   *device_id = current_device_id;
 }
@@ -17,6 +18,7 @@ void CudaSetDevice(int device_id) {
     current_device_id = device_id;
   }
 }
+#endif
 
 NDArray to_int64_ndarray(const std::vector<int64_t>& vec,
                          DeviceIndex device_id) {

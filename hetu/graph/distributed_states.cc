@@ -1,5 +1,4 @@
 #include "hetu/graph/distributed_states.h"
-
 namespace hetu {
 namespace graph {
 
@@ -14,7 +13,7 @@ void DistributedStates::set_placement_group(const DeviceGroup& placement_group) 
 }
 
 void DistributedStates::set_placement(const Device& placement) {
-  HT_ASSERT(_placement_group.num_devices() > 0 && _placement_group.contains(placement))
+  HT_ASSERT(_placement_group.num_devices() > 0 && (_placement_group.contains(placement) || placement == kCPU))
             << "the placement device " << placement << " must in placement group " << _placement_group;    
   _placement = placement;
 }
@@ -26,6 +25,7 @@ void DistributedStates::set_distributed_states(const DistributedStates& dst_dist
   if (_device_num == -1) {
     _device_num = dst_distributed_states._device_num;
   }
+  _zero = dst_distributed_states._zero;
   set_states(dst_distributed_states._states); // set_states会检查是否和device_num相匹配
   set_order(dst_distributed_states._order); // set_order会检查是否和states相匹配
   // dst_distributed_states已经和tensor绑定过，即placement_group不为空时
@@ -389,6 +389,7 @@ std::string DistributedStates::ds_info() const {
       os << "}";
     }
   }
+  os << ", zero = " << _zero;
   return os.str();    
 }
 }

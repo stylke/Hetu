@@ -47,7 +47,8 @@ def pretrain(args):
                        activation_function=args.hidden_act,
                        global_batch_size=args.global_batch_size,
                        num_micro_batches=args.num_micro_batches,
-                       dp=args.dp
+                       dp=args.dp,
+                       use_flash_attn=args.use_flash_attn,
                        )
     # Input data file names definition
     # dict_seqlen2predlen = {128:20, 512:80}
@@ -87,7 +88,9 @@ def pretrain(args):
     loss_mean = loss
 
     print(f'{local_device}: optimizer minimize begin...')
-    opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
+    # opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
+    opt = ht.AdamOptimizer(lr=args.lr)
+
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
 
@@ -115,7 +118,10 @@ def pretrain(args):
                     attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([dp_size, config.seq_len]),
                     masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([dp_size, config.seq_len]),
                     # loss_position_sum: np.array([np.where(batch_data['masked_lm_labels'].reshape(-1, 1)!=-1)[0].shape[0]]).astype(np.float32), # shape=[1,]
-                }                                                                                                            
+                }
+                # 统计masked_lm_labels中为-1的个数及占比
+                # print(f'{local_device}: masked_lm_labels=-1 num={np.where(batch_data["masked_lm_labels"].reshape(-1, 1)==-1)[0].shape[0]}, 
+                #       ratio={np.where(batch_data["masked_lm_labels"].reshape(-1, 1)==-1)[0].shape[0]/(batch_data["masked_lm_labels"].reshape(-1, 1).shape[0])}')
                 results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
                 end_time = time.time()
                 if device_groups[1].contains(local_device):
@@ -123,9 +129,6 @@ def pretrain(args):
                     print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
                 step_num += 1
                 global_step_num += 1
-                # if global_step_num == 20:
-                #     return
-                # return
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -176,7 +179,19 @@ if __name__ == '__main__':
     parser.add_argument(
         "--dropout_prob", type=float, default=0.1, help="Dropout rate."
     )
+    parser.add_argument(
+        "--use_flash_attn", type=bool, default=False, help="Use Flash Attention."
+    )
+    parser.add_argument(
+        "--bf16", action="store_true", help="Use bfloat16."
+    )    
     args = parser.parse_args()
     with ht.graph("define_and_run"):
-        pretrain(args)
-        print(f'{local_device}: train hetu 3d parallel end...')
+        if args.bf16:
+            precision = "ht.bfloat16"
+        else:
+            precision = "ht.float32"
+        print(f'{local_device}: use precision {precision}')
+        with ht.autocast(eval(precision)):            
+            pretrain(args)
+            print(f'{local_device}: train hetu 3d parallel end...')

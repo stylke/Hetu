@@ -43,72 +43,80 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
   NDArrayList& outputs, RuntimeContext& ctx) const {
   const NDArray& preds = inputs.at(0);
   const NDArray& labels = inputs.at(1);
-  DeviceGroup _comm_group = get_devices_by_dim(op->input(0), 1);
-  auto ranks = hetu::impl::comm::DeviceGroupToWorldRanks(_comm_group);
-  hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream()); // do allreduce 3 times  
-  // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": VocabParallelCrossEntropyOp: comm_group: " << _comm_group;
-  // loss per token = - log(e^x / sum(e^x)) = log(sum(e^x) / e^x)=log(sum(e^x)) - x; where x = x_ori - x_max
-  // 1. x = x_ori - x_max
-  HTShape reduce_max_shape = {preds->shape(0), 1};
-  NDArray reduce_max_partial = NDArray::empty(reduce_max_shape, preds->device(), preds->dtype());
-  NDArray::reduce(preds, kMAX, {-1}, true, op->instantiation_ctx().stream_index, reduce_max_partial); // split1 -> partial
-  NDArray reduce_max = NDArray::empty(reduce_max_shape, preds->device(), preds->dtype());
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), // partial -> dup
-                                  hetu::impl::AllReduce, reduce_max_partial,
-                                  reduce_max, kMAX, _comm_group,
-                                  op->instantiation_ctx().stream());
-  auto vocab_parallel_logits = preds - reduce_max;
-  NDArray::MarkUsedBy({preds, labels, reduce_max_partial, reduce_max, vocab_parallel_logits}, op->instantiation_ctx().stream());
 
-  // 2. log(sum(e^x))
-  NDArray exp_logits = NDArray::empty_like(vocab_parallel_logits);
-  NDArray::exp(vocab_parallel_logits, op->instantiation_ctx().stream_index, exp_logits);
-  HTShape reduce_sum_shape = {preds->shape(0), 1};
-  NDArray sum_exp_logits_partial = NDArray::empty(reduce_sum_shape, preds->device(), preds->dtype());
-  NDArray::reduce(exp_logits, kSUM, {-1}, true, op->instantiation_ctx().stream_index, sum_exp_logits_partial); // split1 -> partial
-  NDArray sum_exp_logits = NDArray::empty(reduce_sum_shape, preds->device(), preds->dtype());
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), // partial -> dup
-                                  hetu::impl::AllReduce, sum_exp_logits_partial,
-                                  sum_exp_logits, kSUM, _comm_group,
-                                  op->instantiation_ctx().stream());
-  NDArray log_sum_exp_logits = NDArray::empty_like(sum_exp_logits);
-  NDArray::log(sum_exp_logits, op->instantiation_ctx().stream_index, log_sum_exp_logits);
-  // store softmax for backward compute
-  NDArray softmax = exp_logits / sum_exp_logits;
-  OpRuntimeContext& op_ctx = ctx.get_or_create(op->id());
-  op_ctx.put_ndarray("softmax", softmax);
-  NDArray::MarkUsedBy({exp_logits, sum_exp_logits_partial, sum_exp_logits, log_sum_exp_logits, softmax}, op->instantiation_ctx().stream());
+  if (op->input(0)->get_distributed_states().get_dim(1) == 1) {
+    // no tp vocab parallel, just pure dp
+    NDArray::sceloss(preds, labels, ignored_index(), reduction(),
+                    op->instantiation_ctx().stream_index, outputs.at(0));    
+  } else { 
+    // tp vocab parallel loss
+    DeviceGroup _comm_group = get_devices_by_dim(op->input(0), 1);
+    auto ranks = hetu::impl::comm::DeviceGroupToWorldRanks(_comm_group);
+    hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream()); // do allreduce 3 times  
+    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": VocabParallelCrossEntropyOp: comm_group: " << _comm_group;
+    // loss per token = - log(e^x / sum(e^x)) = log(sum(e^x) / e^x)=log(sum(e^x)) - x; where x = x_ori - x_max
+    // 1. x = x_ori - x_max
+    HTShape reduce_max_shape = {preds->shape(0), 1};
+    NDArray reduce_max_partial = NDArray::empty(reduce_max_shape, preds->device(), preds->dtype());
+    NDArray::reduce(preds, kMAX, {-1}, true, op->instantiation_ctx().stream_index, reduce_max_partial); // split1 -> partial
+    NDArray reduce_max = NDArray::empty(reduce_max_shape, preds->device(), preds->dtype());
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), // partial -> dup
+                                    hetu::impl::AllReduce, reduce_max_partial,
+                                    reduce_max, kMAX, _comm_group,
+                                    op->instantiation_ctx().stream());
+    auto vocab_parallel_logits = preds - reduce_max;
+    NDArray::MarkUsedBy({preds, labels, reduce_max_partial, reduce_max, vocab_parallel_logits}, op->instantiation_ctx().stream());
 
-  // 3. x[label]
-  // Get the partition's vocab indecies, label should in range [vocab_start_index, vocab_end_index)]
-  auto vocab_size_per_partition = preds->shape(1);
-  auto local_device_index = op->placement_group().get_index(op->placement());
-  auto vocab_range_index = op->input(0)->get_distributed_states().map_device_to_state_index(local_device_index)[1];
-  auto vocab_start_index = vocab_size_per_partition * vocab_range_index;
-  auto vocab_end_index = vocab_start_index + vocab_size_per_partition;
-  HTShape predict_logits_shape = {preds->shape(0), 1};
-  NDArray predict_logits_partial = NDArray::empty(predict_logits_shape, preds->device(), preds->dtype());
-  HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-                               hetu::impl::VocabParallelCrossEntropy, vocab_parallel_logits,
-                               labels, vocab_start_index, vocab_end_index, ignored_index(),
-                               predict_logits_partial, log_sum_exp_logits, op->instantiation_ctx().stream());
-  NDArray predict_logits = NDArray::empty(predict_logits_shape, preds->device(), preds->dtype());
-  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), // partial -> dup
-                                  hetu::impl::AllReduce, predict_logits_partial,
-                                  predict_logits, kSUM, _comm_group,
-                                  op->instantiation_ctx().stream());
-  NDArray::MarkUsedBy({predict_logits_partial, predict_logits}, op->instantiation_ctx().stream());
+    // 2. log(sum(e^x))
+    NDArray exp_logits = NDArray::empty_like(vocab_parallel_logits);
+    NDArray::exp(vocab_parallel_logits, op->instantiation_ctx().stream_index, exp_logits);
+    HTShape reduce_sum_shape = {preds->shape(0), 1};
+    NDArray sum_exp_logits_partial = NDArray::empty(reduce_sum_shape, preds->device(), preds->dtype());
+    NDArray::reduce(exp_logits, kSUM, {-1}, true, op->instantiation_ctx().stream_index, sum_exp_logits_partial); // split1 -> partial
+    NDArray sum_exp_logits = NDArray::empty(reduce_sum_shape, preds->device(), preds->dtype());
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), // partial -> dup
+                                    hetu::impl::AllReduce, sum_exp_logits_partial,
+                                    sum_exp_logits, kSUM, _comm_group,
+                                    op->instantiation_ctx().stream());
+    NDArray log_sum_exp_logits = NDArray::empty_like(sum_exp_logits);
+    NDArray::log(sum_exp_logits, op->instantiation_ctx().stream_index, log_sum_exp_logits);
+    // store softmax for backward compute
+    NDArray softmax = exp_logits / sum_exp_logits;
+    OpRuntimeContext& op_ctx = ctx.get_or_create(op->id());
+    op_ctx.put_ndarray("softmax", softmax);
+    NDArray::MarkUsedBy({exp_logits, sum_exp_logits_partial, sum_exp_logits, log_sum_exp_logits, softmax}, op->instantiation_ctx().stream());
 
-  // 4. log(sum(e^x)) - x[label], shape = [batch_size * seq_len, 1]
-  NDArray loss_unreduced = log_sum_exp_logits - predict_logits;
-  // if use ignored_index, please use reduce SUM, and divide the sum by unignored num extraly
-  if (reduction() != kNONE) {
-    NDArray::reduce(loss_unreduced, reduction(), HTAxes(), false, 
-                    op->instantiation_ctx().stream_index, outputs.at(0));
-  } else {
-    NDArray::copy(loss_unreduced, op->instantiation_ctx().stream_index, outputs.at(0));
+    // 3. x[label]
+    // Get the partition's vocab indecies, label should in range [vocab_start_index, vocab_end_index)]
+    auto vocab_size_per_partition = preds->shape(1);
+    auto local_device_index = op->placement_group().get_index(op->placement());
+    auto vocab_range_index = op->input(0)->get_distributed_states().map_device_to_state_index(local_device_index)[1];
+    auto vocab_start_index = vocab_size_per_partition * vocab_range_index;
+    auto vocab_end_index = vocab_start_index + vocab_size_per_partition;
+    HTShape predict_logits_shape = {preds->shape(0), 1};
+    NDArray predict_logits_partial = NDArray::empty(predict_logits_shape, preds->device(), preds->dtype());
+    HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                hetu::impl::VocabParallelCrossEntropy, vocab_parallel_logits,
+                                labels, vocab_start_index, vocab_end_index, ignored_index(),
+                                predict_logits_partial, log_sum_exp_logits, op->instantiation_ctx().stream());
+    NDArray predict_logits = NDArray::empty(predict_logits_shape, preds->device(), preds->dtype());
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), // partial -> dup
+                                    hetu::impl::AllReduce, predict_logits_partial,
+                                    predict_logits, kSUM, _comm_group,
+                                    op->instantiation_ctx().stream());
+    NDArray::MarkUsedBy({predict_logits_partial, predict_logits}, op->instantiation_ctx().stream());
+
+    // 4. log(sum(e^x)) - x[label], shape = [batch_size * seq_len, 1]
+    NDArray loss_unreduced = log_sum_exp_logits - predict_logits;
+    // if use ignored_index, please use reduce SUM, and divide the sum by unignored num extraly
+    if (reduction() != kNONE) {
+      NDArray::reduce(loss_unreduced, reduction(), HTAxes(), false, 
+                      op->instantiation_ctx().stream_index, outputs.at(0));
+    } else {
+      NDArray::copy(loss_unreduced, op->instantiation_ctx().stream_index, outputs.at(0));
+    }
+    NDArray::MarkUsedBy({loss_unreduced}, op->instantiation_ctx().stream());
   }
-  NDArray::MarkUsedBy({loss_unreduced}, op->instantiation_ctx().stream());
 }
 
 TensorList VocabParallelCrossEntropyOpImpl::DoGradient(
@@ -177,18 +185,26 @@ void VocabParallelCrossEntropyGradientOpImpl::DoCompute(
                                     broadcasted, HTAxes(), op->instantiation_ctx().stream());
   }
 
-  auto vocab_size_per_partition = preds->shape(1);
-  auto local_device_index = op->placement_group().get_index(op->placement());
-  auto vocab_range_index = op->input(0)->get_distributed_states().map_device_to_state_index(local_device_index)[1];
-  auto vocab_start_index = vocab_size_per_partition * vocab_range_index;
-  auto vocab_end_index = vocab_start_index + vocab_size_per_partition;
-  const NDArray& softmax = ctx.get_or_create(op->fw_op_id()).get_ndarray("softmax");
+  if (op->input(0)->get_distributed_states().get_dim(1) == 1) {
+    // no tp vocab parallel, just pure dp
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(
+      op->instantiation_ctx().placement.type(), type(), hetu::impl::SoftmaxCrossEntropySparseGradient,
+      preds, labels, broadcasted, outputs.at(0), ignored_index(), op->instantiation_ctx().stream());
+  } else {
+    // tp vocab parallel loss
+    auto vocab_size_per_partition = preds->shape(1);
+    auto local_device_index = op->placement_group().get_index(op->placement());
+    auto vocab_range_index = op->input(0)->get_distributed_states().map_device_to_state_index(local_device_index)[1];
+    auto vocab_start_index = vocab_size_per_partition * vocab_range_index;
+    auto vocab_end_index = vocab_start_index + vocab_size_per_partition;
+    const NDArray& softmax = ctx.get_or_create(op->fw_op_id()).get_ndarray("softmax");
 
-  HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-                               hetu::impl::VocabParallelCrossEntropyGradient, softmax,
-                               labels, vocab_start_index, vocab_end_index, ignored_index(), 
-                               broadcasted, outputs.at(0), op->instantiation_ctx().stream());
-  NDArray::MarkUsedBy({preds, labels, grad_output, broadcasted, softmax}, op->instantiation_ctx().stream());                               
+    HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                hetu::impl::VocabParallelCrossEntropyGradient, softmax,
+                                labels, vocab_start_index, vocab_end_index, ignored_index(), 
+                                broadcasted, outputs.at(0), op->instantiation_ctx().stream());
+    NDArray::MarkUsedBy({preds, labels, grad_output, broadcasted, softmax}, op->instantiation_ctx().stream()); 
+  }                              
 }
 
 HTShapeList VocabParallelCrossEntropyGradientOpImpl::DoInferShape(

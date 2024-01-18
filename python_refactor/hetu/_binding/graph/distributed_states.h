@@ -24,6 +24,8 @@ inline bool PyDistributedStates_CheckExact(PyObject* obj) {
 
 PyObject* PyDistributedStates_New(const DistributedStates& ds);
 
+PyObject* PyDistributedStatesList_New(const DistributedStatesList& multi_ds);
+
 void AddPyDistributedStatesTypeToModule(py::module_& module);
 
 /******************************************************
@@ -54,10 +56,10 @@ inline bool CheckPyDistributedStatesList(PyObject* obj) {
   return false;
 }
 
-inline std::vector<DistributedStates> DistributedStatesList_FromPyObject(PyObject* obj) {
+inline DistributedStatesList DistributedStatesList_FromPyObject(PyObject* obj) {
   bool is_tuple = PyTuple_Check(obj);
   size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-  std::vector<DistributedStates> ret(size);
+  DistributedStatesList ret(size);
   for (size_t i = 0; i < size; i++) {
     auto* item = is_tuple ? PyTuple_GET_ITEM(obj, i) : PyList_GET_ITEM(obj, i);
     ret[i] = DistributedStates_FromPyObject(item);

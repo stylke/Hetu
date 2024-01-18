@@ -5,7 +5,7 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
-#include "hetu/impl/utils/numeric_limits.h"
+#include "hetu/impl/utils/numeric_utils.h"
 #include "hetu/impl/utils/offset_calculator.cuh"
 
 namespace hetu {
@@ -19,7 +19,7 @@ __forceinline__ __device__ void WarpReduceArgmax(spec_t& val, int used_warp_size
   while (active_warp_size >= 2) {
     unsigned int k = active_warp_size;
     k >>= 1;
-    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    tmp_val = hetu::cuda::shfl_down_sync(mask, val, k, warpSize);
     if (tmp_val > val) {
       val = tmp_val;
     }
@@ -36,7 +36,7 @@ __forceinline__ __device__ void WarpReduceArgmax(bfloat16& val, int used_warp_si
   while (active_warp_size >= 2) {
     unsigned int k = active_warp_size;
     k >>= 1;
-    tmp_val = __shfl_down_sync(mask, val, k, warpSize);
+    tmp_val = hetu::cuda::shfl_down_sync(mask, val, k, warpSize);
     if (tmp_val > val) {
       val = tmp_val;
     }
@@ -50,7 +50,7 @@ __forceinline__ __device__ void WarpReduceArgmax(bfloat16& val, int used_warp_si
   while (active_warp_size >= 2) {
     unsigned int k = active_warp_size;
     k >>= 1;
-    tmp_val = __shfl_down_sync(mask, val_f, k, warpSize);
+    tmp_val = hetu::cuda::shfl_down_sync(mask, val_f, k, warpSize);
     if (tmp_val > val_f) {
       val = bfloat16(tmp_val);
     }
@@ -94,7 +94,7 @@ template <typename spec_t>
 __forceinline__ __device__ spec_t WarpReduceSumExp(spec_t val, int used_warp_size) {
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val += __shfl_down_sync(mask, val, k, warpSize);
+    val += hetu::cuda::shfl_down_sync(mask, val, k, warpSize);
   return val;
 }
 
@@ -104,11 +104,11 @@ __forceinline__ __device__ bfloat16 WarpReduceSumExp(bfloat16 val, int used_warp
   unsigned int mask = __ballot_sync(0xFFFFFFFF, true);
   #if(__CUDA_ARCH__ >= 800)
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val += __shfl_down_sync(mask, val, k, warpSize);
+    val += hetu::cuda::shfl_down_sync(mask, val, k, warpSize);
   #else
   float val_f = float(val);
   for (unsigned int k = (warpSize >> 1); k > 0; k >>= 1)
-    val_f += __shfl_down_sync(mask, val_f, k, warpSize);    
+    val_f += hetu::cuda::shfl_down_sync(mask, val_f, k, warpSize);    
   val = bfloat16(val_f);
   #endif
   return val;
@@ -134,7 +134,8 @@ __forceinline__ __device__ void BlockReduceSumExp(spec_t& val,
     shared[idx * threads_per_pos + wid] = val;
 
   __syncthreads();
-  val = (thread_id < threads_per_pos / warpSize) ? shared[idx * threads_per_pos + tid] : 0;
+  spec_t zero = 0;
+  val = (thread_id < threads_per_pos / warpSize) ? shared[idx * threads_per_pos + tid] : zero;
 
   if (wid == 0) {
     val = WarpReduceSumExp(val, used_warp_size);

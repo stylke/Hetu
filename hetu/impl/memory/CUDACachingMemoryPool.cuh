@@ -58,17 +58,19 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     size_t num_bytes;
     PackedStreamId alloc_stream;
     std::unordered_set<PackedStreamId> used_streams;
+    DataPtrDeleter deleter;
     OccupationStatus status;
     mempool_clock_t alloc_at;
     mempool_clock_t free_at;
     uint32_t free_event_cnt;
 
     CudaDataPtrInfo(void* ptr_, size_t num_bytes_, const Stream& alloc_stream_,
-                    mempool_clock_t alloc_at_)
+                    mempool_clock_t alloc_at_, DataPtrDeleter deleter_ = {})
     : ptr(ptr_),
       num_bytes(num_bytes_),
       alloc_stream(alloc_stream_.pack()),
       alloc_at(alloc_at_), 
+      deleter(deleter_),
       free_at(0), 
       free_event_cnt(0) {
       if (!alloc_stream_.is_blocking())

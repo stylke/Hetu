@@ -18,6 +18,18 @@ PyObject* PyDistributedStates_New(const DistributedStates& ds) {
   HT_PY_FUNC_END  
 }
 
+PyObject* PyDistributedStatesList_New(const DistributedStatesList& multi_ds) {
+  HT_PY_FUNC_BEGIN
+  PyObject* ret = PyList_New(multi_ds.size());
+  HT_RUNTIME_ERROR_IF(!ret) << "Failed to alloc list";
+  for (size_t i = 0; i < multi_ds.size(); i++) {
+    auto* distributed_states_obj = PyDistributedStates_New(multi_ds[i]);
+    PyList_SET_ITEM(ret, i, distributed_states_obj);
+  }
+  return ret;
+  HT_PY_FUNC_END
+}
+
 PyObject* PyDistributedStates_pynew(PyTypeObject* type, PyObject* args, 
                                     PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
@@ -25,7 +37,7 @@ PyObject* PyDistributedStates_pynew(PyTypeObject* type, PyObject* args,
   HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyDistributedStates";  
   auto* self = reinterpret_cast<PyDistributedStates*>(unsafe_self);
   static PyArgParser parser({
-    "DistributedStates(int device_num, std::unordered_map<int,int> states, std::vector<int64_t> order=None)",
+    "DistributedStates(int device_num, std::unordered_map<int,int> states, std::vector<int64_t> order=None, bool zero=False)",
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
@@ -38,7 +50,8 @@ PyObject* PyDistributedStates_pynew(PyTypeObject* type, PyObject* args,
         order.push_back(static_cast<int32_t>(o));
       }
     }
-    new (&self->distributed_states) DistributedStates(device_num, states, order);
+    bool zero = parsed_args.get_bool_or_default(3);
+    new (&self->distributed_states) DistributedStates(device_num, states, order, zero);
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -89,6 +102,12 @@ PyObject* PyDistributedStates_placement_group(PyDistributedStates* self) {
   HT_PY_FUNC_END
 }
 */
+
+PyObject* PyDistributedStates_zero(PyDistributedStates* self) {
+  HT_PY_FUNC_BEGIN
+  Py_RETURN_BOOLEAN_COND(self->distributed_states.zero());
+  HT_PY_FUNC_END
+}
 
 PyObject* PyDistributedStates_is_pure_duplicate(PyDistributedStates* self) {
   HT_PY_FUNC_BEGIN
@@ -157,6 +176,7 @@ PyGetSetDef PyDistributedStates_properties[] = {
   {PY_GET_SET_DEF_NAME("states"), (getter) PyDistributedStates_states, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("order"), (getter) PyDistributedStates_order, nullptr, nullptr, nullptr},
   // {PY_GET_SET_DEF_NAME("placement_group"), (getter) PyDistributedStates_placement_group, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("zero"), (getter) PyDistributedStates_zero, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("is_pure_duplicate"), (getter) PyDistributedStates_is_pure_duplicate, nullptr, nullptr, nullptr},
   {nullptr}
 };

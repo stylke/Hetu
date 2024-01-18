@@ -342,7 +342,7 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
     // Question: MakePlaceholderOp的各个参数是否都有必要
     auto needed_slice_instance = MakePlaceholderOp(owned_slice_instance->meta(), 
                                                    param->get_distributed_states(), 
-                                                   OpMeta().set_device_group(group));
+                                                   OpMeta().set_device_groups({group}));
     param_slice->AddNeededSliceInst(device, needed_slice_instance);
     return needed_slice_instance;
   } 
@@ -564,7 +564,7 @@ void SwitchExecGraph::MakeCommGraph() {
       // 但这里还是希望尽量保证comm graph与before graph之间的隔离性
       auto comm_input = MakePlaceholderOp(before_param->meta(), 
                                           before_param->get_distributed_states(), 
-                                          OpMeta().set_device_group(src_group).set_name(before_param->name() + "_comm_input"));
+                                          OpMeta().set_device_groups({src_group}).set_name(before_param->name() + "_comm_input"));
       if (src_group.contains(local_device)) {
         comm_input->producer()->MapToParallelDevices(src_group);
         comm_input->producer()->Instantiate(local_device, kComputingStream);
