@@ -12,7 +12,7 @@ class GPTAttention(ht.nn.Module):
 
         self.config = config
         self.use_flash_attn = config.use_flash_attn
-        self.add_bias = True
+        self.add_bias = False
 
         max_positions = config.max_position_embeddings
         self.bias = np.tril(np.ones((max_positions, max_positions), dtype=np.int64).reshape(
@@ -149,7 +149,7 @@ class ParallelMLP(ht.nn.Module):
     def __init__(self, config, ds_parallel_config, name='mlp'):
         super(ParallelMLP, self).__init__()
         self.config = config
-        self.add_bias = True
+        self.add_bias = False
 
         self.dense_h_to_4h = ht.nn.HtColumnParallelLinear(
             config.hidden_size,
@@ -162,7 +162,7 @@ class ParallelMLP(ht.nn.Module):
         )
 
         # self.bias_gelu_fusion = bias_gelu_fusion
-        self.activation_func = ht.nn.NewGeLU() # should be gelu
+        # self.activation_func = ht.nn.NewGeLU() # should be gelu
 
         self.dense_4h_to_h = ht.nn.HtRowParallelLinear(
             config.ffn_hidden_size,
@@ -178,7 +178,8 @@ class ParallelMLP(ht.nn.Module):
     def forward(self, hidden_states):
         # [b*seq_len, h] -> [b*seq_len, 4h]
         intermediate_parallel = self.dense_h_to_4h(hidden_states)
-        intermediate_parallel = self.activation_func(intermediate_parallel)
+        # intermediate_parallel = self.activation_func(intermediate_parallel)
+        intermediate_parallel = ht.relu(intermediate_parallel)
 
         # [b*seq_len, 4h] -> [b*seq_len, h]
         output = self.dense_4h_to_h(intermediate_parallel)

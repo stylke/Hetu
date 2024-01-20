@@ -103,7 +103,7 @@ void FusedLayerNormOpImpl::DoCompute(Operator& op,
 }
 
 TensorList FusedLayerNormOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  auto g_op_meta = op->grad_op_meta();
+  auto g_op_meta = op->grad_op_meta().set_name(op->grad_name(0));
   TensorList empty = {Tensor(), Tensor(), Tensor()};
   TensorList grad_input;
   if (inplace()) {

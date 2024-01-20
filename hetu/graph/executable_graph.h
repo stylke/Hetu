@@ -13,6 +13,7 @@ struct ExecutePlan {
   OpRefList local_fw_topo;
   OpRefList local_bw_topo;
   OpRefList local_topo;
+  TensorIdSet dtype_transfer_tensor;
   TensorIdSet shared_weight_tensor;
   OpIdSet shared_weight_p2p;
   OpIdSet shared_weight_grad_p2p;
@@ -21,13 +22,15 @@ struct ExecutePlan {
 
   void update(OpRefList& _local_placeholder_variable_ops, 
               OpRefList& _local_fw_topo, OpRefList& _local_bw_topo, 
-              OpRefList& _local_topo, TensorIdSet& _shared_weight_tensor,
-              OpIdSet& _shared_weight_p2p, OpIdSet& _shared_weight_grad_p2p, 
-              TensorIdSet& _accumulated_tensor, OpIdSet& _accumulated_ops) {
+              OpRefList& _local_topo, TensorIdSet& _dtype_transfer_tensor, 
+              TensorIdSet& _shared_weight_tensor, OpIdSet& _shared_weight_p2p, 
+              OpIdSet& _shared_weight_grad_p2p, TensorIdSet& _accumulated_tensor, 
+              OpIdSet& _accumulated_ops) {
     local_placeholder_variable_ops = _local_placeholder_variable_ops;
     local_fw_topo = _local_fw_topo;
     local_bw_topo = _local_bw_topo;
     local_topo = _local_topo;
+    dtype_transfer_tensor = _dtype_transfer_tensor;
     shared_weight_tensor = _shared_weight_tensor;
     shared_weight_p2p = _shared_weight_p2p;
     shared_weight_grad_p2p = _shared_weight_grad_p2p;

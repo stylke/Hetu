@@ -146,7 +146,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       it->second.push_back(filled_grads[i]);
   }
 
-  auto reduce_grad = [](const OpId& fw_op_id, const TensorList& unreduced_grads) -> Tensor {
+  auto reduce_grad = [](const TensorList& unreduced_grads) -> Tensor {
     TensorList filtered;
     filtered.reserve(unreduced_grads.size());
     for (const auto& grad : unreduced_grads)
@@ -159,6 +159,9 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
     } else {
       // Question: How to set op_meta properly?
       // if grad in filtered are all allreduce/reduce-scatter
+      // should use last bw grad here, correspond to first use in fw, 
+      // if the tensor was shared in different pp stages
+      OpId fw_op_id = filtered.back()->producer()->fw_op_id();
       bool is_all_allreduce = true;
       bool is_all_reduce_scatter = true;
       for (const auto& grad : filtered) {
@@ -211,7 +214,8 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
     if (op->num_outputs() > 0) {
       grad_outputs.reserve(op->num_outputs());
       for (auto& output : op->outputs()) {
-        auto grad = reduce_grad(op->id(), tensor_to_grads[output->id()]);
+        // auto grad = reduce_grad(op->id(), tensor_to_grads[output->id()]);
+        auto grad = reduce_grad(tensor_to_grads[output->id()]);
         tensor_to_reduced_grad[output->id()] = grad;
         grad_outputs.push_back(grad);
       }
@@ -229,11 +233,12 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         const auto& grad_op = grad_inputs[i]->producer();
         const auto& ds_grad = grad_inputs[i]->get_distributed_states();
         Tensor final_grad = grad_inputs[i];
-        if (ds_grad.is_valid()) {
+        // handle identify backward allreduce or varibale gradient all-reduce/reduce-scatter
+        // other case should be handled by CommOp DoGradient
+        if (!is_comm_op(op->input(i)->producer()) && ds_grad.is_valid()) {
           // HT_LOG_DEBUG << local_device << ": " << "grad_op: " << grad_op << ": states: " << ds_grad.ds_info() << ", shape: " << grad_inputs[i]->shape();
           if (ds_grad.get_dim(-2) > 1) { // partial->duplicate to sync the gradients for dp
             int32_t device_num = ds_grad.get_device_num();
-            // std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
             std::pair<std::vector<int32_t>, int32_t> src2dst;
             if (is_variable_op(op->input(i)->producer()) && op->input(i)->get_distributed_states().zero()) {
               // attention: the result tensor was dp grouped split0, not really split0!
@@ -252,13 +257,6 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
               OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
             final_grad->set_is_grad(true);
             final_grad->producer()->set_fw_op_id(op->id());
-            // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": grad for tensor " << op->input(i) 
-            //             << ", tensor shape = " << op->input(i)->shape() 
-            //             << ", grad shape = " << final_grad->shape() 
-            //             << ", grad src = " << grad_inputs[i]
-            //             << ", grad src ds = " << grad_inputs[i]->get_distributed_states().ds_info()
-            //             << ", grad dst ds = " << final_grad->get_distributed_states().ds_info()
-            //             << ", comm type = " << reinterpret_cast<CommOpImpl&>(final_grad->producer()->body()).get_comm_type(final_grad->producer());
           }
         } 
 

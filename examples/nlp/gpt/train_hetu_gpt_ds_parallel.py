@@ -140,7 +140,9 @@ def pretrain(args):
         dup_group_idx = label_ds.get_dup_group_index(local_device_idx)
         dup_group_num = label_ds.get_dim(0)
     else:
-        raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
+        dup_group_idx = 0 # get the unused data
+        dup_group_num = input_ds.get_dim(0)
+        # print(f"device {local_device} not in input_device_group or label_device_group!")
     # print(f'local deivce: {local_device}, local_device_idx: {local_device_idx}, dup_group_idx: {dup_group_idx}, dup_group_num: {dup_group_num}')
 
     global_step_num = 0

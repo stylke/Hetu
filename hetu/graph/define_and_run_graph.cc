@@ -180,7 +180,7 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
                 }
                 else {
                   auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
-                                  {exec_inputs[i]}, OpMeta().set(op->op_meta()), *exec_graph);
+                                  {exec_inputs[i]}, OpMeta().set(op->op_meta()).set_name(op->name() + "_transfer"), *exec_graph);
                   HT_LOG_DEBUG << "Map" << &transfer_map << "Insert:" << exec_inputs[i]->id() << "->" << exec_op->output(0)->id();
                   transfer_map[exec_inputs[i]->id()] = exec_op->output(0);
                   exec_inputs[i] = exec_op->output(0);

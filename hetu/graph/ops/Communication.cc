@@ -230,7 +230,8 @@ HTShapeList AllReduceOpImpl::DoInferShape(Operator& op,
 NDArrayList AllReduceOpImpl::DoCompute(Operator& op,
                                        const NDArrayList& inputs,
                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  // NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  NDArrayList outputs = inputs; // just inplace here
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::AllReduce, inputs.at(0),
                                   outputs.at(0), reduction_type(), _comm_group, // _comm_group is a subset of placement_group
@@ -492,20 +493,21 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
     << "Data type mismatched for ReduceScatter communication: " << inputs.at(0)->dtype()
     << " vs. " << op->input(0)->dtype();
 
-  if (inplace()) {
-    NDArrayMeta meta = inputs.at(0)->meta();
-    HTShape scatter_shape = inputs.at(0)->shape();
-    scatter_shape[0] /= _comm_group.num_devices();
-    meta.set_shape(scatter_shape);
-    // int rank = GetWorldRank();
-    int rank = _comm_group.get_index(op->placement());
-    size_t storage_offset = rank * (inputs.at(0)->numel() / _comm_group.num_devices());
-    NDArray output = NDArray(meta, inputs.at(0)->storage(), inputs.at(0)->storage_offset() + storage_offset);
-    outputs.emplace_back(output);
-  }
-  else {
-    outputs = DoAllocOutputs(op, inputs, ctx);
-  }
+  // if (inplace()) {
+  // just inplace here
+  NDArrayMeta meta = inputs.at(0)->meta();
+  HTShape scatter_shape = inputs.at(0)->shape();
+  scatter_shape[0] /= _comm_group.num_devices();
+  meta.set_shape(scatter_shape);
+  // int rank = GetWorldRank();
+  int rank = _comm_group.get_index(op->placement());
+  size_t storage_offset = rank * (inputs.at(0)->numel() / _comm_group.num_devices());
+  NDArray output = NDArray(meta, inputs.at(0)->storage(), inputs.at(0)->storage_offset() + storage_offset);
+  outputs.emplace_back(output);
+  // }
+  // else {
+  //   outputs = DoAllocOutputs(op, inputs, ctx);
+  // }
 
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::ReduceScatter, inputs.at(0), outputs.at(0), 

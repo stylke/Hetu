@@ -930,6 +930,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
                                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                                   const FeedDict& feed_dict, const TensorList& fetches,
                                   const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p) {
+  const TensorIdSet& dtype_transfer_tensor = _execute_plan.dtype_transfer_tensor;
   const TensorIdSet& shared_weight_tensor = _execute_plan.shared_weight_tensor;
   const OpIdSet& shared_weight_p2p = _execute_plan.shared_weight_p2p;
   const OpIdSet& shared_weight_grad_p2p = _execute_plan.shared_weight_grad_p2p;
@@ -952,6 +953,11 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     if (computed)
       continue;
 
+    // just convert fp32 -> bf16, fp16 in micro batch 0
+    if (op->num_outputs() > 0 && dtype_transfer_tensor.find(op->output(0)->id()) != dtype_transfer_tensor.end() && micro_batch_id > 0) {
+      continue;
+    }
+
     // in pipeline(shared_weight_p2p not empty), shared weight p2p ops only execute in micro batch 0
     if (!shared_weight_p2p.empty() && shared_weight_p2p.find(op->id()) != shared_weight_p2p.end() && micro_batch_id > 0) {
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": skip execute shared weight p2p: " << op;
@@ -964,10 +970,9 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     
     HT_LOG_TRACE << "Running op " << op << " (type: " << op->type() << ")...";
 
-    // if (!is_shared_weight_or_grad_p2p(op)) {
     // batched p2p send & recv
-    if ((is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) &&
-      op->instantiation_ctx().placement.is_cuda()) {
+    if ((is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) 
+        && !is_shared_weight_or_grad_p2p(op)) {
       if (!is_continuous_p2p) {
         is_continuous_p2p = true;
         auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
@@ -986,7 +991,6 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       _p2p_events.emplace_back(std::move(event));
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group end";
     }
-    // }
 
     // variable can be directly fetched, needn't save in tensor2data
     NDArrayList input_vals;
@@ -1012,23 +1016,26 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         // should free memory until op aync compute complete!!!
         // recved shared weight should not be erased in first micro batch. but can be multi copied and erased in later micro batches
         if ((--tensor2degrees[input->id()]) == 0 && fetch_indices.find(input->id()) == fetch_indices.end() 
-            && ((micro_batch_id == 0 && shared_weight_tensor.find(input->id()) == shared_weight_tensor.end()) 
-                || micro_batch_id > 0)) {
+            && ((micro_batch_id == 0 && shared_weight_tensor.find(input->id()) == shared_weight_tensor.end() 
+                && dtype_transfer_tensor.find(input->id()) == dtype_transfer_tensor.end())
+            || micro_batch_id > 0)) {
           tensor2data.erase(input->id());
         }
       }
       input_vals.push_back(input_val);
     }
-    // if (is_shared_weight_or_grad_p2p(op)) {
-    //   auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
-    //   event->Record(Stream(op->placement(), kComputingStream));
-    //   event->Block(Stream(op->placement(), kP2PStream));
-    //   ncclGroupStart();
-    // }
+    if (is_shared_weight_or_grad_p2p(op)) {
+      auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+      event->Record(Stream(op->placement(), kComputingStream));
+      event->Block(Stream(op->placement(), kP2PStream));
+      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group start";
+      ncclGroupStart();
+    }
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
-    // if (is_shared_weight_or_grad_p2p(op)) {
-    //   ncclGroupEnd();
-    // }
+    if (is_shared_weight_or_grad_p2p(op)) {
+      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group end";
+      ncclGroupEnd();
+    }
     // Note: The usage should be marked inside kernels, 
     // but we still mark here in case we forget to do so in some kernels. 
     NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
@@ -1126,7 +1133,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     // judge whether is shared weight p2p in fw/bw.
     auto is_fw_share_weight_p2p_send = [&](const OpRef& op_ref) -> bool {
       if (is_peer_to_peer_send_op(op_ref)) {
-        if (is_variable_op(op_ref.get()->input(0)->producer())) {
+        auto& input_op = op_ref.get()->input(0)->producer();
+        if (is_variable_op(input_op) || (is_data_transfer_op(input_op) && 
+                                         is_variable_op(input_op->input(0)->producer()))) {
           // HT_LOG_INFO << local_device << ": shared weight p2p fw send: " << op_ref;
           return true;
         }
@@ -1135,7 +1144,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     };
     auto is_fw_share_weight_p2p_recv = [&](const OpRef& op_ref) -> bool {
       if (is_peer_to_peer_recv_op(op_ref)) {
-        if (is_variable_op(op_ref.get()->in_dep_linker(0)->producer())) {
+        auto& input_op = op_ref.get()->in_dep_linker(0)->producer();
+        if (is_variable_op(input_op) || (is_data_transfer_op(input_op) && 
+                                         is_variable_op(input_op->input(0)->producer()))) {
           // HT_LOG_INFO << local_device << ": shared weight p2p fw recv: " << op_ref;
           return true;
         }
@@ -1146,11 +1157,14 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       if (is_peer_to_peer_send_op(op_ref)) {
         if (is_sum_op(op_ref.get()->out_dep_linker()->consumer(0))) {
           auto& sum_op = op_ref.get()->out_dep_linker()->consumer(0);
+          if (is_optimizer_update_op(sum_op->output(0)->consumer(0))) {
+            return true;
+          } 
           if (is_comm_op(sum_op->output(0)->consumer(0))) {
-            Operator& comm_op = sum_op->output(0)->consumer(0);
-            if (reinterpret_cast<CommOpImpl&>(comm_op->body()).get_comm_type(comm_op) == ALL_REDUCE_OP 
+            auto& comm_op = sum_op->output(0)->consumer(0);
+            auto comm_type = reinterpret_cast<CommOpImpl&>(comm_op->body()).get_comm_type(comm_op);
+            if ((comm_type == ALL_REDUCE_OP || comm_type == REDUCE_SCATTER_OP) 
                 && is_optimizer_update_op(comm_op->output(0)->consumer(0))) {
-              // HT_LOG_INFO << local_device << ": shared weight p2p bw send: " << op_ref;
               return true;
             }
           }
@@ -1162,6 +1176,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       if (is_peer_to_peer_recv_op(op_ref)) {
         if (is_sum_op(op_ref.get()->output(0)->consumer(0))) {
           auto& sum_op = op_ref.get()->output(0)->consumer(0);
+          if (is_optimizer_update_op(sum_op->output(0)->consumer(0))) {
+            return true;
+          } 
           for (auto& consumer_op : sum_op->output(0)->consumers()) {
             if (is_grad_reduce_op(consumer_op)) {
               if (is_optimizer_update_op(consumer_op.get()->output(0)->consumer(0))) {
@@ -1185,6 +1202,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       OpRefList compute_op_list;
       OpRefList update_op_list;
       OpRefList share_weight_recv_op_list;
+      OpRefList share_weight_grad_recv_op_list;
       // todo: assume pp stages = [0,1,2,3]->[4,5,6,7], then 0 send pre-half of wte to 4, 1 send last-half of wte to 5; 
       // 2 send pre-half of wte to 6, 3 send last-half of wte to 7; notice that 0 and 2 are send the same, 1 and 3 are send the same
       // so 0 can send half of pre-half to 4, 2 can send another half of pre-half to 6, then 4 and 6 do gather(at this time, 4 and 6
@@ -1198,8 +1216,10 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           // fw weight share only in micro batch 0, bw weight grad share only in last micro batch
           if (is_fw_share_weight_p2p_send(op_ref) || is_bw_share_weight_grad_p2p_send(op_ref)) {
             compute_op_list.push_back(op_ref);
-          } else if (is_fw_share_weight_p2p_recv(op_ref) || is_bw_share_weight_grad_p2p_recv(op_ref)) {
+          } else if (is_fw_share_weight_p2p_recv(op_ref)) {
             share_weight_recv_op_list.push_back(op_ref);
+          } else if (is_bw_share_weight_grad_p2p_recv(op_ref)) {
+            share_weight_grad_recv_op_list.push_back(op_ref);
           } else if (is_peer_to_peer_send_op(op_ref)) {          
             send_op_list.push_back(op_ref);
           } else if (is_peer_to_peer_recv_op(op_ref)) {
@@ -1219,7 +1239,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           }
         }
       }
-      _local_topo.insert(_local_topo.end(), share_weight_recv_op_list.begin(), share_weight_recv_op_list.end());
+      _local_topo.insert(_local_topo.end(), share_weight_grad_recv_op_list.begin(), share_weight_grad_recv_op_list.end()); // first stage
+      _local_topo.insert(_local_topo.end(), share_weight_recv_op_list.begin(), share_weight_recv_op_list.end()); // last stage
       _local_topo.insert(_local_topo.end(), recv_op_list.begin(), recv_op_list.end());
       _local_topo.insert(_local_topo.end(), compute_op_list.begin(), compute_op_list.end());
       _local_topo.insert(_local_topo.end(), send_op_list.begin(), send_op_list.end());
@@ -1237,10 +1258,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                  << "\nlocal fw topo: " << local_fw_topo << "\nlocal bw topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo end...";
 
-    HT_LOG_DEBUG << local_device << ": [Execution Plan] get shared weights begin...";
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get shared weights & dtype transfered weights begin...";
     // todo: get all shared variable op related (send, recv), cached in first micro batch, and used in later micro batches 
     TensorIdSet shared_weight_tensor;
     OpIdSet shared_weight_p2p;
+    TensorIdSet dtype_transfer_tensor;
     // (group1) variable op -> send -> (group2) recv -> other ops
     for (auto& op_ref : local_fw_topo) {
       if (is_fw_share_weight_p2p_send(op_ref)) {
@@ -1250,14 +1272,20 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         shared_weight_p2p.insert(op_ref.get()->id());
         shared_weight_tensor.insert(op_ref.get()->output(0)->id());
       }
+      if (is_data_transfer_op(op_ref) && is_variable_op(op_ref.get()->input(0)->producer())) {
+        dtype_transfer_tensor.insert(op_ref.get()->output(0)->id());
+      }
     }
     OpIdSet shared_weight_grad_p2p;
     for (auto& op_ref : local_bw_topo) {
       if (is_bw_share_weight_grad_p2p_send(op_ref) || is_bw_share_weight_grad_p2p_recv(op_ref)) {
         shared_weight_grad_p2p.insert(op_ref.get()->id());
       }
+      if (is_data_transfer_op(op_ref) && is_variable_op(op_ref.get()->input(0)->producer())) {
+        dtype_transfer_tensor.insert(op_ref.get()->output(0)->id());
+      }
     }
-    HT_LOG_DEBUG << local_device << ": [Execution Plan] get shared weights end...";
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get shared weights & dtype transfered weights end...";
 
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get accumulated tensor & ops begin...";
     // some special ops shouldn't be updated before grad accumulation finished
@@ -1273,16 +1301,26 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // 3. compute_op -> sum_op -> grad_reduce -> update_op (local_group)
       // 4. compute_op -> p2p_send (group1)  p2p_recv -> update_op (group2)
       // 5. compute_op -> grad_reduce -> p2p_send (group1)  p2p_recv -> update_op (group2)
-      // 6. compute_op -> p2p_send (group1)  p2p_recv -> sum_op -> grad_reduce -> update_op (group2)
+      // 6. compute_op -> p2p_send (group1)  p2p_recv -> sum_op -> (grad_reduce) -> update_op (group2)
 
       // local group or group2 cases (1,2,3,4,5,6)
       if (is_optimizer_update_op(op)) {
         Tensor& grad = op->input(1);
         Operator& grad_op = grad->producer();
-        if (is_grad_reduce_op(grad_op)) {
+        if (is_grad_reduce_op(grad_op) || is_sum_op(grad_op)) {
           // case 6
           bool is_weight_share_case = false;
-          if (is_sum_op(grad_op->input(0)->producer())) {
+          // share weight with dp
+          if (is_sum_op(grad_op)) {
+            for (auto& sum_input : grad_op->inputs()) {
+              if (is_peer_to_peer_recv_op(sum_input->producer())) {
+                accumulated_ops_deque.push_back(std::ref(sum_input->producer()));
+                is_weight_share_case = true;
+              }
+            }
+          }
+          // share weight without dp
+          if (is_grad_reduce_op(grad_op) && is_sum_op(grad_op->input(0)->producer())) {
             for (auto& sum_input : grad_op->input(0)->producer()->inputs()) {
               if (is_peer_to_peer_recv_op(sum_input->producer())) {
                 accumulated_ops_deque.push_back(std::ref(sum_input->producer()));
@@ -1324,6 +1362,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           // case 6
           else if (is_sum_op(consumer_op)) {
             Operator& sum_op = consumer_op.get();
+            // share weight without dp
+            if (is_optimizer_update_op(sum_op->output(0)->consumer(0))) {
+              accumulated_tensor.insert(op->input(0)->id());
+              accumulated_ops_deque.push_back(op_ref);
+            }
+            // share weight with dp
             if (is_comm_op(sum_op->output(0)->consumer(0))) {
               Operator& comm_op = sum_op->output(0)->consumer(0);
               auto comm_type = reinterpret_cast<CommOpImpl&>(comm_op->body()).get_comm_type(comm_op);
@@ -1353,8 +1397,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     // HT_LOG_INFO << local_device << ": accumulated ops: " << accumulated_ops << "\nlocal_bw_topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get accumulated tensor & ops end...";
     // update & cached execute plan 
-    _execute_plan.update(local_placeholder_variable_ops, local_fw_topo, local_bw_topo, local_topo, shared_weight_tensor, 
-                         shared_weight_p2p, shared_weight_grad_p2p, accumulated_tensor, accumulated_ops);
+    _execute_plan.update(local_placeholder_variable_ops, local_fw_topo, local_bw_topo, local_topo, dtype_transfer_tensor,
+                         shared_weight_tensor, shared_weight_p2p, shared_weight_grad_p2p, accumulated_tensor, accumulated_ops);
     // sync partially
     std::vector<int> ranks;
     for (const auto& stage : _stages) {
@@ -1465,10 +1509,21 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     auto& tensor2data = tensor2data_list[micro_batch_id];
     auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
     auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
-    // micro batch i>0 reuse shared weight which was recved in micro batch 0
-    if (micro_batch_id > 0 && !_execute_plan.shared_weight_tensor.empty()) {
-      for (auto& shared_weight_id : _execute_plan.shared_weight_tensor) {
-        tensor2data[shared_weight_id] = tensor2data_list[0][shared_weight_id];
+    // micro batch i>0 reuse: 
+    // 0. shared weight which was recved in micro batch 0
+    // 1. f32 -> fp16, bf16 weight which was transfered in micro batch 0
+    if (micro_batch_id > 0) {
+      if (!_execute_plan.shared_weight_tensor.empty()) {
+        for (auto& shared_weight_id : _execute_plan.shared_weight_tensor) {
+          if (tensor2data.find(shared_weight_id) != tensor2data.end()) break; // avoid assign twice by fw, bw
+          tensor2data[shared_weight_id] = tensor2data_list[0][shared_weight_id];
+        }
+      }
+      if (!_execute_plan.dtype_transfer_tensor.empty()) {
+        for (auto& dtype_transfer_id : _execute_plan.dtype_transfer_tensor) {
+          if (tensor2data.find(dtype_transfer_id) != tensor2data.end()) break; // avoid assign twice by fw, bw
+          tensor2data[dtype_transfer_id] = tensor2data_list[0][dtype_transfer_id];
+        }
       }
     }
     if (is_forward) {

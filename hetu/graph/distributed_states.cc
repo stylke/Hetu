@@ -89,7 +89,7 @@ void DistributedStates::set_order(const std::vector<int32_t>& order) {
     }
     std::vector<int32_t> res_order;
     for (auto o : order) {
-      if (_states[o] > 1) {
+      if (get_dim(o) > 1) {
         res_order.push_back(o);
       }
     }
