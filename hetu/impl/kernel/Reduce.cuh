@@ -7,6 +7,7 @@
 #include "hetu/impl/utils/common_utils.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/impl/utils/cuda_math.h"
+#include "hetu/impl/kernel/Vectorized.cuh"
 #include <numeric>
 
 namespace hetu {
@@ -353,7 +354,7 @@ __device__ static int64_t calc_offset(int64_t index, const int64_t* strides, con
 
 template <typename spec_t, typename arg_t, typename op_t, typename ident_t=double>
 __device__ void input_vectorized_thread_reduce_impl(const spec_t* data, arg_t* value, ReduceConfig config,
-                                                    const op_t& ops, ident_t ident) {
+                                                    op_t ops, ident_t ident) {
   int64_t end = config.num_inputs;
   constexpr int input_vec_size = config.input_vec_size;
 
@@ -414,7 +415,7 @@ __device__ void input_vectorized_thread_reduce_impl(const spec_t* data, arg_t* v
 template <typename spec_t, typename arg_t, int output_vec_size, typename op_t,
           typename ident_t, typename offset_calc_t, int list_size=4>
 __device__ void thread_reduce_impl(const spec_t* data, arg_t* value, ReduceConfig config,
-                                   const op_t& ops, ident_t ident, offset_calc_t offset_calc) {
+                                   op_t ops, ident_t ident, offset_calc_t offset_calc) {
   int64_t idx = config.input_idx();
   const int64_t end = config.num_inputs;
   const int64_t stride = config.step_input;
@@ -494,7 +495,7 @@ __device__ void thread_reduce_impl(const spec_t* data, arg_t* value, ReduceConfi
 template <typename spec_t, typename arg_t, int output_vec_size, typename op_t, typename ident_t=double>
 __device__ void thread_reduce(const spec_t* data, const int64_t* in_strides, const int64_t* in_shape,
                               size_t reduce_ndim, arg_t* value, ReduceConfig config,
-                              const op_t& ops, ident_t ident) {
+                              op_t ops, ident_t ident) {
   if (config.vectorize_input) {
     assert(output_vec_size == 1);
     input_vectorized_thread_reduce_impl<spec_t, arg_t>(data, value, config, ops, ident);
@@ -516,7 +517,7 @@ __device__ void thread_reduce(const spec_t* data, const int64_t* in_strides, con
 }
 
 template <typename arg_t, int output_vec_size, typename op_t>
-__device__ void block_x_reduce(arg_t* value, char* shared_memory, const op_t& ops) {
+__device__ void block_x_reduce(arg_t* value, char* shared_memory, op_t ops) {
   using args_vec_t = arg_t[output_vec_size];
   args_vec_t* shared = reinterpret_cast<args_vec_t*>(shared_memory);
   int dim_x = blockDim.x;
@@ -554,7 +555,7 @@ __device__ void block_x_reduce(arg_t* value, char* shared_memory, const op_t& op
 
 template <typename arg_t, int output_vec_size, typename op_t>
 __device__ void block_y_reduce(arg_t* value, char* shared_memory, ReduceConfig config,
-                               const op_t& ops) {
+                               op_t ops) {
   using args_vec_t = arg_t[output_vec_size];
   args_vec_t* shared = reinterpret_cast<args_vec_t*>(shared_memory);
   #pragma unroll
@@ -578,7 +579,7 @@ template <typename spec_t, typename arg_t, typename out_t, int output_vec_size, 
 __device__ void global_reduce(arg_t* value, char* shared_memory, void* cta_buf, const int64_t* out_strides,
                               const int64_t* in_shape, size_t reduce_ndim, size_t ndim,
                               out_t* output, int* semaphores, ReduceConfig config,
-                              const op_t& ops, ident_t ident) {
+                              op_t ops, ident_t ident) {
   using args_vec_t = arg_t[output_vec_size];
   args_vec_t* reduce_buffer = reinterpret_cast<args_vec_t*>(cta_buf);
   int64_t output_idx = config.output_idx<output_vec_size>();
@@ -704,7 +705,7 @@ static void setReduceMeta(const NDArray& in_arr, size_t in_ndim, int64_t num_ax,
 }
 
 template <typename spec_t, typename arg_t, typename out_t, int output_vec_size, typename op_t, typename ident_t=double>
-__global__ void reduce_kernel(const int64_t* in_strides, const int64_t* out_strides, const int64_t* in_shape, const op_t& ops,
+__global__ void reduce_kernel(const int64_t* in_strides, const int64_t* out_strides, const int64_t* in_shape, op_t ops,
                               size_t reduce_ndim, size_t ndim, ident_t ident, const spec_t* input,
                               out_t* output, void* cta_buf, int* semaphores, ReduceConfig config) {
   extern __shared__ char shared_memory[];

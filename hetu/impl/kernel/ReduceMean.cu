@@ -6,35 +6,30 @@
 namespace hetu {
 namespace impl {
 
-template <typename acc_t>
+template <typename acc_t, typename factor_t>
 struct MeanOp {
-  acc_t factor;
-  MeanOp(acc_t factor) : factor(factor) {}
+  factor_t factor;
 
   inline __device__ acc_t project(acc_t val) const {
     return val * factor;
   }
 
-  __device__ acc_t reduce(acc_t acc, acc_t val) const {
+  inline __device__ acc_t reduce(acc_t acc, acc_t val) const {
     return acc + val;
   }
+
+  MeanOp(factor_t factor) : factor(factor) {}
 };
 
 template <typename spec_t, typename acc_t = spec_t, typename out_t = spec_t>
 static void mean_functor(const NDArray& in_arr, NDArray& out_arr, const int64_t* axes,
                          int64_t num_ax, size_t reduce_num, const Stream& stream) {
-  using MeanOp_t = MeanOp<acc_t>;
-  acc_t factor = static_cast<acc_t>(1.0 / reduce_num);
-  MeanOp_t ops{factor};
+  float factor = 1.0f / reduce_num;
   auto device_id = in_arr->device().index();
   hetu::cuda::CUDADeviceGuard guard(device_id);
   CUDAStream cuda_stream(stream);
-  auto ops_arr = 
-    hetu::cuda::to_byte_ndarray(reinterpret_cast<uint8_t*>(&ops),
-                                sizeof(MeanOp_t), device_id);
   launch_reduce_kernel<spec_t, out_t, acc_t>(in_arr, out_arr, axes, num_ax,
-                                             *(ops_arr->data_ptr<MeanOp_t>()), 0., stream);
-  NDArray::MarkUsedBy({ops_arr}, stream);
+                                             MeanOp<acc_t, float> {factor}, 0., stream);
 }
 
 void ReduceMeanCuda(const NDArray& in_arr, NDArray& out_arr, const int64_t* axes,
