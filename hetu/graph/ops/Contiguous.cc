@@ -8,7 +8,8 @@ namespace graph {
 NDArrayList ContiguousOpImpl::DoCompute(Operator& op,
                                         const NDArrayList& inputs,
                                         RuntimeContext& ctx) const {
-  NDArrayList outputs = inputs.at(0)->is_contiguous() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  NDArrayList outputs = inputs.at(0)->is_contiguous() && !ctx.has_runtime_allocation(op->output(0)->id()) ? 
+                        inputs : DoAllocOutputs(op, inputs, ctx);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::DataTransfer, inputs.at(0),
                                   outputs.at(0), op->instantiation_ctx().stream());

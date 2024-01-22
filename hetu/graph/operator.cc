@@ -130,7 +130,9 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
   auto output_size = op->num_outputs();
   if (output_size > 0) {
     outputs.reserve(output_size);
-    // eager graph
+    // 动态图
+    // 无runtime_ctx
+    // 现推output_shapes
     if (runtime_ctx.shape_plan().empty()) {
       HTShapeList input_shapes;
       input_shapes.reserve(op->num_inputs());
@@ -145,13 +147,16 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                           op->instantiation_ctx().stream_index));
       }
     }
-    // exec graph & symbolic shape
+    // 静态图
+    // 有runtime_ctx
+    // output_shapes全部提前设置好
+    // 部分output的allocation也会设置好
     else {
       for (size_t i = 0; i < output_size; i++) {
         // question: will tensor shape != NDArray shape happen in any situation
         auto output_id = op->output(i)->id();
         const auto& output_shape = runtime_ctx.get_runtime_shape(output_id);
-        HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
+        HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
           << " output " << i << " shape = " << output_shape << " ds = " << op->output(i)->get_distributed_states().ds_info();
         if (runtime_ctx.has_runtime_allocation(output_id)) {
           outputs.push_back(runtime_ctx.get_runtime_allocation(output_id));
@@ -160,16 +165,6 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                             op->instantiation_ctx().placement,
                             op->output(i)->dtype(),
                             op->instantiation_ctx().stream_index));
-        }
-        // for some ops that rely on symbolic shape
-        if (op->output(i)->symbolic()) {
-          HT_LOG_TRACE << "exec op " << op 
-            << " output " << i << " has " << op->output(i)->symbolic_shape();
-          if (is_SyShape_leaf(op->output(i)->symbolic_shape())) {
-            op->output(i)->set_symbolic_shape(output_shape);
-            HT_LOG_TRACE << "set symbolic shape of exec op " << op 
-              << " output " << i << " to " << output_shape;
-          }
         }
       }
     }

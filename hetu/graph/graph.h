@@ -58,7 +58,8 @@ class Graph {
                           const FeedDict& feed_dict = {}) = 0;
 
   virtual NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
-                          const FeedDict& feed_dict = {}, const int num_micro_batches = 1) {}                          
+                          const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
+                          const int cur_strategy_id = 0) {}                          
 
   GraphId id() const noexcept {
     return _id;
@@ -653,13 +654,22 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
       // input must be split_op
       if (batched_isend_irecv_op->num_inputs() > 0) {
         for (size_t j = i - 1; i >= 2 && j >= 1; j--) {
-          if (is_slice_op(ret[j]) && ret[j].get()->output(0)->consumer(0)->id() == batched_isend_irecv_op->id()) {
-            // move batched_isend_irecv_op (ret[i]) after split_op (ret[j])
-            for (size_t k = i; k > j + 1; k--) {
-              ret[k] = ret[k - 1];
-            } 
-            ret[j + 1] = batched_isend_irecv_op;
-            break;
+          if (is_slice_op(ret[j])) {
+            bool is_matched = false;
+            for (auto& consumer : ret[j].get()->output(0)->consumers()) {
+              if (consumer.get()->id() == batched_isend_irecv_op->id()) {
+                is_matched = true;
+                break;
+              }
+            }
+            if (is_matched) {
+              // move batched_isend_irecv_op (ret[i]) after split_op (ret[j])
+              for (size_t k = i; k > j + 1; k--) {
+                ret[k] = ret[k - 1];
+              } 
+              ret[j + 1] = batched_isend_irecv_op;
+              break;
+            }
           }
         }
       }

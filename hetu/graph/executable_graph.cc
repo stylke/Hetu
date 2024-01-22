@@ -1,4 +1,5 @@
 #include "hetu/graph/executable_graph.h"
+#include "hetu/graph/switch_exec_graph.h"
 #include "hetu/graph/ops/data_transfer.h"
 #include "hetu/graph/ops/group.h"
 #include "hetu/graph/ops/Split.h"
@@ -71,8 +72,21 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
   }
   HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": alloc exec variable " << tensor;
   // TODO: check meta is valid & maybe we can use non-blocking stream?
-  _preserved_data[tensor->id()] = NDArray::empty(
-    tensor->shape(), tensor->placement(), tensor->dtype(), kBlockingStream);
+  if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()) {
+    HT_ASSERT(_origin_param_buffer->HasTensor(tensor))
+      << "Cannot find param " << tensor << " in the origin param buffer";
+    if (!_origin_param_buffer->IsAllocated()) {
+      _origin_param_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
+    }
+    _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
+                                            _origin_param_buffer->AsStorage(), 
+                                            _origin_param_buffer->GetElementOffest(tensor));
+  } else {
+    _preserved_data[tensor->id()] = NDArray::empty(tensor->shape(), 
+                                                   tensor->placement(), 
+                                                   tensor->dtype(), 
+                                                   kBlockingStream);
+  }
   auto it = _add_on_inits.find(tensor->id());
   if (it != _add_on_inits.end()) {
     it->second->Init(_preserved_data[tensor->id()], seed, global_shape,
@@ -93,6 +107,40 @@ void ExecutableGraph::RegisterVariableDataInner(const Tensor& tensor,
     it->second->Init(_preserved_data[tensor->id()]);
   } else if (!init.vodify()) {
     init.Init(_preserved_data[tensor->id()]);
+  }
+}
+
+void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ctx_list) {
+  // some memory could alloc in advance
+  // 每个exec graph不一定需要分配origin param buffer
+  // 如果需要其会在AllocVariableDataInner中on-the-fly分配
+  // 但如果有transfer param buffer那么就一定是要分配好的（为了热切换）
+  if (!_transfer_param_buffer->IsEmpty()) {
+    if (!_transfer_param_buffer->IsAllocated()) {
+      _transfer_param_buffer->Alloc(Stream(hetu::impl::comm::GetLocalDevice(), kBlockingStream));
+    }
+    auto origin_params = params();
+    for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
+      auto& op = op_ref.get();
+      if (is_variable_op(op) && _parameter_ops.find(op->id()) != _parameter_ops.end()) {
+        auto it = _transfer_map.find(op->output(0)->id());
+        HT_ASSERT(it != _transfer_map.end())
+          << "The transfer map does not consist of " << op->output(0);
+        auto& transfer_param = it->second;
+        auto transfer_param_data = NDArray(transfer_param->meta(),
+                                           _transfer_param_buffer->AsStorage(), 
+                                           _transfer_param_buffer->GetElementOffest(transfer_param));
+        for (auto& runtime_ctx : runtime_ctx_list) {
+          runtime_ctx.add_runtime_allocation(transfer_param->id(), transfer_param_data);
+        }
+        if (_preserved_data.find(transfer_param->id()) != _preserved_data.end()) {
+          HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": exec transfer param " 
+            << transfer_param << " already has the data";
+        } else {
+          _preserved_data[transfer_param->id()] = transfer_param_data;
+        }
+      }
+    }
   }
 }
 
@@ -595,23 +643,18 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           }
         }
       } else {
-        if (src_group == dst_group) {
-          // no comm
-          result = input;
-        } else {
-          // p2p recv
-          HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group;
-          Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
-          Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->shape(),
-            dst_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
-          RecordTensorShape(recv_output->id(), recv_output->shape());
-          auto& recv_op = recv_output->producer();
-          recv_op->MapToParallelDevices(dst_group);
-          recv_op->Instantiate(local_device, kP2PStream);
-          // add dummy link for topo sort
-          Graph::AddInDeps(recv_op, {input});
-          result = recv_output;
-        }
+        // p2p recv
+        HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group;
+        Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
+        Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->shape(),
+          dst_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
+        RecordTensorShape(recv_output->id(), recv_output->shape());
+        auto& recv_op = recv_output->producer();
+        recv_op->MapToParallelDevices(dst_group);
+        recv_op->Instantiate(local_device, kP2PStream);
+        // add dummy link for topo sort
+        Graph::AddInDeps(recv_op, {input});
+        result = recv_output;
       }
       result->set_distributed_states(comm_op_impl.get_dst_distributed_states(comm_op)); // assign distributed states for result tensor
 
@@ -1079,7 +1122,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 }
 
 NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
-                                 const FeedDict& feed_dict, const int num_micro_batches) {
+                                 const FeedDict& feed_dict, const int num_micro_batches,
+                                 const int cur_strategy_id) {
   TIK(run);
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
@@ -1208,7 +1252,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // move p2p send op to topo tail
       OpRefList send_op_list;
       OpRefList recv_op_list;
-      OpRefList placehoder_variable_op_list;
       OpRefList compute_op_list;
       OpRefList update_op_list;
       OpRefList share_weight_recv_op_list;
@@ -1462,7 +1505,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   }
   HT_LOG_DEBUG << local_device << ": 1. pipeline init[end]";
 
-  HT_LOG_DEBUG << local_device << ": 2. compute[begin]";
+  HT_LOG_DEBUG << local_device << ": 2. alloc buffer[begin]";
+  // alloc params (todo: and alloc gradients) buffer
+  AllocRuntimeBuffer(runtime_ctx_list);
+  HT_LOG_DEBUG << local_device << ": 2. alloc buffer[end]";
+
+  HT_LOG_DEBUG << local_device << ": 3. compute[begin]";
   int num_stages = _stages.size();
   bool is_inference = (_execute_plan.local_bw_topo.size() == 0);
   HT_LOG_DEBUG << local_device << ": num_stages = " << num_stages 
@@ -1527,9 +1575,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     event->Block(Stream(local_device, kComputingStream));
     _p2p_events.emplace_back(std::move(event));
   }
-  HT_LOG_DEBUG << local_device << ": 2. compute[end]";
+  HT_LOG_DEBUG << local_device << ": 3. compute[end]";
 
-  HT_LOG_DEBUG << local_device << ": 3. get results[begin]";
+  HT_LOG_DEBUG << local_device << ": 4. get results[begin]";
   NDArrayList results(fetches.size(), NDArray());
   std::unordered_set<OpId> to_sync_op_ids;
   to_sync_op_ids.reserve(fetches.size());
@@ -1570,7 +1618,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // HT_LOG_DEBUG << local_device << ": sync ops = " << sync_ops;
   for (size_t i = 0; i < results.size(); i++)
     HT_LOG_TRACE << "results[" << i << "]: " << results[i];
-  HT_LOG_DEBUG << local_device << ": 3. get results[end]";
+  HT_LOG_DEBUG << local_device << ": 4. get results[end]";
 
   TOK(run);
   HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)

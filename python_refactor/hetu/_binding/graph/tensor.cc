@@ -400,13 +400,13 @@ PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwar
     DistributedStatesList multi_ds = parsed_args.get_distributed_states_list(1);
     bool requires_grad = parsed_args.get_bool_or_default(2);
     new(&self->tensor) Tensor();
-    self->tensor = MakeParallelParameterOp(NDArrayFromNumpy(array_obj), multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
+    self->tensor = MakeParallelVariableOp(NDArrayFromNumpy(array_obj), multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
   } else if (parsed_args.signature_index() == 1) {
     NDArrayList multi_data = parsed_args.get_numpy_array_list(0);
     DistributedStatesList multi_ds = parsed_args.get_distributed_states_list(1);
     bool requires_grad = parsed_args.get_bool_or_default(2);
     new(&self->tensor) Tensor();
-    self->tensor = MakeParallelParameterOp(multi_data, multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
+    self->tensor = MakeParallelVariableOp(multi_data, multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);

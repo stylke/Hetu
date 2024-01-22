@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hetu/graph/operator.h"
+#include "hetu/graph/graph.h"
 #include "hetu/graph/init/initializer.h"
 #include "hetu/graph/distributed_states.h"
 
@@ -186,7 +187,14 @@ class ParallelVariableOpImpl : public OpInterface {
 
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
-    return {NDArrayMeta().set_shape(local_shape()).set_dtype(dtype())};
+    auto cur_ds = _multi_ds[Graph::GetGraph(Graph::cur_graph_ctx()).CUR_STRATEGY_ID];
+    HT_ASSERT(!_global_shape.empty())
+      << "global shape should be initialized";
+    HTShape cur_local_shape(_global_shape.size());
+    for (size_t d = 0; d < _global_shape.size(); d++) {
+      cur_local_shape[d] = _global_shape[d] / cur_ds.get_dim(d);
+    } 
+    return {NDArrayMeta().set_shape(cur_local_shape).set_dtype(dtype())};
   }                     
 
   TensorList DoGradient(Operator& op,
@@ -196,7 +204,14 @@ class ParallelVariableOpImpl : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override {
-    return {local_shape()};
+    auto cur_ds = _multi_ds[op->graph().CUR_STRATEGY_ID];
+    HT_ASSERT(!_global_shape.empty())
+      << "global shape should be initialized";
+    HTShape cur_local_shape(_global_shape.size());
+    for (size_t d = 0; d < _global_shape.size(); d++) {
+      cur_local_shape[d] = _global_shape[d] / cur_ds.get_dim(d);
+    } 
+    return {cur_local_shape};
   }
 
   NDArrayList DoAllocOutputs(Operator& op, const NDArrayList& inputs,

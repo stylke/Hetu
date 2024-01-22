@@ -71,13 +71,14 @@ class SliceOpImpl final : public ViewsOpImpl {
     int len = _begin_pos.size();
     for (int i = 0; i < len; ++i) {
       HT_ASSERT(_begin_pos[i]->get_val() >= 0 && (_output_shape[i]->get_val() > 0 || _output_shape[i]->get_val() == -1));
-      HT_ASSERT(_begin_pos[i]->get_val() + _output_shape[i]->get_val() <= inputs[0]->shape(i));
+      HT_ASSERT(_begin_pos[i]->get_val() + _output_shape[i]->get_val() <= inputs[0]->shape(i))
+        << "dim " << i << " begin pos is " << _begin_pos[i]->get_val() << " and output len is " << _output_shape[i]->get_val()
+        << ", but input len is " << inputs[0]->shape(i);
     }
     NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[0]->dtype())
                                            .set_shape(get_output_shape())
                                            .set_stride(inputs[0]->stride())
                                            .set_device(inputs[0]->device());
-    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " splice op DoInferMeta() finished";
     return {output_meta};
   };
 
@@ -101,7 +102,7 @@ class SliceOpImpl final : public ViewsOpImpl {
   SyShape _output_shape;
   bool _symbolic;
 
-  int64_t _padding_axis;
+  int64_t _padding_axis; // deprecated
 
  public:
   bool operator==(const OpInterface& rhs) const override {

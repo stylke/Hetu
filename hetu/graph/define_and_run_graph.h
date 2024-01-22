@@ -4,28 +4,60 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/init/initializer.h"
 
+namespace std {
+
+template <>
+struct hash<std::pair<size_t, size_t>> {
+  std::size_t operator()(const std::pair<size_t, size_t>& key) const noexcept {
+    auto hash_1 = std::hash<size_t>()(key.first);
+    auto hash_2 = std::hash<size_t>()(key.second);
+    return hash_1 ^ hash_2;
+  }
+};
+
+} // namespace std
+
 namespace hetu {
 namespace graph {
 
 class ExecGraphPlan {
  public:
   std::shared_ptr<ExecutableGraph> exec_graph;
+  size_t strategy_id;
   Op2OpMap op_to_exec_op_mapping;
   Tensor2TensorMap tensor_to_exec_tensor_mapping;
-  TensorList fetches;
+  TensorList fetches; // most likey useless
 
-  ExecGraphPlan(const std::shared_ptr<ExecutableGraph>& _exec_graph, const Op2OpMap& _op_to_exec_op_mapping, 
-                const Tensor2TensorMap& _tensor_to_exec_tensor_mapping)
+  ExecGraphPlan(const std::shared_ptr<ExecutableGraph>& _exec_graph, 
+                const Op2OpMap& _op_to_exec_op_mapping, 
+                const Tensor2TensorMap& _tensor_to_exec_tensor_mapping,
+                size_t _strategy_id = 0)
   : exec_graph(_exec_graph), 
     op_to_exec_op_mapping(_op_to_exec_op_mapping),
-    tensor_to_exec_tensor_mapping(_tensor_to_exec_tensor_mapping) {}
+    tensor_to_exec_tensor_mapping(_tensor_to_exec_tensor_mapping),
+    strategy_id(_strategy_id) {}
   
-  ExecGraphPlan(std::shared_ptr<ExecutableGraph>&& _exec_graph, Op2OpMap&& _op_to_exec_op_mapping, 
-                Tensor2TensorMap&& _tensor_to_exec_tensor_mapping)
+  ExecGraphPlan(std::shared_ptr<ExecutableGraph>&& _exec_graph, 
+                Op2OpMap&& _op_to_exec_op_mapping, 
+                Tensor2TensorMap&& _tensor_to_exec_tensor_mapping,
+                size_t _strategy_id = 0)
   : exec_graph(std::move(_exec_graph)), 
     op_to_exec_op_mapping(std::move(_op_to_exec_op_mapping)),
-    tensor_to_exec_tensor_mapping(std::move(_tensor_to_exec_tensor_mapping)) {}
+    tensor_to_exec_tensor_mapping(std::move(_tensor_to_exec_tensor_mapping)),
+    strategy_id(_strategy_id) {}
 };
+
+/*
+class SwitcherPoolKey {
+ public:
+  size_t before_num;
+  size_t after_num;
+  
+  SwitcherPoolKey(const size_t& _before_num, const size_t& _after_num)
+  : before_num(_before_num),
+    after_num(_after_num) {}
+};
+*/
 
 class DefineAndRunGraph : public Graph {
  protected:
@@ -47,7 +79,8 @@ class DefineAndRunGraph : public Graph {
   NDArrayList Run(const TensorList& fetches, const FeedDict& feed_dict = {});
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
-                  const FeedDict& feed_dict = {}, const int num_micro_batches = 1);
+                  const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
+                  const int cur_strategy_id = 0);
 
   GraphType type() const {
     return GraphType::DEFINE_AND_RUN;
@@ -99,6 +132,7 @@ class DefineAndRunGraph : public Graph {
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
   std::vector<DeviceGroupList> _multi_device_groups; // all the device groups of ops, in the order of MakeOp calls
 
+  std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _switcher_pool;
   std::vector<ExecGraphPlan> _exec_graph_plan_pool;
   std::vector<Tensor2ShapeMap> _shape_plan_pool;
   size_t _active_plan;

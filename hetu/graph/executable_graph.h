@@ -40,6 +40,7 @@ class ExecutableGraph : public Graph {
  protected:
   friend class Graph;
   friend class Tensor;
+  friend class DefineAndRunGraph;
   friend class SwitchExecGraph;
 
   ExecutableGraph(GraphName name, size_t init_capacity)
@@ -58,7 +59,8 @@ class ExecutableGraph : public Graph {
                   const FeedDict& feed_dict = {});
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
-                  const FeedDict& feed_dict = {}, const int num_micro_batches = 1);
+                  const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
+                  const int cur_strategy_id = 0);
 
   GraphType type() const {
     return GraphType::EXECUTABLE;
@@ -69,13 +71,21 @@ class ExecutableGraph : public Graph {
   }
 
   void InitShapePlan(const Tensor2ShapeMap& shape_plan) {
-    _shape_plan = shape_plan;
+    if (_shape_plan.size() == 0) {
+      _shape_plan = shape_plan;
+    } else {
+      HT_LOG_WARN << "exec graph shape plan already has some shapes";
+      for (auto it = shape_plan.begin(); it != shape_plan.end(); ++it) {
+        RecordTensorShape(it->first, it->second);
+      }
+    }
   }
 
   void InitShapePlan(Tensor2ShapeMap&& shape_plan) {
-    if (_shape_plan.size() == 0)
+    if (_shape_plan.size() == 0) {
       _shape_plan = std::move(shape_plan);
-    else {
+    } else {
+      HT_LOG_WARN << "exec graph shape plan already has some shapes";
       for (auto it = shape_plan.begin(); it != shape_plan.end(); ++it) {
         RecordTensorShape(it->first, it->second);
       }
@@ -166,11 +176,16 @@ class ExecutableGraph : public Graph {
     const Tensor& tensor, NDArray data,
     const Initializer& init = VoidifiedInitializer()) override;
 
+  void AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ctx_list);
+
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
   std::vector<DeviceGroup> _stages;
   int _num_micro_batches;
   ExecutePlan _execute_plan;
   Tensor2ShapeMap _shape_plan;
+  std::shared_ptr<ParamBuffer> _origin_param_buffer;
+  std::shared_ptr<ParamBuffer> _transfer_param_buffer;
+  Tensor2TensorMap _transfer_map;
   std::vector<std::unique_ptr<Event>> _p2p_events;
 };
 

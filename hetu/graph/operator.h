@@ -399,6 +399,15 @@ class OpDef : public shared_ptr_target {
       << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
       << ", got micro batch id: " << micro_batch_id;
     BlockOrSyncAllInputs(micro_batch_id);
+    // correctness debug
+    /*
+    HTShapeList input_shapes;
+    for (auto& input : inputs) {
+      input_shapes.push_back(input->shape());
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
+      << ", the input shapes are " << input_shapes;
+    */
     // precision debug
     /*
     NDArrayList input_sums;
@@ -421,6 +430,19 @@ class OpDef : public shared_ptr_target {
     HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
       << ", the result is " << ret_sums;
     */
+    // for some ops that rely on symbolic shape
+    auto output_size = num_outputs();
+    for (size_t i = 0; i < output_size; i++) {
+      if (output(i)->symbolic()) {
+        HT_LOG_TRACE << "exec op " << name()
+          << " output " << i << " has " << output(i)->symbolic_shape();
+        if (is_SyShape_leaf(output(i)->symbolic_shape())) {
+          output(i)->set_symbolic_shape(rets[i]->shape());
+          HT_LOG_TRACE << "set symbolic shape of exec op " << name()
+            << " output " << i << " to " << rets[i]->shape();
+        }
+      }
+    }
     return rets;
   }
 

@@ -1,6 +1,7 @@
 #include "hetu/impl/memory/CUDACachingMemoryPool.cuh"
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/cuda_utils.h"
+#include "hetu/impl/communication/mpi_comm_group.h"
 #include <mutex>
 
 namespace hetu {
@@ -189,6 +190,7 @@ DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
     << "Deleter must not be empty when borrowing storages";
 
   std::lock_guard<std::mutex> lock(_mtx);
+  WatchEvents();
   // Note: The borrowed memory must be ready, so we use blocking stream here
   DataPtr data_ptr{ptr, num_bytes, device(), next_id()};
   Stream borrow_stream = Stream(device(), kBlockingStream);
@@ -214,14 +216,22 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   auto& info = it->second;
   info.free_at = free_at;
 
-  if (info.status == OccupationStatus::OCCUPIED_BY_ALLOC_STREAM) {
-    // for borrow data
-    // we free it directly
-    if (info.deleter) {
-      _data_ptr_info.erase(it);
-      info.deleter(data_ptr);
-      return;
+  // move borrow data free to WatchEvents()
+  /*
+  // for borrow data we free it directly
+  // we should block the used streams here
+  if (info.deleter) {
+    // Stream::unpack(info.alloc_stream).Sync();
+    auto& used_streams = info.used_streams;
+    for (auto s_id : used_streams) {
+      Stream::unpack(s_id).Sync();
     }
+    info.deleter(data_ptr);
+    _data_ptr_info.erase(it);
+    return;
+  }
+  */
+  if (info.status == OccupationStatus::OCCUPIED_BY_ALLOC_STREAM) {
     info.status = OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM;
     InsertAvailableToLookupTable(
       data_ptr, *(_available_for_single_stream[info.alloc_stream]));
@@ -273,11 +283,9 @@ void CUDACachingMemoryPool::WatchEvents() {
         << "Cannot find data " << data_ptr_id << " from info";
       auto& info = it->second;
       if ((--info.free_event_cnt) == 0) {
-        // for borrow data
-        // we free it directly
         if (info.deleter) {
-          _data_ptr_info.erase(it);
           info.deleter(DataPtr{info.ptr, info.num_bytes, device(), data_ptr_id});
+          _data_ptr_info.erase(it);
         } else {
           InsertAvailableToLookupTable(
             DataPtr{info.ptr, info.num_bytes, device(), data_ptr_id},

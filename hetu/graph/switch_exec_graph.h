@@ -34,22 +34,31 @@ enum class SWITCH_PROFILE_LEVEL : int8_t {
   INFO,
 };
 
+enum class SWITCH_MODE : int8_t {
+  SWITCH_ORIGIN_PARAM = 0,
+  SWITCH_TRANSFER_PARAM,
+};
+
 class ParamBuffer {
   protected:
     friend class SwitchExecGraph;
 
   public:
-    ParamBuffer(const TensorList& tensor_list = {}) {
-      _tensor_list = tensor_list;
-      for (const auto& tensor : tensor_list) {
+    ParamBuffer(const std::string name = {}, 
+                const TensorList& tensor_list = {}):
+      _name(name),
+      _tensor_list(tensor_list) {
+      for (const auto& tensor : _tensor_list) {
         if (_dtype == DataType::UNDETERMINED) {
           _dtype = tensor->dtype();
         } else {
           HT_ASSERT(_dtype == tensor->dtype())
-            << "ParamBuffer dtype should be consistent";
+            << "ParamBuffer " << _name << " dtype should be consistent"
+            << ", but tensor " << tensor << " dtype is " << tensor->dtype() 
+            << " and buffer dtype is " << _dtype;
         }
         HT_ASSERT(_tensor_offset_mapping.find(tensor->id()) == _tensor_offset_mapping.end())
-          << "tensor should be unique in the ParamBuffer"
+          << "tensor should be unique in the ParamBuffer" << _name
           << ", but there are multiple " << tensor;
         _tensor_offset_mapping[tensor->id()] = _buffer_size;
         _buffer_size += tensor->numel() * DataType2Size(tensor->dtype());
@@ -62,17 +71,23 @@ class ParamBuffer {
 
     void AddTensor(const Tensor& tensor) {
       HT_ASSERT(_tensor_offset_mapping.find(tensor->id()) == _tensor_offset_mapping.end())
-        << "tensor should be unique in the ParamBuffer"
+        << "tensor should be unique in the ParamBuffer " << _name
         << ", but there are multiple " << tensor;
       if (_dtype == DataType::UNDETERMINED) {
-          _dtype = tensor->dtype();
+        _dtype = tensor->dtype();
       } else {
         HT_ASSERT(_dtype == tensor->dtype())
-          << "ParamBuffer dtype should be consistent";
+          << "ParamBuffer " << _name << " dtype should be consistent"
+          << ", but tensor " << tensor << " dtype is " << tensor->dtype() 
+          << " and buffer dtype is " << _dtype;
       }
       _tensor_list.push_back(tensor);
       _tensor_offset_mapping[tensor->id()] = _buffer_size;
       _buffer_size += tensor->numel() * DataType2Size(tensor->dtype());
+    }
+
+    bool IsEmpty() const {
+      return _tensor_list.empty();
     }
 
     bool IsAllocated() const {
@@ -85,25 +100,25 @@ class ParamBuffer {
 
     Stream stream() const {
       HT_ASSERT(_is_allocated == true)
-        << "please ensure you've alloc the buffer in advance";
+        << "please ensure you've alloc the buffer " << _name << " in advance";
       return _stream;
     }
 
     void* AsRawPtr() {
       HT_ASSERT(_is_allocated == true)
-        << "please ensure you've alloc the buffer in advance";
+        << "please ensure you've alloc the buffer " << _name << " in advance";
       return _raw_ptr;
     }
 
     std::shared_ptr<NDArrayStorage> AsStorage() {
       HT_ASSERT(_is_allocated == true)
-        << "please ensure you've alloc the buffer in advance";
+        << "please ensure you've alloc the buffer " << _name << " in advance";
       return _storage;
     }
 
     NDArray AsNDArray() {
       HT_ASSERT(_is_allocated == true)
-        << "please ensure you've alloc the buffer in advance";
+        << "please ensure you've alloc the buffer " << _name << " in advance";
       // 设置成一个一维的NDArray
       auto meta = NDArrayMeta().set_dtype(_dtype)
                                .set_device(_stream.device())
@@ -114,14 +129,14 @@ class ParamBuffer {
     const size_t GetByteOffest(const Tensor& tensor) const {
       auto it = _tensor_offset_mapping.find(tensor->id());
       HT_ASSERT(it != _tensor_offset_mapping.end())
-        << "Can't find tensor " << tensor << " in the ParamBuffer";
+        << "Can't find tensor " << tensor << " in the ParamBuffer " << _name;
       return it->second;
     }
 
     const size_t GetElementOffest(const Tensor& tensor) const {
       auto it = _tensor_offset_mapping.find(tensor->id());
       HT_ASSERT(it != _tensor_offset_mapping.end())
-        << "Can't find tensor " << tensor << " in the ParamBuffer";
+        << "Can't find tensor " << tensor << " in the ParamBuffer " << _name;
       return it->second / DataType2Size(_dtype);
     }
 
@@ -132,21 +147,28 @@ class ParamBuffer {
           return i;
         }
       }
-      HT_RUNTIME_ERROR << "Can't find tensor " << tensor << " in the ParamBuffer";
+      HT_RUNTIME_ERROR << "Can't find tensor " << tensor << " in the ParamBuffer " << _name;
     }
 
-    void Alloc(const Stream& stream);
+    void Alloc(const Stream& stream); // stream is unused actually (borrow data must use kBlockingStream)
     void Free();
+    void Bind(const std::shared_ptr<NDArrayStorage>& storage); // bind to a customized storage rather than alloc by itself
 
   protected:
+    // basic attributes
+    std::string _name;
     TensorList _tensor_list;
     bool _is_allocated{false};
     DataType _dtype{DataType::UNDETERMINED};
     std::unordered_map<TensorId, size_t> _tensor_offset_mapping; // 这里的offset是字节数
-    Stream _stream; // 记录在哪个stream上alloc的
+    Stream _stream; // 记录在哪个stream上alloc的（目前deprecated）
     std::shared_ptr<NDArrayStorage> _storage; // high-level cuda mempool api
     void* _raw_ptr; // low-level nccl mem api
     size_t _buffer_size{0};
+
+    // profile related
+    size_t _alloc_time;
+    size_t _free_time;
 };
 
 class ParamSlice {
@@ -265,8 +287,12 @@ class SwitchExecGraph {
     friend class ParamSlice;
 
   public:
-    SwitchExecGraph(DefineAndRunGraph* define_graph, size_t plan_before, size_t plan_after) {
-      _define_graph = define_graph;
+    SwitchExecGraph(DefineAndRunGraph* define_graph, 
+                    size_t plan_before, 
+                    size_t plan_after, 
+                    SWITCH_MODE switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM):
+      _define_graph(define_graph),
+      _switch_mode(switch_mode) {
       _define_graph_params = define_graph->params();
       _switch_plan_pair = std::make_pair(plan_before, plan_after);
       _switch_graph_pair = std::make_pair(define_graph->GetPlan(plan_before).exec_graph, 
@@ -358,6 +384,7 @@ class SwitchExecGraph {
 
   protected:
     // basic attributes
+    SWITCH_MODE _switch_mode; // 切换什么
     DefineAndRunGraph* _define_graph; // 定义图
     TensorCRefList _define_graph_params; // 定义图的params tensor
     std::pair<size_t, size_t> _switch_plan_pair; // 需要切换的两个exec graph plan的编号

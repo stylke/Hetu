@@ -15,9 +15,19 @@ NDArrayList ArrayReshapeOpImpl::DoCompute(Operator& op,
 
 TensorList ArrayReshapeOpImpl::DoGradient(Operator& op, 
                                           const TensorList& grad_outputs) const {
-  return {op->requires_grad(0) ? MakeArrayReshapeGradientOp(grad_outputs.at(0), op->input(0), op->input(0)->shape(),
+  if (symbolic()) {
+    //要将输入的tensor设置成symbolic的，之后shape发生改变时，
+    // 直接overwrite该tensor中的symbolic shape的value即可，
+    // 后续rrayReshapeGradientOp算子的shape均会发生改变
+    op->input(0)->init_symbolic_shape(); // leaf
+    return {op->requires_grad(0) ? MakeArrayReshapeGradientOp(grad_outputs.at(0), op->input(0), op->input(0)->symbolic_shape(),
                                                             op->grad_op_meta().set_name(op->grad_name()))
-                               : Tensor()};
+                                 : Tensor()};
+  }
+  else
+    return {op->requires_grad(0) ? MakeArrayReshapeGradientOp(grad_outputs.at(0), op->input(0), op->input(0)->shape(),
+                                                              op->grad_op_meta().set_name(op->grad_name()))
+                                 : Tensor()};
 }
 
 HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op, 
@@ -111,7 +121,7 @@ void ArrayReshapeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& ou
 NDArrayList ArrayReshapeGradientOpImpl::DoCompute(Operator& op,
                                                   const NDArrayList& inputs,
                                                   RuntimeContext& ctx) const {
-  NDArray output = NDArray::reshape(inputs.at(0), input_shape(), op->instantiation_ctx().stream_index);
+  NDArray output = NDArray::reshape(inputs.at(0), get_input_shape(), op->instantiation_ctx().stream_index);
   return {output};
 }
 
@@ -134,7 +144,7 @@ Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
       std::move(op_meta))->output(0);
 }
 
-// sumbolic shape
+// symbolic shape
 Tensor MakeArrayReshapeOp(Tensor input, const SyShape& output_shape,
                           OpMeta op_meta) {
   return Graph::MakeOp(
@@ -156,7 +166,17 @@ Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
       std::move(op_meta))->output(0);
 }
 
+// fixed shape
 Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input, const HTShape& in_shape,
+                                  OpMeta op_meta) {
+  return Graph::MakeOp(
+      std::make_shared<ArrayReshapeGradientOpImpl>(in_shape),
+      {std::move(grad_output), std::move(ori_input)},
+      std::move(op_meta))->output(0);
+}
+
+// symbolic shape
+Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input, const SyShape& in_shape,
                                   OpMeta op_meta) {
   return Graph::MakeOp(
       std::make_shared<ArrayReshapeGradientOpImpl>(in_shape),

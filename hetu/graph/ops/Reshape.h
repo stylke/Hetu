@@ -14,7 +14,7 @@ class ArrayReshapeGradientOp;
 
 // reshape算子虽然依赖shape，但不需要symbolic方法
 // 原因是其可以通过-1去推断维度的大小
-// 2023.12.9修正：依然是需要symbolic shape的
+// 2023.12.9修正，依然是需要symbolic shape的
 // 因为可能会有seq_len以及batch_size同时发生变化的情况
 class ArrayReshapeOpImpl final : public OpInterface {
  private:
@@ -26,13 +26,15 @@ class ArrayReshapeOpImpl final : public OpInterface {
   ArrayReshapeOpImpl(const SyShape& output_shape, int64_t padding_axis = -1)
   : OpInterface(quote(ArrayReshapeOp)),
      _global_output_shape(output_shape), 
-     _padding_axis(padding_axis) { // default is global output shape, if distributed, then turn into local output shape
+     _padding_axis(padding_axis), 
+     _symbolic(true) { // default is global output shape, if distributed, then turn into local output shape
   }
   // fixed shape constructor
   ArrayReshapeOpImpl(const HTShape& output_shape, int64_t padding_axis = -1)
   : OpInterface(quote(ArrayReshapeOp)),
      _global_output_shape(output_shape.begin(), output_shape.end()), 
-     _padding_axis(padding_axis) { // default is global output shape, if distributed, then turn into local output shape
+     _padding_axis(padding_axis), 
+     _symbolic(false) { // default is global output shape, if distributed, then turn into local output shape
   }
 
   HTShape get_output_shape() const {
@@ -46,6 +48,10 @@ class ArrayReshapeOpImpl final : public OpInterface {
   // deprecated: only used in gpt inference, before symbolic shape is realized
   int64_t get_padding_axis() const {
     return _padding_axis;
+  }
+
+  bool symbolic() const {
+    return _symbolic;
   }
 
   HTShape get_output_shape(const HTShape& input_shape) const {
@@ -189,7 +195,9 @@ class ArrayReshapeOpImpl final : public OpInterface {
   HTShapeList DoInferDynamicShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
   SyShape _global_output_shape;
-  int64_t _padding_axis;
+  bool _symbolic;
+
+  int64_t _padding_axis; // deprecated
 
  public:
   inline bool require_contig_inputs() const override {
@@ -220,18 +228,39 @@ Tensor MakeArrayReshapeOp(Tensor input, const HTShape& output_shape,
 class ArrayReshapeGradientOpImpl final : public OpInterface {
 
  public:
+  // symbolic shape constructor
+  ArrayReshapeGradientOpImpl(const SyShape& in_shape)
+  : OpInterface(quote(ArrayReshapeGradientOp)), 
+    _input_shape(in_shape),
+    _symbolic(true) {
+  }
+  // fixed shape constructor
   ArrayReshapeGradientOpImpl(const HTShape& in_shape)
-  : OpInterface(quote(ArrayReshapeGradientOp)), _input_shape(in_shape) {
+  : OpInterface(quote(ArrayReshapeGradientOp)), 
+    _input_shape(in_shape.begin(), in_shape.end()),
+    _symbolic(false) {
   }
 
-  HTShape input_shape() const {
+  HTShape get_input_shape() const {
+    return get_HTShape_from_SyShape(_input_shape);
+  }
+
+  const SyShape& get_symbolic_input_shape() const {
     return _input_shape;
+  }
+
+  bool symbolic() const {
+    return _symbolic;
   }
 
  protected:
   std::vector<NDArrayMeta> 
   DoInferMeta(const TensorList& inputs) const override {
-    return {inputs[1]->meta()};
+    NDArrayMeta output_meta = NDArrayMeta().set_dtype(inputs[1]->dtype())
+                                           .set_shape(get_input_shape())
+                                           .set_stride(inputs[1]->stride())
+                                           .set_device(inputs[1]->device());
+    return {output_meta};
   };
 
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
@@ -245,7 +274,8 @@ class ArrayReshapeGradientOpImpl final : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes, RuntimeContext& ctx) const override;
 
-  HTShape _input_shape;
+  SyShape _input_shape;
+  bool _symbolic;
 
  public:
   inline bool require_contig_inputs() const override {
@@ -255,13 +285,18 @@ class ArrayReshapeGradientOpImpl final : public OpInterface {
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const ArrayReshapeGradientOpImpl&>(rhs);
-      return input_shape() == rhs_.input_shape();
+      return get_input_shape() == rhs_.get_input_shape();
     }
   }
 
 };
 
+// fixed shape
 Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input, const HTShape& in_shape,
+                                  OpMeta op_meta = OpMeta());
+
+// symbolic shape
+Tensor MakeArrayReshapeGradientOp(Tensor grad_output, Tensor ori_input, const SyShape& in_shape,
                                   OpMeta op_meta = OpMeta());
 
 } // namespace graph

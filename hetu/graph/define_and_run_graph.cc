@@ -123,18 +123,24 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     }
   }
 
+  // initializations of the exec plan
   auto exec_graph_num = _exec_graph_plan_pool.size();
   Tensor2ShapeMap exec_shape_plan;
   Op2OpMap op_to_exec_op_mapping;
   Tensor2TensorMap tensor_to_exec_tensor_mapping;
-  auto exec_graph = Graph::_make_new_graph<ExecutableGraph>(name() + "_executable_" + std::to_string(exec_graph_num));
-  exec_graph->NUM_STRATEGY = NUM_STRATEGY;
-  exec_graph->CUR_STRATEGY_ID = CUR_STRATEGY_ID;
-  
+  auto origin_param_buffer = std::make_shared<ParamBuffer>("origin_param_buffer");
+  auto transfer_param_buffer = std::make_shared<ParamBuffer>("transfer_param_buffer");
+  Tensor2TensorMap transfer_map;
+    
   exec_shape_plan.reserve(shape_plan.size());
   op_to_exec_op_mapping.reserve(_init_capacity);
   tensor_to_exec_tensor_mapping.reserve(_init_capacity);
 
+  // initializations of the exec graph
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  auto exec_graph = Graph::_make_new_graph<ExecutableGraph>(name() + "_executable_" + std::to_string(exec_graph_num));
+  exec_graph->NUM_STRATEGY = NUM_STRATEGY;
+  exec_graph->CUR_STRATEGY_ID = CUR_STRATEGY_ID;
   Graph::push_graph_ctx(exec_graph->id());
 
   // assign pp stages
@@ -150,10 +156,10 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   // todo: just use multi_ds[cur_strategy_id] which was deduced in define_and_run_graph
   // executable_graph needn't deduce states again!
   auto handle_exec_output = [&](Tensor& tensor, Tensor& exec_tensor) -> void {
-    // assign tensor mapping
     HT_LOG_DEBUG << "handle mapping of tensor " << tensor->id() << " " << tensor;
+    // 1)、assign tensor mapping
     tensor_to_exec_tensor_mapping[tensor->id()] = exec_tensor;
-    // assign shape
+    // 2)、assign shape
     auto plan_it = shape_plan.find(tensor->id());
     // The shape plan will be expanded step by step
     if (plan_it != shape_plan.end()) {
@@ -162,18 +168,19 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
       shape_plan[tensor->id()] = exec_tensor->shape();
     }
     exec_shape_plan[exec_tensor->id()] = exec_tensor->shape();
+    HT_LOG_DEBUG << "assign exec tensor " << exec_tensor << " shape " << exec_tensor->shape();
     exec_tensor->set_is_grad(tensor->is_grad());
-    // assign symbolic shape
+    // 3)、assign symbolic shape
     if (tensor->symbolic()) {
       exec_tensor->copy_symbolic_shape(tensor->symbolic_shape());
       if (is_SyShape_leaf(exec_tensor->symbolic_shape())) {
         exec_tensor->set_symbolic_shape(exec_tensor->shape());
       }
     }
-    // assign distributed_states
+    // 4)、assign distributed_states
     // just copy distributed_states here
     exec_tensor->set_multi_distributed_states(tensor->multi_distributed_states());
-    // 冷启动
+    // 5)、assign add on inits
     auto it = _add_on_inits.find(tensor->id());
     if (it != _add_on_inits.end()) {
       Graph::ResetVariableData(exec_tensor, *it->second);
@@ -181,19 +188,20 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
       // 之后会使用热切换
       _add_on_inits.erase(tensor->id());
     }
-    //////////
-    auto local_device = hetu::impl::comm::GetLocalDevice();
-    if (is_variable_op(exec_tensor->producer()) 
+    // 6)、assign param 
+    // 目前只是记录而并不会alloc
+    if (exec_graph->_parameter_ops.find(exec_tensor->producer()->id()) != exec_graph->_parameter_ops.end()
         && exec_tensor->producer()->device_group().contains(local_device)) {
+      origin_param_buffer->AddTensor(exec_tensor);
+      /*
       exec_tensor->set_placement_group(exec_tensor->producer()->device_group());
       exec_tensor->set_placement(local_device);
       Graph::AllocVariableData(exec_tensor);
+      */
     }
-    /////////
   };
 
   HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << topo;
-  std::unordered_map<int, Tensor> transfer_map;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
     HT_LOG_DEBUG << "Creating an executable version of op " << op << " begin...";;
@@ -203,7 +211,6 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     // 2、进行autocast
     TensorList exec_inputs, exec_in_deps;
     std::tie(exec_inputs, exec_in_deps) = Operator::transform_each_input_tensor(op, get_exec_input);
-    // todo: move autocast insert add op to suitable place
     auto autocast_id = AutoCast::cur_autocast_ctx();
     if (autocast_id != UINT64_MAX) {
       auto autocast = AutoCast::GetAutoCast(autocast_id);
@@ -211,11 +218,11 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
         DataType datatype = DataType::UNDETERMINED;
         if (autocast.cast_type() != DataType::UNDETERMINED)
           datatype = autocast.cast_type();
-
         if (datatype != DataType::UNDETERMINED) {
           auto optype = op->type();
-          if (is_optimizer_update_op(op) || is_host_to_device_op(op) || is_device_to_host_op(op) || is_data_transfer_op(op)) {}
-          else {
+          if (is_optimizer_update_op(op) || is_host_to_device_op(op) || is_device_to_host_op(op) || is_data_transfer_op(op)) {
+            // seems nothing to do
+          } else {
             for (int i = 0; i < exec_inputs.size(); ++i) {
               if ((is_variable_op(exec_inputs[i]->producer()) || is_placeholder_op(exec_inputs[i]->producer())) &&
                   exec_inputs[i]->dtype() != datatype && 
@@ -224,18 +231,21 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
                   exec_inputs[i]->dtype() == DataType::FLOAT32 ||
                   exec_inputs[i]->dtype() == DataType::FLOAT64)) {
                 if (transfer_map.find(exec_inputs[i]->id()) != transfer_map.end()) {
-                  HT_LOG_DEBUG << "Map" << &transfer_map << "ReUse:" << exec_inputs[i]->id() << "->" << transfer_map[exec_inputs[i]->id()]->id();
+                  HT_LOG_DEBUG << "Map " << &transfer_map << " reuse: " << exec_inputs[i]->id() << " -> " << transfer_map[exec_inputs[i]->id()]->id();
                   exec_inputs[i] = transfer_map[exec_inputs[i]->id()];
-                }
-                else {
+                } else {
                   auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
-                                  {exec_inputs[i]}, OpMeta().set(op->op_meta()).set_name(op->name() + "_datatransfer").set_is_deduce_states(false), *exec_graph);
-                  HT_LOG_DEBUG << "Map" << &transfer_map << "Insert:" << exec_inputs[i]->id() << "->" << exec_op->output(0)->id();
+                                  {exec_inputs[i]}, OpMeta().set(op->op_meta()).set_name(op->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
+                  HT_LOG_DEBUG << "Map " << &transfer_map << " insert: " << exec_inputs[i]->id() << " -> " << exec_op->output(0)->id();
+                  exec_shape_plan[exec_op->output(0)->id()] = exec_op->output(0)->shape();
                   exec_op->output(0)->set_multi_distributed_states(op->input(i)->multi_distributed_states()); // walkaround: set here by hand
+                  if (exec_graph->_parameter_ops.find(exec_inputs[i]->producer()->id()) != exec_graph->_parameter_ops.end()
+                      && exec_inputs[i]->producer()->device_group().contains(local_device)) {
+                    transfer_param_buffer->AddTensor(exec_op->output(0));
+                  }
                   transfer_map[exec_inputs[i]->id()] = exec_op->output(0);
                   exec_inputs[i] = exec_op->output(0);
                 }
-                exec_graph->RecordTensorShape(exec_inputs[i]->id(), exec_inputs[i]->shape());
               }
             }
           }
@@ -252,7 +262,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
 
     // 后处理
     // 1、建立op和exec_op的映射
-    // 2、标记parameter
+    // 2、标记parameter（同时给即将创建的exec graph预先设置ParamBuffer）
     // 3、设置tensor的shape和distributed_states
     op_to_exec_op_mapping[op->id()] = exec_op;
     if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
@@ -274,13 +284,20 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   
   // assign initial shape plan
   exec_graph->InitShapePlan(std::move(exec_shape_plan));
+
+  // assign param buffer and transfer map
+  exec_graph->_origin_param_buffer = std::move(origin_param_buffer);
+  exec_graph->_transfer_param_buffer = std::move(transfer_param_buffer);
+  exec_graph->_transfer_map = std::move(transfer_map);
   
   // wrap up all of this as an exec graph plan
   _exec_graph_plan_pool.emplace_back(std::move(exec_graph), 
                                      std::move(op_to_exec_op_mapping),
-                                     std::move(tensor_to_exec_tensor_mapping));
+                                     std::move(tensor_to_exec_tensor_mapping),
+                                     CUR_STRATEGY_ID);
 
   Graph::pop_graph_ctx();
+
   // Test Case: 切换并行方案
   if (env != nullptr) {
     if (std::string(env) == "PRECISION" || std::string(env) == "COST") {
@@ -317,11 +334,12 @@ NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
 // 每次调用run都会从当前的define graph中
 // 生成/使用之前生成过的一个exec graph
 // 而只有当：
-// 1、fetch的tensor 2、feed_dict的shape 
+// 1、并行策略 2、fetch的tensor 3、feed_dict的shape 
 // 与cache的某一个重合时，才会复用
-// 后者是由于要切换并行方案，所以也需要重新生曾一个exec graph
+// 目前的写法下，我们认为并行策略已经在python端选择好了然后再传进来
 NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches,
-                                   const FeedDict& feed_dict, const int num_micro_batches) {
+                                   const FeedDict& feed_dict, const int num_micro_batches,
+                                   const int cur_strategy_id) {
 
   auto local_device = hetu::impl::comm::GetLocalDevice(); // only for debug use
   HT_LOG_DEBUG << local_device << ": [Graph Plan] obtain exec graph begin...";
@@ -348,7 +366,11 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     const auto& shape_plan = _shape_plan_pool[i];
     const auto& exec_graph_plan = _exec_graph_plan_pool[i];
     bool plan_matched = true;
-    // 先看fetch匹配不
+    // 先看strategy匹配不
+    if (static_cast<size_t>(cur_strategy_id) != exec_graph_plan.strategy_id) {
+      plan_matched = false;
+    }
+    // 再看fetch匹配不
     for (const auto& fetch : fetches) {
       if (std::find(exec_graph_plan.fetches.begin(), exec_graph_plan.fetches.end(), fetch) == exec_graph_plan.fetches.end()) {
         HT_LOG_TRACE << local_device << ": exec_graph_plan fetches are " << exec_graph_plan.fetches 
@@ -460,8 +482,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
 
     // set define_and_run_graph.CUR_STRATEGY_ID = dst id, 
     // and then do instantiate, if not set, use default id = 0
-    // CUR_STRATEGY_ID = 0;
-    HT_LOG_INFO << "use default CUR_STRATEGY_ID = " << CUR_STRATEGY_ID << " for new executable graph...";
+    CUR_STRATEGY_ID = static_cast<size_t>(cur_strategy_id);
+    HT_LOG_DEBUG << "use CUR_STRATEGY_ID = " << CUR_STRATEGY_ID << " for new executable graph...";
     // Instantiate会将新的exec_graph_plan加入pool中
     Instantiate(topo, shape_plan);
     _shape_plan_pool.push_back(std::move(shape_plan));
@@ -479,16 +501,13 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   // 需要切换plan
   if (!_is_active || _active_plan != next_active_plan) {
     HT_LOG_DEBUG << local_device << ": [Graph Plan] Context switch to the new exec plan begin...";
-
-    // TODO
-    // 1、Automatically Done: 切换到新的并行方案（exec graph的并行信息都在tensor的distributed states中）
-    // 2、*WIP: 热切换，即将原先_active_plan的ckpt重新分配到新方案的设备上，这样才能继续训练
-
     // 热切换
     if (_is_active) {
-      auto switcher = SwitchExecGraph(this, _active_plan, next_active_plan);
-      HT_LOG_DEBUG << local_device << ": " << switcher;
-      switcher.SwitchParams();
+      auto key = std::make_pair(_active_plan, next_active_plan);
+      if (_switcher_pool.find(key) == _switcher_pool.end()) {
+        _switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_plan, next_active_plan);
+      }
+      _switcher_pool[key]->SwitchParams();
     }
     _is_active = true;
     _active_plan = next_active_plan;
@@ -521,14 +540,14 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   exec_feed_dict.reserve(feed_dict.size());
   for (const auto& kv : feed_dict) {
     if (tensor_to_exec_tensor_mapping.find(kv.first) == tensor_to_exec_tensor_mapping.end()) {
-      HT_LOG_WARN << "feed tensor " <<kv.first << " is not used in the exec graph"
+      HT_LOG_DEBUG << "feed tensor " << kv.first << " is not used in the exec graph"
         << ", so we just skipped it";
       continue;
     }
     exec_feed_dict[tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;
   }
-  HT_LOG_DEBUG << "the active exec graph start running..." ;
-  return exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches);
+  HT_LOG_INFO << exec_graph->name() << " start running..." ;
+  return exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches, cur_strategy_id);
 }
 
 } // namespace graph

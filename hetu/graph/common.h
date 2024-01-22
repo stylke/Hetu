@@ -74,6 +74,8 @@ class DefineAndRunGraph;
 class ExecutableGraph;
 class SwitchExecGraph;
 
+class ParamBuffer;
+
 #define HT_MAX_NUM_MICRO_BATCHES (128)
 } // namespace graph
 } // namespace hetu
