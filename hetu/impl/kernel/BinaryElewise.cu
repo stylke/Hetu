@@ -211,46 +211,31 @@ void launch_vectorize_broadcast_loop_kernel(const NDArray& inputA, const NDArray
   CUDAStream cuda_stream(stream);
   dim3 grid(DIVUP(size, BLOCK_WORK_SIZE));
   dim3 block(NUM_THREADS);
-  // NOTE: It's a heuristic value to determine whether to use constant memory
-  //      based on benchmark results on A100.
-  constexpr size_t constant_mem_numel_limit = 33554432UL / sizeof(out_t);
-  if (out_size <= constant_mem_numel_limit) {
-    #define ALLOC_NDIM_BUFFER(ndim)                                      \
-    auto strideA_arr = hetu::cuda::to_int64_buffer<ndim>(strideA);       \
-    auto strideB_arr = hetu::cuda::to_int64_buffer<ndim>(strideB);       \
-    auto out_stride_arr = hetu::cuda::to_int64_buffer<ndim>(out_stride);
 
-    #define DISPATCH_NDIM(ndim, vec_size_A, vec_size_B) \
-    if (ndim == 1) {                                    \
-      ALLOC_NDIM_BUFFER(1)                              \
-      DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
-    } else if (ndim == 2) {                             \
-      ALLOC_NDIM_BUFFER(2)                              \
-      DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
-    } else if (ndim == 3) {                             \
-      ALLOC_NDIM_BUFFER(3)                              \
-      DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
-    } else if (ndim == 4) {                             \
-      ALLOC_NDIM_BUFFER(4)                              \
-      DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
-    } else {                                            \
-      ALLOC_NDIM_BUFFER(HT_MAX_NDIM)                    \
-      DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
-    }
+  #define ALLOC_NDIM_BUFFER(ndim)                                      \
+  auto strideA_arr = hetu::cuda::to_int64_buffer<ndim>(strideA);       \
+  auto strideB_arr = hetu::cuda::to_int64_buffer<ndim>(strideB);       \
+  auto out_stride_arr = hetu::cuda::to_int64_buffer<ndim>(out_stride);
 
-    DISPATCH_NDIM(num_dims, vec_size_A, vec_size_B);
-  } else {
-    std::vector<int64_t> broadcast_metadata;
-    broadcast_metadata.insert(broadcast_metadata.end(), strideA.begin(), strideA.end());
-    broadcast_metadata.insert(broadcast_metadata.end(), strideB.begin(), strideB.end());
-    broadcast_metadata.insert(broadcast_metadata.end(), out_stride.begin(), out_stride.end());
-    auto broadcast_metadata_arr = hetu::cuda::to_int64_ndarray(broadcast_metadata, device_id);
-    int64_t *strideA_arr = broadcast_metadata_arr->data_ptr<int64_t>();
-    int64_t *strideB_arr = strideA_arr + strideA.size();
-    int64_t *out_stride_arr = strideB_arr + strideB.size();
-    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B);
-    NDArray::MarkUsedBy(broadcast_metadata_arr, stream);
+  #define DISPATCH_NDIM(ndim, vec_size_A, vec_size_B) \
+  if (ndim == 1) {                                    \
+    ALLOC_NDIM_BUFFER(1)                              \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
+  } else if (ndim == 2) {                             \
+    ALLOC_NDIM_BUFFER(2)                              \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
+  } else if (ndim == 3) {                             \
+    ALLOC_NDIM_BUFFER(3)                              \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
+  } else if (ndim == 4) {                             \
+    ALLOC_NDIM_BUFFER(4)                              \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
+  } else {                                            \
+    ALLOC_NDIM_BUFFER(HT_MAX_NDIM)                    \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
   }
+
+  DISPATCH_NDIM(num_dims, vec_size_A, vec_size_B);
 }
 
 template <int nt, int vt, typename spec_a_t, typename spec_b_t, typename out_t, typename func_t>
