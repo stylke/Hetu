@@ -179,15 +179,13 @@ def pretrain(args):
     
     # return
 
-    def run_plan(plan_num = 0):
+    def run_plan(strategy_id = 0, run_level = 0):
         
-        dp_size = config.global_batch_size // input_multi_ds[plan_num].get_dim(0)
-        # use the first ds, just adapt for run, will changed for dynamic shape & distributed states in future...
-        input_ds = input_multi_ds[plan_num]
-        input_device_group = input_device_groups[plan_num]
-        label_ds = label_multi_ds[plan_num]
-        label_device_group = label_device_groups[plan_num]
-        # return
+        dp_size = config.global_batch_size // input_multi_ds[strategy_id].get_dim(0)
+        input_ds = input_multi_ds[strategy_id]
+        input_device_group = input_device_groups[strategy_id]
+        label_ds = label_multi_ds[strategy_id]
+        label_device_group = label_device_groups[strategy_id]
         # device in same dp_group will read the same batch data
         if input_device_group.contains(local_device):
             local_device_idx = input_device_group.get_index(local_device)
@@ -230,25 +228,39 @@ def pretrain(args):
                                                  [loss_mean, lm_logits, train_op], 
                                                  feed_dict = feed_dict, 
                                                  num_micro_batches = config.num_micro_batches, 
-                                                 cur_strategy_id = plan_num)
+                                                 cur_strategy_id = strategy_id,
+                                                 run_level = run_level)
                     end_time = time.time()
-                    if label_device_group.contains(local_device):
-                        loss_out = results[0].numpy(force=True).mean()
-                        print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
+                    if run_level == ht.run_level("update"):
+                        if label_device_group.contains(local_device):
+                            loss_out = results[0].numpy(force=True).mean()
+                            print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
                     step_num += 1
                     global_step_num += 1
                     return
                     # if global_step_num == 20:
                     #     return
             
-    run_plan(0)
-    run_plan(1)
-    run_plan(2)
-    run_plan(1)
-    run_plan(0)
-    run_plan(2)
-    run_plan(1)
-
+    run_plan(strategy_id = 0, run_level = ht.run_level("topo"))
+    run_plan(strategy_id = 1, run_level = ht.run_level("topo"))
+    run_plan(strategy_id = 2, run_level = ht.run_level("topo"))
+    run_plan(strategy_id = 1, run_level = ht.run_level("topo"))
+    run_plan(strategy_id = 0, run_level = ht.run_level("topo"))
+            
+    print("run topo end")
+            
+    run_plan(strategy_id = 0, run_level = ht.run_level("alloc"))
+    run_plan(strategy_id = 1, run_level = ht.run_level("grad"))
+    run_plan(strategy_id = 2, run_level = ht.run_level("grad"))
+    run_plan(strategy_id = 1, run_level = ht.run_level("grad"))
+    run_plan(strategy_id = 2, run_level = ht.run_level("grad"))
+    run_plan(strategy_id = 0, run_level = ht.run_level("update"))
+    
+    run_plan(strategy_id = 0, run_level = ht.run_level("alloc"))
+    run_plan(strategy_id = 1, run_level = ht.run_level("grad"))
+    run_plan(strategy_id = 1, run_level = ht.run_level("grad"))
+    run_plan(strategy_id = 0, run_level = ht.run_level("grad"))
+    run_plan(strategy_id = 0, run_level = ht.run_level("update"))
 
 
 if __name__ == '__main__':

@@ -191,7 +191,7 @@ void DefineByRunGraph::PruneTensor(const Tensor& tensor) {
 
 NDArrayList DefineByRunGraph::Run(const Tensor& loss, const TensorList& fetches,
                                   const FeedDict& feed_dict, const int num_micro_batches,
-                                  const int cur_strategy_id) {
+                                  const int cur_strategy_id, RunLevel run_level) {
   TensorList referred_tensors, exec_referred_tensors;
   FeedDict exec_feed_dict;
   std::tie(referred_tensors, exec_referred_tensors, exec_feed_dict) =

@@ -23,6 +23,8 @@
 namespace hetu {
 namespace graph {
 
+std::unordered_map<DeviceGroup, std::once_flag> warmup_flags;
+
 std::ostream& operator<<(std::ostream& os, const SwitchExecGraph& switcher) {
   os << "switch_exec_graph(" << switcher.SwitchGraphPair().first->name() << ", " 
     << switcher.SwitchGraphPair().second->name() << ")";
@@ -116,7 +118,7 @@ static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer) {
     }
     */
     auto new_tensor = MakeContiguousOp(tensor, 
-                                       OpMeta().set_is_deduce_states(false));
+                                       OpMeta().set_is_deduce_states(false).set_name("contiguous_" + tensor->name()));
     auto& contiguous_op = new_tensor->producer();
     if (tensor->placement() == local_device) {
       contiguous_op->MapToParallelDevices(tensor->placement_group());
@@ -538,7 +540,7 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
   }
 }
 
-void SwitchExecGraph::MakeCommGraph() {
+void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_level) {
 
   auto local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": make a new comm graph begin...";
@@ -575,7 +577,7 @@ void SwitchExecGraph::MakeCommGraph() {
     // AMP情形需要使用transfer param而不是origin param
     // 这里直接修正before_it和after_it即可
     // Question: transfer param作为DataTransferOp是否会和ParallelVariableOp有所不同
-    if (_switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+    if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
       if (is_before_active) {
         before_it = before_param_transfer_map.find(before_it->second->id());
         HT_ASSERT(before_it != before_param_transfer_map.end())
@@ -607,7 +609,7 @@ void SwitchExecGraph::MakeCommGraph() {
     } 
     // 只在后头的图里
     else if (!is_before_active && is_after_active) {
-      if (_switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
+      if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
         // 为了保证正确性我们这里还是会从add init里再度对其赋值
         // 这里只对after的add init赋值而不会产生性能上的开销
         // 目的是为了防止在新的after graph中有新的topo而需要访问这一before graph中未使用的param
@@ -624,7 +626,7 @@ void SwitchExecGraph::MakeCommGraph() {
           HT_LOG_DEBUG << local_device << ": param " << define_param << " in the after graph will be lazily initialized";
         }
       }
-      if (_switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+      if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
         HT_RUNTIME_ERROR << "NotImplementedError";
       }
     } 
@@ -683,11 +685,14 @@ void SwitchExecGraph::MakeCommGraph() {
       if (src_group.contains(local_device)) {
         comm_input->producer()->MapToParallelDevices(src_group);
         comm_input->producer()->Instantiate(local_device, kComputingStream);
-        auto comm_input_data_it = before_graph->_preserved_data.find(before_param->id());
-        HT_ASSERT(comm_input_data_it != before_graph->_preserved_data.end())
-          << "something wrong, the data to switch in the before graph is not available";
+        // 只求comm graph的topo的话并不需要实际的feed dict
+        if (switch_level != SWITCH_LEVEL::TOPO) {
+          auto comm_input_data_it = before_graph->_preserved_data.find(before_param->id());
+          HT_ASSERT(comm_input_data_it != before_graph->_preserved_data.end())
+            << "something wrong, the data to switch in the before graph is not available";
+          _comm_feed_dict.insert(std::make_pair(comm_input->id(), comm_input_data_it->second));
+        }    
         _comm_feed_dict_mapping.insert(std::make_pair(comm_input->id(), before_param));
-        _comm_feed_dict.insert(std::make_pair(comm_input->id(), comm_input_data_it->second));
       }
       // 生成该param切分和合并的计算图
       // 并建立映射关系
@@ -974,7 +979,7 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
 // context switch
 // 将before graph中的所有params以尽量高效的方式
 // 重新分配到after graph中
-void SwitchExecGraph::SwitchParams() {
+void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_level) {
 
   // utils
   auto local_device = hetu::impl::comm::GetLocalDevice();
@@ -987,12 +992,17 @@ void SwitchExecGraph::SwitchParams() {
   // 那么直接使用即可
   // 否则需要重新建立
   if (_comm_graph != nullptr) {
+    // 如果只需要建立topo
+    // 此处直接返回即可
+    if (switch_level == SWITCH_LEVEL::TOPO) {
+      return;
+    }
     // 只需要重新设置_comm_feed_dict即可
     // 从_preserve_data中获取before graph的params的数据
     for (const auto& kv : _comm_feed_dict_mapping) {
       auto comm_input_data_it = _switch_graph_pair.first->_preserved_data.find(kv.second->id());
       HT_ASSERT(comm_input_data_it != _switch_graph_pair.first->_preserved_data.end())
-      << "something wrong, the data to transfer in the before graph is not available";
+        << "something wrong, the data to transfer in the before graph is not available";
       // 给feed_dict赋上NDArray
       _comm_feed_dict[kv.first] = comm_input_data_it->second;
     }
@@ -1001,7 +1011,7 @@ void SwitchExecGraph::SwitchParams() {
     HT_ASSERT(_comm_results.empty())
       << "no comm result should exist";
     // *建图*
-    MakeCommGraph();
+    MakeCommGraph(switch_mode, switch_level);
     // 计算topo
     HT_LOG_DEBUG << local_device << ": the mutual params len is " << _param_blocks.size()
       << " and the local recv params len is " << _comm_results.size();
@@ -1041,10 +1051,20 @@ void SwitchExecGraph::SwitchParams() {
     }
   }
 
+  // 热启动nccl的all-to-all通信
+  // warm up the comm group
+  DeviceGroup comm_device_group{std::vector<Device>(_comm_set.begin(), _comm_set.end())};
+  std::call_once(warmup_flags[comm_device_group], 
+                 WarmUpComm, 
+                 _comm_set);
+  // 如果只需要建立topo
+  // 此处直接返回即可
+  if (switch_level == SWITCH_LEVEL::TOPO) {
+    return;
+  }
+
   // profile时需要先都同步好了
   if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
-    // warm up the comm group
-    WarmUpComm(_comm_set);
     // stream同步
     SynchronizeAllStreams(local_device);
     // rank同步
@@ -1080,10 +1100,10 @@ void SwitchExecGraph::SwitchParams() {
   // 获取切换前后param的buffer
   std::shared_ptr<ParamBuffer> before_param_buffer;
   std::shared_ptr<ParamBuffer> after_param_buffer;
-  if (_switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
+  if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
     before_param_buffer = _switch_graph_pair.first->_origin_param_buffer;
     after_param_buffer = _switch_graph_pair.second->_origin_param_buffer;
-  } else if (_switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+  } else if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
     before_param_buffer = _switch_graph_pair.first->_transfer_param_buffer;
     after_param_buffer = _switch_graph_pair.second->_transfer_param_buffer;
   } else {
@@ -1204,6 +1224,8 @@ void SwitchExecGraph::SwitchParams() {
   // 清空concat的buffer
   // 让_concat_buffer的storage的所有权转交给after param buffer和_preserved_data
   if (_use_concat_buffer) {
+    // HT_LOG_INFO << local_device << ": after_param_buffer tensor list is " << after_param_buffer->_tensor_list;
+    // HT_LOG_INFO << local_device << ": conat_buffer tensor list is " << _concat_buffer->_tensor_list;
     after_param_buffer->Bind(_concat_buffer->AsStorage());
     _concat_buffer->Free();
   }

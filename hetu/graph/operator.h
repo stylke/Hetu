@@ -195,10 +195,22 @@ class RuntimeContext {
     return it->second;
   }
 
+  bool has_runtime_skipped(const OpId& op_id) const {
+    return _skipped_plan.find(op_id) != _skipped_plan.end();
+  }
+
+  void add_runtime_skipped(const OpId& op_id) {
+    auto it = _skipped_plan.find(op_id);
+    HT_ASSERT(it == _skipped_plan.end())
+      << "Op " << op_id << " is already existed in runtime skipped plan";
+    _skipped_plan.insert(op_id);
+  }
+
  private:
   std::unordered_map<OpId, OpRuntimeContext*> _ctxs; // 初始化时进行赋值
   Tensor2ShapeMap _shape_plan; // 初始化时进行赋值，每个tensor必须有一个对应的shape，没有则报错
   Tensor2NDArrayMap _allocation_plan; // 初始化后进行赋值，部分tensor可以有一个对应的allocation，没有则临时分配
+  std::unordered_set<OpId> _skipped_plan; // 初始化后进行赋值，部分op不需要sync
 };
 
 struct OpInstantiationContext {
@@ -398,7 +410,7 @@ class OpDef : public shared_ptr_target {
     HT_ASSERT(micro_batch_id < HT_MAX_NUM_MICRO_BATCHES)
       << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
       << ", got micro batch id: " << micro_batch_id;
-    BlockOrSyncAllInputs(micro_batch_id);
+    BlockOrSyncAllInputs(runtime_ctx, micro_batch_id);
     // correctness debug
     /*
     HTShapeList input_shapes;
@@ -644,9 +656,9 @@ class OpDef : public shared_ptr_target {
 
   const Operator& get_self() const;
 
-  void BlockOrSyncAllInputs(size_t micro_batch_id = 0);
+  void BlockOrSyncAllInputs(RuntimeContext& runtime_ctx, size_t micro_batch_id = 0);
   
-  void BlockOrSyncInput(Tensor& input, size_t micro_batch_id = 0);
+  void BlockOrSyncInput(Tensor& input, RuntimeContext& runtime_ctx, size_t micro_batch_id = 0);
 
   const OpIdentifier _ids;
   std::shared_ptr<OpInterface> _body;

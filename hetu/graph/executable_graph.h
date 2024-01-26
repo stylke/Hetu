@@ -60,7 +60,7 @@ class ExecutableGraph : public Graph {
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                   const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
-                  const int cur_strategy_id = 0);
+                  const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE);
 
   GraphType type() const {
     return GraphType::EXECUTABLE;
@@ -187,6 +187,7 @@ class ExecutableGraph : public Graph {
   std::shared_ptr<ParamBuffer> _transfer_param_buffer;
   Tensor2TensorMap _transfer_map;
   std::vector<std::unique_ptr<Event>> _p2p_events;
+  std::vector<std::unique_ptr<Event>> _grad_accumulate_events;
 };
 
 } // namespace graph

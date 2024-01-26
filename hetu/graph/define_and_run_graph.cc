@@ -182,7 +182,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     exec_tensor->set_multi_distributed_states(tensor->multi_distributed_states());
     // 5)、assign add on inits
     auto it = _add_on_inits.find(tensor->id());
-    if (it != _add_on_inits.end()) {
+    if (_run_level != RunLevel::TOPO && it != _add_on_inits.end()) {
       Graph::ResetVariableData(exec_tensor, *it->second);
       // 考虑要切换plan，仅第一次使用_add_on_inits
       // 之后会使用热切换
@@ -190,7 +190,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     }
     // 6)、assign param 
     // 目前只是记录而并不会alloc
-    if (exec_graph->_parameter_ops.find(exec_tensor->producer()->id()) != exec_graph->_parameter_ops.end()
+    if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
         && exec_tensor->producer()->device_group().contains(local_device)) {
       origin_param_buffer->AddTensor(exec_tensor);
       /*
@@ -235,11 +235,11 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
                   exec_inputs[i] = transfer_map[exec_inputs[i]->id()];
                 } else {
                   auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
-                                  {exec_inputs[i]}, OpMeta().set(op->op_meta()).set_name(op->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
+                                  {exec_inputs[i]}, OpMeta().set(exec_inputs[i]->producer()->op_meta()).set_name(exec_inputs[i]->producer()->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
                   HT_LOG_DEBUG << "Map " << &transfer_map << " insert: " << exec_inputs[i]->id() << " -> " << exec_op->output(0)->id();
                   exec_shape_plan[exec_op->output(0)->id()] = exec_op->output(0)->shape();
                   exec_op->output(0)->set_multi_distributed_states(op->input(i)->multi_distributed_states()); // walkaround: set here by hand
-                  if (exec_graph->_parameter_ops.find(exec_inputs[i]->producer()->id()) != exec_graph->_parameter_ops.end()
+                  if (_parameter_ops.find(op->input(i)->producer()->id()) != _parameter_ops.end()
                       && exec_inputs[i]->producer()->device_group().contains(local_device)) {
                     transfer_param_buffer->AddTensor(exec_op->output(0));
                   }
@@ -339,8 +339,8 @@ NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
 // 目前的写法下，我们认为并行策略已经在python端选择好了然后再传进来
 NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches,
                                    const FeedDict& feed_dict, const int num_micro_batches,
-                                   const int cur_strategy_id) {
-
+                                   const int cur_strategy_id, RunLevel run_level) {
+  _run_level = run_level;
   auto local_device = hetu::impl::comm::GetLocalDevice(); // only for debug use
   HT_LOG_DEBUG << local_device << ": [Graph Plan] obtain exec graph begin...";
 
@@ -418,8 +418,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     HT_LOG_DEBUG << local_device << ": global topo before deducing shape plan is " << topo;
 
     // deprecated, but maybe useful some day
-    // now move all the logic of inferring shape and distributed_states to Instantiate()
-    // MakeOp can handle most of the cases automatically
+    // *now move all the logic of inferring shape and distributed_states to Instantiate()
+    // that is because MakeOp can handle most of the cases automatically
     /*
     RuntimeContext runtime_ctx(topo.size());
     // std::unordered_set<TensorId> params;
@@ -507,7 +507,31 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       if (_switcher_pool.find(key) == _switcher_pool.end()) {
         _switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_plan, next_active_plan);
       }
-      _switcher_pool[key]->SwitchParams();
+      // 默认的切换状态设置
+      auto switch_mode = SWITCH_MODE::SWITCH_TRANSFER_PARAM;
+      auto switch_level = SWITCH_LEVEL::EXEC;
+      // 如果旧的exec graph没开AMP
+      // 那么只能切换origin param buffer
+      if (_exec_graph_plan_pool[_active_plan].exec_graph->_transfer_param_buffer->IsEmpty()) {
+        switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
+      }
+      // 如果旧的exec graph只是建立topo
+      // 那么其必然没有alloc
+      // 此时无法做实际的热切换
+      // 而是建立热切换的topo
+      if (_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::TOPO) {
+        switch_level = SWITCH_LEVEL::TOPO;
+      }
+      // 如果新的exec graph只是建立topo
+      // 但旧的exec graph已经alloc/grad/update了
+      // 我们目前禁止这样做（以防出现一些bug）
+      else {
+        if (_run_level == RunLevel::TOPO) {
+          HT_RUNTIME_ERROR << "graph with RunLevel::TOPO "
+            << "should only followed behind graph with RunLevel::TOPO right now";
+        }
+      }
+      _switcher_pool[key]->SwitchParams(switch_mode, switch_level);
     }
     _is_active = true;
     _active_plan = next_active_plan;
@@ -547,7 +571,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     exec_feed_dict[tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;
   }
   HT_LOG_INFO << exec_graph->name() << " start running..." ;
-  return exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches, cur_strategy_id);
+  return exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches, 
+                         cur_strategy_id, run_level);
 }
 
 } // namespace graph

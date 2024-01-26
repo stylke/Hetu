@@ -186,7 +186,7 @@ class ParallelMLP(ht.nn.Module):
         )
 
         # self.bias_gelu_fusion = bias_gelu_fusion
-        self.activation_func = ht.nn.NewGeLU() # should be gelu
+        self.activation_func = ht.nn.NewGeLU() 
 
         self.dense_4h_to_h = ht.nn.HtMultiRowParallelLinear(
             config.ffn_hidden_size,

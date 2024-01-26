@@ -126,3 +126,19 @@ def autocast():
 
 def autocast(dtype):
     return _AutocastContext(dtype)
+
+class _RunLevel(object):
+    def __init__(self, type):
+        if type == "update":
+            self.type = 0
+        elif type == "grad":
+            self.type = 1
+        elif type == "alloc":
+            self.type = 2
+        elif type == "topo":
+            self.type = 3
+        else:
+            raise ValueError(f"No level for '{type}' in hetu.Graph")
+        
+def run_level(type = "update"):
+    return _RunLevel(type).type

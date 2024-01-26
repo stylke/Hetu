@@ -306,19 +306,19 @@ const Operator& OpDef::get_self() const {
   return Graph::GetGraph(graph_id()).GetOp(id());
 }
 
-void OpDef::BlockOrSyncAllInputs(size_t micro_batch_id) {
+void OpDef::BlockOrSyncAllInputs(RuntimeContext& runtime_ctx, size_t micro_batch_id) {
   for (auto& input : _inputs)
-    BlockOrSyncInput(input, micro_batch_id);
+    BlockOrSyncInput(input, runtime_ctx, micro_batch_id);
   for (auto& in_dep : _extra_in_dep_linkers)
-    BlockOrSyncInput(in_dep, micro_batch_id);
+    BlockOrSyncInput(in_dep, runtime_ctx, micro_batch_id);
 }
 
-void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
+void OpDef::BlockOrSyncInput(Tensor& input, RuntimeContext& runtime_ctx, size_t micro_batch_id) {
   if (!input.is_defined())
     return;
   // for commom case
   auto& input_op = input->producer();
-  // in_degree=0 op should't be blocked
+  // in_degree=0 op shouldn't blocked
   if (is_placeholder_op(input_op) || is_variable_op(input_op))
     return;
   // p2p ops are all gathered in group start/end, so the start/stop events for p2p ops is invalid, should not be used any more!
@@ -339,8 +339,14 @@ void OpDef::BlockOrSyncInput(Tensor& input, size_t micro_batch_id) {
              instantiation_ctx().stream_index) {
     // Both ops are on the same device. We can block the current op
     // by waiting for the stop event of the dependency.
+    if (!input_op->instantiation_ctx().stop[micro_batch_id]->IsRecorded()) {
+      HT_ASSERT(runtime_ctx.has_runtime_skipped(input_op->id()))
+        << "input op " << input_op << " is not skipped and doesn't record the stop event of "
+        << micro_batch_id << " micro batch, which is not permitted";
+      return;
+    }
     input_op->instantiation_ctx().stop[micro_batch_id]->Block(instantiation_ctx().stream());
-    HT_LOG_TRACE << "input op " << input_op << " stream is: " << input_op->instantiation_ctx().stream() 
+    HT_LOG_TRACE << "input op " << input_op << " stream is " << input_op->instantiation_ctx().stream() 
       << " and current op " << name() << " stream is " << instantiation_ctx().stream();
   }
 }

@@ -104,7 +104,7 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
                                   .set_eager_device(kCPU)
                                   .set_name(var->name() + "_step")
                                   .set_is_step(true));
-  // var: dup in dp group, grad: reduce-scatter in dp group, mean/var: same as grad
+  // variable: dup in dp group, grad: reduce-scatter in dp group, mean & variance: same as grad
   return MakeAdamOp(var, grad, MakeStates(var, grad, "mean"),
                     MakeStates(var, grad, "variance"),
                     learning_rate(), step, beta1(), beta2(),

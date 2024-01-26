@@ -43,6 +43,10 @@ class CPUEvent final : public Event {
     _block_fn = std::bind(CPUEvent::_Block, this);
   }
 
+  inline bool IsRecorded() {
+    return _recorded;
+  }
+
   inline void Record(const Stream& stream) {
     _record_fn_completed = false;
     _record_future = CPUStream(stream).EnqueueTask(_record_fn, "Event_Record");

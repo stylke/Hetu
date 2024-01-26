@@ -39,6 +39,11 @@ enum class SWITCH_MODE : int8_t {
   SWITCH_TRANSFER_PARAM,
 };
 
+enum class SWITCH_LEVEL : int8_t {
+  EXEC = 0,
+  TOPO,
+};
+
 class ParamBuffer {
   protected:
     friend class SwitchExecGraph;
@@ -104,6 +109,10 @@ class ParamBuffer {
       return _stream;
     }
 
+    size_t size() const {
+      return _buffer_size;
+    }
+
     void* AsRawPtr() {
       HT_ASSERT(_is_allocated == true)
         << "please ensure you've alloc the buffer " << _name << " in advance";
@@ -162,8 +171,8 @@ class ParamBuffer {
     DataType _dtype{DataType::UNDETERMINED};
     std::unordered_map<TensorId, size_t> _tensor_offset_mapping; // 这里的offset是字节数
     Stream _stream; // 记录在哪个stream上alloc的（目前deprecated）
-    std::shared_ptr<NDArrayStorage> _storage; // high-level cuda mempool api
-    void* _raw_ptr; // low-level nccl mem api
+    std::shared_ptr<NDArrayStorage> _storage; // high-level hetu mempool api
+    void* _raw_ptr; // low-level cuda/nccl mem api
     size_t _buffer_size{0};
 
     // profile related
@@ -289,10 +298,8 @@ class SwitchExecGraph {
   public:
     SwitchExecGraph(DefineAndRunGraph* define_graph, 
                     size_t plan_before, 
-                    size_t plan_after, 
-                    SWITCH_MODE switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM):
-      _define_graph(define_graph),
-      _switch_mode(switch_mode) {
+                    size_t plan_after):
+      _define_graph(define_graph) {
       _define_graph_params = define_graph->params();
       _switch_plan_pair = std::make_pair(plan_before, plan_after);
       _switch_graph_pair = std::make_pair(define_graph->GetPlan(plan_before).exec_graph, 
@@ -346,7 +353,8 @@ class SwitchExecGraph {
       return _switch_graph_pair;
     }
     
-    void SwitchParams();
+    void SwitchParams(SWITCH_MODE switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM,
+                      SWITCH_LEVEL switch_level = SWITCH_LEVEL::EXEC);
 
   protected:
     void CreateParamBlock(ParamBlock& block,
@@ -366,7 +374,8 @@ class SwitchExecGraph {
                                const std::unordered_map<int32_t, int32_t>& state,
                                const std::vector<int32_t>& multiple, int32_t dim);
     
-    void MakeCommGraph();
+    void MakeCommGraph(SWITCH_MODE switch_mode,
+                       SWITCH_LEVEL switch_level);
 
     void BufferBatchedIsendIrecvExec(const Operator& op);
     
@@ -384,7 +393,6 @@ class SwitchExecGraph {
 
   protected:
     // basic attributes
-    SWITCH_MODE _switch_mode; // 切换什么
     DefineAndRunGraph* _define_graph; // 定义图
     TensorCRefList _define_graph_params; // 定义图的params tensor
     std::pair<size_t, size_t> _switch_plan_pair; // 需要切换的两个exec graph plan的编号

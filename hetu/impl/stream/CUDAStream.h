@@ -64,6 +64,10 @@ class CUDAEvent final : public Event {
     CudaEventDestroy(_event);
   }
 
+  inline bool IsRecorded() {
+    return _recorded;
+  }
+
   inline void Record(const Stream& stream) {
     hetu::cuda::CUDADeviceGuard guard(stream.device_index());
     CudaEventRecord(_event, CUDAStream(stream));

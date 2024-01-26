@@ -23,6 +23,13 @@ enum class GraphType : int8_t {
   NUM_GRAPH_TYPES
 };
 
+enum class RunLevel : int8_t {
+  UPDATE = 0,
+  GRAD,
+  ALLOC,
+  TOPO
+};
+
 std::string GraphType2Str(GraphType);
 std::ostream& operator<<(std::ostream&, GraphType);
 
@@ -59,7 +66,7 @@ class Graph {
 
   virtual NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                           const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
-                          const int cur_strategy_id = 0) {}                          
+                          const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE) {}                          
 
   GraphId id() const noexcept {
     return _id;
@@ -260,6 +267,7 @@ class Graph {
   
   std::unordered_map<OpId, uint32_t> _op_out_degrees;
   Tensor2NDArrayMap _preserved_data;
+  RunLevel _run_level;
 
  protected:
   OpId next_op_id() {

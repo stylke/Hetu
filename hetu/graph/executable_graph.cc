@@ -75,6 +75,7 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
   if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()) {
     HT_ASSERT(_origin_param_buffer->HasTensor(tensor))
       << "Cannot find param " << tensor << " in the origin param buffer";
+    // alloc on-the-fly
     if (!_origin_param_buffer->IsAllocated()) {
       _origin_param_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
     }
@@ -82,6 +83,8 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
                                             _origin_param_buffer->AsStorage(), 
                                             _origin_param_buffer->GetElementOffest(tensor));
   } else {
+    // 另外一些是variable但不是parameter的正常走mempool
+    // 分配的是碎片化的显存
     _preserved_data[tensor->id()] = NDArray::empty(tensor->shape(), 
                                                    tensor->placement(), 
                                                    tensor->dtype(), 
@@ -112,36 +115,65 @@ void ExecutableGraph::RegisterVariableDataInner(const Tensor& tensor,
 
 void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ctx_list) {
   // some memory could alloc in advance
-  // 每个exec graph不一定需要分配origin param buffer
-  // 如果需要其会在AllocVariableDataInner中on-the-fly分配
-  // 但如果有transfer param buffer那么就一定是要分配好的（为了热切换）
-  if (!_transfer_param_buffer->IsEmpty()) {
-    if (!_transfer_param_buffer->IsAllocated()) {
-      _transfer_param_buffer->Alloc(Stream(hetu::impl::comm::GetLocalDevice(), kBlockingStream));
-    }
-    auto origin_params = params();
-    for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
-      auto& op = op_ref.get();
-      if (is_variable_op(op) && _parameter_ops.find(op->id()) != _parameter_ops.end()) {
+  // 1、fragile non-param varaible (alloc and compute)
+  // 2、origin param (if needed, alloc on-the-fly and compute)
+  // 3、transfer param (alloc and compute)
+  // 4、todo: gradient (just alloc)
+  if (!_transfer_param_buffer->IsEmpty() && !_transfer_param_buffer->IsAllocated()) {
+    // alloc transfer param
+    _transfer_param_buffer->Alloc(Stream(hetu::impl::comm::GetLocalDevice(), kBlockingStream));
+    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": alloc transfer param buffer "
+      << ", the size is " << _transfer_param_buffer->size();
+  }
+  for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
+    auto& op = op_ref.get();
+    if (is_variable_op(op)) {
+      // 是param且存在data transfer的情况需要单独处理
+      // 因为有可能是热切换过来的而不需要再计算
+      if (_parameter_ops.find(op->id()) != _parameter_ops.end() && !_transfer_param_buffer->IsEmpty()) {
         auto it = _transfer_map.find(op->output(0)->id());
         HT_ASSERT(it != _transfer_map.end())
           << "The transfer map does not consist of " << op->output(0);
         auto& transfer_param = it->second;
         auto transfer_param_data = NDArray(transfer_param->meta(),
-                                           _transfer_param_buffer->AsStorage(), 
-                                           _transfer_param_buffer->GetElementOffest(transfer_param));
+                                          _transfer_param_buffer->AsStorage(), 
+                                          _transfer_param_buffer->GetElementOffest(transfer_param));
+        // 添加runtime allocation
         for (auto& runtime_ctx : runtime_ctx_list) {
           runtime_ctx.add_runtime_allocation(transfer_param->id(), transfer_param_data);
         }
+        // 热切换
         if (_preserved_data.find(transfer_param->id()) != _preserved_data.end()) {
           HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": exec transfer param " 
             << transfer_param << " already has the data";
-        } else {
+        } 
+        // 冷启动
+        else {
+          // alloc and compute origin param
+          auto origin_param = op->Compute({}, runtime_ctx_list[0]);
+          // compute transfer param
+          transfer_param->producer()->Compute(origin_param, runtime_ctx_list[0]);
+          // todo: for pp > 1, it is safer to 
+          // record the start and end event on all micro batches here
           _preserved_data[transfer_param->id()] = transfer_param_data;
+        }
+        // 添加runtime skipped
+        for (auto& runtime_ctx : runtime_ctx_list) {
+          runtime_ctx.add_runtime_skipped(op->id());
+          runtime_ctx.add_runtime_skipped(transfer_param->producer()->id());
+        }
+      }
+      // 其余情况正常按variable去compute即可
+      // AllocVariableDataInner已经自动处理了_preserved_data已存在的情况
+      else {
+        op->Compute({}, runtime_ctx_list[0]);
+        // 添加runtime skipped
+        for (auto& runtime_ctx : runtime_ctx_list) {
+          runtime_ctx.add_runtime_skipped(op->id());
         }
       }
     }
-  }
+  } 
 }
 
 bool ExecutableGraph::Instantiate(const TensorList& fetches,
@@ -994,7 +1026,7 @@ ExecutableGraph::GeneratePipedreamFlushSchedule(
   return schedule;
 }
 
-void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo, RuntimeContext& runtime_ctx, 
+void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo, RuntimeContext& runtime_ctx,
                                   Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
                                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                                   const FeedDict& feed_dict, const TensorList& fetches,
@@ -1015,19 +1047,25 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     auto& op = op_ref.get();
     HT_ASSERT(!is_placeholder_op(op) && !is_variable_op(op))
       << "Placeholder & Variable ops should not appear in ComputeFunc!";
-    bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
+    bool is_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
       return feed_dict.find(tensor->id()) != feed_dict.end();
     });
-    if (computed)
-      continue;
 
+    if (runtime_ctx.has_runtime_skipped(op->id())) {
+      continue; 
+    }
+    if (is_feed_dict_op) {
+      continue;
+    }
     // in pipeline(shared_weight_p2p not empty), shared weight p2p ops only execute in micro batch 0
     if (!shared_weight_p2p.empty() && shared_weight_p2p.find(op->id()) != shared_weight_p2p.end() && micro_batch_id > 0) {
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": skip execute shared weight p2p: " << op;
       continue;
     }
     // shared weight grad p2p ops are included in accumulated_ops, only execute in last micro batch
-    if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
+    // 另外GRAD模式下不会运行accumulated_ops
+    if ((_run_level == RunLevel::GRAD || !grad_accumulation_finished)
+        && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
       continue;
     }
     
@@ -1058,12 +1096,13 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     // }
 
     // variable can be directly fetched, needn't save in tensor2data
+    // AMP data transfer can be directly fetched, needn't save in tensor2data
     NDArrayList input_vals;
     input_vals.reserve(op->num_inputs());
     for (const auto& input : op->inputs()) {
       NDArray input_val;
-      if (is_variable_op(input->producer())) {
-        input_val = GetVariableDataInner(input);     
+      if (_preserved_data.find(input->id()) != _preserved_data.end()) {
+        input_val = _preserved_data[input->id()];     
       } else {
         auto it = tensor2data.find(input->id());
         HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
@@ -1113,6 +1152,9 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         }
         if (grad_accumulation_finished) {
           tensor2data[output->id()] = grad_accumulation[output->id()];
+          auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+          event->Record(Stream(op->placement(), op->instantiation_ctx().stream_index));
+          _grad_accumulate_events.emplace_back(std::move(event));
         }
       } else if (tensor2degrees[output->id()] > 0 || fetch_indices.find(output->id()) != fetch_indices.end()) {
         tensor2data[output->id()] = output_vals[i];
@@ -1123,8 +1165,9 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
 NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
                                  const FeedDict& feed_dict, const int num_micro_batches,
-                                 const int cur_strategy_id) {
+                                 const int cur_strategy_id, RunLevel run_level) {
   TIK(run);
+  _run_level = run_level;
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
 
@@ -1293,7 +1336,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       _local_topo.insert(_local_topo.end(), recv_op_list.begin(), recv_op_list.end());
       _local_topo.insert(_local_topo.end(), compute_op_list.begin(), compute_op_list.end());
       _local_topo.insert(_local_topo.end(), send_op_list.begin(), send_op_list.end());
-      // move move allreduce/reduce-scatter & udpate & group op after pipeline p2p, to make p2p & allreduce/reduce-scatter overlap
+      // move allreduce/reduce-scatter & udpate & group op after pipeline p2p, to make p2p & allreduce/reduce-scatter overlap
       _local_topo.insert(_local_topo.end(), update_op_list.begin(), update_op_list.end());
     };
     get_local_topo(fw_topo, local_fw_topo, local_placeholder_variable_ops);
@@ -1457,6 +1500,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   HT_LOG_DEBUG << local_device << ": 0. Create Execution Plan [end]";
 
+  // ********************** Run Level Check Point **********************
+  if (_run_level == RunLevel::TOPO) {
+    return {};
+  }
+  // ********************** Run Level Check Point **********************
+
   HT_LOG_DEBUG << local_device << ": 1. pipeline init[begin]";
   // pipeline compute
   // runtimectx for m micro batches
@@ -1479,20 +1528,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       tensor2data_list[i][kv.first] = micro_batches[i];
     }
   }
-
-  // // variable ops: directly get data from graph, may cost more time when params is large?
-  // for (auto& op: _execute_plan.local_placeholder_variable_ops) {
-  //   if (is_variable_op(op)) {
-  //     for (int i = 0; i < num_micro_batches; i++) {
-  //       tensor2data_list[i][op->output(0)->id()] = Graph::GetVariableData(op->output(0));
-  //     }
-  //   }
-  // }
-  
   std::unordered_map<TensorId, size_t> fetch_indices;
   for (size_t i = 0; i < fetches.size(); i++)
     fetch_indices[fetches.at(i)->id()] = i;
-
   // get consume times for each tensor
   Tensor2IntMap tensor2degrees;
   for (auto& op_ref : _execute_plan.local_topo) {
@@ -1505,10 +1543,17 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   }
   HT_LOG_DEBUG << local_device << ": 1. pipeline init[end]";
 
-  HT_LOG_DEBUG << local_device << ": 2. alloc buffer[begin]";
-  // alloc params (todo: and alloc gradients) buffer
+  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[begin]";
+  // alloc params and pre-compute (todo: alloc gradients buffer)
   AllocRuntimeBuffer(runtime_ctx_list);
-  HT_LOG_DEBUG << local_device << ": 2. alloc buffer[end]";
+  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[end]";
+
+  // ********************** Run Level Check Point **********************
+  if (_run_level == RunLevel::ALLOC) {
+    SynchronizeAllStreams();
+    return {};
+  }
+  // ********************** Run Level Check Point **********************
 
   HT_LOG_DEBUG << local_device << ": 3. compute[begin]";
   int num_stages = _stages.size();
@@ -1553,7 +1598,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
     // micro batch i: execute fw/bw
     if (is_forward) {
-      ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx, 
+      ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx,
                   tensor2data, tensor2degrees, grad_accumulation, false, 
                   feed_dict, fetches, fetch_indices, is_continuous_p2p);
     } else {
@@ -1576,6 +1621,23 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     _p2p_events.emplace_back(std::move(event));
   }
   HT_LOG_DEBUG << local_device << ": 3. compute[end]";
+
+  // ********************** Run Level Check Point **********************
+  // 仅仅是算出grad但不更新
+  // 这里需要先对grad的op进行sync
+  // 然后将grad buffer直接reduce_scatter到dst exec graph
+  if (_run_level == RunLevel::GRAD) {
+    for (auto& event : _grad_accumulate_events) {
+      event->Sync();
+    }
+    _grad_accumulate_events.clear();
+    // todo
+    // 需要单独设计接口指定dst exec graph
+    // 或者按热切换来弄
+    return {};
+  }
+  _grad_accumulate_events.clear();
+  // ********************** Run Level Check Point **********************
 
   HT_LOG_DEBUG << local_device << ": 4. get results[begin]";
   NDArrayList results(fetches.size(), NDArray());
@@ -1619,6 +1681,32 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   for (size_t i = 0; i < results.size(); i++)
     HT_LOG_TRACE << "results[" << i << "]: " << results[i];
   HT_LOG_DEBUG << local_device << ": 4. get results[end]";
+
+  // ********************** Run Level Check Point **********************
+  // 一次完整的optimizer update发生了
+  // transfer param buffer需要被清理掉
+  // origin param buffer不用管
+  if (_run_level == RunLevel::UPDATE) {
+    if (!_transfer_param_buffer->IsEmpty()) {
+      HT_ASSERT(_transfer_param_buffer->IsAllocated()) 
+        << "transfer param buffer should be allocated";
+      for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
+        auto& op = op_ref.get();
+        if (is_variable_op(op) && _parameter_ops.find(op->id()) != _parameter_ops.end()) {
+          auto it = _transfer_map.find(op->output(0)->id());
+          HT_ASSERT(it != _transfer_map.end())
+            << "The transfer map does not consist of " << op->output(0);
+          auto& transfer_param = it->second;
+          auto data_it = _preserved_data.find(transfer_param->id());
+          HT_ASSERT(data_it != _preserved_data.end())
+            << "The preserved data does not consist of " << transfer_param;
+          _preserved_data.erase(data_it);
+        }
+      }
+      _transfer_param_buffer->Free();
+    }
+  }
+  // ********************** Run Level Check Point **********************
 
   TOK(run);
   HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)

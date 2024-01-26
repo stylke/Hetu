@@ -100,6 +100,8 @@ class Event {
   Event(Device device, bool enable_timing = true)
   : _device(std::move(device)), _enable_timing(enable_timing) {}
 
+  virtual bool IsRecorded() = 0;
+
   virtual void Record(const Stream& stream) = 0;
 
   virtual void Sync() = 0;

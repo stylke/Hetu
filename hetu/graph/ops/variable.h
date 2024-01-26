@@ -70,9 +70,6 @@ class VariableOpImpl : public OpInterface {
   }
 
  protected:
-  bool DoInstantiate(Operator& op, const Device& placement,
-                     StreamIndex stream_id) const override;
-
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
     return {NDArrayMeta().set_shape(shape()).set_dtype(dtype()).set_device(device())};
@@ -182,9 +179,6 @@ class ParallelVariableOpImpl : public OpInterface {
   }  
 
  protected:
-  bool DoInstantiate(Operator& op, const Device& placement,
-                     StreamIndex stream_id) const override;
-
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
     auto cur_ds = _multi_ds[Graph::GetGraph(Graph::cur_graph_ctx()).CUR_STRATEGY_ID];

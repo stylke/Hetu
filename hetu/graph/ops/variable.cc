@@ -4,43 +4,31 @@
 namespace hetu {
 namespace graph {
 
-bool VariableOpImpl::DoInstantiate(Operator& op, const Device& placement,
-                                   StreamIndex stream_id) const {
-  if (!OpInterface::DoInstantiate(op, placement, stream_id))
-    return false;
-
+NDArrayList VariableOpImpl::DoAllocOutputs(Operator& op,
+                                           const NDArrayList& inputs,
+                                           RuntimeContext& runtime_ctx) const {
   if (_init != nullptr) {
     Graph::AllocVariableData(op->output(0), *_init);
   } else {
     if (_copy_provided_data || dtype() != _provided_data->dtype() ||
-        placement != _provided_data->device()) {
+        op->instantiation_ctx().placement != _provided_data->device()) {
       Graph::AllocVariableData(op->output(0),
                                ProvidedInitializer(_provided_data));
-      // TODO: free the provided data in order to save memory
     } else {
       Graph::RegisterVariableData(op->output(0), _provided_data);
     }
   }
-  return true;
-}
-
-NDArrayList VariableOpImpl::DoAllocOutputs(Operator& op,
-                                           const NDArrayList& inputs,
-                                           RuntimeContext& runtime_ctx) const {
   return {Graph::GetVariableData(op->output(0))};
 }
 
-bool ParallelVariableOpImpl::DoInstantiate(Operator& op, 
-                                           const Device& placement,
-                                           StreamIndex stream_id) const {
+NDArrayList ParallelVariableOpImpl::DoAllocOutputs(Operator& op,
+                                                   const NDArrayList& inputs,
+                                                   RuntimeContext& runtime_ctx) const {
   auto ds = _multi_ds[op->graph().CUR_STRATEGY_ID];
   auto local_idx = _local_idx.empty() ? -1 : _local_idx[op->graph().CUR_STRATEGY_ID];
   HT_ASSERT(_init == nullptr || local_idx != -1)
     << "ParallelVariableOp: when use initializer, local_idx "
     << "must be assigned when local_device is in pipeline device_group!";
-                                              
-  if (!OpInterface::DoInstantiate(op, placement, stream_id))
-    return false;
 
   if (_init != nullptr) {
     int32_t dup_group_idx = ds.get_dup_group_index(local_idx);
@@ -53,22 +41,14 @@ bool ParallelVariableOpImpl::DoInstantiate(Operator& op,
     auto& provided_data = _multi_provided_data.empty() ? 
       _provided_data : _multi_provided_data[op->graph().CUR_STRATEGY_ID]; 
     if (_copy_provided_data || dtype() != provided_data->dtype() ||
-        placement != provided_data->device()) {
+        op->instantiation_ctx().placement != provided_data->device()) {
       HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " << op << " inits by provided data.";
       Graph::AllocVariableData(op->output(0),
                                ProvidedInitializer(provided_data));
-      // free the provided data in order to save memory, may still have some problem?
-      provided_data = hetu::NDArray();
     } else {
       Graph::RegisterVariableData(op->output(0), provided_data);
     }
   }
-  return true;
-}
-
-NDArrayList ParallelVariableOpImpl::DoAllocOutputs(Operator& op,
-                                                   const NDArrayList& inputs,
-                                                   RuntimeContext& runtime_ctx) const {
   return {Graph::GetVariableData(op->output(0))};
 }
 

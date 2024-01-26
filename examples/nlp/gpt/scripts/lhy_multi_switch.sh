@@ -1,6 +1,6 @@
 # NCCL_DEBUG=info
 NUM_LAYERS=${1:-32}
-HIDDEN_SIZE=${2:-32}
+HIDDEN_SIZE=${2:-256}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-128}
 GLOBAL_BATCH_SIZE=${5:-16}
@@ -24,4 +24,6 @@ python lhy_multi_switch.py \
 --adam_weight_decay 0.01 \
 --hidden_act relu \
 --dropout_prob 0.1 \
+--bf16 \
+--use_flash_attn \
 
