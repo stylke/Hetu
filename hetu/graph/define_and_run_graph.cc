@@ -2,6 +2,7 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/ops/variable.h"
 #include "hetu/graph/autocast/autocast.h"
+#include "hetu/graph/recompute/recompute.h"
 
 namespace hetu {
 namespace graph {
@@ -11,7 +12,9 @@ Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
   if (!op_meta.device_group.empty() && std::find(_device_groups.begin(), _device_groups.end(), op_meta.device_group) == _device_groups.end())
     _device_groups.push_back(op_meta.device_group);
-  // HT_LOG_TRACE << name() << " make op: " << op_meta.name;
+  if (Recompute::enabled()) {
+    op_meta = op_meta.set_is_recompute(true);
+  }
   return MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
 }
 
@@ -106,6 +109,10 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
   op_to_exec_op_mapping.reserve(_init_capacity);
   tensor_to_exec_tensor_mapping.reserve(_init_capacity);
 
+  // insert recompute subgraph
+  auto topo = topo_order();
+  Recompute::InsertRecomputedOps(topo);
+
   Graph::push_graph_ctx(exec_graph->id());
 
   // assign pp stages
@@ -142,10 +149,10 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
     }
   };
 
-  auto topo = topo_order();
-  HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << topo;
+  auto updated_topo = topo_order();
+  HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << updated_topo;
   std::unordered_map<int, Tensor> transfer_map;
-  for (auto& op_ref : topo) {
+  for (auto& op_ref : updated_topo) {
     auto& op = op_ref.get();
     if (op_to_exec_op_mapping.find(op->id()) != op_to_exec_op_mapping.end())
       continue;
@@ -193,9 +200,15 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
       }
     }
 
+    auto new_op_meta = OpMeta().set(op->op_meta())
+                               .set_extra_deps(std::move(exec_in_deps));
+    // set `origin_op_id` to the op id on the exec graph
+    if (op->op_meta().origin_op_id != -1) {
+      new_op_meta = new_op_meta.set_origin_op_id(op_to_exec_op_mapping[op->op_meta().origin_op_id]->id());
+    }
     auto& exec_op = Graph::MakeOp(
       op->_body, std::move(exec_inputs),
-      OpMeta().set(op->op_meta()).set_extra_deps(std::move(exec_in_deps)),
+      std::move(new_op_meta),
       *exec_graph);
     if (_parameter_ops.find(op->id()) != _parameter_ops.end())
       Graph::MarkAsParameter(exec_op);
@@ -209,7 +222,7 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
   }
 
   // assign fw_op_id map
-  for (auto& op_ref : topo) {
+  for (auto& op_ref : updated_topo) {
     auto& op = op_ref.get();
     auto& exec_op = op_to_exec_op_mapping[op->id()];
     if (op->fw_op_id() != -1) {

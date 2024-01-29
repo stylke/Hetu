@@ -109,7 +109,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
       auto& input_op = op->input(0)->producer();
       // TODO: special case: input_op include pp but op don't 
       if (is_comm_op(input_op)) {
-        ReplaceInput(op, 0, input_op->input(0));
+        op->replace_input(0, input_op->input(0));
         // input changes, update comm_op type
         reinterpret_cast<CommOpImpl&>(op->body()).get_comm_type(op);
       }
@@ -179,7 +179,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             if (consumer_i->id() == grad_scale_op->id()) continue;
             for (int j = 0; j < consumer_i->num_inputs(); j++) {
               if (consumer_i->input(j)->id() == grad->id()) {
-                ReplaceInput(consumer_i, j, grad_scale);
+                consumer_i->replace_input(j, grad_scale);
               }
             }
           }
@@ -216,7 +216,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
                 const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
                 if (consumer_op_impl.get_dst_distributed_states().check_equal(
                   input_op_impl.get_dst_distributed_states()) && dst_group_comm == dst_group) {
-                  ReplaceInput(op, i, consumer_op.get()->output(0));
+                  op->replace_input(i, consumer_op.get()->output(0));
                   reused = true;
                   break;
                 }
@@ -250,7 +250,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
               const auto& dst_group_comm = consumer_op_impl.dst_group(consumer_op.get());
               if (consumer_op_impl.get_dst_distributed_states().check_equal(
                   input->get_distributed_states()) && dst_group_comm == dst_group) {
-                ReplaceInput(op, i, consumer_op.get()->output(0));
+                op->replace_input(i, consumer_op.get()->output(0));
                 reused = true;
                 break;
               }
@@ -267,7 +267,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         auto& p2p_op = p2p_input->producer();
         // will be splited into intra_comm + p2p_send(src_group) and p2p_recv(dst_group)
         p2p_op->MapToParallelDevices(input_op->placement_group());
-        ReplaceInput(op, i, p2p_input);
+        op->replace_input(i, p2p_input);
         /*
         HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": add p2p between " 
           << input_op << " " << src_group << " and " << op << " " << dst_group;
@@ -336,7 +336,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
         if (!input_op->placement_group().empty())
           transfer_op->MapToParallelDevices(input_op->placement_group());
         transfer_op->Instantiate(placement, transfer_stream_id);
-        ReplaceInput(op, i, transferred_input);
+        op->replace_input(i, transferred_input);
       }
     }
   }
@@ -362,7 +362,7 @@ void ExecutableGraph::InsertContiguousOp(const OpRefList& topo_order) {
                          << " is not contiguous for op " << op->body().type()
                          << ". But it may have a contiguous copy, use it instead";
             auto contig_op = _op_indexing[op_id.value()];
-            ReplaceInput(op, i, contig_op->output(0));
+            op->replace_input(i, contig_op->output(0));
           } else {
             HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": Make Contiguous op for tensor " << input->name()
                          << " while making " << op->body().type() << " op.";
@@ -373,7 +373,7 @@ void ExecutableGraph::InsertContiguousOp(const OpRefList& topo_order) {
             auto& contig_op = contig_input->producer();
             contig_op->MapToParallelDevices(input_op->placement_group());
             contig_op->Instantiate(local_device, kComputingStream);
-            ReplaceInput(op, i, contig_input);
+            op->replace_input(i, contig_input);
           }
         }
       }
@@ -594,7 +594,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         auto& consumer_i = comm_op->output(0)->consumer(i);
         for (int j = 0; j < consumer_i->num_inputs(); j++) {
           if (consumer_i->input(j)->id() == comm_op->output(0)->id()) {
-            ReplaceInput(consumer_i, j, result);
+            consumer_i->replace_input(j, result);
           }
         }
       }

@@ -23,15 +23,14 @@ class DropoutNd(Module):
 
 class Dropout(DropoutNd):
     def forward(self, input: Tensor) -> Tensor:
-        # return input
         if self.inplace:
-            return hetu.dropout_(input, self.p, False)
+            return hetu.dropout_(input, self.p)
         else:
-            return hetu.dropout(input, self.p, False)
+            return hetu.dropout(input, self.p)
 
 class Dropout2d(DropoutNd):
     def forward(self, input: Tensor) -> Tensor:
         if self.inplace:
-            return hetu.dropout2d_(input, self.p, False)
+            return hetu.dropout2d_(input, self.p)
         else:
-            return hetu.dropout2d(input, self.p, False)
+            return hetu.dropout2d(input, self.p)

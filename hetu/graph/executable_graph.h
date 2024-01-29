@@ -165,13 +165,6 @@ class ExecutableGraph : public Graph {
     const Tensor& tensor, NDArray data,
     const Initializer& init = VoidifiedInitializer()) override;
 
-  void ReplaceInput(Operator& op, size_t input_index, Tensor& new_input) {
-    auto& old_input = op->_inputs[input_index];
-    old_input->DelConsumer(op);
-    op->_inputs[input_index] = new_input;
-    new_input->AddConsumer(op);
-  }
-
   void AddInDeps(Operator& op, const TensorList& in_deps) {
     if (in_deps.empty()) {
       return;

@@ -40,6 +40,7 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
 class Module(object):
 
     def __init__(self):
+        self._recompute = False
         with hetu.graph("define_and_run"):
             super().__setattr__("_parameters", OrderedDict())
             super().__setattr__("_modules", OrderedDict())
@@ -272,7 +273,11 @@ class Module(object):
 
     def __call__(self, *input, **kwargs) -> Any:
         with hetu.graph("define_and_run"):
-            return self.forward(*input, **kwargs)
+            if self._recompute:
+                with hetu.recompute():
+                    return self.forward(*input, **kwargs)
+            else:
+                return self.forward(*input, **kwargs)
     
     def forward(self, *input: Any, **kwargs: Any) -> Any:
         raise NotImplementedError(
@@ -314,6 +319,10 @@ class Module(object):
         def convert(t):
             return t.to(dtype, device)
         return self._apply(convert) 
+    
+    def recompute(self):
+        self._recompute = True
+        return self
     
     ############################################################################
     # Save and Load

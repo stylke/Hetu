@@ -177,6 +177,10 @@ class Sequential(Module):
             self.append(layer)
         return self
 
+    def recompute(self) -> 'Sequential':
+        for layer in self:
+            layer = layer.recompute()
+        return self
 
 class ModuleList(Module):
 

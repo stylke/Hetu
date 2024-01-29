@@ -122,3 +122,14 @@ def autocast():
 
 def autocast(dtype):
     return _AutocastContext(dtype)
+
+class _RecomputeContext(object):
+    def __enter__(self):
+        _hetu_core._internal_context.push_recompute_ctx()
+        return self
+
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_recompute_ctx()
+
+def recompute():
+    return _RecomputeContext()

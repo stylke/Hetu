@@ -76,6 +76,16 @@ class OpMeta {
     is_step = step;
     return *this;
   }
+
+  inline OpMeta& set_origin_op_id(OpId id) {
+    origin_op_id = id;
+    return *this;
+  }
+
+  inline OpMeta& set_is_recompute(bool recompute) {
+    is_recompute = recompute;
+    return *this;
+  }
   
   inline OpMeta& set(const OpMeta& other) {
     operator=(other);
@@ -107,6 +117,8 @@ class OpMeta {
   Device eager_device{kUndeterminedDevice};
   DeviceGroup device_group;
   TensorList extra_deps;
+  OpId origin_op_id{-1}; // for recomputation only
+  bool is_recompute{false};
   bool is_deduce_states{true};  
   bool is_step{false};
 };
@@ -143,10 +155,14 @@ class RuntimeContext {
   }
 
   OpRuntimeContext& get(OpId id) {
+    HT_ASSERT(_ctxs.find(id) != _ctxs.end())
+      << "Op " << id << " is not found in runtime context";
     return *_ctxs.at(id);
   }
 
   const OpRuntimeContext& get(OpId id) const {
+    HT_ASSERT(_ctxs.find(id) != _ctxs.end())
+      << "Op " << id << " is not found in runtime context";
     return *_ctxs.at(id);
   }
 
@@ -328,6 +344,7 @@ class OpDef : public shared_ptr_target {
   friend class DefineByRunGraph;
   friend class DefineAndRunGraph;
   friend class ExecutableGraph;
+  friend class Recompute;
   struct constrcutor_access_key {};
 
  public:
@@ -575,6 +592,13 @@ class OpDef : public shared_ptr_target {
     return _inputs[i]->requires_grad();
   }
 
+  void replace_input(size_t input_index, Tensor& new_input) {
+    auto& old_input = _inputs[input_index];
+    old_input->DelConsumer(get_self());
+    _inputs[input_index] = new_input;
+    new_input->AddConsumer(get_self());
+  }
+
  protected:
   // Walkaround methods to get the corresponding wrapper
   Operator& get_self();
@@ -744,6 +768,28 @@ class Operator : public shared_ptr_wrapper<OpDef> {
   }
 
   template <typename UnaryPredicate>
+  static bool any_input_tensor_of(Operator& op, UnaryPredicate pred) {
+    for (auto& tensor : op->_inputs)
+      if (pred(tensor))
+        return true;
+    for (auto& tensor : op->_extra_in_dep_linkers)
+      if (pred(tensor))
+        return true;
+    return false;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_input_tensor_of(const Operator& op, UnaryPredicate pred) {
+    for (const auto& tensor : op->_inputs)
+      if (pred(tensor))
+        return true;
+    for (const auto& tensor : op->_extra_in_dep_linkers)
+      if (pred(tensor))
+        return true;
+    return false;
+  }
+
+  template <typename UnaryPredicate>
   static bool all_output_tensors_of(Operator& op, UnaryPredicate pred) {
     if (op->_outputs.empty()) {
       return pred(op->_extra_out_dep_linkers.front());
@@ -765,6 +811,30 @@ class Operator : public shared_ptr_wrapper<OpDef> {
           return false;
     }
     return true;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_output_tensor_of(Operator& op, UnaryPredicate pred) {
+    if (op->_outputs.empty()) {
+      return pred(op->_extra_out_dep_linkers.front());
+    } else {
+      for (auto& tensor : op->_outputs)
+        if (pred(tensor))
+          return true;
+    }
+    return false;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_output_tensor_of(const Operator& op, UnaryPredicate pred) {
+    if (op->_outputs.empty()) {
+      return pred(op->_extra_out_dep_linkers.front());
+    } else {
+      for (const auto& tensor : op->_outputs)
+        if (pred(tensor))
+          return true;
+    }
+    return false;
   }
 };
 
