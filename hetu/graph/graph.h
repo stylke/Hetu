@@ -487,6 +487,17 @@ class Graph {
   }
 
   static void 
+  ReplaceOutput(Operator& op, size_t output_index, Tensor& new_output) {
+    auto& old_output = op->_outputs[output_index];
+    HT_ASSERT(old_output->meta() == new_output->meta())
+      << "ReplaceOutput can only used when the new tensor meta is equal to the old one";
+    HT_ASSERT(old_output->num_consumers() == 0)
+      << "ReplaceOutput can only used when the old tensor has no consumers (guarantee the safeness of topo)";
+    op->_outputs[output_index] = new_output;
+    new_output->set_producer_id(op->id());
+  }
+
+  static void 
   AddInDeps(Operator& op, const TensorList& in_deps) {
     if (in_deps.empty()) {
       return;

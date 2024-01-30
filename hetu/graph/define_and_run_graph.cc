@@ -2,6 +2,7 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/switch_exec_graph.h"
 #include "hetu/graph/ops/variable.h"
+#include "hetu/graph/ops/optimizer_update.h"
 #include "hetu/graph/autocast/autocast.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
@@ -130,7 +131,10 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   Tensor2TensorMap tensor_to_exec_tensor_mapping;
   auto origin_param_buffer = std::make_shared<ParamBuffer>("origin_param_buffer");
   auto transfer_param_buffer = std::make_shared<ParamBuffer>("transfer_param_buffer");
+  auto current_grad_buffer = std::make_shared<ParamBuffer>("current_grad_buffer");
+  auto accumulate_grad_buffer = std::make_shared<ParamBuffer>("accumulate_grad_buffer");
   Tensor2TensorMap transfer_map;
+  Tensor2TensorMap grad_map;
     
   exec_shape_plan.reserve(shape_plan.size());
   op_to_exec_op_mapping.reserve(_init_capacity);
@@ -262,14 +266,36 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
 
     // 后处理
     // 1、建立op和exec_op的映射
-    // 2、标记parameter（同时给即将创建的exec graph预先设置ParamBuffer）
-    // 3、设置tensor的shape和distributed_states
+    // 2、设置tensor的shape和distributed_states
+    // 3、标记parameter并给即将创建的exec graph预先设置ParamBuffer
+    // 4、设置AdamOptimizer的zero属性
+    // 5、给grad设置placement和buffer
     op_to_exec_op_mapping[op->id()] = exec_op;
+    Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
     if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
       Graph::MarkAsParameter(exec_op);
     }
-    Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
-
+    if (is_optimizer_update_op(exec_op)) {
+      Tensor& param = op->input(0);
+      Tensor& exec_param = exec_op->input(0);
+      Tensor& exec_grad = exec_op->input(1);
+      HT_ASSERT(exec_graph->_parameter_ops.find(exec_param->producer()->id()) != exec_graph->_parameter_ops.end())
+        << "optimizer op " << exec_op << " input 0 " << exec_param << " is not a parameter";
+      auto zero = (param->get_distributed_states().get_dim(-1) > 1) && param->get_distributed_states().zero();
+      auto adam_op_interface = std::dynamic_pointer_cast<AdamOpImpl>(exec_op->_body);
+      if (adam_op_interface) {
+        adam_op_interface->set_zero(zero);
+      }
+      // 热切换接口需要提前设置一些grad的信息
+      exec_grad->producer()->set_device_groups(exec_param->producer()->device_groups());
+      if (exec_grad->producer()->device_group().contains(local_device)) {
+        current_grad_buffer->AddTensor(exec_grad);
+        accumulate_grad_buffer->AddTensor(exec_grad);
+        exec_grad->set_placement_group(exec_param->producer()->device_group());
+        exec_grad->set_placement(local_device);
+      }
+      grad_map[exec_param->id()] = exec_grad;
+    }
     HT_LOG_DEBUG << "Creating an executable version of op " << op << " end...";
   }
 
@@ -285,10 +311,13 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   // assign initial shape plan
   exec_graph->InitShapePlan(std::move(exec_shape_plan));
 
-  // assign param buffer and transfer map
+  // assign param buffer, grad buffer and transfer map
   exec_graph->_origin_param_buffer = std::move(origin_param_buffer);
   exec_graph->_transfer_param_buffer = std::move(transfer_param_buffer);
+  exec_graph->_current_grad_buffer = std::move(current_grad_buffer);
+  exec_graph->_accumulate_grad_buffer = std::move(accumulate_grad_buffer);
   exec_graph->_transfer_map = std::move(transfer_map);
+  exec_graph->_grad_map = std::move(grad_map);
   
   // wrap up all of this as an exec graph plan
   _exec_graph_plan_pool.emplace_back(std::move(exec_graph), 
@@ -334,7 +363,7 @@ NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
 // 每次调用run都会从当前的define graph中
 // 生成/使用之前生成过的一个exec graph
 // 而只有当：
-// 1、并行策略 2、fetch的tensor 3、feed_dict的shape 
+// 1、并行策略 2、fetch的tensor 3、feed_dict的shape（包括batch_size以及seq_len） 
 // 与cache的某一个重合时，才会复用
 // 目前的写法下，我们认为并行策略已经在python端选择好了然后再传进来
 NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches,
@@ -399,7 +428,6 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     plan_scanned++;
   }
 
-  // todo: 确定distributed states后，再推导shape，再根据{ds + shape}来判断是否要创建新的exec_graph
   // 需要新增shape plan到shape plan pools
   // 同时也需要新增exec graph plan到exec graph plan pools
   if (plan_scanned == plan_size) {
@@ -415,7 +443,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       });
     };
     OpRefList topo = Graph::TopoSort(fetches, -1, is_feed_dict_op);
-    HT_LOG_DEBUG << local_device << ": global topo before deducing shape plan is " << topo;
+    HT_LOG_DEBUG << local_device << ": global topo of define graph is " << topo;
 
     // deprecated, but maybe useful some day
     // *now move all the logic of inferring shape and distributed_states to Instantiate()
@@ -487,7 +515,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     // Instantiate会将新的exec_graph_plan加入pool中
     Instantiate(topo, shape_plan);
     _shape_plan_pool.push_back(std::move(shape_plan));
-    // 补上fetches
+    // 补上fetches（其在instantiate中不需要用到，但是plan需要进行记录）
     auto& new_plan = _exec_graph_plan_pool.back();
     new_plan.fetches = fetches;
     // 新的plan就是pool里的最后一个
@@ -504,34 +532,65 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     // 热切换
     if (_is_active) {
       auto key = std::make_pair(_active_plan, next_active_plan);
-      if (_switcher_pool.find(key) == _switcher_pool.end()) {
-        _switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_plan, next_active_plan);
+      if (_param_switcher_pool.find(key) == _param_switcher_pool.end()) {
+        _param_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_plan, next_active_plan);
+        _grad_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_plan, next_active_plan);
       }
       // 默认的切换状态设置
-      auto switch_mode = SWITCH_MODE::SWITCH_TRANSFER_PARAM;
-      auto switch_level = SWITCH_LEVEL::EXEC;
+      auto param_switch_mode = SWITCH_MODE::SWITCH_TRANSFER_PARAM;
+      auto grad_switch_mode = SWITCH_MODE::SWITCH_ACCUMULATE_GRAD;
+      auto param_switch_level = SWITCH_LEVEL::EXEC;
+      auto grad_switch_level = SWITCH_LEVEL::EXEC;
+      // 1、----- mode设置 -----
       // 如果旧的exec graph没开AMP
       // 那么只能切换origin param buffer
       if (_exec_graph_plan_pool[_active_plan].exec_graph->_transfer_param_buffer->IsEmpty()) {
-        switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
+        param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
+      }
+      // 2、----- level设置 -----
+      // 1)、topo前只能跟topo（算exec graph和switcher的topo）
+      // 2)、alloc前只能跟topo或update（新的一轮开始）
+      // 3)、grad后只能跟grad或update（grad要么不断累积要么更新掉）
+      // 4)、update前都能跟
+      // 其实原则就是有transfer param就切，没有就切origin param
+      // 有accumulate grad就切，没有就不切
+      if (_run_level == RunLevel::TOPO) {
+        HT_ASSERT(_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::TOPO) 
+          << "graph with RunLevel::TOPO should only follow behind graph with RunLevel::TOPO right now";
+      }
+      if (_run_level == RunLevel::ALLOC) {
+        HT_ASSERT(_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::TOPO
+                  || _exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::UPDATE) 
+          << "graph with RunLevel::ALLOC should only follow behind graph with RunLevel::TOPO or RunLevel::UPDATE right now";
+      }
+      if (_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::GRAD) {
+        HT_ASSERT(_run_level == RunLevel::GRAD
+                  || _run_level == RunLevel::UPDATE) 
+          << "graph with RunLevel::GRAD should only followed by graph with RunLevel::GRAD or RunLevel::UPDATE right now";
       }
       // 如果旧的exec graph只是建立topo
-      // 那么其必然没有alloc
-      // 此时无法做实际的热切换
-      // 而是建立热切换的topo
+      // 其并没有产生param和grad
       if (_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::TOPO) {
-        switch_level = SWITCH_LEVEL::TOPO;
+        param_switch_level = SWITCH_LEVEL::TOPO;
+        grad_switch_level = SWITCH_LEVEL::TOPO;
       }
-      // 如果新的exec graph只是建立topo
-      // 但旧的exec graph已经alloc/grad/update了
-      // 我们目前禁止这样做（以防出现一些bug）
-      else {
-        if (_run_level == RunLevel::TOPO) {
-          HT_RUNTIME_ERROR << "graph with RunLevel::TOPO "
-            << "should only followed behind graph with RunLevel::TOPO right now";
-        }
+      // 如果旧的exec graph只是alloc
+      // 其并没有产生grad
+      if (_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::ALLOC) {
+        grad_switch_level = SWITCH_LEVEL::TOPO;
       }
-      _switcher_pool[key]->SwitchParams(switch_mode, switch_level);
+      /*
+      for (auto& tensor : _exec_graph_plan_pool[next_active_plan].exec_graph->_transfer_param_buffer->tensor_list()) {
+        HT_LOG_INFO << local_device << ": transfer param " << tensor << " meta is " << tensor->meta() << " and device group is " << tensor->producer()->device_group()
+          << " and ds is " << tensor->get_distributed_states().get_states();
+      }
+      for (auto& tensor : _exec_graph_plan_pool[next_active_plan].exec_graph->_accumulate_grad_buffer->tensor_list()) {
+        HT_LOG_INFO << local_device << ": accumulate grad " << tensor << " meta is " << tensor->meta() << " and device group is " << tensor->producer()->device_group()
+          << " and ds is " << tensor->get_distributed_states().get_states();
+      }
+      */
+      _param_switcher_pool[key]->SwitchParams(param_switch_mode, param_switch_level);
+      _grad_switcher_pool[key]->SwitchParams(grad_switch_mode, grad_switch_level);
     }
     _is_active = true;
     _active_plan = next_active_plan;

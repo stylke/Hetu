@@ -103,7 +103,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
       NDArrayMeta().set_shape(grad->shape())
                    .set_dtype(param->dtype())
                    .set_device(param->device()), 
-      param->storage(), param_start_index);
+      param->storage(), param->storage_offset() + param_start_index);
     // only update scatter part of param
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
                                     type(), hetu::impl::Adam, grad, param_scatter,

@@ -66,7 +66,7 @@ static std::unordered_set<Key> KeysUnion(const std::unordered_set<Key>& set1, co
 }
 
 // nccl存在一些冷启动的开销
-// 先简单地进行一个小的allreduce
+// 先简单地进行一个小的all-to-all
 static void WarmUpComm(const std::unordered_set<Device>& comm_set) {
   auto local_device = hetu::impl::comm::GetLocalDevice();
   std::vector<int> ranks(comm_set.size());
@@ -142,8 +142,9 @@ void ParamBuffer::Alloc(const Stream& stream) {
 #if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19)                                                    
   ncclMemAlloc(&_raw_ptr, _buffer_size);
   _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
-    local_device, _raw_ptr, _buffer_size, [&](DataPtr ptr) {
-      ncclMemFree(_raw_ptr);
+    local_device, _raw_ptr, _buffer_size, [](DataPtr data_ptr) {
+      hetu::cuda::CUDADeviceGuard guard(data_ptr.device.index());
+      ncclMemFree(data_ptr.ptr);
     }));
   // HT_RUNTIME_ERROR << "NotImplementedError";
 #else
@@ -156,8 +157,9 @@ void ParamBuffer::Alloc(const Stream& stream) {
   // Use BorrowDataSpace
   CudaMalloc(&_raw_ptr, _buffer_size);
   _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
-    local_device, _raw_ptr, _buffer_size, [&](DataPtr ptr) {
-      CudaFree(_raw_ptr);
+    local_device, _raw_ptr, _buffer_size, [](DataPtr data_ptr) {
+      hetu::cuda::CUDADeviceGuard guard(data_ptr.device.index());
+      CudaFree(data_ptr.ptr);
     }));
 #endif
   _stream = stream;
@@ -549,11 +551,23 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
   auto& after_graph = _switch_graph_pair.second;
   auto& before_mapping = _define_graph->GetPlan(_switch_plan_pair.first).tensor_to_exec_tensor_mapping;
   auto& after_mapping = _define_graph->GetPlan(_switch_plan_pair.second).tensor_to_exec_tensor_mapping;
-  auto& before_param_transfer_map = before_graph->_transfer_map;
-  auto& after_param_transfer_map = after_graph->_transfer_map;
+  auto& before_transfer_map = before_graph->_transfer_map;
+  auto& after_transfer_map = after_graph->_transfer_map;
+  auto& before_grad_map = before_graph->_grad_map;
+  auto& after_grad_map = after_graph->_grad_map;
 
+  std::string comm_graph_name_prefix;
+  if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM
+      || switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+    comm_graph_name_prefix = "param";
+  } else if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD
+             || switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
+    comm_graph_name_prefix = "grad";
+  } else {
+    HT_RUNTIME_ERROR << "switch mode type wrong";
+  }
   _comm_graph = Graph::_make_new_graph<ExecutableGraph>(
-    "comm_graph_between_" + before_graph->name() 
+    comm_graph_name_prefix + "_comm_graph_between_" + before_graph->name() 
     + "_and_" + after_graph->name());
 
   Graph::push_graph_ctx(_comm_graph->id());
@@ -579,14 +593,28 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
     // Question: transfer param作为DataTransferOp是否会和ParallelVariableOp有所不同
     if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
       if (is_before_active) {
-        before_it = before_param_transfer_map.find(before_it->second->id());
-        HT_ASSERT(before_it != before_param_transfer_map.end())
-          << "before param transfer map dose not consist of " << before_it->second;
+        before_it = before_transfer_map.find(before_it->second->id());
+        HT_ASSERT(before_it != before_transfer_map.end())
+          << "before transfer map dose not consist of " << before_it->second;
       }
       if (is_after_active) {
-        after_it = after_param_transfer_map.find(after_it->second->id());
-        HT_ASSERT(after_it != after_param_transfer_map.end())
-          << "after param transfer map dose not consist of " << after_it->second;
+        after_it = after_transfer_map.find(after_it->second->id());
+        HT_ASSERT(after_it != after_transfer_map.end())
+          << "after transfer map dose not consist of " << after_it->second;
+      }
+    }
+    // 切换grad的情形则把grad来当作param处理
+    if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD
+        || switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
+      if (is_before_active) {
+        before_it = before_grad_map.find(before_it->second->id());
+        HT_ASSERT(before_it != before_grad_map.end())
+          << "before grad map dose not consist of " << before_it->second;
+      }
+      if (is_after_active) {
+        after_it = after_grad_map.find(after_it->second->id());
+        HT_ASSERT(after_it != after_grad_map.end())
+          << "after grad map dose not consist of " << after_it->second;
       }
     }
     // 分情况讨论
@@ -626,14 +654,13 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
           HT_LOG_DEBUG << local_device << ": param " << define_param << " in the after graph will be lazily initialized";
         }
       }
-      if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+      else {
         HT_RUNTIME_ERROR << "NotImplementedError";
       }
     } 
     // 两个图都在（这种情况才是我们核心要考虑的）
     else {
       HT_LOG_DEBUG << local_device << ": param " << define_param << " is in both graphs";
-      auto& param_global_shape = define_param->global_shape();
       auto& before_param = before_it->second;
       auto& after_param = after_it->second;
       HT_ASSERT(before_param->global_shape() == after_param->global_shape())
@@ -657,6 +684,10 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
       const auto& src_group = before_param->producer()->device_group();
       const auto& dst_ds = after_param->get_distributed_states();
       const auto& dst_group = after_param->producer()->device_group();
+      HT_ASSERT(!src_group.empty() && !dst_group.empty())
+        << "src group and dst group shouldn't be empty, but before param "
+        << before_param << " src_group is " << src_group << " and after param "
+        << after_param << " dst group is " << dst_group;
       // 将出现过的device都放入comm set中
       for (auto& device : src_group.devices()) {
         if (src_set.find(device) == src_set.end()) {
@@ -690,6 +721,9 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
           auto comm_input_data_it = before_graph->_preserved_data.find(before_param->id());
           HT_ASSERT(comm_input_data_it != before_graph->_preserved_data.end())
             << "something wrong, the data to switch in the before graph is not available";
+          HT_ASSERT(comm_input->shape() == comm_input_data_it->second->shape())
+            << "comm graph placeholder shape " << comm_input->shape() << " should be equal to"
+            << " the shape of the preserved data " << comm_input_data_it->second->shape();
           _comm_feed_dict.insert(std::make_pair(comm_input->id(), comm_input_data_it->second));
         }    
         _comm_feed_dict_mapping.insert(std::make_pair(comm_input->id(), before_param));
@@ -920,7 +954,8 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
                                                                 static_cast<uint64_t>(-1)}); // set id to maximum
     */
     HT_LOG_TRACE << local_device << ": obtain buffer data for " << _info_mapping[input->id()]
-      << ", whose shape is " << input->shape() << " and tensor offset in buffer is " << buffer->GetTensorOffest(input);
+      << ", whose shape is " << input->shape() << " and dtype is " << input->dtype() << " and tensor offset in buffer is " << buffer->GetElementOffest(input)
+      << ", the whole size is " << buffer->AsStorage()->size();
     auto buffer_data = NDArray(input->meta(), buffer->AsStorage(), buffer->GetElementOffest(input));
     // 将原data移动到buffer中并转化成连续存储
     auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
@@ -953,6 +988,7 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
   op->instantiation_ctx().start[0]->Record(op_stream);
   BufferBatchedIsendIrecvExec(op); // 执行BufferBatchedIsendIrecv
   op->instantiation_ctx().stop[0]->Record(op_stream);
+  // HT_LOG_INFO << "BufferBatchedIsendIrecvExec end";
   // 清空send的buffer
   for (auto& kv : _send_buffers) {
     auto& send_buffer = kv.second;
@@ -988,6 +1024,42 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       return _comm_feed_dict.find(tensor->id()) != _comm_feed_dict.end();
     });
   };
+  // 获取切换前后param的buffer
+  std::shared_ptr<ParamBuffer> before_param_buffer;
+  std::shared_ptr<ParamBuffer> after_param_buffer;
+  if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
+    before_param_buffer = _switch_graph_pair.first->_origin_param_buffer;
+    after_param_buffer = _switch_graph_pair.second->_origin_param_buffer;
+  } else if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+    before_param_buffer = _switch_graph_pair.first->_transfer_param_buffer;
+    after_param_buffer = _switch_graph_pair.second->_transfer_param_buffer;
+  } else if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD) {
+    before_param_buffer = _switch_graph_pair.first->_current_grad_buffer;
+    after_param_buffer = _switch_graph_pair.second->_current_grad_buffer;
+  } else if (switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
+    before_param_buffer = _switch_graph_pair.first->_accumulate_grad_buffer;
+    after_param_buffer = _switch_graph_pair.second->_accumulate_grad_buffer;
+  } else {
+    HT_RUNTIME_ERROR << "NotImplementedError";
+  }
+  if (switch_level != SWITCH_LEVEL::TOPO) {
+    HT_ASSERT(before_param_buffer->IsAllocated() && !after_param_buffer->IsAllocated())
+      << "wrong allocation state for buffers";
+    HT_ASSERT(!before_param_buffer->IsEmpty() && !after_param_buffer->IsEmpty())
+      << "wrong empty state for buffers";
+    // 为grad分配_preserved_data
+    // 因为要对齐热切换的接口
+    if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD
+        || switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
+      for (const auto& before_param : before_param_buffer->tensor_list()) {
+        auto before_param_data = NDArray(before_param->meta(),
+                                         before_param_buffer->AsStorage(), 
+                                         before_param_buffer->GetElementOffest(before_param));
+        _switch_graph_pair.first->_preserved_data[before_param->id()] = before_param_data;
+      }
+    }
+  }
+
   // 如果有cache好的_comm_graph
   // 那么直接使用即可
   // 否则需要重新建立
@@ -1097,22 +1169,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       tensor2degrees[input->id()]++;
     }
   }
-  // 获取切换前后param的buffer
-  std::shared_ptr<ParamBuffer> before_param_buffer;
-  std::shared_ptr<ParamBuffer> after_param_buffer;
-  if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
-    before_param_buffer = _switch_graph_pair.first->_origin_param_buffer;
-    after_param_buffer = _switch_graph_pair.second->_origin_param_buffer;
-  } else if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
-    before_param_buffer = _switch_graph_pair.first->_transfer_param_buffer;
-    after_param_buffer = _switch_graph_pair.second->_transfer_param_buffer;
-  } else {
-    HT_RUNTIME_ERROR << "NotImplementedError";
-  }
-  HT_ASSERT(before_param_buffer->IsAllocated() && !after_param_buffer->IsAllocated())
-    << "wrong allocation state for buffers";
-  HT_ASSERT(!before_param_buffer->IsEmpty() && !after_param_buffer->IsEmpty())
-    << "wrong empty state for buffers";
+  // 释放before param buffer
   // 此时并不会真正free，因为还有_preserved_data
   // 只是交出所有权
   before_param_buffer->Free(); 
@@ -1201,7 +1258,11 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       << "something wrong, can't find the result from the tensor2data mapping";
     HT_LOG_DEBUG << local_device << ": comm result sum of " << kv.second << " is " << NDArray::sum(it->second);
     // 给新图的_preserved_data赋上NDArray
-    _switch_graph_pair.second->_preserved_data[kv.second->id()] = it->second;
+    // 对于grad则不需要（_preserved_data表示已经算出来的）
+    if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM 
+        || switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+      _switch_graph_pair.second->_preserved_data[kv.second->id()] = it->second;
+    }
     // allocation check
     if (_use_concat_buffer) {
       // 值得一提的是after param并不在concat buffer的tensor list中

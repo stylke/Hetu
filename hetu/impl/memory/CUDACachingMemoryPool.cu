@@ -216,7 +216,8 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   auto& info = it->second;
   info.free_at = free_at;
 
-  // move borrow data free to WatchEvents()
+  // move borrow data actual free to WatchEvents()
+  // we only record the free event here
   /*
   // for borrow data we free it directly
   // we should block the used streams here
@@ -231,6 +232,25 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     return;
   }
   */
+  if (info.deleter) {
+    auto& used_streams = info.used_streams;
+    if (used_streams.empty()) {
+      info.deleter(data_ptr);
+      _data_ptr_info.erase(it);
+      return;
+    }
+    info.status = OccupationStatus::UNAVAILABLE_UNTIL_FREE;
+    for (auto s_id : used_streams) {
+      auto event = std::make_unique<CUDAEvent>(data_ptr.device, false);
+      event->Record(Stream::unpack(s_id));
+      _free_events[s_id].emplace_back(
+        std::make_tuple(std::move(event), data_ptr.id, free_at));
+    }
+    info.free_event_cnt += used_streams.size();
+    _free_cnt++;
+    return;
+  }
+
   if (info.status == OccupationStatus::OCCUPIED_BY_ALLOC_STREAM) {
     info.status = OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM;
     InsertAvailableToLookupTable(

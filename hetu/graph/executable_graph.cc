@@ -118,11 +118,13 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
   // 1、fragile non-param varaible (alloc and compute)
   // 2、origin param (if needed, alloc on-the-fly and compute)
   // 3、transfer param (alloc and compute)
-  // 4、todo: gradient (just alloc)
+  // 4、grad (just alloc)
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  // ---------- param ----------
   if (!_transfer_param_buffer->IsEmpty() && !_transfer_param_buffer->IsAllocated()) {
     // alloc transfer param
-    _transfer_param_buffer->Alloc(Stream(hetu::impl::comm::GetLocalDevice(), kBlockingStream));
-    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": alloc transfer param buffer "
+    _transfer_param_buffer->Alloc(Stream(local_device, kBlockingStream));
+    HT_LOG_DEBUG << local_device << ": alloc transfer param buffer "
       << ", the size is " << _transfer_param_buffer->size();
   }
   for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
@@ -174,6 +176,30 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
       }
     }
   } 
+  // ---------- grad ----------
+  if (_run_level == RunLevel::GRAD || _run_level == RunLevel::UPDATE) {
+    if (!_current_grad_buffer->IsEmpty() && !_current_grad_buffer->IsAllocated()) {
+      // alloc grad
+      _current_grad_buffer->Alloc(Stream(local_device, kBlockingStream));
+      HT_LOG_DEBUG << local_device << ": alloc current grad buffer "
+        << ", the size is " << _current_grad_buffer->size();
+      for (const auto& current_grad : _current_grad_buffer->tensor_list()) {
+        auto current_grad_data = NDArray(current_grad->meta(),
+                                         _current_grad_buffer->AsStorage(), 
+                                         _current_grad_buffer->GetElementOffest(current_grad));
+        // 添加runtime allocation
+        for (auto& runtime_ctx : runtime_ctx_list) {
+          auto it = _grad_grad_map.find(current_grad->id());
+          HT_ASSERT(it != _grad_grad_map.end())
+            << "cannot find the mapping of " << current_grad << " in the grad grad map";
+          runtime_ctx.add_runtime_allocation(it->second->id(), current_grad_data);
+        }
+        // 注意与param不同的是
+        // 这里不能添加runtime skipped
+        // 因为grad还是要计算的
+      }
+    }
+  }
 }
 
 bool ExecutableGraph::Instantiate(const TensorList& fetches,
@@ -1064,13 +1090,54 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     }
     // shared weight grad p2p ops are included in accumulated_ops, only execute in last micro batch
     // 另外GRAD模式下不会运行accumulated_ops
-    if ((_run_level == RunLevel::GRAD || !grad_accumulation_finished)
-        && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
+    if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
       continue;
     }
-    
-    HT_LOG_TRACE << "Running op " << op << " (type: " << op->type() << ")...";
+    if (is_group_op(op) && _run_level == RunLevel::GRAD) {
+      continue;
+    }
+    if (is_optimizer_update_op(op)) {
+      // 只用得到grad而不需要进行update
+      if (_run_level == RunLevel::GRAD) {
+        auto& grad_op = op->input(1)->producer();
+        // HT_LOG_INFO << "grad op " << grad_op << " placement is " << grad_op->placement();
+        auto event = std::make_unique<hetu::impl::CUDAEvent>(grad_op->placement());
+        event->Record(Stream(grad_op->placement(), grad_op->instantiation_ctx().stream_index));
+        _grad_events.emplace_back(std::move(event));
+        continue;
+      }
+      // 要进行梯度更新
+      // 如果有累积梯度那么此时要加上
+      else if (_run_level == RunLevel::UPDATE) {
+        if (_accumulate_grad_buffer->IsAllocated()) {
+          auto& grad = op->input(1);
+          auto it = _reversed_grad_grad_map.find(grad->id());
+          HT_ASSERT(it != _reversed_grad_grad_map.end())
+            << "cannot find the mapping of " << grad << " in the reversed grad grad map";
+          auto& grad_in_buffer = it->second;
+          auto current_grad_data = NDArray(grad->meta(), 
+                                           _current_grad_buffer->AsStorage(), 
+                                           _current_grad_buffer->GetElementOffest(grad_in_buffer));
+          auto accumulate_grad_data = NDArray(grad->meta(), 
+                                              _accumulate_grad_buffer->AsStorage(), 
+                                              _accumulate_grad_buffer->GetElementOffest(grad_in_buffer));
+          auto grad_stream = Stream(grad->producer()->placement(),
+                                    grad->producer()->instantiation_ctx().stream_index);
+          NDArray::add(current_grad_data, 
+                       accumulate_grad_data, 
+                       grad_stream.stream_index(),
+                       current_grad_data);
+          // 需要重新设置grad op的stop event来保证update算子的输入是sync的
+          grad->producer()->instantiation_ctx().stop[micro_batch_id]->Record(grad_stream);
+        }
+      }
+      // 其余情况不可能发生
+      else {
+        HT_RUNTIME_ERROR << "run level error";
+      }
+    }
 
+    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op << " start...";
     // if (!is_shared_weight_or_grad_p2p(op)) {
     // batched p2p send & recv
     if ((is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) &&
@@ -1141,7 +1208,6 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     // but we still mark here in case we forget to do so in some kernels. 
     NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
     NDArray::MarkUsedBy(output_vals, op->instantiation_ctx().stream());
-    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": op execute " << op;
     for (size_t i = 0; i < op->num_outputs(); i++) {
       const auto& output = op->output(i);
       if (accumulated_tensor.find(output->id()) != accumulated_tensor.end()) {
@@ -1152,14 +1218,12 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         }
         if (grad_accumulation_finished) {
           tensor2data[output->id()] = grad_accumulation[output->id()];
-          auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
-          event->Record(Stream(op->placement(), op->instantiation_ctx().stream_index));
-          _grad_accumulate_events.emplace_back(std::move(event));
         }
       } else if (tensor2degrees[output->id()] > 0 || fetch_indices.find(output->id()) != fetch_indices.end()) {
         tensor2data[output->id()] = output_vals[i];
       }
     }
+  // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op << " end...";
   }
 }
 
@@ -1349,6 +1413,29 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     HT_LOG_DEBUG << local_device  << ": local placeholder & variable ops: " << local_placeholder_variable_ops
                  << "\nlocal fw topo: " << local_fw_topo << "\nlocal bw topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo end...";
+
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get grad to grad map begin...";
+    for (auto& op_ref : local_bw_topo) {
+      if (is_optimizer_update_op(op_ref)) {
+        auto& param = op_ref.get()->input(0);
+        auto& grad = op_ref.get()->input(1);
+        auto it = _grad_map.find(param->id());
+        HT_ASSERT(it != _grad_map.end())
+          << "cannot find the mapping of " << param << " in the grad map";
+        auto& grad_in_buffer = it->second;
+        HT_ASSERT(grad_in_buffer->meta() == grad->meta())
+          << "the meta of the grad before/after substitute comm op should be equal"
+          << ", but meta of grad in buffer is " << grad_in_buffer->meta()
+          << ", and meta of grad is " << grad->meta();
+        HT_ASSERT(grad_in_buffer->get_distributed_states().check_equal(grad->get_distributed_states()))
+          << "the distributed states of the grad before/after substitute comm op should be equal";
+        HT_ASSERT(grad_in_buffer->producer()->device_group() == grad->placement_group())
+          << "the device group of the grad before/after substitute comm op should be equal";
+        _grad_grad_map[grad_in_buffer->id()] = grad;
+        _reversed_grad_grad_map[grad->id()] = grad_in_buffer;
+      }
+    }
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get grad to grad map end...";
 
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get shared weights begin...";
     // todo: get all shared variable op related (send, recv), cached in first micro batch, and used in later micro batches 
@@ -1544,7 +1631,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   HT_LOG_DEBUG << local_device << ": 1. pipeline init[end]";
 
   HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[begin]";
-  // alloc params and pre-compute (todo: alloc gradients buffer)
+  // alloc origin/transfer params and pre-compute, alloc grads
   AllocRuntimeBuffer(runtime_ctx_list);
   HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[end]";
 
@@ -1625,18 +1712,40 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // ********************** Run Level Check Point **********************
   // 仅仅是算出grad但不更新
   // 这里需要先对grad的op进行sync
-  // 然后将grad buffer直接reduce_scatter到dst exec graph
   if (_run_level == RunLevel::GRAD) {
-    for (auto& event : _grad_accumulate_events) {
+    for (auto& event : _grad_events) {
       event->Sync();
     }
-    _grad_accumulate_events.clear();
-    // todo
-    // 需要单独设计接口指定dst exec graph
-    // 或者按热切换来弄
+    _grad_events.clear();
+    // Question: 可能单独设计接口指定dst exec graph去切换能更快更省显存
+    // 即，当前current_grad_buffer切换到dst exec graph后再加到accumulate_grad_buffer上
+    // 但dp8逐渐切换到tp8的例子里，逐一切换和直接切换到dst并无明显区别
+    // 因此目前grad也用两两间的热切换来弄
+    // 即，在define graph中自动切换accumulate_grad_buffer
+    // 然后将当前的current_grad_buffer加到当前的accumulate_grad_buffer后清空即可
+    if (!_current_grad_buffer->IsEmpty() && !_accumulate_grad_buffer->IsEmpty()) {
+      if (!_accumulate_grad_buffer->IsAllocated()) {
+        // 说明是第一次算grad，之前没有累积grad
+        // 直接bind即可
+        _accumulate_grad_buffer->Bind(_current_grad_buffer->AsStorage());
+      } else {
+        // 用kBlockingStream集中对整个buffer进行一次add
+        // 相比于算出来某一个grad后进行局部的async的add
+        // 虽然并发程度降低，但是写法上会简单许多
+        auto current_grad_buffer_data = _current_grad_buffer->AsNDArray();
+        auto accumulate_grad_buffer_data = _accumulate_grad_buffer->AsNDArray();
+        NDArray::add(current_grad_buffer_data, 
+                     accumulate_grad_buffer_data, 
+                     kBlockingStream,
+                     accumulate_grad_buffer_data);
+      }
+      // 释放当前grad
+      _current_grad_buffer->Free();
+    }
+    _p2p_events.clear();
     return {};
   }
-  _grad_accumulate_events.clear();
+  _grad_events.clear();
   // ********************** Run Level Check Point **********************
 
   HT_LOG_DEBUG << local_device << ": 4. get results[begin]";
@@ -1684,8 +1793,10 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   // ********************** Run Level Check Point **********************
   // 一次完整的optimizer update发生了
-  // transfer param buffer需要被清理掉
-  // origin param buffer不用管
+  // transfer param buffer如果存在需要被清理掉
+  // origin param buffer不能被清理掉
+  // accumulate grad buffer如果存在需要被清理掉
+  // current grad buffer需要被清理掉
   if (_run_level == RunLevel::UPDATE) {
     if (!_transfer_param_buffer->IsEmpty()) {
       HT_ASSERT(_transfer_param_buffer->IsAllocated()) 
@@ -1705,6 +1816,14 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       }
       _transfer_param_buffer->Free();
     }
+    if (_accumulate_grad_buffer->IsAllocated()) {
+      // 已经对fetches sync过了
+      // 这里直接free即可
+      _accumulate_grad_buffer->Free();
+    }
+    HT_ASSERT(_current_grad_buffer->IsAllocated())
+      << "current grad buffer should be allocated in RunLevel::UPDATE";
+    _current_grad_buffer->Free();
   }
   // ********************** Run Level Check Point **********************
 

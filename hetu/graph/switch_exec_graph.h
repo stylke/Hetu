@@ -37,6 +37,8 @@ enum class SWITCH_PROFILE_LEVEL : int8_t {
 enum class SWITCH_MODE : int8_t {
   SWITCH_ORIGIN_PARAM = 0,
   SWITCH_TRANSFER_PARAM,
+  SWITCH_CURRENT_GRAD,
+  SWITCH_ACCUMULATE_GRAD
 };
 
 enum class SWITCH_LEVEL : int8_t {
@@ -113,6 +115,10 @@ class ParamBuffer {
       return _buffer_size;
     }
 
+    const TensorList& tensor_list() const {
+      return _tensor_list;
+    }
+
     void* AsRawPtr() {
       HT_ASSERT(_is_allocated == true)
         << "please ensure you've alloc the buffer " << _name << " in advance";
@@ -129,8 +135,9 @@ class ParamBuffer {
       HT_ASSERT(_is_allocated == true)
         << "please ensure you've alloc the buffer " << _name << " in advance";
       // 设置成一个一维的NDArray
+      // Question: device可不可能是unlocal device
       auto meta = NDArrayMeta().set_dtype(_dtype)
-                               .set_device(_stream.device())
+                               .set_device(hetu::impl::comm::GetLocalDevice())
                                .set_shape({_buffer_size / DataType2Size(_dtype)});
       return NDArray(meta, _storage);
     }

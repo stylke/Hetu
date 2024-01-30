@@ -132,7 +132,8 @@ class DefineAndRunGraph : public Graph {
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
   std::vector<DeviceGroupList> _multi_device_groups; // all the device groups of ops, in the order of MakeOp calls
 
-  std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _switcher_pool;
+  std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _param_switcher_pool;
+  std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _grad_switcher_pool;
   std::vector<ExecGraphPlan> _exec_graph_plan_pool;
   std::vector<Tensor2ShapeMap> _shape_plan_pool;
   size_t _active_plan;

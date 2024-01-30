@@ -508,6 +508,10 @@ class OpDef : public shared_ptr_target {
     return _op_meta.device_groups;
   }
 
+  void set_device_groups(const DeviceGroupList& groups) {
+    _op_meta.device_groups = groups;
+  }
+
   bool is_deduce_states() const noexcept {
     return _op_meta.is_deduce_states;
   }

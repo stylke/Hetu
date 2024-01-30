@@ -165,6 +165,10 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
     return false;
   }
 
+  void set_zero(bool zero) {
+    _zero = zero;
+  }
+
   bool zero() const {
     return _zero;
   }

@@ -6,11 +6,14 @@ SEQ_LEN=${4:-128}
 GLOBAL_BATCH_SIZE=${5:-16}
 NUM_MICRO_BATCHES=${6:-2}
 
-HETU_INTERNAL_LOG_LEVEL=INFO mpirun --allow-run-as-root -np 8 \
+export HETU_SWITCH_ALGORITHM=ROUND_ROBIN
+# export HETU_SWITCH_PROFILE=NVLINK
+export HETU_INTERNAL_LOG_LEVEL=INFO 
+mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python lhy_multi_switch.py \
---num_strategy=4 \
---ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json,ds_parallel_config/dp8.json,ds_parallel_config/dp4_tp2.json,ds_parallel_config/tp8.json \
+--num_strategy=5 \
+--ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json,ds_parallel_config/dp8.json,ds_parallel_config/dp4_tp2.json,ds_parallel_config/dp2_tp4.json,ds_parallel_config/tp8.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --num_micro_batches $NUM_MICRO_BATCHES \
 --dataset wikicorpus_en \

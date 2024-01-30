@@ -734,6 +734,7 @@ class NDArrayDef : public shared_ptr_target {
   }
 
   size_t min_storage_size(int64_t storage_offset) const {
+    /*
     int64_t storage_size = storage_offset + 1;
     int64_t dim = ndim();
     for (int64_t i = 0; i < dim; i++) {
@@ -744,6 +745,8 @@ class NDArrayDef : public shared_ptr_target {
       storage_size += (size_i - 1) * stride(i);
     }
     return storage_size * DataType2Size(dtype());
+    */
+    return (storage_offset + numel()) * DataType2Size(dtype());
   }
 
   int64_t storage_offset() const {

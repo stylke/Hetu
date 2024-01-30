@@ -112,7 +112,6 @@ def pretrain(args):
                        n_layer=args.num_hidden_layers, 
                        n_head=args.num_attention_heads, 
                        seq_len=args.seq_length,
-                       # n_inner=4*args.hidden_size,
                        resid_pdrop=args.dropout_prob,
                        embd_pdrop=args.dropout_prob,
                        attn_pdrop=args.dropout_prob,
@@ -121,11 +120,7 @@ def pretrain(args):
                        num_micro_batches=args.num_micro_batches,
                        use_flash_attn=args.use_flash_attn,
                        )
-    # Input data file names definition
-    # dict_seqlen2predlen = {128:20, 512:80}
-    # assert config.seq_len == 128 or config.seq_len == 512, "seq_len must be 128 or 512, got " + config.seq_len
-    # pred_len = dict_seqlen2predlen[config.max_position_embeddings]
-    pred_len = config.seq_len
+    
     dataset = args.dataset
     if dataset not in ['wikicorpus_en', 'wiki_books']:
         raise(NotImplementedError)
@@ -179,9 +174,17 @@ def pretrain(args):
     
     # return
 
-    def run_plan(strategy_id = 0, run_level = 0):
+    def run_plan(global_batch_size = config.global_batch_size,
+                 seq_len = config.seq_len,
+                 strategy_id = 0, 
+                 run_level = 0):       
+        if global_batch_size != config.global_batch_size or seq_len != config.seq_len:
+            assert config.use_flash_attn == True, "symbolic shape can only used when flash attn is on for now"
+        # todo: may also have multiple config.num_micro_batches
+        config.micro_batch_size_symbol.set_data(global_batch_size // config.num_micro_batches)
+        config.seq_len_symbol.set_data(seq_len)
         
-        dp_size = config.global_batch_size // input_multi_ds[strategy_id].get_dim(0)
+        dp_size = global_batch_size // input_multi_ds[strategy_id].get_dim(0)
         input_ds = input_multi_ds[strategy_id]
         input_device_group = input_device_groups[strategy_id]
         label_ds = label_multi_ds[strategy_id]
@@ -203,10 +206,8 @@ def pretrain(args):
         for ep in range(num_epochs):
             step_num = 0
             for train_file in train_files:
-                # walkaround: dataloader读取来的seq_len必定是128的, 这里暂时手动处理下
-                # dataloader = DataLoaderForGPT(train_file, dp_size, pred_len)
-                required_batch_size = dp_size * config.seq_len // 128
-                dataloader = DataLoaderForGPT(train_file, required_batch_size, pred_len)
+                required_batch_size = dp_size * seq_len // 128
+                dataloader = DataLoaderForGPT(train_file, required_batch_size, seq_len)
                 # todo: 保证dataloader.batch_num是dp的倍数
                 for i in range(dataloader.batch_num):
                     if i % dup_group_num != dup_group_idx:
@@ -214,15 +215,14 @@ def pretrain(args):
                     start_time = time.time()
                     batch_data = dataloader.get_batch(i)
                     feed_dict = {
-                        input_ids: batch_data['input_ids'].astype(np.int64).reshape([dp_size, config.seq_len]),
-                        position_ids: get_position_ids(config.seq_len_symbol.data, 
-                                                       config.micro_batch_size_symbol.data * config.num_micro_batches, 
+                        input_ids: batch_data['input_ids'].astype(np.int64).reshape([dp_size, seq_len]),
+                        position_ids: get_position_ids(seq_len, 
+                                                       global_batch_size, 
                                                        input_ds, 
                                                        input_device_group), # [batch_size, seq_len]
-                        token_type_ids: batch_data['token_type_ids'].astype(np.int64).reshape([dp_size, config.seq_len]),
-                        attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([dp_size, config.seq_len]),
-                        masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([dp_size, config.seq_len]),
-                        # loss_position_sum: np.array([np.where(batch_data['masked_lm_labels'].reshape(-1, 1)!=-1)[0].shape[0]]).astype(np.float32), # shape=[1,]
+                        token_type_ids: batch_data['token_type_ids'].astype(np.int64).reshape([dp_size, seq_len]),
+                        attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([dp_size, seq_len]),
+                        masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([dp_size, seq_len]),
                     }
                     results = train_op.graph.run(loss_mean, 
                                                  [loss_mean, lm_logits, train_op], 
@@ -240,27 +240,21 @@ def pretrain(args):
                     return
                     # if global_step_num == 20:
                     #     return
-            
-    run_plan(strategy_id = 0, run_level = ht.run_level("topo"))
-    run_plan(strategy_id = 1, run_level = ht.run_level("topo"))
-    run_plan(strategy_id = 2, run_level = ht.run_level("topo"))
-    run_plan(strategy_id = 1, run_level = ht.run_level("topo"))
-    run_plan(strategy_id = 0, run_level = ht.run_level("topo"))
-            
-    print("run topo end")
-            
-    run_plan(strategy_id = 0, run_level = ht.run_level("alloc"))
-    run_plan(strategy_id = 1, run_level = ht.run_level("grad"))
-    run_plan(strategy_id = 2, run_level = ht.run_level("grad"))
-    run_plan(strategy_id = 1, run_level = ht.run_level("grad"))
-    run_plan(strategy_id = 2, run_level = ht.run_level("grad"))
-    run_plan(strategy_id = 0, run_level = ht.run_level("update"))
     
-    run_plan(strategy_id = 0, run_level = ht.run_level("alloc"))
-    run_plan(strategy_id = 1, run_level = ht.run_level("grad"))
-    run_plan(strategy_id = 1, run_level = ht.run_level("grad"))
-    run_plan(strategy_id = 0, run_level = ht.run_level("grad"))
-    run_plan(strategy_id = 0, run_level = ht.run_level("update"))
+    '''
+    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 0, run_level = ht.run_level("topo"))
+    run_plan(global_batch_size = 16, seq_len = 256, strategy_id = 1, run_level = ht.run_level("topo"))
+    run_plan(global_batch_size = 32, seq_len = 128, strategy_id = 2, run_level = ht.run_level("topo"))
+    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 4, run_level = ht.run_level("topo"))
+    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 0, run_level = ht.run_level("topo"))       
+    print("--------- run topo end ---------")
+    '''
+            
+    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 0, run_level = ht.run_level("alloc"))
+    run_plan(global_batch_size = 16, seq_len = 256, strategy_id = 1, run_level = ht.run_level("grad"))
+    run_plan(global_batch_size = 32, seq_len = 128, strategy_id = 2, run_level = ht.run_level("grad"))
+    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 4, run_level = ht.run_level("grad"))
+    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 0, run_level = ht.run_level("update"))
 
 
 if __name__ == '__main__':

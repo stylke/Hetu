@@ -12,7 +12,7 @@ namespace graph {
 
 struct TensorIdentifier {
   GraphId graph_id;
-  OpId producer_id;
+  mutable OpId producer_id;
   int32_t output_id;
   TensorId tensor_id;
 };
@@ -52,6 +52,11 @@ class TensorDef : public shared_ptr_target {
 
   OpId producer_id() const {
     return _ids.producer_id;
+  }
+
+  // unsafe, may cause chaos of topo, so try to avoid using it
+  void set_producer_id(const OpId& id) {
+    _ids.producer_id = id;
   }
 
   const Graph& graph() const;
