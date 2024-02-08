@@ -420,22 +420,22 @@
 
 - name: dropout
   op: DropoutOp
-  args: Tensor input, double keep_prob, bool recompute=False
+  args: Tensor input, double keep_prob
   self: input
 
 - name: dropout_
   op: DropoutInplaceOp
-  args: Tensor input, double keep_prob, bool recompute=False
+  args: Tensor input, double keep_prob
   self: input
 
 - name: dropout2d
   op: Dropout2dOp
-  args: Tensor input, double keep_prob, bool recompute=False
+  args: Tensor input, double keep_prob
   self: input
 
 - name: dropout2d_
   op: Dropout2dInplaceOp
-  args: Tensor input, double keep_prob, bool recompute=False
+  args: Tensor input, double keep_prob
   self: input
 
 # #######################################################

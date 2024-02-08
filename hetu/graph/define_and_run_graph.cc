@@ -109,10 +109,6 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
   op_to_exec_op_mapping.reserve(_init_capacity);
   tensor_to_exec_tensor_mapping.reserve(_init_capacity);
 
-  // insert recompute subgraph
-  auto topo = topo_order();
-  Recompute::InsertRecomputedOps(topo);
-
   Graph::push_graph_ctx(exec_graph->id());
 
   // assign pp stages
@@ -200,15 +196,10 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
       }
     }
 
-    auto new_op_meta = OpMeta().set(op->op_meta())
-                               .set_extra_deps(std::move(exec_in_deps));
-    // set `origin_op_id` to the op id on the exec graph
-    if (op->op_meta().origin_op_id != -1) {
-      new_op_meta = new_op_meta.set_origin_op_id(op_to_exec_op_mapping[op->op_meta().origin_op_id]->id());
-    }
     auto& exec_op = Graph::MakeOp(
       op->_body, std::move(exec_inputs),
-      std::move(new_op_meta),
+      OpMeta().set(op->op_meta())
+              .set_extra_deps(std::move(exec_in_deps)),
       *exec_graph);
     if (_parameter_ops.find(op->id()) != _parameter_ops.end())
       Graph::MarkAsParameter(exec_op);

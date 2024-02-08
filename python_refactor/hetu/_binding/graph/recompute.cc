@@ -42,8 +42,8 @@ PyObject* PyPopRecomputeCtx(PyObject*, PyObject* args, PyObject* kwargs) {
 
 // NOLINTNEXTLINE
 PyMethodDef PyRecomputeCtx_methods[] = { 
-  {"push_recompute_ctx", (PyCFunction) PyPushRecomputeCtx, METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"pop_recompute_ctx", (PyCFunction) PyPopRecomputeCtx, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"push_recompute_ctx", (PyCFunction) PyPushRecomputeCtx, METH_NOARGS, nullptr},
+  {"pop_recompute_ctx", (PyCFunction) PyPopRecomputeCtx, METH_NOARGS, nullptr},
   {nullptr}
 };
 

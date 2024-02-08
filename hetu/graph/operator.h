@@ -419,6 +419,13 @@ class OpDef : public shared_ptr_target {
       *instantiation_ctx().start[micro_batch_id]);
   }
 
+  void ReplaceInput(size_t input_index, Tensor& new_input) {
+    auto& old_input = _inputs[input_index];
+    old_input->DelConsumer(get_self());
+    _inputs[input_index] = new_input;
+    new_input->AddConsumer(get_self());
+  }
+
   OpId id() const noexcept {
     return _ids.op_id;
   }
@@ -592,11 +599,8 @@ class OpDef : public shared_ptr_target {
     return _inputs[i]->requires_grad();
   }
 
-  void replace_input(size_t input_index, Tensor& new_input) {
-    auto& old_input = _inputs[input_index];
-    old_input->DelConsumer(get_self());
-    _inputs[input_index] = new_input;
-    new_input->AddConsumer(get_self());
+  bool is_bw_op() const {
+    return _fw_op_id != -1;
   }
 
  protected:

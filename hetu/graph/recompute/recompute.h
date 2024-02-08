@@ -1,7 +1,8 @@
 #pragma once
 
 #include "hetu/graph/common.h"
-#include "hetu/graph/define_and_run_graph.h"
+#include "hetu/graph/executable_graph.h"
+#include <functional>
 
 namespace hetu {
 namespace graph {
@@ -23,10 +24,16 @@ class Recompute {
   static void InsertRecomputedOps(const OpRefList& topo_order);
 
  protected:
+  static bool IsNoRecomputedOp(Operator& op);
+
   static void GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool get_inputs, bool get_outputs);
 
+  static bool HasFilterOpInPath(const Operator& op, std::function<bool(const Operator &)> filter_fn,
+                                std::unordered_map<OpId, bool>& has_filter_op_map);
+
   static Operator& DuplicateRecomputedOp(const Operator& origin_op, const Op2OpRefMap& filtered_recomputed_ops,
-                                         const TensorList& first_mapped_grad_inputs, Op2OpMap& origin_to_recomputed_map);
+                                         const TensorList& first_mapped_grad_inputs, Op2OpMap& origin_to_recomputed_map,
+                                         ExecutableGraph& cur_exec_graph);
 
   static bool _enabled;
 };

@@ -1,5 +1,6 @@
 import hetu
 import itertools
+from contextlib import ExitStack, nullcontext
 from hetu import Tensor
 from ..parameter import Parameter
 from collections import OrderedDict, namedtuple
@@ -41,6 +42,7 @@ class Module(object):
 
     def __init__(self):
         self._recompute = False
+        self._output_recompute = False
         with hetu.graph("define_and_run"):
             super().__setattr__("_parameters", OrderedDict())
             super().__setattr__("_modules", OrderedDict())
@@ -272,12 +274,13 @@ class Module(object):
     ############################################################################
 
     def __call__(self, *input, **kwargs) -> Any:
-        with hetu.graph("define_and_run"):
-            if self._recompute:
-                with hetu.recompute():
-                    return self.forward(*input, **kwargs)
-            else:
-                return self.forward(*input, **kwargs)
+        with ExitStack() as stack:
+            stack.enter_context(hetu.graph("define_and_run"))
+            stack.enter_context(hetu.recompute() if self._recompute else nullcontext())
+            value = self.forward(*input, **kwargs)
+            if self._recompute and not self._output_recompute and isinstance(value, hetu.Tensor):
+                value._make_recompute(False)
+            return value
     
     def forward(self, *input: Any, **kwargs: Any) -> Any:
         raise NotImplementedError(
@@ -320,8 +323,9 @@ class Module(object):
             return t.to(dtype, device)
         return self._apply(convert) 
     
-    def recompute(self):
+    def recompute(self, output_recompute=False):
         self._recompute = True
+        self._output_recompute = output_recompute
         return self
     
     ############################################################################
