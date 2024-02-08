@@ -86,7 +86,17 @@ class OpMeta {
     is_recompute = recompute;
     return *this;
   }
-  
+
+  inline OpMeta& set_is_cpu_offload(bool cpu_offload) {
+    is_cpu_offload = cpu_offload;
+    return *this;
+  }
+
+  inline OpMeta& set_is_offload(bool offload) {
+    is_offload = offload;
+    return *this;
+  }
+
   inline OpMeta& set(const OpMeta& other) {
     operator=(other);
     return *this;
@@ -119,6 +129,8 @@ class OpMeta {
   TensorList extra_deps;
   OpId origin_op_id{-1}; // for recomputation only
   bool is_recompute{false};
+  bool is_cpu_offload{false};
+  bool is_offload{false}; // for offload op only
   bool is_deduce_states{true};  
   bool is_step{false};
 };

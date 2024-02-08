@@ -686,7 +686,8 @@ inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_
   fw_ops.reserve(fw_set.size());
   std::copy_if(topo.begin(), topo.end(), std::back_inserter(fw_ops),
                [&fw_set](const OpRef& op_ref) {
-                 return fw_set.find(op_ref.get()->id()) != fw_set.end();
+                 return fw_set.find(op_ref.get()->id()) != fw_set.end() ||
+                        op_ref.get()->op_meta().is_offload;
                });
 
   // get the backward ops
@@ -694,7 +695,8 @@ inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_
   bw_ops.reserve(topo.size() - fw_ops.size());
   std::copy_if(topo.begin(), topo.end(), std::back_inserter(bw_ops),
                [&fw_set](const OpRef& op_ref) {
-                 return fw_set.find(op_ref.get()->id()) == fw_set.end();
+                 return fw_set.find(op_ref.get()->id()) == fw_set.end() &&
+                        !op_ref.get()->op_meta().is_offload;
                });
 
   return {fw_ops, bw_ops};

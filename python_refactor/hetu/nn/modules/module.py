@@ -43,6 +43,7 @@ class Module(object):
     def __init__(self):
         self._recompute = False
         self._output_recompute = False
+        self._cpu_offload = False
         with hetu.graph("define_and_run"):
             super().__setattr__("_parameters", OrderedDict())
             super().__setattr__("_modules", OrderedDict())
@@ -277,6 +278,7 @@ class Module(object):
         with ExitStack() as stack:
             stack.enter_context(hetu.graph("define_and_run"))
             stack.enter_context(hetu.recompute() if self._recompute else nullcontext())
+            stack.enter_context(hetu.cpu_offload() if self._cpu_offload else nullcontext())
             value = self.forward(*input, **kwargs)
             if self._recompute and not self._output_recompute and isinstance(value, hetu.Tensor):
                 value._make_recompute(False)
@@ -326,6 +328,10 @@ class Module(object):
     def recompute(self, output_recompute=False):
         self._recompute = True
         self._output_recompute = output_recompute
+        return self
+
+    def cpu_offload(self):
+        self._cpu_offload = True
         return self
     
     ############################################################################

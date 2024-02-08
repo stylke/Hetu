@@ -12,6 +12,7 @@
 #include "hetu/_binding/graph/graph.h"
 #include "hetu/_binding/graph/autocast.h"
 #include "hetu/_binding/graph/recompute.h"
+#include "hetu/_binding/graph/cpu_offload.h"
 #include "hetu/_binding/graph/gradscaler.h"
 #include "hetu/_binding/graph/sgdoptimizer.h"
 #include "hetu/_binding/graph/adamoptimizer.h"
@@ -42,4 +43,5 @@ PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::graph::AddGraphContextManagingFunctionsToModule(internal_sub_module);
   hetu::graph::AddAutoCastContextManagingFunctionsToModule(internal_sub_module);
   hetu::graph::AddRecomputeContextManagingFunctionsToModule(internal_sub_module);
+  hetu::graph::AddCPUOffloadContextManagingFunctionsToModule(internal_sub_module);
 }

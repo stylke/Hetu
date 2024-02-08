@@ -10,6 +10,7 @@
 #include "hetu/graph/ops/Loss.h"
 #include "hetu/graph/autocast/autocast.h"
 #include "hetu/graph/recompute/recompute.h"
+#include "hetu/graph/offload/activation_cpu_offload.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/core/symbol.h"
@@ -1091,6 +1092,17 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       HT_LOG_DEBUG << local_device << ": [Execution Plan] recompute pass end...";
 
       // init topo with recomputed ops
+      OpRefList topo_before_activation_offload = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before activation offload pass: " << topo_before_activation_offload;
+
+      // insert activation offload ops
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] activation offload pass begin...";
+      Graph::push_graph_ctx(id());
+      ActivationCPUOffload::OffloadToCPU(topo_before_activation_offload);
+      Graph::pop_graph_ctx();
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] activation offload pass end...";
+
+      // init topo contains comm_op
       OpRefList topo_before_substitute_comm = Graph::TopoSort(fetches, num_ops(), is_op_computed);
       HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo_before_substitute_comm;
 
@@ -1205,7 +1217,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // to do later update, but stage id = 0 can do aync grad_reduce immediately after weight grad was computed, which can be 
       // overlapped with backward compute(no overhead for pure dp, but may make tp backward allreduce slower)
       for (auto& op_ref : _topo) {
-        if (op_ref.get()->placement() == local_device || op_ref.get()->op_meta().is_step) {
+        if (op_ref.get()->placement() == local_device || op_ref.get()->op_meta().is_step ||
+            op_ref.get()->op_meta().is_offload) {
           // share weight p2p send op will not block anything! so treat it as commom compute op
           // fw weight share only in micro batch 0, bw weight grad share only in last micro batch
           if (is_fw_share_weight_p2p_send(op_ref) || is_bw_share_weight_grad_p2p_send(op_ref)) {

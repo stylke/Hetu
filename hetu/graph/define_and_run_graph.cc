@@ -3,6 +3,7 @@
 #include "hetu/graph/ops/variable.h"
 #include "hetu/graph/autocast/autocast.h"
 #include "hetu/graph/recompute/recompute.h"
+#include "hetu/graph/offload/activation_cpu_offload.h"
 
 namespace hetu {
 namespace graph {
@@ -14,6 +15,9 @@ Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
     _device_groups.push_back(op_meta.device_group);
   if (Recompute::enabled()) {
     op_meta = op_meta.set_is_recompute(true);
+  }
+  if (ActivationCPUOffload::enabled()) {
+    op_meta = op_meta.set_is_cpu_offload(true);
   }
   return MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
 }
