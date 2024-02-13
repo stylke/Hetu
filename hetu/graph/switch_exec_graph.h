@@ -29,6 +29,7 @@ enum class SWITCH_ALGORITHM_LEVEL : int8_t {
 
 enum class SWITCH_PROFILE_LEVEL : int8_t {
   TRACE = 0,
+  MEMORY,
   NVLINK,
   TIME,
   INFO,
@@ -97,8 +98,30 @@ class ParamBuffer {
       return _tensor_list.empty();
     }
 
+    bool IsEqual(const ParamBuffer& param_buffer) {
+      if (_dtype != param_buffer._dtype) {
+        return false;
+      }
+      auto len = _tensor_list.size();
+      if (len != param_buffer._tensor_list.size()) {
+        return false;
+      }
+      for (size_t i = 0; i < len; i++) {
+        if (_tensor_list[i].get() != param_buffer._tensor_list[i].get()) {
+          return false;
+        }
+      }
+      HT_ASSERT(_buffer_size == param_buffer._buffer_size)
+        << "the total buffer size should be equal";
+      return true;
+    }
+
     bool IsAllocated() const {
       return _is_allocated;
+    }
+
+    bool IsAuxiliary() const {
+      return _is_auxiliary;
     }
 
     DataType dtype() const {
@@ -175,6 +198,7 @@ class ParamBuffer {
     std::string _name;
     TensorList _tensor_list;
     bool _is_allocated{false};
+    bool _is_auxiliary{false};
     DataType _dtype{DataType::UNDETERMINED};
     std::unordered_map<TensorId, size_t> _tensor_offset_mapping; // 这里的offset是字节数
     Stream _stream; // 记录在哪个stream上alloc的（目前deprecated）
@@ -183,8 +207,8 @@ class ParamBuffer {
     size_t _buffer_size{0};
 
     // profile related
-    size_t _alloc_time;
-    size_t _free_time;
+    size_t _alloc_time{0};
+    size_t _free_time{0};
 };
 
 class ParamSlice {
@@ -339,6 +363,8 @@ class SwitchExecGraph {
           _profile_level = SWITCH_PROFILE_LEVEL::TIME;
         } else if (profile_level == "NVLINK") {
           _profile_level = SWITCH_PROFILE_LEVEL::NVLINK;
+        } else if (profile_level == "MEMORY") {
+          _profile_level = SWITCH_PROFILE_LEVEL::MEMORY;
         } else if (profile_level == "TRACE") {
           _profile_level = SWITCH_PROFILE_LEVEL::TRACE;
         } else {
@@ -397,6 +423,7 @@ class SwitchExecGraph {
     void ProfileRunningDetails();
     void ProfileNvlinkStart();
     void ProfileNvlinkEnd();
+    static void ProfileMemory(const std::string& prefix);
 
   protected:
     // basic attributes

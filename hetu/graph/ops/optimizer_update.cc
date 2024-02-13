@@ -63,7 +63,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
   NDArray& mean = const_cast<NDArray&>(inputs.at(2));
   NDArray& variance = const_cast<NDArray&>(inputs.at(3));
   NDArray& step = const_cast<NDArray&>(inputs.at(4));
-  if (!zero()) {
+  if (!_multi_zero.at(op->graph().CUR_STRATEGY_ID)) {
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
                                     type(), hetu::impl::Adam, grad, param,
                                     mean, variance, step, learning_rate(), 
@@ -125,7 +125,7 @@ void AdamOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   const DistributedStates& ds_mean = inputs.at(2)->get_distributed_states();
   const DistributedStates& ds_variance = inputs.at(3)->get_distributed_states();
   const DistributedStates& ds_step = inputs.at(4)->get_distributed_states();
-  if (!zero()) {
+  if (_multi_zero.at(Graph::GetGraph(Graph::cur_graph_ctx()).CUR_STRATEGY_ID)) {
     HT_ASSERT(ds_param.check_equal(ds_grad) && ds_mean.check_equal(ds_variance) && ds_param.check_equal(ds_mean))
       << "DistributedStates for param, grad, mean, variance should be equal!";
   } else {
@@ -163,11 +163,16 @@ Tensor MakeMomentumUpdateOp(Tensor param, Tensor grad, Tensor velocity,
 Tensor MakeAdamOp(Tensor param, Tensor grad, Tensor mean, Tensor variance,
                   float learning_rate, Tensor step, float beta1, float beta2, 
                   float eps, float weight_decay, OpMeta op_meta) {
-  // pure tp needn't zero                     
-  bool zero = (param->get_distributed_states().get_dim(-1) > 1) && param->get_distributed_states().zero();
-  // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": MakeAdamOp: param = " << param << ", zero = " << zero;
+  // pure tp needn't zero 
+  std::vector<bool> multi_zero; 
+  multi_zero.reserve(param->multi_distributed_states().size());   
+  for (const auto& ds : param->multi_distributed_states()) {
+    bool zero = (ds.get_dim(-1) > 1) && ds.zero();
+    multi_zero.push_back(zero);
+  }                 
+  // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": MakeAdamOp: param = " << param << ", multi zero = " << multi_zero;
   return Graph::MakeOp(std::make_shared<AdamOpImpl>(
-                       learning_rate, zero, beta1, beta2, eps, weight_decay),
+                       learning_rate, multi_zero, beta1, beta2, eps, weight_decay),
                        {std::move(param), std::move(grad), std::move(mean), std::move(variance), std::move(step)},
                        std::move(op_meta))
     ->output(0);

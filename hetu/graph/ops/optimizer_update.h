@@ -127,11 +127,11 @@ class MomentumUpdateOpImpl final : public OptimizerUpdateOpInterface {
 
 class AdamOpImpl : public OptimizerUpdateOpInterface {
  public:
-  AdamOpImpl(float learning_rate, bool zero = false,
+  AdamOpImpl(float learning_rate, const std::vector<bool>& multi_zero = {false},
              float beta1 = 0.9, float beta2 = 0.999, 
              float eps = 1e-8, float weight_decay = 0)
   : OptimizerUpdateOpInterface(quote(AdamOp), learning_rate),
-    _zero(zero),
+    _multi_zero(multi_zero),
     _beta1(beta1),
     _beta2(beta2),
     _eps(eps),
@@ -165,12 +165,8 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
     return false;
   }
 
-  void set_zero(bool zero) {
-    _zero = zero;
-  }
-
-  bool zero() const {
-    return _zero;
+  const std::vector<bool>& multi_zero() const {
+    return _multi_zero;
   }
 
   float beta1() const {
@@ -194,7 +190,7 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
   }
 
  protected:
-  bool _zero;
+  std::vector<bool> _multi_zero;
   float _beta1;
   float _beta2;
   float _eps;

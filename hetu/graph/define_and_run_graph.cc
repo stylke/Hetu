@@ -114,7 +114,7 @@ DeviceGroup DefineAndRunGraph::GetVariableDeviceGroupInner(const Tensor& tensor)
 void DefineAndRunGraph::Instantiate(const OpRefList& topo,
                                     Tensor2ShapeMap& shape_plan) {
 
-  // Test Case: 切换并行方案（验证切换时间）
+  // deprecated: Test Case - 手动切换并行方案（验证切换时间）
   char* env = std::getenv("HETU_PARALLEL_CHANGE_TEST");
   if (env != nullptr) {
     if (std::string(env) == "COST" && change_parallel_test_case >= 1) {
@@ -145,6 +145,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   auto exec_graph = Graph::_make_new_graph<ExecutableGraph>(name() + "_executable_" + std::to_string(exec_graph_num));
   exec_graph->NUM_STRATEGY = NUM_STRATEGY;
   exec_graph->CUR_STRATEGY_ID = CUR_STRATEGY_ID;
+  // HT_LOG_INFO << local_device << ": instantiate " << exec_graph->name();
   Graph::push_graph_ctx(exec_graph->id());
 
   // assign pp stages
@@ -268,8 +269,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     // 1、建立op和exec_op的映射
     // 2、设置tensor的shape和distributed_states
     // 3、标记parameter并给即将创建的exec graph预先设置ParamBuffer
-    // 4、设置AdamOptimizer的zero属性
-    // 5、给grad设置placement和buffer
+    // 4、给grad设置placement和buffer
     op_to_exec_op_mapping[op->id()] = exec_op;
     Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
     if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
@@ -281,11 +281,14 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
       Tensor& exec_grad = exec_op->input(1);
       HT_ASSERT(exec_graph->_parameter_ops.find(exec_param->producer()->id()) != exec_graph->_parameter_ops.end())
         << "optimizer op " << exec_op << " input 0 " << exec_param << " is not a parameter";
+      // zero属性已经类似multi_ds一样设置成了list
+      /*
       auto zero = (param->get_distributed_states().get_dim(-1) > 1) && param->get_distributed_states().zero();
       auto adam_op_interface = std::dynamic_pointer_cast<AdamOpImpl>(exec_op->_body);
       if (adam_op_interface) {
         adam_op_interface->set_zero(zero);
       }
+      */
       // 热切换接口需要提前设置一些grad的信息
       exec_grad->producer()->set_device_groups(exec_param->producer()->device_groups());
       if (exec_grad->producer()->device_group().contains(local_device)) {
@@ -293,6 +296,8 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
         accumulate_grad_buffer->AddTensor(exec_grad);
         exec_grad->set_placement_group(exec_param->producer()->device_group());
         exec_grad->set_placement(local_device);
+        HT_LOG_TRACE << "local grad " << exec_grad << " ds states = " << exec_grad->get_distributed_states().get_states() 
+          << " and order = " << exec_grad->get_distributed_states().get_order();
       }
       grad_map[exec_param->id()] = exec_grad;
     }
@@ -327,7 +332,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
 
   Graph::pop_graph_ctx();
 
-  // Test Case: 切换并行方案
+  // deprecated: Test Case - 手动切换并行方案
   if (env != nullptr) {
     if (std::string(env) == "PRECISION" || std::string(env) == "COST") {
       change_parallel_test_case += 1;
@@ -363,12 +368,12 @@ NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
 // 每次调用run都会从当前的define graph中
 // 生成/使用之前生成过的一个exec graph
 // 而只有当：
-// 1、并行策略 2、fetch的tensor 3、feed_dict的shape（包括batch_size以及seq_len） 
+// 1、并行策略 2、fetch的tensor 3、feed_dict的shape（包括batch_size以及seq_len等） 
 // 与cache的某一个重合时，才会复用
 // 目前的写法下，我们认为并行策略已经在python端选择好了然后再传进来
 NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches,
                                    const FeedDict& feed_dict, const int num_micro_batches,
-                                   const int cur_strategy_id, RunLevel run_level) {
+                                   const int cur_strategy_id, RunLevel run_level, const double grad_scale) {
   _run_level = run_level;
   auto local_device = hetu::impl::comm::GetLocalDevice(); // only for debug use
   HT_LOG_DEBUG << local_device << ": [Graph Plan] obtain exec graph begin...";
@@ -541,15 +546,9 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       auto grad_switch_mode = SWITCH_MODE::SWITCH_ACCUMULATE_GRAD;
       auto param_switch_level = SWITCH_LEVEL::EXEC;
       auto grad_switch_level = SWITCH_LEVEL::EXEC;
-      // 1、----- mode设置 -----
-      // 如果旧的exec graph没开AMP
-      // 那么只能切换origin param buffer
-      if (_exec_graph_plan_pool[_active_plan].exec_graph->_transfer_param_buffer->IsEmpty()) {
-        param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
-      }
-      // 2、----- level设置 -----
+      // 1、----- level设置 -----
       // 1)、topo前只能跟topo（算exec graph和switcher的topo）
-      // 2)、alloc前只能跟topo或update（新的一轮开始）
+      // 2)、alloc前只能跟topo或alloc或update（新的一轮开始）
       // 3)、grad后只能跟grad或update（grad要么不断累积要么更新掉）
       // 4)、update前都能跟
       // 其实原则就是有transfer param就切，没有就切origin param
@@ -560,8 +559,9 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       }
       if (_run_level == RunLevel::ALLOC) {
         HT_ASSERT(_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::TOPO
+                  || _exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::ALLOC
                   || _exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::UPDATE) 
-          << "graph with RunLevel::ALLOC should only follow behind graph with RunLevel::TOPO or RunLevel::UPDATE right now";
+          << "graph with RunLevel::ALLOC should only follow behind graph with RunLevel::TOPO or RunLevel::ALLOC or RunLevel::UPDATE right now";
       }
       if (_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::GRAD) {
         HT_ASSERT(_run_level == RunLevel::GRAD
@@ -578,6 +578,20 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 其并没有产生grad
       if (_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::ALLOC) {
         grad_switch_level = SWITCH_LEVEL::TOPO;
+      }
+      // 如果旧的exec graph是update
+      // grad已经被消耗掉了
+      if (_exec_graph_plan_pool[_active_plan].exec_graph->_run_level == RunLevel::UPDATE) {
+        grad_switch_level = SWITCH_LEVEL::TOPO;
+      }
+      // 2、----- mode设置 -----
+      // 如果旧的exec graph没开AMP
+      // 或者是刚刚进行了update（使得transfer param是空的）
+      // 那么只能切换origin param buffer
+      if (_exec_graph_plan_pool[_active_plan].exec_graph->_transfer_param_buffer->IsEmpty()
+          || (!_exec_graph_plan_pool[_active_plan].exec_graph->_transfer_param_buffer->IsAllocated()
+              && param_switch_level == SWITCH_LEVEL::EXEC)) {
+        param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
       }
       /*
       for (auto& tensor : _exec_graph_plan_pool[next_active_plan].exec_graph->_transfer_param_buffer->tensor_list()) {
@@ -598,7 +612,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   }
   HT_LOG_DEBUG << local_device << ": [Graph Plan] obtain exec graph end...";
 
-  // Test Case: 切换并行方案（验证切换时间）
+  // deprecated: Test Case - 手动切换并行方案（验证切换时间）
   char* env = std::getenv("HETU_PARALLEL_CHANGE_TEST");
   if (env != nullptr) {
     if (std::string(env) == "COST" && change_parallel_test_case >= 1) {
@@ -607,6 +621,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   }
 
   // 运行挑选出的active exec graph
+  CUR_STRATEGY_ID = _exec_graph_plan_pool[_active_plan].strategy_id;
   auto& exec_graph = _exec_graph_plan_pool[_active_plan].exec_graph;
   auto& op_to_exec_op_mapping = _exec_graph_plan_pool[_active_plan].op_to_exec_op_mapping;
   auto& tensor_to_exec_tensor_mapping = _exec_graph_plan_pool[_active_plan].tensor_to_exec_tensor_mapping;
@@ -629,9 +644,12 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     }
     exec_feed_dict[tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;
   }
-  HT_LOG_INFO << exec_graph->name() << " start running..." ;
-  return exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches, 
-                         cur_strategy_id, run_level);
+  HT_LOG_DEBUG << exec_graph->name() << " start running..." ;
+  Graph::push_graph_ctx(exec_graph->id()); // 防止exec graph run内部MakeOp时忘记加
+  auto ret = exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches, 
+                             cur_strategy_id, run_level, grad_scale);
+  Graph::pop_graph_ctx();
+  return ret;
 }
 
 } // namespace graph

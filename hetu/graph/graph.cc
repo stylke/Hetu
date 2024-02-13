@@ -259,6 +259,9 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
                 // attention: the result tensor was dp grouped split0, not really split0!
                 // so should do allgather still within the same dp group later! 
                 src2dst = {{-2}, 0}; // reduce-scatter
+                // Question: consider exec graph switch
+                // for row parallel whose split is at dim 1
+                // maybe it's a better option to set src2dst = {{-2}, 1}
               } else {
                 src2dst = {{-2}, -1}; // allreduce
               }

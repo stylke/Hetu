@@ -60,7 +60,7 @@ class ExecutableGraph : public Graph {
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                   const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
-                  const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE);
+                  const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE, const double grad_scale = 1);
 
   GraphType type() const {
     return GraphType::EXECUTABLE;
@@ -185,12 +185,14 @@ class ExecutableGraph : public Graph {
   Tensor2ShapeMap _shape_plan;
   std::shared_ptr<ParamBuffer> _origin_param_buffer;
   std::shared_ptr<ParamBuffer> _transfer_param_buffer;
-  std::shared_ptr<ParamBuffer> _current_grad_buffer;
+  std::shared_ptr<ParamBuffer> _current_grad_buffer; // deprecated
   std::shared_ptr<ParamBuffer> _accumulate_grad_buffer;
   Tensor2TensorMap _transfer_map; // origin param到transfer param的映射
   Tensor2TensorMap _grad_map; // origin param到未substitue comm op前的grad的映射
   Tensor2TensorMap _grad_grad_map; // 未substitue comm op前的grad到substitue comm op后的grad的映射
   Tensor2TensorMap _reversed_grad_grad_map; // substitue comm op后的grad到未substitue comm op前的grad的映射
+  bool _use_current_grad_buffer{true};
+  double _grad_scale; 
   std::vector<std::unique_ptr<Event>> _p2p_events;
   std::vector<std::unique_ptr<Event>> _grad_events;
 };

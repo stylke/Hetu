@@ -1,7 +1,7 @@
 import os
 import hetu as ht
 from hetu_gpt_multi_ds_parallel_symbolic import GPTLMHeadModel
-from hetu.nn.modules.parallel_multi_ds import config2ds, parallel_data_provider, parallel_multi_data_provider, get_device_index
+from hetu.nn.modules.parallel_multi_ds import config2ds, get_device_index
 from gpt_config import GPTConfig
 from load_data import DataLoaderForGPT
 import numpy as np
@@ -9,6 +9,7 @@ import time
 import argparse
 import json
 import socket
+import pynvml
 from queue import Queue
 
 local_device = None
@@ -88,17 +89,30 @@ def parse_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
         device_groups.append(device_group)
     return multi_ds, device_groups
 
-def get_position_ids(seq_len, global_batch_size, distributed_states, device_group): 
-    # position_ids: [1, seq_len]
-    position_ids = np.arange(0, seq_len, dtype=np.int64) 
-    position_ids = np.tile(position_ids, [global_batch_size, 1]) # shape: [b, seq_len]
-    return parallel_data_provider(position_ids, distributed_states, get_device_index(device_group))
+def get_position_ids(dp_size, seq_len): 
+    position_ids = np.arange(0, seq_len, dtype=np.int64) # [1, seq_len]
+    position_ids = np.tile(position_ids, [dp_size, 1]) # [dp_size, seq_len]
+    return position_ids
 
 def get_causal_mask(seq_len, global_batch_size, num_heads, distributed_states, device_group):
     raise NotImplementedError
 
 def get_mask(seq_len, global_batch_size, num_heads, distributed_states, device_group):
     raise NotImplementedError
+
+def profile_memory(device_index = 0):
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+    # 查询设备名称
+    device_name = pynvml.nvmlDeviceGetName(handle).decode("utf-8")
+    print("Device", device_index, ":", device_name)
+    # 查询显存信息
+    memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+    total_memory = memory_info.total / 1024 / 1024  # 总显存大小（MB）
+    used_memory = memory_info.used / 1024 / 1024   # 已使用的显存大小（MB）
+    free_memory = memory_info.free / 1024 / 1024   # 剩余的显存大小（MB）
+    print("Total Memory:", total_memory, "MiB")
+    print("Used Memory:", used_memory, "MiB")
+    print("Free Memory:", free_memory, "MiB")
 
 def pretrain(args):
     ds_parallel_configs = read_ds_parallel_config(args)
@@ -121,15 +135,6 @@ def pretrain(args):
                        use_flash_attn=args.use_flash_attn,
                        )
     
-    dataset = args.dataset
-    if dataset not in ['wikicorpus_en', 'wiki_books']:
-        raise(NotImplementedError)
-    # file_dir = '../bert/data/hdf5_lower_case_1_seq_len_128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/%s/'%dataset
-    file_dir = './data/'    
-    file_name_format = dataset + '_training_%d.hdf5'
-    train_file_num = 1
-    train_files = [file_dir + file_name_format%file_id for file_id in range(train_file_num)]
-
     # simple check for gpt blocks range
     ranges = []
     for _, block_config in ds_parallel_configs[0]['gpt']['blocks'].items():
@@ -202,60 +207,77 @@ def pretrain(args):
             raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
         # print(f'local deivce: {local_device}, local_device_idx: {local_device_idx}, dup_group_idx: {dup_group_idx}, dup_group_num: {dup_group_num}')
 
-        global_step_num = 0
-        for ep in range(num_epochs):
-            step_num = 0
-            for train_file in train_files:
-                required_batch_size = dp_size * seq_len // 128
-                dataloader = DataLoaderForGPT(train_file, required_batch_size, seq_len)
-                # todo: 保证dataloader.batch_num是dp的倍数
-                for i in range(dataloader.batch_num):
-                    if i % dup_group_num != dup_group_idx:
-                        continue
-                    start_time = time.time()
-                    batch_data = dataloader.get_batch(i)
-                    feed_dict = {
-                        input_ids: batch_data['input_ids'].astype(np.int64).reshape([dp_size, seq_len]),
-                        position_ids: get_position_ids(seq_len, 
-                                                       global_batch_size, 
-                                                       input_ds, 
-                                                       input_device_group), # [batch_size, seq_len]
-                        token_type_ids: batch_data['token_type_ids'].astype(np.int64).reshape([dp_size, seq_len]),
-                        attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([dp_size, seq_len]),
-                        masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([dp_size, seq_len]),
-                    }
-                    results = train_op.graph.run(loss_mean, 
-                                                 [loss_mean, lm_logits, train_op], 
-                                                 feed_dict = feed_dict, 
-                                                 num_micro_batches = config.num_micro_batches, 
-                                                 cur_strategy_id = strategy_id,
-                                                 run_level = run_level)
-                    end_time = time.time()
-                    if run_level == ht.run_level("update"):
-                        if label_device_group.contains(local_device):
-                            loss_out = results[0].numpy(force=True).mean()
-                            print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
-                    step_num += 1
-                    global_step_num += 1
-                    return
-                    # if global_step_num == 20:
-                    #     return
+        # profile_memory()
+
+        for i in range(1000):
+            if i % dup_group_num != dup_group_idx:
+                continue
+            start_time = time.time()
+            feed_dict = {
+                input_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
+                position_ids: get_position_ids(dp_size, seq_len).astype(np.int64), 
+                token_type_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
+                attention_mask: np.zeros([dp_size, seq_len]).astype(np.float32),
+                masked_lm_labels: np.zeros([dp_size, seq_len]).astype(np.int64),
+            }
+            print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run begin")
+            results = train_op.graph.run(loss_mean, 
+                                         [loss_mean, lm_logits, train_op], 
+                                         feed_dict = feed_dict, 
+                                         num_micro_batches = config.num_micro_batches, 
+                                         cur_strategy_id = strategy_id,
+                                         run_level = run_level,
+                                         grad_scale = 1.0) 
+            print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run end")
+            # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
+            # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
+            end_time = time.time()
+            if run_level == ht.run_level("update"):
+                if label_device_group.contains(local_device):
+                    loss_out = results[0].numpy(force=True).mean()
+                    print(f"{local_device}: loss = {loss_out} and time = {end_time - start_time}")
+            return
     
     '''
-    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 0, run_level = ht.run_level("topo"))
-    run_plan(global_batch_size = 16, seq_len = 256, strategy_id = 1, run_level = ht.run_level("topo"))
-    run_plan(global_batch_size = 32, seq_len = 128, strategy_id = 2, run_level = ht.run_level("topo"))
-    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 4, run_level = ht.run_level("topo"))
-    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 0, run_level = ht.run_level("topo"))       
-    print("--------- run topo end ---------")
+    run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
+    run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 0, run_level = ht.run_level("update"))
+    run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
     '''
-            
-    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 0, run_level = ht.run_level("alloc"))
-    run_plan(global_batch_size = 16, seq_len = 256, strategy_id = 1, run_level = ht.run_level("grad"))
-    run_plan(global_batch_size = 32, seq_len = 128, strategy_id = 2, run_level = ht.run_level("grad"))
-    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 4, run_level = ht.run_level("grad"))
-    run_plan(global_batch_size = 16, seq_len = 128, strategy_id = 0, run_level = ht.run_level("update"))
-
+    '''
+    run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("topo"))
+    # run_plan(global_batch_size = 8, seq_len = 128, strategy_id = 0, run_level = ht.run_level("topo"))
+    run_plan(global_batch_size = 16, seq_len = 8, strategy_id = 1, run_level = ht.run_level("topo"))
+    run_plan(global_batch_size = 8, seq_len = 64, strategy_id = 2, run_level = ht.run_level("topo"))
+    run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 3, run_level = ht.run_level("topo"))
+    run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("topo"))     
+    print("--------- run topo end ---------")
+    ''' 
+    
+    # 单轮样例 
+    def test_single_round(): 
+        run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
+        # run_plan(global_batch_size = 8, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
+        run_plan(global_batch_size = 16, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
+        run_plan(global_batch_size = 8, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
+        run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
+        run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
+    
+    # 多轮样例
+    def test_multi_round():
+        # 在tp8上分配fp32参数和bf16参数
+        # bf16参数切换到dp8并用累计梯度的方式训练、切换到tp8然后更新
+        # 第一个循环会很慢是因为要算topo & 算切换方案 & 进行很多cudaMalloc
+        for round in range(10):
+            run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
+            # run_plan(global_batch_size = 8, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 16, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 8, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
+            print(f"round {round} finished")
+    
+    # test_single_round()
+    test_multi_round()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -319,6 +341,7 @@ if __name__ == '__main__':
         "--bf16", action="store_true", help="Use bfloat16."
     )
     args = parser.parse_args()
+    pynvml.nvmlInit()
     distributed_init(args.use_two_node)
     with ht.graph("define_and_run", num_strategy=args.num_strategy):
         if args.bf16:

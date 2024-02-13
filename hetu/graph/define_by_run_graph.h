@@ -30,7 +30,7 @@ class DefineByRunGraph : public Graph {
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                   const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
-                  const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE);
+                  const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE, const double grad_scale = 1);
 
   GraphType type() const {
     return GraphType::DEFINE_BY_RUN;

@@ -144,7 +144,7 @@ void NDArray::MarkUsedBy(const NDArrayList& arrays, const Stream& stream) {
   }
 }
 
-// Consider dynamic shape at inference when using different seq_len
+// deprecated: dynamic shape at inference when using different seq_len
 NDArray NDArray::to(const NDArray& input, const Device& device, DataType dtype,
                     StreamIndex stream_id, NDArray& output) {
   bool same_device = device.is_undetermined() || device == input->device();
@@ -875,7 +875,7 @@ NDArrayList NDArray::split(const NDArray& input, size_t num_chunks,
   return split(input, chunks, axis, stream_id);
 }
 
-// Consider dynamic shape at inference when using different seq_len
+// deprecated: dynamic shape at inference when using different seq_len
 NDArrayList NDArray::split(const NDArray& input, const HTShape& chunks,
                            int64_t axis, StreamIndex stream_id) {
   auto parsed_axis = NDArrayMeta::ParseAxis(axis, input->ndim());
@@ -1527,7 +1527,7 @@ NDArray NDArray::cat(const NDArrayList& inputs, int axis,
   }
 }
 
-// Consider dynamic shape at inference when using different seq_len
+// deprecated: dynamic shape at inference when using different seq_len
 NDArray NDArray::empty(const HTShape& shape, const Device& device,
                        DataType dtype, StreamIndex stream_id,
                        const HTShape& dynamic_shape) {
@@ -1546,7 +1546,7 @@ NDArray NDArray::empty_like(const NDArray& other, StreamIndex stream_id) {
                         stream_id, other->dynamic_shape());
 }
 
-// Consider dynamic shape at inference when using different seq_len
+// deprecated: dynamic shape at inference when using different seq_len
 NDArray NDArray::full(const HTShape& shape, double fill_value,
                       const Device& device, DataType dtype,
                       StreamIndex stream_id,
@@ -1555,7 +1555,7 @@ NDArray NDArray::full(const HTShape& shape, double fill_value,
   return NDArray::full_(out, fill_value, stream_id);
 }
 
-// Consider dynamic shape at inference when using different seq_len
+// deprecated: dynamic shape at inference when using different seq_len
 NDArray NDArray::full_like(const NDArray& other, double fill_value,
                            StreamIndex stream_id) {
   return NDArray::full(other->shape(), fill_value, other->device(),
@@ -1607,7 +1607,7 @@ NDArray NDArray::contiguous(const NDArray& input, StreamIndex stream_id,
   return out;
 }
 
-// Consider dynamic shape at inference when using different seq_len
+// deprecated: dynamic shape at inference when using different seq_len
 NDArray NDArray::rand(const HTShape& shape, const Device& device,
                       DataType dtype, double lb, double ub, uint64_t seed,
                       StreamIndex stream_id,
@@ -1616,7 +1616,7 @@ NDArray NDArray::rand(const HTShape& shape, const Device& device,
   return NDArray::uniform_(out, lb, ub, seed, stream_id);
 }
 
-// Consider dynamic shape at inference when using different seq_len
+// deprecated: dynamic shape at inference when using different seq_len
 NDArray NDArray::randn(const HTShape& shape, const Device& device,
                        DataType dtype, double mean, double stddev,
                        uint64_t seed, StreamIndex stream_id,

@@ -29,14 +29,26 @@ void ConcatenateOpImpl::DoCompute(Operator& op,
     int num = op->num_inputs();
     size_t offset = 0;
     size_t axis = get_axis();
-    for (int i = 0; i < num; ++i) {
-      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-                                  hetu::impl::Concatenate, inputs.at(i),
-                                  outputs.at(0), axis, offset, op->instantiation_ctx().stream());
-      offset += inputs.at(i)->shape(axis);
+    if (axis == 0) {
+      for (int i = 0; i < num; ++i) {
+        auto output = NDArray(inputs.at(i)->meta(), 
+                              outputs.at(0)->storage(),
+                              outputs.at(0)->storage_offset() + offset);
+        HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                     hetu::impl::DataTransfer, inputs.at(i), output,
+                                     op->instantiation_ctx().stream());
+        offset += inputs.at(i)->numel();
+      }
+    } 
+    else {
+      for (int i = 0; i < num; ++i) {
+        HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                      hetu::impl::Concatenate, inputs.at(i),
+                                      outputs.at(0), axis, offset, op->instantiation_ctx().stream());
+        offset += inputs.at(i)->shape(axis);
+      }
     }
   }
-  // NDArray::cat(inputs, get_axis(), op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList ConcatenateOpImpl::DoGradient(Operator& op,

@@ -433,8 +433,8 @@ class OpDef : public shared_ptr_target {
     auto rets = _body->Compute(get_self(), inputs, runtime_ctx);
     instantiation_ctx().stop[micro_batch_id]->Record(stream());
     // precision debug
-    /*
     // stream().Sync();
+    /*
     NDArrayList ret_sums;
     for (auto& ret : rets) {
       ret_sums.push_back(NDArray::sum(ret));

@@ -216,10 +216,11 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   auto& info = it->second;
   info.free_at = free_at;
 
-  // move borrow data actual free to WatchEvents()
-  // we only record the free event here
-  /*
-  // for borrow data we free it directly
+  // for borrow data, we currently adopt method 1
+  // the exec graph running & switching memory profiling will be more accurate
+  // note we will eventually use method 2
+
+  // method 1: for borrow data we free it directly
   // we should block the used streams here
   if (info.deleter) {
     // Stream::unpack(info.alloc_stream).Sync();
@@ -231,7 +232,9 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     _data_ptr_info.erase(it);
     return;
   }
-  */
+
+  // method 2: move borrow data actual free to WatchEvents()
+  // we only record the free event here
   if (info.deleter) {
     auto& used_streams = info.used_streams;
     if (used_streams.empty()) {
