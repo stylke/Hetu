@@ -269,7 +269,8 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
               std::vector<int32_t> res_order = ds_grad.combine_order(src2dst);
               DistributedStates ds_dst({device_num, res_states, res_order});
               HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " 
-                << "backward: partial to duplicate: " << grad_inputs[i] 
+                << "backward: partial to duplicate: " << grad_inputs[i]
+                << ", src states: " << ds_grad.ds_info()
                 << ", dst states: " << ds_dst.ds_info();
               multi_dst_ds.push_back(ds_dst);
               is_need_comm_op = true;

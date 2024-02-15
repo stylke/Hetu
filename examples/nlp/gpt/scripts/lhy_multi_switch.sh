@@ -23,7 +23,7 @@ python lhy_multi_switch.py \
 --num_attention_heads $NUM_HEADS \
 --seq_length $SEQ_LEN \
 --epochs 20 \
---lr 1e-6 \
+--lr 1e-4 \
 --adam_weight_decay 0.01 \
 --hidden_act relu \
 --dropout_prob 0.1 \

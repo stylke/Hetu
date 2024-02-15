@@ -32,6 +32,7 @@ DECLARE_HT_EXCEPTION(cuda_error);
  * Some useful wrappers for CUDA functions
  ******************************************************/
 // device
+#define CudaDeviceSetLimit(attr, value) CUDA_CALL(cudaDeviceSetLimit(attr, value))
 #define CudaGetDeviceCount(ptr) CUDA_CALL(cudaGetDeviceCount(ptr))
 #define CudaDeviceGetAttribute(ptr, attr, stream)                              \
   CUDA_CALL(cudaDeviceGetAttribute(ptr, attr, stream))

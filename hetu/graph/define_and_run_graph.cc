@@ -596,11 +596,11 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       /*
       for (auto& tensor : _exec_graph_plan_pool[next_active_plan].exec_graph->_transfer_param_buffer->tensor_list()) {
         HT_LOG_INFO << local_device << ": transfer param " << tensor << " meta is " << tensor->meta() << " and device group is " << tensor->producer()->device_group()
-          << " and ds is " << tensor->get_distributed_states().get_states();
+          << " and ds is " << tensor->get_distributed_states().ds_info();
       }
       for (auto& tensor : _exec_graph_plan_pool[next_active_plan].exec_graph->_accumulate_grad_buffer->tensor_list()) {
         HT_LOG_INFO << local_device << ": accumulate grad " << tensor << " meta is " << tensor->meta() << " and device group is " << tensor->producer()->device_group()
-          << " and ds is " << tensor->get_distributed_states().get_states();
+          << " and ds is " << tensor->get_distributed_states().ds_info();
       }
       */
       _param_switcher_pool[key]->SwitchParams(param_switch_mode, param_switch_level);

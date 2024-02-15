@@ -237,12 +237,13 @@ def pretrain(args):
                     loss_out = results[0].numpy(force=True).mean()
                     print(f"{local_device}: loss = {loss_out} and time = {end_time - start_time}")
             return
-    
+        
     '''
     run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
     run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 0, run_level = ht.run_level("update"))
     run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
     '''
+    
     '''
     run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("topo"))
     # run_plan(global_batch_size = 8, seq_len = 128, strategy_id = 0, run_level = ht.run_level("topo"))
