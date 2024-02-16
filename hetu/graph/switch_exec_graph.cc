@@ -977,17 +977,15 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
     HT_LOG_TRACE << local_device << ": obtain buffer data for " << _info_mapping[input->id()]
       << ", whose shape is " << input->shape() << " and dtype is " << input->dtype() << " and tensor offset in buffer is " << buffer->GetElementOffest(input)
       << ", the whole size is " << buffer->AsStorage()->size();
-    auto buffer_data = NDArray(input->meta(), buffer->AsStorage(), buffer->GetElementOffest(input));
     // 将原data移动到buffer中并转化成连续存储
+    NDArrayMeta input_meta = input->meta();
+    NDArrayMeta buffer_data_meta = input_meta.set_shape(input->shape()); // contiguous meta!!!
+    auto buffer_data = NDArray(buffer_data_meta, buffer->AsStorage(), buffer->GetElementOffest(input));
     auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
     auto stream = Stream(local_device, kComputingStream);
     event->Record(stream);
     _buffer_transfer_events.emplace_back(std::move(event));
-    // HT_LOG_INFO << _info_mapping[input->id()] << " begin";
     NDArray::contiguous(data, kComputingStream, buffer_data); // data ---> buffer_data
-    // HT_LOG_INFO << _info_mapping[input->id()] << " end";
-    // stream.Sync();
-    // HT_LOG_INFO << _info_mapping[input->id()] << " siu";
     NDArray::MarkUsedBy(data, stream);
     NDArray::MarkUsedBy(buffer_data, stream);
     event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
