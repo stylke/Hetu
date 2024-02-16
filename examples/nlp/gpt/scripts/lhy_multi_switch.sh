@@ -3,20 +3,31 @@ NUM_LAYERS=${1:-32}
 HIDDEN_SIZE=${2:-1280}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-128}
+# todo: should pass a gbs/mbs list
 GLOBAL_BATCH_SIZE=${5:-16}
 NUM_MICRO_BATCHES=${6:-2}
 
+ROOT_FOLDER=/home/gehao/megatron/Megatron-LM/data
+JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
+JSON_KEY=content
+VOCAB_FILE=${ROOT_FOLDER}/vocab.json
+MERGE_FILE=${ROOT_FOLDER}/merges.txt
+
+export NCCL_DEBUG=VERSION
 export HETU_SWITCH_ALGORITHM=ROUND_ROBIN
 export HETU_SWITCH_PROFILE=INFO
-export HETU_INTERNAL_LOG_LEVEL=WARN
+export HETU_INTERNAL_LOG_LEVEL=INFO
 mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
-python lhy_multi_switch.py \
+python3 lhy_multi_switch.py \
 --num_strategy=5 \
 --ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json,ds_parallel_config/dp8.json,ds_parallel_config/dp4_tp2.json,ds_parallel_config/dp2_tp4.json,ds_parallel_config/tp8.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --num_micro_batches $NUM_MICRO_BATCHES \
---dataset wikicorpus_en \
+--json_file $JSON_FILE \
+--json_key $JSON_KEY \
+--vocab_file $VOCAB_FILE \
+--merge_file $MERGE_FILE \
 --vocab_size 30592 \
 --hidden_size $HIDDEN_SIZE \
 --num_hidden_layers $NUM_LAYERS \

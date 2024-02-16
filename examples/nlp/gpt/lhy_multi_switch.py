@@ -3,7 +3,7 @@ import hetu as ht
 from hetu_gpt_multi_ds_parallel_symbolic import GPTLMHeadModel
 from hetu.nn.modules.parallel_multi_ds import config2ds, get_device_index
 from gpt_config import GPTConfig
-from load_data import DataLoaderForGPT
+from data_utils import GPTJsonDataset, get_mask_and_position_ids, build_pretraining_data_loader
 import numpy as np
 import time
 import argparse
@@ -89,16 +89,21 @@ def parse_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
         device_groups.append(device_group)
     return multi_ds, device_groups
 
-def get_position_ids(dp_size, seq_len): 
-    position_ids = np.arange(0, seq_len, dtype=np.int64) # [1, seq_len]
-    position_ids = np.tile(position_ids, [dp_size, 1]) # [dp_size, seq_len]
-    return position_ids
+def train_dataset_provider(args):
+    """Build train dataset."""
+    train_dataset = GPTJsonDataset(
+        json_file=args.json_file,
+        key=args.json_key,
+        max_seq_len=args.seq_length,
+        vocab_file=args.vocab_file,
+        merge_file=args.merge_file)
+    return train_dataset
 
-def get_causal_mask(seq_len, global_batch_size, num_heads, distributed_states, device_group):
-    raise NotImplementedError
-
-def get_mask(seq_len, global_batch_size, num_heads, distributed_states, device_group):
-    raise NotImplementedError
+def train_data_iterator(dataset, consumed_samples, mbs, dp_rank, dp_size):
+    # print(f'new dataloader: consumed_samples = {consumed_samples}')
+    train_dataloader = build_pretraining_data_loader(dataset, consumed_samples, mbs, dp_rank, dp_size)
+    train_data_iterator = iter(train_dataloader)
+    return train_data_iterator
 
 def profile_memory(device_index = 0):
     handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
@@ -149,16 +154,16 @@ def pretrain(args):
     label_multi_ds, label_device_groups = parse_multi_ds_parallel_config(ds_parallel_configs, 'label')
     # print(f'input_ds: {input_ds}, label_ds: {label_ds}')
     
-    micro_batch_size = config.global_batch_size // config.num_micro_batches
+    mbs_times_dp = config.global_batch_size // config.num_micro_batches
         
     # todo: assign multi device_groups, and instantiate only one placement_group
-    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='input_ids')
-    position_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='position_ids')
-    token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='token_type_ids')
-    attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[micro_batch_size, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='attention_mask')
-    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], multi_ds=label_multi_ds, device_groups=label_device_groups, name='masked_lm_labels')
+    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='input_ids')
+    position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='position_ids')
+    token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='token_type_ids')
+    attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[mbs_times_dp, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='attention_mask')
+    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], multi_ds=label_multi_ds, device_groups=label_device_groups, name='masked_lm_labels')
 
-    config.micro_batch_size_symbol = ht.IntSymbol(micro_batch_size)
+    config.mbs_times_dp_symbol = ht.IntSymbol(mbs_times_dp)
     config.seq_len_symbol = input_ids.symbolic_shape[1]
 
     # print(f'{local_device}: build model begin...')
@@ -177,24 +182,27 @@ def pretrain(args):
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
     
+    print(f'{local_device}: build dataset begin...')
+    train_dataset = train_dataset_provider(args)
+    print(f'{local_device}: build dataset end...')
     # return
 
-    def run_plan(global_batch_size = config.global_batch_size,
+    def run_plan(consumed_samples = 0,
+                 global_batch_size = config.global_batch_size,
+                 micro_batch_size = 2,
                  seq_len = config.seq_len,
                  strategy_id = 0, 
                  run_level = 0):       
         if global_batch_size != config.global_batch_size or seq_len != config.seq_len:
             assert config.use_flash_attn == True, "symbolic shape can only used when flash attn is on for now"
-        # todo: may also have multiple config.num_micro_batches
-        config.micro_batch_size_symbol.set_data(global_batch_size // config.num_micro_batches)
-        config.seq_len_symbol.set_data(seq_len)
         
-        dp_size = global_batch_size // input_multi_ds[strategy_id].get_dim(0)
         input_ds = input_multi_ds[strategy_id]
         input_device_group = input_device_groups[strategy_id]
         label_ds = label_multi_ds[strategy_id]
         label_device_group = label_device_groups[strategy_id]
+
         # device in same dp_group will read the same batch data
+        dup_group_idx, dup_group_num = -1, -1
         if input_device_group.contains(local_device):
             local_device_idx = input_device_group.get_index(local_device)
             dup_group_idx = input_ds.get_dup_group_index(local_device_idx)
@@ -207,36 +215,63 @@ def pretrain(args):
             raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
         # print(f'local deivce: {local_device}, local_device_idx: {local_device_idx}, dup_group_idx: {dup_group_idx}, dup_group_num: {dup_group_num}')
 
+        dp_rank = dup_group_idx
+        dp_size = dup_group_num
+        gbs_per_dp = global_batch_size // dp_size
+        mbs_times_dp = micro_batch_size * dp_size
+        assert global_batch_size % mbs_times_dp == 0, \
+            f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
+        num_micro_batches = global_batch_size // mbs_times_dp
+        config.mbs_times_dp_symbol.set_data(mbs_times_dp)
+        config.seq_len_symbol.set_data(seq_len)
+
+        # if dp_size * mbs changes, then should use the new dataloader
+        # start_time = time.time()
+        train_iter = train_data_iterator(train_dataset, consumed_samples, micro_batch_size, dp_rank, dp_size) # need cache?
+        # end_time = time.time()
+        # print(f'{local_device}: create dataloader cost {end_time - start_time} s')
+
         # profile_memory()
 
-        for i in range(1000):
-            if i % dup_group_num != dup_group_idx:
-                continue
-            start_time = time.time()
-            feed_dict = {
-                input_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
-                position_ids: get_position_ids(dp_size, seq_len).astype(np.int64), 
-                token_type_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
-                attention_mask: np.zeros([dp_size, seq_len]).astype(np.float32),
-                masked_lm_labels: np.zeros([dp_size, seq_len]).astype(np.int64),
-            }
-            print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run begin")
-            results = train_op.graph.run(loss_mean, 
-                                         [loss_mean, lm_logits, train_op], 
-                                         feed_dict = feed_dict, 
-                                         num_micro_batches = config.num_micro_batches, 
-                                         cur_strategy_id = strategy_id,
-                                         run_level = run_level,
-                                         grad_scale = 1.0) 
-            print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run end")
-            # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
-            # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
-            end_time = time.time()
-            if run_level == ht.run_level("update"):
-                if label_device_group.contains(local_device):
-                    loss_out = results[0].numpy(force=True).mean()
-                    print(f"{local_device}: loss = {loss_out} and time = {end_time - start_time}")
-            return
+        # load data for each dp
+        micro_batches = []
+        for _ in range(num_micro_batches):
+            micro_batch = next(train_iter)
+            micro_batches.append(micro_batch)
+        micro_batches = np.concatenate(micro_batches, axis=0) # [num_micro_batches, micro_batch_size, max_seq_len + 1]
+        # todo: use the real seq_len
+        micro_batches = micro_batches.reshape(gbs_per_dp, -1)[:, :seq_len+1] # [gbs_per_dp, seq_len + 1]
+        labels = micro_batches[:, 1:] # [gbs_per_dp, seq_len]
+        tokens = micro_batches[:, :-1] # [gbs_per_dp, seq_len]
+        _attention_mask, _position_ids = get_mask_and_position_ids(tokens, train_dataset.encoder.pad_id())
+        _token_type_ids = np.zeros([gbs_per_dp, seq_len])
+
+        start_time = time.time()
+        feed_dict = {
+            input_ids: tokens.astype(np.int64),
+            position_ids: _position_ids.astype(np.int64), 
+            token_type_ids: _token_type_ids.astype(np.int64),
+            attention_mask: _attention_mask.astype(np.int64),
+            masked_lm_labels: labels.astype(np.int64),
+        }
+        print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
+        results = train_op.graph.run(loss_mean, 
+                                        [loss_mean, lm_logits, train_op], 
+                                        feed_dict = feed_dict, 
+                                        num_micro_batches = num_micro_batches, 
+                                        cur_strategy_id = strategy_id,
+                                        run_level = run_level,
+                                        grad_scale = 1.0) 
+        consumed_samples += global_batch_size
+        print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run end, consumed_samples = {consumed_samples}")
+        # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
+        # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
+        end_time = time.time()
+        if run_level == ht.run_level("update"):
+            if label_device_group.contains(local_device):
+                loss_out = results[0].numpy(force=True).mean()
+                print(f"{local_device}: loss = {loss_out} and time = {end_time - start_time}")
+        return consumed_samples
     
     '''
     run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
@@ -255,26 +290,28 @@ def pretrain(args):
     
     # 单轮样例 
     def test_single_round(): 
-        run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
-        # run_plan(global_batch_size = 8, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
-        run_plan(global_batch_size = 16, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
-        run_plan(global_batch_size = 8, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
-        run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
-        run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
+        consumed_samples = 0 # should be reset when run next epoch
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 2, micro_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
+        # consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 2, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2,  seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 2, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 4, micro_batch_size = 2, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 2, micro_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
     
     # 多轮样例
     def test_multi_round():
         # 在tp8上分配fp32参数和bf16参数
         # bf16参数切换到dp8并用累计梯度的方式训练、切换到tp8然后更新
         # 第一个循环会很慢是因为要算topo & 算切换方案 & 进行很多cudaMalloc
+        consumed_samples = 0 # should be reset when run next epoch
         for round in range(10):
-            run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
-            # run_plan(global_batch_size = 8, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 16, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 8, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
-            print(f"round {round} finished")
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 2, micro_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
+            # consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 2, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 2, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 4, micro_batch_size = 2, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 2, micro_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
+            print(f"round {round} finished, consumed_samples = {consumed_samples}")
     
     # test_single_round()
     test_multi_round()
@@ -301,6 +338,18 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--dataset", type=str, default='wikicorpus_en', help="Dataset used to train."
+    )
+    parser.add_argument(
+        "--json_file", type=str, help='data json format file path'
+    )
+    parser.add_argument(
+        "--json_key", type=str, help='json key for tokens'
+    )
+    parser.add_argument(
+        "--vocab_file", type=str, help='gpt vocab file path'
+    )
+    parser.add_argument(
+        "--merge_file", type=str, help='gpt merge file path'
     )
     parser.add_argument(
         "--vocab_size", type=int, default=30522, help="Total number of vocab"

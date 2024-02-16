@@ -129,13 +129,13 @@ class GPTAttention(ht.nn.Module):
     ):
         embed_dim = hidden_states.global_shape[-1]
         # [micro_batch_size*seq_len, embed_dim]
-        hidden_states = hidden_states.reshape([self.config.micro_batch_size_symbol * self.config.seq_len_symbol, ht.IntSymbol(embed_dim)])
+        hidden_states = hidden_states.reshape([self.config.mbs_times_dp_symbol * self.config.seq_len_symbol, ht.IntSymbol(embed_dim)])
         # print(f'hidden_states.global_shape={hidden_states.global_shape}, hidden_states.shape={hidden_states.shape}, hidden_states.distributed_states={hidden_states.distributed_states}')        
         # column parallel, [micro_batch_size*seq_len, 3*embed_dim]
         qkv = self.qkv_dense(hidden_states)
         # print(f'qkv.global_shape={qkv.global_shape}, qkv.shape={qkv.shape}, qkv.distributed_states={qkv.distributed_states}')        
         # [micro_batch_size, seq_len, num_heads, 3*head_dim]
-        qkv = qkv.reshape([self.config.micro_batch_size_symbol, self.config.seq_len_symbol, ht.IntSymbol(self.num_heads), ht.IntSymbol(3 * self.head_dim)])
+        qkv = qkv.reshape([self.config.mbs_times_dp_symbol, self.config.seq_len_symbol, ht.IntSymbol(self.num_heads), ht.IntSymbol(3 * self.head_dim)])
         # print(f'qkv_{self.layer_idx} multi ds = {qkv.multi_distributed_states}') # ensure multi ds for reshape was right 
         # q,k,v shape=[micro_batch_size, seq_len, num_heads, head_dim]
         query, key, value = ht.split(qkv, 3, qkv.ndim - 1)
@@ -156,11 +156,11 @@ class GPTAttention(ht.nn.Module):
             attn_output = attn_output.transpose([0, 2, 1, 3])
         
         # [micro_batch_size*seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([self.config.micro_batch_size_symbol * self.config.seq_len_symbol, ht.IntSymbol(self.num_heads * self.head_dim)])
+        attn_output = attn_output.reshape([self.config.mbs_times_dp_symbol * self.config.seq_len_symbol, ht.IntSymbol(self.num_heads * self.head_dim)])
         # row parallel, shape=[micro_batch_size*seq_len, num_heads*head_dim]
         attn_output = self.dense(attn_output)
         # [micro_batch_size, seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([self.config.micro_batch_size_symbol, self.config.seq_len_symbol, ht.IntSymbol(self.num_heads * self.head_dim)])
+        attn_output = attn_output.reshape([self.config.mbs_times_dp_symbol, self.config.seq_len_symbol, ht.IntSymbol(self.num_heads * self.head_dim)])
         # dropout
         # attn_output = self.resid_dropout(attn_output)
 
@@ -218,11 +218,11 @@ class GPTMLP(ht.nn.Module):
     def forward(self, hidden_states):
         origin_shape = hidden_states.global_shape # [b, seq_len, hidden_size]
         if len(origin_shape) != 2: # shape adaptor
-            hidden_states = hidden_states.reshape([self.config.micro_batch_size_symbol * self.config.seq_len_symbol, ht.IntSymbol(origin_shape[-1])])
+            hidden_states = hidden_states.reshape([self.config.mbs_times_dp_symbol * self.config.seq_len_symbol, ht.IntSymbol(origin_shape[-1])])
         hidden_states = self.parallel_mlp(hidden_states)
         if len(origin_shape) != 2: # shape adaptor
             # two undetermined dim, we therefore should use symbolic shape here
-            hidden_states = hidden_states.reshape([self.config.micro_batch_size_symbol, self.config.seq_len_symbol, ht.IntSymbol(origin_shape[-1])])
+            hidden_states = hidden_states.reshape([self.config.mbs_times_dp_symbol, self.config.seq_len_symbol, ht.IntSymbol(origin_shape[-1])])
         return hidden_states
 
 class GPTBlock(ht.nn.Module):
@@ -300,7 +300,7 @@ class GPTModel(ht.nn.Module):
             assert attention_mask.global_shape == input_ids.global_shape \
                 and attention_mask.distributed_states.check_equal(attention_mask.distributed_states), \
                 'attention_mask global_shape and distributed_states should be equal to input_ids!'
-            attention_mask = attention_mask.reshape([self.config.micro_batch_size_symbol, ht.IntSymbol(1), ht.IntSymbol(1), self.config.seq_len_symbol])
+            attention_mask = attention_mask.reshape([self.config.mbs_times_dp_symbol, ht.IntSymbol(1), ht.IntSymbol(1), self.config.seq_len_symbol])
             # 原attention_mask: 1为使用的值, 0为mask的值
             # attention_mask = attention_mask.to(dtype=self.dtype)  # fp16 compatibility
             attention_mask = (1.0 - attention_mask) * -10000.0 # 0为使用的值, -10000为mask的值
@@ -361,7 +361,7 @@ class GPTLMHeadModel(ht.nn.Module):
         shift_hidden_states = ht.slice(hidden_states, [ht.IntSymbol(0), ht.IntSymbol(0), ht.IntSymbol(0)], [hidden_states.symbolic_shape[0], hidden_states.symbolic_shape[1] - 1, hidden_states.symbolic_shape[2]])
         _,  _, n_embd = hidden_states.global_shape
         # [b*(seq_len-1), n_embd]
-        shift_hidden_states = shift_hidden_states.reshape([self.config.micro_batch_size_symbol * (self.config.seq_len_symbol - 1), ht.IntSymbol(n_embd)])
+        shift_hidden_states = shift_hidden_states.reshape([self.config.mbs_times_dp_symbol * (self.config.seq_len_symbol - 1), ht.IntSymbol(n_embd)])
         # column parallel, [b*(seq_len-1), n_embd]->[b*(seq_len-1), vocab_size], and splited in vocab dimension
         shift_lm_logits = self.lm_head(shift_hidden_states)
 
