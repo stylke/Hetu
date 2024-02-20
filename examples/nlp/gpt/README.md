@@ -76,3 +76,17 @@ device = device(type=cuda, index=7), loss = 5.774656772613525
 5. you could compare the averge loss of hetu with the loss of pytorch at each round (e.g. at round 0, they should exactly be 3.61, almost equals to pytorch), note that we can't guarantee they are absolutely equal, especially the case when learing rate or the num of round is larger
 
 6. you could compare the model weight by running `python examine_ckpt.py`, you may add more assertion or change the learning rate (`1e-6 to 1e-2`) for double check
+
+# Use hetu multi distributed-stategy training with real world datasets (support multi nodes)
+
+1. cd `examples/nlp/gpt`
+
+2. run `bash data_utils/create_web_dataset.sh` to download vocab.json, merges.txt, refinedweb0.parquet, create web dataset and build cache
+
+3. run `bash scripts/hetu_pack_or_pad.sh` to train hetu 3d parallel with one strategy, 8 gpus
+
+4. run `bash scripts/hetu_pack_or_pad_two_node.sh` to train hetu 3d parallel with one startegy, 2x8 gpus
+
+5. run `bash scripts/hetu_pack_or_pad_switch_two_node.sh` to train hetu 3d parallel hot switch with multi strategy, 2x8 gpus
+
+6. appendix for 4 and 5: if use conda env, then should edit scripts and add shared env variable by `-x PATH`, where `PATH` is your conda python path; edit `distributed_init()` func in `hetu_pack_or_pad.py` and `hetu_pack_or_pad_switch.py`, where the `hostname` variable should match with your machine hostname

@@ -1671,7 +1671,8 @@ void SwitchExecGraph::ProfileMemory(const std::string& prefix) {
 
   nvmlDevice_t device;
   auto world_rank = hetu::impl::comm::GetWorldRank();
-  result = nvmlDeviceGetHandleByIndex(world_rank, &device);
+  auto device_index = hetu::impl::comm::GetLocalDevice().index();
+  result = nvmlDeviceGetHandleByIndex(device_index, &device);
   if (result != NVML_SUCCESS) {
     HT_RUNTIME_ERROR << "Failed to get device handle: " << nvmlErrorString(result);
     return;
