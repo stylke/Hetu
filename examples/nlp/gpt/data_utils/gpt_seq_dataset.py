@@ -103,7 +103,7 @@ def get_mask_and_position_ids(tokens, pad):
     return attention_mask, position_ids
 
 if __name__ == '__main__':
-    root_folder = '/home/gehao/megatron/Megatron-LM/data'
+    root_folder = 'data'
     test_dataset = GPTJsonDataset(
         json_file=f'{root_folder}/web/refinedweb0.json',
         key='content',
