@@ -257,7 +257,8 @@ def pretrain(args):
     # 单次切换
     def test_single_switch():
         run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 6, run_level = ht.run_level("alloc"))
-        run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 1, run_level = ht.run_level("alloc"))
+        run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 3, run_level = ht.run_level("alloc"))
+        run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
         # run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 2, run_level = ht.run_level("alloc"))
     
     # 单轮样例 
