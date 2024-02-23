@@ -159,7 +159,8 @@ NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape) {
   auto element_size = static_cast<size_t>(PyArray_ITEMSIZE(numpy_array));
   auto stride = FromNumpyStride(PyArray_STRIDES(numpy_array), ndim, element_size);
   HT_VALUE_ERROR_IF(stride != Shape2Stride(shape))
-    << "Strided arrays are not supported yet.";
+    << "Strided arrays are not supported yet"
+    << ", stride is " << stride << " and shape is " << shape;
   auto dtype = FromNumpyDataType(PyArray_TYPE(numpy_array), element_size);
   auto meta = NDArrayMeta().set_dtype(dtype).set_shape(shape).set_device(kCPU);
 

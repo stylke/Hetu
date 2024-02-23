@@ -10,6 +10,7 @@
 #include "hetu/graph/operator.h"
 #include "hetu/graph/init/initializer.h"
 #include "hetu/impl/communication/comm_group.h"
+#include "hetu/impl/communication/nccl_comm_group.h"
 #include <nccl.h>
 
 namespace hetu {
@@ -24,6 +25,7 @@ std::ostream& operator<<(std::ostream& os, const SwitchExecGraph& switcher);
 enum class SWITCH_ALGORITHM_LEVEL : int8_t {
   FCFS = 0,
   ROUND_ROBIN,
+  MULTI_NODE_ROUND_ROBIN,
   GREEDY,
 };
 
@@ -45,6 +47,26 @@ enum class SWITCH_MODE : int8_t {
 enum class SWITCH_LEVEL : int8_t {
   EXEC = 0,
   TOPO,
+};
+
+enum class P2P_ROUTE_LEVEL : int8_t {
+  NVLINK = 0,
+  PCIE,
+  NET
+};
+
+class P2PRoute {
+  public:
+    P2PRoute(const P2P_ROUTE_LEVEL& route_level = P2P_ROUTE_LEVEL::NVLINK):
+      _route_level(route_level) {   
+      }
+
+    const P2P_ROUTE_LEVEL& route_level() const {
+      return _route_level;
+    }
+  
+  protected:
+    P2P_ROUTE_LEVEL _route_level;
 };
 
 class ParamBuffer {
@@ -189,7 +211,7 @@ class ParamBuffer {
       HT_RUNTIME_ERROR << "Can't find tensor " << tensor << " in the ParamBuffer " << _name;
     }
 
-    void Alloc(const Stream& stream); // stream is unused actually (borrow data must use kBlockingStream)
+    void Alloc(const Stream& stream, bool use_nccl = false, ncclComm_t comm = nullptr); // stream is unused actually (borrow data must use kBlockingStream)
     void Free();
     void Bind(const std::shared_ptr<NDArrayStorage>& storage); // bind to a customized storage rather than alloc by itself
 
@@ -345,6 +367,8 @@ class SwitchExecGraph {
         std::transform(algorithm_level.begin(), algorithm_level.end(), algorithm_level.begin(), ::toupper);
         if (algorithm_level == "GREEDY") {
           _algorithm_level = SWITCH_ALGORITHM_LEVEL::GREEDY;
+        } else if (algorithm_level == "MULTI_NODE_ROUND_ROBIN") {
+          _algorithm_level = SWITCH_ALGORITHM_LEVEL::MULTI_NODE_ROUND_ROBIN;
         } else if (algorithm_level == "ROUND_ROBIN") {
           _algorithm_level = SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN;
         } else if (algorithm_level == "FCFS") {
@@ -410,9 +434,10 @@ class SwitchExecGraph {
     void MakeCommGraph(SWITCH_MODE switch_mode,
                        SWITCH_LEVEL switch_level);
 
-    void BufferBatchedIsendIrecvExec(const Operator& op);
+    void BufferBatchedIsendIrecvExec(const hetu::impl::comm::NCCLCommunicationGroup& comm_nccl_group);
     
     void BufferBatchedIsendIrecv(const Operator& op,
+                                 const hetu::impl::comm::NCCLCommunicationGroup& comm_nccl_group,
                                  Tensor2NDArrayMap& tensor2data,
                                  Tensor2IntMap& tensor2degrees);
 

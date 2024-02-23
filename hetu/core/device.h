@@ -74,7 +74,7 @@ class Device {
 
   inline bool operator==(const Device& device) const {
     return type() == device.type() && index() == device.index() &&
-      Device::_compare_hostname(*this, device) == 0 &&
+      Device::compare_hostname(*this, device) == 0 &&
       multiplex() == device.multiplex();
   }
 
@@ -83,7 +83,7 @@ class Device {
   }
 
   inline bool operator<(const Device& device) const {
-    auto tmp = Device::_compare_hostname(*this, device);
+    auto tmp = Device::compare_hostname(*this, device);
     if (tmp != 0)
       return tmp < 0;
     if (type() != device.type())
@@ -147,6 +147,18 @@ class Device {
     }
   }
 
+  static int compare_hostname(const Device& d1, const Device& d2) {
+    if (d1.local() && d2.local()) {
+      return 0;
+    } else if (d1.local()) {
+      return GetLocalHostname().compare(d2.hostname());
+    } else if (d2.local()) {
+      return d1.hostname().compare(GetLocalHostname());
+    } else {
+      return d1.hostname().compare(d2.hostname());
+    }
+  }
+
  protected: 
   static std::vector<std::pair<bool, DeviceProp>> _dprops;
 
@@ -176,18 +188,6 @@ class Device {
       cudaDeviceProp dprop;
       cudaGetDeviceProperties(&dprop, _index);
       _dprops[_index].second = DeviceProp(dprop);
-    }
-  }
-
-  static int _compare_hostname(const Device& d1, const Device& d2) {
-    if (d1.local() && d2.local()) {
-      return 0;
-    } else if (d1.local()) {
-      return GetLocalHostname().compare(d2.hostname());
-    } else if (d2.local()) {
-      return d1.hostname().compare(GetLocalHostname());
-    } else {
-      return d1.hostname().compare(d2.hostname());
     }
   }
 

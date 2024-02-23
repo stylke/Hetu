@@ -23,7 +23,8 @@
 namespace hetu {
 namespace graph {
 
-std::unordered_map<DeviceGroup, std::once_flag> warmup_flags;
+static std::unordered_map<DeviceGroup, std::once_flag> warmup_flags;
+static std::unordered_map<std::pair<Device, Device>, P2PRoute> all_routes;
 
 std::ostream& operator<<(std::ostream& os, const SwitchExecGraph& switcher) {
   os << "switch_exec_graph(" << switcher.SwitchGraphPair().first->name() << ", " 
@@ -65,6 +66,21 @@ static std::unordered_set<Key> KeysUnion(const std::unordered_set<Key>& set1, co
   return result;
 }
 
+static const P2PRoute& GetP2PRoute(const Device& from, const Device& to) {
+  auto p2p_pair = std::make_pair(from, to);
+  auto it = all_routes.find(p2p_pair);
+  if (it != all_routes.end()) {
+    return it->second;
+  }
+  if (Device::compare_hostname(from, to) != 0) {
+    all_routes[p2p_pair] = P2PRoute(P2P_ROUTE_LEVEL::NET);
+  } else {
+    // TODO: 非A100/A800
+    all_routes[p2p_pair] = P2PRoute(P2P_ROUTE_LEVEL::NVLINK);
+  }
+  return all_routes[p2p_pair];
+}
+
 // nccl存在一些冷启动的开销
 // 先简单地进行一个小的all-to-all
 static void WarmUpComm(const std::unordered_set<Device>& comm_set) {
@@ -73,6 +89,8 @@ static void WarmUpComm(const std::unordered_set<Device>& comm_set) {
   std::transform(comm_set.begin(), comm_set.end(), ranks.begin(), 
                  [&](const Device& device) { return hetu::impl::comm::DeviceToWorldRank(device); });
   std::sort(ranks.begin(), ranks.end());
+  HT_LOG_DEBUG << "all-to-all warm up for " << comm_set
+    << ", whose ranks after sort = " << ranks;
   auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, Stream(local_device, kP2PStream));
   auto data = NDArray::empty({comm_set.size()}, local_device, kFloat32, kP2PStream);
   comm_group->AlltoAll(data, data);
@@ -134,23 +152,64 @@ static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer) {
   }
 }
 
-void ParamBuffer::Alloc(const Stream& stream) {
+void ParamBuffer::Alloc(const Stream& stream, bool use_nccl, ncclComm_t comm) {
   TIK(alloc_time);
   auto local_device = hetu::impl::comm::GetLocalDevice(); 
   hetu::cuda::CUDADeviceGuard guard(local_device.index());
   HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
     << " will alloc " << (double)_buffer_size / (1024 * 1024) << " MiB";  
-#if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19)                                                    
-  ncclMemAlloc(&_raw_ptr, _buffer_size);
-  _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
-    local_device, _raw_ptr, _buffer_size, [=](DataPtr data_ptr) {
-      hetu::cuda::CUDADeviceGuard guard(data_ptr.device.index());
-      HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
-        << " will free " << (double)_buffer_size / (1024 * 1024) << " MiB";  
-      ncclMemFree(data_ptr.ptr);
-      HT_LOG_DEBUG << local_device << ": " << _name << " param buffer free end";  
-    }));
+#if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19) 
   // HT_RUNTIME_ERROR << "NotImplementedError";
+  if (use_nccl) {
+    HT_ASSERT(comm != nullptr)
+      << "nccl buffer registration must have a communicator";
+    void* reg_handle;                                     
+    ncclResult_t status = ncclMemAlloc(&_raw_ptr, _buffer_size);
+    if (status != ncclSuccess) {
+      HT_RUNTIME_ERROR << "ncclMemAlloc failed: " << ncclGetErrorString(status);
+    }
+    status = ncclCommRegister(comm, _raw_ptr, _buffer_size, &reg_handle);
+    if (status != ncclSuccess) {
+      HT_RUNTIME_ERROR << "ncclCommRegister failed: " << ncclGetErrorString(status);
+    }         
+    _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
+      local_device, _raw_ptr, _buffer_size, [=](DataPtr data_ptr) {
+        TIK(free_time);
+        hetu::cuda::CUDADeviceGuard guard(data_ptr.device.index());
+        HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
+          << " will free " << (double)_buffer_size / (1024 * 1024) << " MiB";  
+        ncclResult_t status = ncclCommDeregister(comm, reg_handle);
+        if (status != ncclSuccess) {
+          HT_RUNTIME_ERROR << "ncclCommDeregister failed: " << ncclGetErrorString(status);
+        }   
+        status = ncclMemFree(data_ptr.ptr);
+        if (status != ncclSuccess) {
+          HT_RUNTIME_ERROR << "ncclMemFree failed: " << ncclGetErrorString(status);
+        } 
+        HT_LOG_DEBUG << local_device << ": " << _name << " param buffer free end";  
+        TOK(free_time);
+        _free_time = COST_MSEC(free_time);
+      }));
+  } else {
+    cudaError_t status = cudaMalloc(&_raw_ptr, _buffer_size);
+    if (status != cudaSuccess) {
+      HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
+    }
+    _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
+      local_device, _raw_ptr, _buffer_size, [=](DataPtr data_ptr) {
+        TIK(free_time);
+        hetu::cuda::CUDADeviceGuard guard(data_ptr.device.index());
+        HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
+          << " will free " << (double)_buffer_size / (1024 * 1024) << " MiB";  
+        cudaError_t status = cudaFree(data_ptr.ptr);
+        if (status != cudaSuccess) {
+          HT_RUNTIME_ERROR << "cudaFree failed: " << cudaGetErrorString(status);
+        }
+        HT_LOG_DEBUG << local_device << ": " << _name << " param buffer free end";  
+        TOK(free_time);
+        _free_time = COST_MSEC(free_time);
+      }));
+  }
 #else
   // Use AllocDataSpace will cause OOM
   /*
@@ -165,6 +224,7 @@ void ParamBuffer::Alloc(const Stream& stream) {
   }
   _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
     local_device, _raw_ptr, _buffer_size, [=](DataPtr data_ptr) {
+      TIK(free_time);
       hetu::cuda::CUDADeviceGuard guard(data_ptr.device.index());
       HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
         << " will free " << (double)_buffer_size / (1024 * 1024) << " MiB";  
@@ -173,6 +233,8 @@ void ParamBuffer::Alloc(const Stream& stream) {
         HT_RUNTIME_ERROR << "cudaFree failed: " << cudaGetErrorString(status);
       }
       HT_LOG_DEBUG << local_device << ": " << _name << " param buffer free end";  
+      TOK(free_time);
+      _free_time = COST_MSEC(free_time);
     }));
 #endif
   _stream = stream;
@@ -183,18 +245,10 @@ void ParamBuffer::Alloc(const Stream& stream) {
 }
 
 void ParamBuffer::Free() {
-  TIK(free_time);
-  auto local_device = hetu::impl::comm::GetLocalDevice();  
-  hetu::cuda::CUDADeviceGuard guard(local_device.index());
-#if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19)                                                     
-#else
-#endif
   _storage.reset();
   _raw_ptr = nullptr;
   _is_allocated = false;
   _is_auxiliary = false;
-  TOK(free_time);
-  _free_time = COST_MSEC(free_time);
 }
 
 void ParamBuffer::Bind(const std::shared_ptr<NDArrayStorage>& storage) {
@@ -298,11 +352,28 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
       // 不同的算法
       // FCFS or round-robin
       if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::FCFS
-          || _switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN) {
+          || _switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN
+          || _switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::MULTI_NODE_ROUND_ROBIN) {
         send_tensor = _owned_slice_instances[_round_robin];
         send_device = _owned_devices[_round_robin];
         // 更新轮询次数
-        if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN) {
+        // 多node情形下要额外考虑跨机间通信
+        // 尽可能将其避免（除非避免不了）
+        if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::MULTI_NODE_ROUND_ROBIN) {
+          size_t round = 0, max_round = _owned_slice_instances.size();
+          while (round < max_round) {
+            send_tensor = _owned_slice_instances[(_round_robin + round) % max_round];
+            send_device = _owned_devices[(_round_robin + round) % max_round];
+            const auto& p2p_route = GetP2PRoute(send_device, recv_device);
+            if (p2p_route.route_level() >= P2P_ROUTE_LEVEL::NET) {
+              round++;
+            } else {
+              break;
+            }
+          }
+        }
+        if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::ROUND_ROBIN
+            || _switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::MULTI_NODE_ROUND_ROBIN) {
           _round_robin++;
         }
         if (_round_robin == _owned_slice_instances.size()) {
@@ -543,7 +614,7 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
     // 将新的ParamSliceInstance放入对应的ParamSlice
     // 会先用placeholder（之后再用BatchedISendIRecvOp进行替换）表征ParamSliceInstance
     // 返回的result即为新exec graph中最终合并后的param
-    HT_LOG_DEBUG << local_device << ": MergeAllParamSlices for tensor " << after_param << " at device " << src_group.get(i)
+    HT_LOG_DEBUG << local_device << ": MergeAllParamSlices for tensor " << after_param << " at device " << dst_group.get(i)
       << ", cur_state_index = " << cur_state_index << " and dst_multiple = " << dst_multiple;
     auto result = MergeAllParamSlices(after_param, *param_block_ptr, dst_group.get(i), dst_group, cur_slice_num, cur_slice_relative_num, 
                                       cur_state_index, dst_multiple, 0);
@@ -896,18 +967,8 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
   HT_LOG_DEBUG << local_device << ": make a new comm graph end...";
 }
 
-void SwitchExecGraph::BufferBatchedIsendIrecvExec(const Operator& op) {
+void SwitchExecGraph::BufferBatchedIsendIrecvExec(const hetu::impl::comm::NCCLCommunicationGroup& comm_nccl_group) {
   auto local_device = hetu::impl::comm::GetLocalDevice();
-   HT_ASSERT(is_batched_isend_irecv_op(op))
-    << "BufferBatchedIsendIrecv is merely implemented based on BatchedIsendIrecvOp";
-  BatchedISendIRecvOpImpl& op_interface = dynamic_cast<BatchedISendIRecvOpImpl&>(op->body());
-  auto stream = op->stream();
-  const auto& comm_deivces = op_interface.comm_devices();
-  std::vector<int> ranks(comm_deivces.size());
-  std::transform(comm_deivces.begin(), comm_deivces.end(), ranks.begin(), 
-                 [&](const Device& device) { return hetu::impl::comm::DeviceToWorldRank(device); });
-  std::sort(ranks.begin(), ranks.end());
-  auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, stream);
   NDArrayList send_data_list;
   NDArrayList recv_data_list;
   std::vector<hetu::impl::comm::CommTask> tasks;
@@ -919,29 +980,39 @@ void SwitchExecGraph::BufferBatchedIsendIrecvExec(const Operator& op) {
   for (const auto& kv : _send_buffers) {
     const auto& send_to_device = kv.first;
     auto send_data = kv.second->AsNDArray();
-    tasks.push_back(comm_group->ISend(send_data, hetu::impl::comm::DeviceToWorldRank(send_to_device)));
+    HT_LOG_TRACE << local_device << " send to " << send_to_device << ": " << kv.second->tensor_list();
+    tasks.push_back(comm_nccl_group->ISend(send_data, hetu::impl::comm::DeviceToWorldRank(send_to_device)));
     send_data_list.push_back(std::move(send_data));
   }
   for (const auto& kv : _recv_buffers) {
     const auto& recv_from_device = kv.first;
     auto recv_data = kv.second->AsNDArray();
-    tasks.push_back(comm_group->IRecv(recv_data, hetu::impl::comm::DeviceToWorldRank(recv_from_device)));
+    HT_LOG_TRACE << local_device << " recv from " << recv_from_device << ": " << kv.second->tensor_list();
+    tasks.push_back(comm_nccl_group->IRecv(recv_data, hetu::impl::comm::DeviceToWorldRank(recv_from_device)));
     recv_data_list.push_back(std::move(recv_data));
   }
-  comm_group->BatchedISendIRecv(tasks);
-  NDArray::MarkUsedBy(send_data_list, stream);
-  NDArray::MarkUsedBy(recv_data_list, stream);
+  comm_nccl_group->BatchedISendIRecv(tasks);
+  NDArray::MarkUsedBy(send_data_list, Stream(local_device, kP2PStream));
+  NDArray::MarkUsedBy(recv_data_list, Stream(local_device, kP2PStream));
   HT_LOG_DEBUG << local_device << ": BufferBatchedIsendIrecvExec is done";
 }
 
 void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
+                                              const hetu::impl::comm::NCCLCommunicationGroup& comm_nccl_group,
                                               Tensor2NDArrayMap& tensor2data,
                                               Tensor2IntMap& tensor2degrees) {
   auto local_device = hetu::impl::comm::GetLocalDevice();
-  HT_ASSERT(is_batched_isend_irecv_op(op))
-    << "BufferBatchedIsendIrecv is merely implemented based on BatchedIsendIrecvOp";
   BatchedISendIRecvOpImpl& op_interface = dynamic_cast<BatchedISendIRecvOpImpl&>(op->body());
   auto op_stream = op->stream();
+  // dup code
+  /*
+  const auto& comm_deivces = op_interface.comm_devices();
+  std::vector<int> ranks(comm_deivces.size());
+  std::transform(comm_deivces.begin(), comm_deivces.end(), ranks.begin(), 
+                 [&](const Device& device) { return hetu::impl::comm::DeviceToWorldRank(device); });
+  std::sort(ranks.begin(), ranks.end());
+  auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, op_stream);
+  */
   // 将原先input的NDArray移动并连续存储到各个send buffer中
   auto input_len = op->num_inputs();
   HT_ASSERT(input_len == op_interface.dst_devices().size())
@@ -1009,10 +1080,10 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
     auto& recv_buffer = kv.second;
     HT_ASSERT(!recv_buffer->IsAllocated())
       << "recv buffer shouldn't be allocated yet";
-    recv_buffer->Alloc(op_stream);
+    recv_buffer->Alloc(op_stream, false, comm_nccl_group->GetComm());
   }
   op->instantiation_ctx().start[0]->Record(op_stream);
-  BufferBatchedIsendIrecvExec(op); // 执行BufferBatchedIsendIrecv
+  BufferBatchedIsendIrecvExec(comm_nccl_group); // 执行BufferBatchedIsendIrecv
   op->instantiation_ctx().stop[0]->Record(op_stream);
   // HT_LOG_INFO << "BufferBatchedIsendIrecvExec end";
   // 清空send的buffer
@@ -1157,6 +1228,11 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   // 热启动nccl的all-to-all通信
   // warm up the comm group
   DeviceGroup comm_device_group{std::vector<Device>(_comm_set.begin(), _comm_set.end())};
+  std::vector<int> comm_ranks(_comm_set.size());
+  std::transform(_comm_set.begin(), _comm_set.end(), comm_ranks.begin(), 
+                 [&](const Device& device) { return hetu::impl::comm::DeviceToWorldRank(device); });
+  std::sort(comm_ranks.begin(), comm_ranks.end());
+  auto& comm_nccl_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(comm_ranks, Stream(local_device, kP2PStream));
   std::call_once(warmup_flags[comm_device_group], 
                  WarmUpComm, 
                  _comm_set);
@@ -1228,7 +1304,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       }
     }
     if (!send_buffer->IsAllocated()) {
-      send_buffer->Alloc(Stream(local_device, kP2PStream));
+      send_buffer->Alloc(Stream(local_device, kP2PStream), false, comm_nccl_group->GetComm());
     }
   }
   if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
@@ -1255,7 +1331,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     // 特殊处理2
     // 使用聚合的buffer进行通信
     if (is_batched_isend_irecv_op(op)) {
-      BufferBatchedIsendIrecv(op, tensor2data, tensor2degrees);
+      BufferBatchedIsendIrecv(op, comm_nccl_group, tensor2data, tensor2degrees);
       continue;
     }
     // 特殊处理3
@@ -1306,6 +1382,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       tensor2data[op->output(i)->id()] = output_vals[i];
     }
   }
+  HT_LOG_DEBUG << "switch exec graph topo end";
   // 将结果赋值给after graph
   for (const auto& kv : _comm_results_mapping) {
     auto it = tensor2data.find(kv.first);
@@ -1512,13 +1589,12 @@ void SwitchExecGraph::ProfileRunningDetails() {
   HT_LOG_INFO << local_device << ": switch params running details: " << std::endl
     << "*********************************************" << std::endl
     << "comm buffer num = " << comm_buffer_num << ", alloc time = " << comm_buffer_alloc_time << " ms" << std::endl
-    // << "comm buffer num = " << comm_buffer_num << ", free time = " << comm_buffer_free_time << " ms" << std::endl
+    << "comm buffer num = " << comm_buffer_num << ", free time = " << comm_buffer_free_time << " ms" << std::endl
     << "concat buffer num = " << concat_buffer_num << ", alloc time = " << concat_buffer_alloc_time << " ms" << std::endl
-    // << "concat buffer num = " << concat_buffer_num << ", free time = " << concat_buffer_free_time << " ms" << std::endl
+    << "concat buffer num = " << concat_buffer_num << ", free time = " << concat_buffer_free_time << " ms" << std::endl
     << "*********************************************" << std::endl
     << "slice num = " << slice_num << ", time = " << slice_time << " ms" << std::endl
     << "concat num = " << concat_num << ", time = " << concat_time << " ms" << std::endl
-    // << "contiguous num = " << contiguous_num << ", time = " << contiguous_time << " ms" << std::endl
     << "send buffer transfer num = " << send_buffer_transfer_num << ", time = " << send_buffer_transfer_time << " ms" << std::endl
     << "concat buffer transfer num = " << concat_buffer_transfer_num << ", time = " << concat_buffer_transfer_time << " ms" << std::endl
     << "comm num = " << comm_num << ", time = " << comm_time << " ms" << std::endl
@@ -1670,7 +1746,6 @@ void SwitchExecGraph::ProfileMemory(const std::string& prefix) {
   }
 
   nvmlDevice_t device;
-  auto world_rank = hetu::impl::comm::GetWorldRank();
   auto device_index = hetu::impl::comm::GetLocalDevice().index();
   result = nvmlDeviceGetHandleByIndex(device_index, &device);
   if (result != NVML_SUCCESS) {
@@ -1685,7 +1760,7 @@ void SwitchExecGraph::ProfileMemory(const std::string& prefix) {
     return;
   }
         
-  HT_LOG_INFO << "[" << prefix << "] Device " << world_rank << ": ";
+  HT_LOG_INFO << "[" << prefix << "] Device " << hetu::impl::comm::GetWorldRank() << ": ";
   // HT_LOG_INFO << "Total Memory: " << memory.total / (1024 * 1024) << " MiB";
   HT_LOG_INFO << "Used Memory: " << memory.used / (1024 * 1024) << " MiB";
   // HT_LOG_INFO << "Free Memory: " << memory.free / (1024 * 1024) << " MiB";

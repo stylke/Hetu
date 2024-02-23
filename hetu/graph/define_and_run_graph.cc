@@ -161,7 +161,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   // todo: just use multi_ds[cur_strategy_id] which was deduced in define_and_run_graph
   // executable_graph needn't deduce states again!
   auto handle_exec_output = [&](Tensor& tensor, Tensor& exec_tensor) -> void {
-    HT_LOG_DEBUG << "handle mapping of tensor " << tensor->id() << " " << tensor;
+    HT_LOG_TRACE << "handle mapping of tensor " << tensor->id() << " " << tensor;
     // 1)、assign tensor mapping
     tensor_to_exec_tensor_mapping[tensor->id()] = exec_tensor;
     // 2)、assign shape
@@ -173,7 +173,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
       shape_plan[tensor->id()] = exec_tensor->shape();
     }
     exec_shape_plan[exec_tensor->id()] = exec_tensor->shape();
-    HT_LOG_DEBUG << "assign exec tensor " << exec_tensor << " shape " << exec_tensor->shape();
+    HT_LOG_TRACE << "assign exec tensor " << exec_tensor << " shape " << exec_tensor->shape();
     exec_tensor->set_is_grad(tensor->is_grad());
     // 3)、assign symbolic shape
     if (tensor->symbolic()) {
@@ -209,7 +209,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << topo;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
-    HT_LOG_DEBUG << "Creating an executable version of op " << op << " begin...";;
+    HT_LOG_TRACE << "Creating an executable version of op " << op << " begin...";;
 
     // 前处理
     // 1、获取exec op的inputs
@@ -236,12 +236,12 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
                   exec_inputs[i]->dtype() == DataType::FLOAT32 ||
                   exec_inputs[i]->dtype() == DataType::FLOAT64)) {
                 if (transfer_map.find(exec_inputs[i]->id()) != transfer_map.end()) {
-                  HT_LOG_DEBUG << "Map " << &transfer_map << " reuse: " << exec_inputs[i]->id() << " -> " << transfer_map[exec_inputs[i]->id()]->id();
+                  HT_LOG_TRACE << "Map " << &transfer_map << " reuse: " << exec_inputs[i]->id() << " -> " << transfer_map[exec_inputs[i]->id()]->id();
                   exec_inputs[i] = transfer_map[exec_inputs[i]->id()];
                 } else {
                   auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
                                   {exec_inputs[i]}, OpMeta().set(exec_inputs[i]->producer()->op_meta()).set_name(exec_inputs[i]->producer()->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
-                  HT_LOG_DEBUG << "Map " << &transfer_map << " insert: " << exec_inputs[i]->id() << " -> " << exec_op->output(0)->id();
+                  HT_LOG_TRACE << "Map " << &transfer_map << " insert: " << exec_inputs[i]->id() << " -> " << exec_op->output(0)->id();
                   exec_shape_plan[exec_op->output(0)->id()] = exec_op->output(0)->shape();
                   exec_op->output(0)->set_multi_distributed_states(op->input(i)->multi_distributed_states()); // walkaround: set here by hand
                   if (_parameter_ops.find(op->input(i)->producer()->id()) != _parameter_ops.end()
@@ -301,7 +301,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
       }
       grad_map[exec_param->id()] = exec_grad;
     }
-    HT_LOG_DEBUG << "Creating an executable version of op " << op << " end...";
+    HT_LOG_TRACE << "Creating an executable version of op " << op << " end...";
   }
 
   // assign fw_op_id map

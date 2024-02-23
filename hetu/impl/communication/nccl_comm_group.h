@@ -26,6 +26,10 @@ class NCCLCommunicationGroupDef : public CommunicationGroupDef {
 
   ~NCCLCommunicationGroupDef();
 
+  const ncclComm_t& GetComm() const {
+    return _comm;
+  }
+
   void Broadcast(NDArray& data, int broadcaster) override;
 
   void AllReduce(const NDArray& input, NDArray& output,

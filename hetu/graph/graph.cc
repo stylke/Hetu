@@ -268,7 +268,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
               std::unordered_map<int32_t, int32_t> res_states = ds_grad.combine_states(src2dst);
               std::vector<int32_t> res_order = ds_grad.combine_order(src2dst);
               DistributedStates ds_dst({device_num, res_states, res_order});
-              HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " 
+              HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": " 
                 << "backward: partial to duplicate: " << grad_inputs[i]
                 << ", src states: " << ds_grad.ds_info()
                 << ", dst states: " << ds_dst.ds_info();
