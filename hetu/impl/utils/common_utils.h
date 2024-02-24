@@ -31,6 +31,15 @@ inline HTStride Shape2Stride(const HTShape& shape) {
   return stride;
 }
 
+inline bool IsContiguous(const NDArrayList& arrays) {
+  for (const auto& array : arrays) {
+    if (!array->is_contiguous()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline int GetThreadNum(int cnt) {
   if (cnt >= 1048576)
     return 1024;
@@ -54,6 +63,25 @@ inline int64_t get_index(int64_t idx, int64_t ndims, const int64_t* stride, cons
     i_idx += ratio * stride[i];
   }
   return i_idx;
+}
+
+// Simplified implementation of std::apply
+template <class F, class Tuple, std::size_t... INDEX>
+__host__ __device__ constexpr decltype(auto) apply_impl(
+    F&& f,
+    Tuple&& t,
+    std::index_sequence<INDEX...>)
+{
+  return std::forward<F>(f)(std::get<INDEX>(std::forward<Tuple>(t))...);
+}
+
+template <class F, class Tuple>
+__host__ __device__ constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+  return apply_impl(
+      std::forward<F>(f),
+      std::forward<Tuple>(t),
+      std::make_index_sequence<
+          std::tuple_size<std::remove_reference_t<Tuple>>::value>{});
 }
 
 } // namespace impl

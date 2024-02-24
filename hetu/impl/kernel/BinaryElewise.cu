@@ -106,12 +106,12 @@ int get_vectorize_size(size_t num_dims, const HTShape& shapeA, const HTShape& sh
   }
 }
 
-template <int vec_size_A, int vec_size_B,
-          typename spec_a_t, typename spec_b_t, typename out_t, typename func_t>
+template <int vec_size_A, int vec_size_B, typename spec_a_t, typename spec_b_t,
+          typename out_t, typename arr_t, typename func_t>
 __global__ void vectorize_broadcast_loop_kernel(const spec_a_t* inputA, const spec_b_t* inputB, size_t size,
                                                 out_t* output, size_t num_dims, const int64_t idx_mask_A,
-                                                const int64_t idx_mask_B, const int64_t* strideA,
-                                                const int64_t* strideB, const int64_t* out_stride,
+                                                const int64_t idx_mask_B, arr_t strideA,
+                                                arr_t strideB, arr_t out_stride,
                                                 func_t op) {
   constexpr int vec_size_out = vec_size_A > vec_size_B ? vec_size_A : vec_size_B;
   auto step = blockDim.x * gridDim.x;
@@ -172,58 +172,78 @@ void launch_vectorize_broadcast_loop_kernel(const NDArray& inputA, const NDArray
   }
   out_shape[num_dims - 1] /= vec_size;
   stride_div_vec_size(out_stride, vec_size);
-  size_t size = output->numel() / vec_size;
+  size_t out_size = output->numel();
+  size_t size = out_size / vec_size;
   int64_t idx_mask_A = 0, idx_mask_B = 0;
   for (int i = 0; i < num_dims; i++) {
     idx_mask_A |= (shapeA[i] == 1 ? 0 : (1 << i));
     idx_mask_B |= (shapeB[i] == 1 ? 0 : (1 << i));
   }
-  auto device_id = inputA->device().index();
-  hetu::cuda::CUDADeviceGuard guard(device_id);
-  CUDAStream cuda_stream(stream);
-  std::vector<int64_t> broadcast_metadata;
-  broadcast_metadata.insert(broadcast_metadata.end(), strideA.begin(), strideA.end());
-  broadcast_metadata.insert(broadcast_metadata.end(), strideB.begin(), strideB.end());
-  broadcast_metadata.insert(broadcast_metadata.end(), out_stride.begin(), out_stride.end());
-  auto broadcast_metadata_arr = hetu::cuda::to_int64_ndarray(broadcast_metadata, device_id);
-  int64_t *strideA_ptr = broadcast_metadata_arr->data_ptr<int64_t>();
-  int64_t *strideB_ptr = strideA_ptr + strideA.size();
-  int64_t *out_stride_ptr = strideB_ptr + strideB.size();
-
-  dim3 grid(DIVUP(size, 256));
-  dim3 block(256);
   #define DISPATCH_VECTORIZE_KERNEL(vec_size_A, vec_size_B)                                             \
-    vectorize_broadcast_loop_kernel<vec_size_A, vec_size_B, spec_a_t, spec_b_t, out_t, func_t>          \
+    vectorize_broadcast_loop_kernel<vec_size_A, vec_size_B, spec_a_t, spec_b_t, out_t>                  \
     <<<grid, block, 0, cuda_stream>>>(inputA->data_ptr<spec_a_t>(), inputB->data_ptr<spec_b_t>(), size, \
                                       output->data_ptr<out_t>(), num_dims, idx_mask_A,                  \
-                                      idx_mask_B, strideA_ptr, strideB_ptr,                             \
-                                      out_stride_ptr, op);
-  if (vec_size_A == 1 && vec_size_B == 1) {
-    DISPATCH_VECTORIZE_KERNEL(1, 1);
-  } else if (vec_size_A == 1 && vec_size_B == 2) {
-    DISPATCH_VECTORIZE_KERNEL(1, 2);
-  } else if (vec_size_A == 1 && vec_size_B == 4) {
-    DISPATCH_VECTORIZE_KERNEL(1, 4);
-  } else if (vec_size_A == 2 && vec_size_B == 1) {
-    DISPATCH_VECTORIZE_KERNEL(2, 1);
-  } else if (vec_size_A == 4 && vec_size_B == 1) {
-    DISPATCH_VECTORIZE_KERNEL(4, 1);
-  } else if (vec_size_A == 2 && vec_size_B == 2) {
-    DISPATCH_VECTORIZE_KERNEL(2, 2);
-  } else if (vec_size_A == 4 && vec_size_B == 4) {
-    DISPATCH_VECTORIZE_KERNEL(4, 4);
-  } else {
-    HT_RUNTIME_ERROR << "Unexpected vectorization size: " << vec_size_A << ", " << vec_size_B;
-    __builtin_unreachable();
+                                      idx_mask_B, strideA_arr, strideB_arr,                             \
+                                      out_stride_arr, op);
+
+  #define DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)                                            \
+  if (vec_size_A == 1 && vec_size_B == 1) {                                                    \
+    DISPATCH_VECTORIZE_KERNEL(1, 1);                                                           \
+  } else if (vec_size_A == 1 && vec_size_B == 2) {                                             \
+    DISPATCH_VECTORIZE_KERNEL(1, 2);                                                           \
+  } else if (vec_size_A == 1 && vec_size_B == 4) {                                             \
+    DISPATCH_VECTORIZE_KERNEL(1, 4);                                                           \
+  } else if (vec_size_A == 2 && vec_size_B == 1) {                                             \
+    DISPATCH_VECTORIZE_KERNEL(2, 1);                                                           \
+  } else if (vec_size_A == 4 && vec_size_B == 1) {                                             \
+    DISPATCH_VECTORIZE_KERNEL(4, 1);                                                           \
+  } else if (vec_size_A == 2 && vec_size_B == 2) {                                             \
+    DISPATCH_VECTORIZE_KERNEL(2, 2);                                                           \
+  } else if (vec_size_A == 4 && vec_size_B == 4) {                                             \
+    DISPATCH_VECTORIZE_KERNEL(4, 4);                                                           \
+  } else {                                                                                     \
+    HT_RUNTIME_ERROR << "Unexpected vectorization size: " << vec_size_A << ", " << vec_size_B; \
+    __builtin_unreachable();                                                                   \
   }
-  NDArray::MarkUsedBy(broadcast_metadata_arr, stream);
+
+  auto device_id = stream.device_index();
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CUDAStream cuda_stream(stream);
+  dim3 grid(DIVUP(size, BLOCK_WORK_SIZE));
+  dim3 block(NUM_THREADS);
+
+  #define ALLOC_NDIM_BUFFER(ndim)                                      \
+  auto strideA_arr = hetu::cuda::to_int64_buffer<ndim>(strideA);       \
+  auto strideB_arr = hetu::cuda::to_int64_buffer<ndim>(strideB);       \
+  auto out_stride_arr = hetu::cuda::to_int64_buffer<ndim>(out_stride);
+
+  #define DISPATCH_NDIM(ndim, vec_size_A, vec_size_B) \
+  if (ndim == 1) {                                    \
+    ALLOC_NDIM_BUFFER(1)                              \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
+  } else if (ndim == 2) {                             \
+    ALLOC_NDIM_BUFFER(2)                              \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
+  } else if (ndim == 3) {                             \
+    ALLOC_NDIM_BUFFER(3)                              \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
+  } else if (ndim == 4) {                             \
+    ALLOC_NDIM_BUFFER(4)                              \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
+  } else {                                            \
+    ALLOC_NDIM_BUFFER(HT_MAX_NDIM)                    \
+    DISPATCH_VEC_SIZE(vec_size_A, vec_size_B)         \
+  }
+
+  DISPATCH_NDIM(num_dims, vec_size_A, vec_size_B);
 }
 
 template <int nt, int vt, typename spec_a_t, typename spec_b_t, typename out_t, typename func_t>
 __global__ void broadcast_elewise_kernel(const spec_a_t* inputA, const spec_b_t* inputB, size_t size,
                                          out_t* output, size_t num_dims, const int64_t idx_mask_A,
                                          const int64_t idx_mask_B, const int64_t* strideA,
-                                         const int64_t* strideB, const int64_t* out_stride, func_t op) {
+                                         const int64_t* strideB, const int64_t* out_stride, func_t op,
+                                         const OffsetCalculator* out_offset_calculator) {
   int tid = threadIdx.x;
   int nv = nt * vt;
   int idx = nv * blockIdx.x + tid;
@@ -242,7 +262,8 @@ __global__ void broadcast_elewise_kernel(const spec_a_t* inputA, const spec_b_t*
       }
       offset_A += bool(idx_mask_A & (1 << (num_dims - 1))) ? remainder * strideA[num_dims - 1] : 0;
       offset_B += bool(idx_mask_B & (1 << (num_dims - 1))) ? remainder * strideB[num_dims - 1] : 0;
-      output[idx] = op(inputA[offset_A], inputB[offset_B]);
+      auto out_offset = out_offset_calculator->get(idx);
+      output[out_offset] = op(inputA[offset_A], inputB[offset_B]);
       idx += nt;
     }
   }
@@ -272,6 +293,15 @@ void launch_broadcast_loop_kernel(const NDArray& inputA, const NDArray& inputB, 
       idx_mask_A |= (shapeA[i] == 1 ? 0 : (1 << i));
       idx_mask_B |= (shapeB[i] == 1 ? 0 : (1 << i));
     }
+    NDArrayMeta broadcast_out_meta = output->meta();
+    broadcast_out_meta.set_shape(out_shape)
+                      .set_stride(out_stride);
+    auto broadcast_output = NDArray(broadcast_out_meta, output->storage(), output->storage_offset());
+    NDArray out_offset_calculator_arr;
+    OffsetCalculator *out_offset_calculator;
+    std::tie(out_offset_calculator_arr, out_offset_calculator) =
+      AllocOffsetCalculator(broadcast_output, stream);
+    out_stride = Shape2Stride(out_shape);
     std::vector<int64_t> broadcast_metadata;
     broadcast_metadata.insert(broadcast_metadata.end(), strideA.begin(), strideA.end());
     broadcast_metadata.insert(broadcast_metadata.end(), strideB.begin(), strideB.end());
@@ -283,8 +313,9 @@ void launch_broadcast_loop_kernel(const NDArray& inputA, const NDArray& inputB, 
     hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
     broadcast_elewise_kernel<NUM_THREADS, unroll_factor><<<grid, block, 0, cuda_stream>>>(
       inputA->data_ptr<spec_a_t>(), inputB->data_ptr<spec_b_t>(), size, output->data_ptr<out_t>(),
-      num_dims, idx_mask_A, idx_mask_B, strideA_ptr, strideB_ptr, out_stride_ptr, op);
-    NDArray::MarkUsedBy(broadcast_metadata_arr, stream);
+      num_dims, idx_mask_A, idx_mask_B, strideA_ptr, strideB_ptr,
+      out_stride_ptr, op, out_offset_calculator);
+    NDArray::MarkUsedBy({broadcast_metadata_arr, out_offset_calculator_arr}, stream);
   }
 }
 

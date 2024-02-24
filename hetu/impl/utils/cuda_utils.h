@@ -169,5 +169,25 @@ NDArray to_byte_ndarray(const std::vector<uint8_t>& vec,
                         DeviceIndex device_id);
 NDArray to_byte_ndarray(const uint8_t* from, size_t n, DeviceIndex device_id);
 
+// Helper functions to copy pointers into NDArrays (blocking)
+template <typename T>
+NDArray to_ptr_ndarray(const std::vector<T*>& vec, DeviceIndex device_id) {
+  auto ret = NDArray::empty({static_cast<int64_t>(vec.size())},
+                            Device(kCUDA, device_id), kInt64, kBlockingStream);
+  hetu::cuda::CUDADeviceGuard guard(device_id);
+  CudaMemcpy(ret->raw_data_ptr(), vec.data(), vec.size() * sizeof(T*),
+             cudaMemcpyHostToDevice);
+  return ret;
+}
+
+template <typename T>
+NDArray to_ptr_ndarray(const T** from, size_t n, DeviceIndex device_id) {
+  auto ret = NDArray::empty({static_cast<int64_t>(n)}, Device(kCUDA, device_id),
+                            kInt64, kBlockingStream);
+  CudaMemcpy(ret->raw_data_ptr(), from, n * sizeof(T*),
+             cudaMemcpyHostToDevice);
+  return ret;
+}
+
 } // namespace cuda
 } // namespace hetu
