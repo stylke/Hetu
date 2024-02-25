@@ -17,6 +17,7 @@ namespace hetu {
 namespace graph {
 
 using ExecGraphPair = std::pair<std::shared_ptr<ExecutableGraph>, std::shared_ptr<ExecutableGraph>>;
+using Device2Val = std::unordered_map<Device, size_t>;
 using DevicePair2Val = std::unordered_map<std::pair<Device, Device>, size_t>;
 using Device2DTListPairMap = std::unordered_map<Device, std::pair<std::vector<Device>, std::vector<Tensor>>>;
 
@@ -27,6 +28,7 @@ enum class SWITCH_ALGORITHM_LEVEL : int8_t {
   ROUND_ROBIN,
   MULTI_NODE_ROUND_ROBIN,
   GREEDY,
+  NEW_GREEDY
 };
 
 enum class SWITCH_PROFILE_LEVEL : int8_t {
@@ -239,9 +241,11 @@ class ParamSlice {
 
   public:
     ParamSlice(const TensorName& block_name, 
+               const HTShape& slice_shape,
                const std::vector<int32_t>& slice_num,
                SwitchExecGraph* switcher): 
       _block_name(block_name),
+      _slice_shape(slice_shape),
       _slice_num(slice_num),
       _switcher(switcher) {
     }
@@ -252,6 +256,18 @@ class ParamSlice {
         suffix += "_" + std::to_string(x);
       }
       return _block_name + suffix;
+    }
+
+    const size_t numel() const {
+      if (_slice_shape.size() == 0) {
+        HT_LOG_WARN << "ParamSlice with 0 numel";
+        return 0;
+      }
+      size_t numel = 1;
+      for(auto s : _slice_shape) {
+        numel *= s;
+      }
+      return numel;
     }
 
     const Tensor& OwnedSliceInst(size_t idx) const {
@@ -277,6 +293,7 @@ class ParamSlice {
     // 在一个block中的slice编号
     // 例如block有3*2*5个slice
     // 那么一个合法的_slice_num就是{2,1,3}
+    HTShape _slice_shape;
     std::vector<int32_t> _slice_num; 
     SwitchExecGraph* _switcher;
 
@@ -296,9 +313,11 @@ class ParamBlock {
   public:
     ParamBlock(const TensorName& block_name, 
                const std::vector<int32_t>& block_shape,
+               const HTShape& slice_shape,
                SwitchExecGraph* switcher):
       _block_name(block_name), 
       _block_shape(block_shape),
+      _slice_shape(slice_shape),
       _switcher(switcher) {
     }
 
@@ -308,6 +327,10 @@ class ParamBlock {
 
     const std::vector<int32_t>& BlockShape() const {
       return _block_shape;
+    }
+
+    const HTShape& SliceShape() const {
+      return _slice_shape;
     }
 
     std::vector<std::shared_ptr<ParamSlice>>& GetParamSlices() {
@@ -334,7 +357,8 @@ class ParamBlock {
     void ParamBlockComm(Device2DTListPairMap& send_mapping, Device2DTListPairMap& recv_mapping);
 
   protected:
-    std::vector<int32_t> _block_shape;
+    std::vector<int32_t> _block_shape; // # of the abstract slices
+    HTShape _slice_shape; // # of the actual elements
     TensorName _block_name;
     SwitchExecGraph* _switcher;
 
@@ -365,7 +389,9 @@ class SwitchExecGraph {
       if (algorithm_env != nullptr) {
         std::string algorithm_level = algorithm_env;
         std::transform(algorithm_level.begin(), algorithm_level.end(), algorithm_level.begin(), ::toupper);
-        if (algorithm_level == "GREEDY") {
+        if (algorithm_level == "NEW_GREEDY") {
+          _algorithm_level = SWITCH_ALGORITHM_LEVEL::NEW_GREEDY;
+        } else if (algorithm_level == "GREEDY") {
           _algorithm_level = SWITCH_ALGORITHM_LEVEL::GREEDY;
         } else if (algorithm_level == "MULTI_NODE_ROUND_ROBIN") {
           _algorithm_level = SWITCH_ALGORITHM_LEVEL::MULTI_NODE_ROUND_ROBIN;
@@ -469,8 +495,9 @@ class SwitchExecGraph {
     TensorList _dummy_links; // 只有send没有recv时BatchedISendIRecvOp的输出dummy tensor需要被记录并在之后fetch
 
     // comm plan related
-    SWITCH_ALGORITHM_LEVEL _algorithm_level = SWITCH_ALGORITHM_LEVEL::GREEDY; // 采用的算法
-    DevicePair2Val _p2p_val_mapping; // 记录了每两个device之间的p2p通信通路的总value（目前value是指次数）
+    SWITCH_ALGORITHM_LEVEL _algorithm_level = SWITCH_ALGORITHM_LEVEL::NEW_GREEDY; // 采用的算法
+    DevicePair2Val _p2p_val_mapping; // deprecated: 记录了每两个device之间的p2p通信通路的总value（目前value是指次数）
+    Device2Val _device_val_mapping; // 记录每个device的value（目前value指发送数据的量除以带宽）（**热切换场景下接收数据的量固定）
     Device2DTListPairMap _send_mapping; // 记录了每个device要send的(device, tensor)的pair
     Device2DTListPairMap _recv_mapping; // 记录了每个device要recv的(device, placeholder的tensor（之后会替换）)的pair
     std::vector<std::shared_ptr<ParamBlock>> _param_blocks; // 记录了graph所包含的所有的抽象ParamBlock

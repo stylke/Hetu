@@ -416,6 +416,58 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
         send_tensor = _owned_slice_instances[best_send_num];
         send_device = _owned_devices[best_send_num];
       }
+      // 2024.2.25
+      // 修正版greedy
+      if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::NEW_GREEDY) {
+        size_t best_send_num, round = 0;
+        auto& device_val_mapping = _switcher->_device_val_mapping;
+        size_t min_val = std::numeric_limits<size_t>::max();
+        for (size_t j = 0; j < owned_len; ++j) {
+          const auto& p2p_route = GetP2PRoute(_owned_devices[j], recv_device);
+          // 能不跨机，就不跨机
+          if (p2p_route.route_level() >= P2P_ROUTE_LEVEL::NET) {
+            round++;
+            continue;
+          }
+          auto it = device_val_mapping.find(_owned_devices[j]);
+          // 相当于通信为0
+          if (it == device_val_mapping.end()) {
+            best_send_num = j;
+            break;
+          }
+          // 选择通信量除以带宽最小的
+          if (it->second < min_val) {
+            min_val = it->second;
+            best_send_num = j;
+          }
+        }
+        // 如果不得不跨机，那么再扫一遍
+        if (round == owned_len) {
+          for (size_t j = 0; j < owned_len; ++j) {
+            auto it = device_val_mapping.find(_owned_devices[j]);
+            // 相当于通信为0
+            if (it == device_val_mapping.end()) {
+              best_send_num = j;
+              break;
+            }
+            // 选择通信量除以带宽最小的
+            if (it->second < min_val) {
+              min_val = it->second;
+              best_send_num = j;
+            }
+          }
+        }
+        // 更新device_val_mapping
+        const auto& p2p_route = GetP2PRoute(_owned_devices[best_send_num], recv_device);
+        if (p2p_route.route_level() >= P2P_ROUTE_LEVEL::NET) {
+          // 目前hard-coded一个10
+          device_val_mapping[_owned_devices[best_send_num]] += numel() * 10;
+        } else {
+          device_val_mapping[_owned_devices[best_send_num]] += numel();
+        }
+        send_tensor = _owned_slice_instances[best_send_num];
+        send_device = _owned_devices[best_send_num];
+      }
       // 建立通信关系
       auto recv_it = recv_mapping.find(recv_device);
       auto send_it = send_mapping.find(send_device);
@@ -449,7 +501,10 @@ void SwitchExecGraph::CreateParamBlock(ParamBlock& block,
                                       int32_t dim) {
   const auto& block_shape = block.BlockShape();
   if (dim == block_shape.size()) {
-    block.GetParamSlices().emplace_back(std::make_shared<ParamSlice>(block_name, slice_num, this));
+    block.GetParamSlices().emplace_back(std::make_shared<ParamSlice>(block_name,
+                                                                     block.SliceShape(),
+                                                                     slice_num, 
+                                                                     this));
     return;
   }
   for (int32_t i = 0; i < block_shape[dim]; ++i) {
@@ -549,6 +604,7 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
                                    const Tensor& comm_input, const Tensor& after_param) {
   auto local_device = hetu::impl::comm::GetLocalDevice();
   std::vector<int32_t> block_shape;
+  HTShape slice_shape;
   std::vector<int32_t> src_multiple;
   std::vector<int32_t> dst_multiple;
   // 获得最小粒度的块划分
@@ -568,6 +624,7 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
     HT_ASSERT(max_dim % src_dim == 0 && max_dim % dst_dim == 0)
       << "only support scaling by an integer";
     block_shape.push_back(max_dim); 
+    slice_shape.push_back(comm_input->global_shape().at(key) / max_dim);
     src_multiple.push_back(max_dim / src_dim);
     dst_multiple.push_back(max_dim / dst_dim);
   }
@@ -577,7 +634,7 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
   const TensorName& param_block_name = after_param->name();
   HT_LOG_DEBUG << local_device << ": make an abstract block for " << param_block_name
     << ", whose shape is " << block_shape;
-  auto param_block_ptr = std::make_shared<ParamBlock>(param_block_name, block_shape, this);
+  auto param_block_ptr = std::make_shared<ParamBlock>(param_block_name, block_shape, slice_shape, this);
   std::vector<int32_t> slice_num(param_dims, 0);
   CreateParamBlock(*param_block_ptr, slice_num, param_block_name, 0);
   _param_blocks.push_back(param_block_ptr);
