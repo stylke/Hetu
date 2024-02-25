@@ -19,6 +19,8 @@
 #include "hetu/common/timing.h"
 #include <nvml.h>
 #include <nccl.h>
+#include <iostream>
+#include <fstream>
 
 namespace hetu {
 namespace graph {
@@ -1453,6 +1455,17 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
     mpi_group->Barrier(true);
     HT_LOG_INFO << local_device << ": switch params running time = " << COST_MSEC(switch_params_running) << " ms";
+    char* switch_log_file = std::getenv("HETU_SWITCH_LOG_FILE");
+    if (switch_log_file != nullptr && hetu::impl::comm::GetWorldRank() == 0) {
+      std::ofstream file;
+      file.open(switch_log_file, std::ios_base::app);
+      if (file.is_open()) {
+        file << COST_MSEC(switch_params_running) << " ms";
+        file.close();
+      } else {
+        HT_RUNTIME_ERROR << "Error opening the file";
+      }
+    }
     if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
       ProfileMemory("switch exec graph end");
     }

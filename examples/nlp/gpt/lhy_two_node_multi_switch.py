@@ -1,4 +1,5 @@
 import os
+import signal
 import hetu as ht
 from hetu_gpt_multi_ds_parallel_symbolic import GPTLMHeadModel
 from hetu.nn.modules.parallel_multi_ds import config2ds, get_device_index
@@ -19,9 +20,9 @@ def distributed_init(use_two_node: bool = False):
     if use_two_node:
         hostname = socket.gethostname()
         if hostname == 'job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-master-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-master-0'
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
         elif hostname == 'job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-worker-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-worker-0'
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-2'
         else:
             raise ValueError(f"Unknown hostname: {hostname}")
 
@@ -30,11 +31,12 @@ def distributed_init(use_two_node: bool = False):
     local_device = ht.local_device()
     all_devices = ht.global_device_group()
     if local_device.index == 0:
-        print(f'local_device: {local_device}, all_devices: {all_devices}')
+        pass
+        # print(f'local_device: {local_device}, all_devices: {all_devices}')
 
 def read_ds_parallel_config(args):
     # read ds_parallel_config from json file
-    print(f'{local_device}: load ds_parallel_config from: {args.ds_parallel_config}')
+    # print(f'{local_device}: load ds_parallel_config from: {args.ds_parallel_config}')
     config_paths = args.ds_parallel_config.split(',')
     assert len(config_paths) == args.num_strategy, \
       f'ds_parallel_config num should equal to num_strategy {args.num_strategy}'
@@ -171,11 +173,11 @@ def pretrain(args):
 
     loss_mean = loss
 
-    print(f'{local_device}: optimizer minimize begin...')
+    # print(f'{local_device}: optimizer minimize begin...')
     # opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
     opt = ht.AdamOptimizer(lr=args.lr)
     train_op = opt.minimize(loss_mean)
-    print(f'{local_device}: optimizer minimize end...')
+    # print(f'{local_device}: optimizer minimize end...')
     
     # return
 
@@ -220,7 +222,7 @@ def pretrain(args):
                 attention_mask: np.zeros([dp_size, seq_len]).astype(np.float32),
                 masked_lm_labels: np.zeros([dp_size, seq_len]).astype(np.int64),
             }
-            print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run begin")
+            # print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run begin")
             results = train_op.graph.run(loss_mean, 
                                          [loss_mean, lm_logits, train_op], 
                                          feed_dict = feed_dict, 
@@ -228,7 +230,7 @@ def pretrain(args):
                                          cur_strategy_id = strategy_id,
                                          run_level = run_level,
                                          grad_scale = 1.0) 
-            print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run end")
+            # print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run end")
             # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
             # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
             end_time = time.time()
@@ -237,29 +239,33 @@ def pretrain(args):
                     loss_out = results[0].numpy(force=True).mean()
                     print(f"{local_device}: loss = {loss_out} and time = {end_time - start_time}")
             return
-        
-    '''
-    run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
-    run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 0, run_level = ht.run_level("update"))
-    run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
-    '''
     
-    '''
-    run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("topo"))
-    # run_plan(global_batch_size = 8, seq_len = 128, strategy_id = 0, run_level = ht.run_level("topo"))
-    run_plan(global_batch_size = 16, seq_len = 8, strategy_id = 1, run_level = ht.run_level("topo"))
-    run_plan(global_batch_size = 8, seq_len = 64, strategy_id = 2, run_level = ht.run_level("topo"))
-    run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 3, run_level = ht.run_level("topo"))
-    run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("topo"))     
-    print("--------- run topo end ---------")
-    ''' 
-    
-    # 单次切换
+    # 单次切换实验
+    def run_experiment():
+        try:
+            if args.bf16:
+                # 保险起见先在tp8/tp16上分配float32的参数以防止爆显存
+                run_plan(global_batch_size = 64, seq_len = 32, strategy_id = args.num_strategy - 1, run_level = ht.run_level("alloc"))
+                run_plan(global_batch_size = 64, seq_len = 32, strategy_id = args.from_strategy, run_level = ht.run_level("alloc"))
+                os.environ['HETU_SWITCH_LOG_FILE'] = args.switch_file
+                run_plan(global_batch_size = 64, seq_len = 32, strategy_id = args.to_strategy, run_level = ht.run_level("alloc"))
+                if 'HETU_SWITCH_LOG_FILE' in os.environ:
+                    del os.environ['HETU_SWITCH_LOG_FILE']
+            else:
+                run_plan(global_batch_size = 64, seq_len = 32, strategy_id = args.from_strategy, run_level = ht.run_level("alloc"))
+                os.environ['HETU_SWITCH_LOG_FILE'] = args.switch_file
+                run_plan(global_batch_size = 64, seq_len = 32, strategy_id = args.to_strategy, run_level = ht.run_level("alloc"))
+                if 'HETU_SWITCH_LOG_FILE' in os.environ:
+                    del os.environ['HETU_SWITCH_LOG_FILE']
+        except RuntimeError as e:
+            print("OOM occurs, we just skipped")
+            # with open(args.switch_file, "a") as file:
+            #    file.write(" OOM") # may occur multiple OOM because of async write (the file format will be ugly)
+            os.killpg(0, signal.SIGTERM)
+                
     def test_single_switch():
-        run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 6, run_level = ht.run_level("alloc"))
         run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 3, run_level = ht.run_level("alloc"))
-        run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
-        # run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 2, run_level = ht.run_level("alloc"))
+        run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 6, run_level = ht.run_level("alloc"))
     
     # 单轮样例 
     def test_single_round(): 
@@ -284,12 +290,21 @@ def pretrain(args):
             run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
             print(f"round {round} finished")
     
-    test_single_switch()
-    # test_single_round()
-    # test_multi_round()
+    run_experiment()
+    # test_single_switch()
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--from_strategy", type=int, default=0
+    )
+    parser.add_argument(
+        "--to_strategy", type=int, default=0
+    )
+    parser.add_argument(
+        "--switch_file", type=str, default="experiments/result.txt"
+    )
     parser.add_argument(
         "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
     )
@@ -357,7 +372,7 @@ if __name__ == '__main__':
             precision = "ht.bfloat16"
         else:
             precision = "ht.float32"
-        print(f'{local_device}: use precision {precision}')
+        # print(f'{local_device}: use precision {precision}')
         with ht.autocast(eval(precision)):            
             pretrain(args)
-            print(f'{local_device}: train hetu ds parallel end...')
+            # print(f'{local_device}: train hetu ds parallel end...')
