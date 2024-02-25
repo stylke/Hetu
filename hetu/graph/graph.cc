@@ -146,7 +146,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       it->second.push_back(filled_grads[i]);
   }
 
-  auto reduce_grad = [](const OpId& fw_op_id, const TensorList& unreduced_grads) -> Tensor {
+  auto reduce_grad = [](const TensorList& unreduced_grads) -> Tensor {
     TensorList filtered;
     filtered.reserve(unreduced_grads.size());
     for (const auto& grad : unreduced_grads)
@@ -159,7 +159,9 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
     } else {
       // Question: How to set op_meta properly?
       // if grad in filtered are all allreduce/reduce-scatter
-
+      // should use last bw grad here, correspond to first use in fw, 
+      // if the tensor was shared in different pp stages
+      OpId fw_op_id = filtered.back()->producer()->fw_op_id();
       // comm op的multi ds中只要有一组满足is_all_allreduce || is_all_reduce_scatter的条件, 
       // 就要走先sum再comm的路径
       auto& graph = filtered[0]->graph();
@@ -226,7 +228,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
     if (op->num_outputs() > 0) {
       grad_outputs.reserve(op->num_outputs());
       for (auto& output : op->outputs()) {
-        auto grad = reduce_grad(op->id(), tensor_to_grads[output->id()]);
+        auto grad = reduce_grad(tensor_to_grads[output->id()]);
         tensor_to_reduced_grad[output->id()] = grad;
         grad_outputs.push_back(grad);
       }
@@ -243,50 +245,54 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         // states deduce
         auto& grad_op = grad_inputs[i]->producer();
         Tensor final_grad = grad_inputs[i];
-        auto& graph = grad_inputs[i]->graph();
-        DistributedStatesList multi_dst_ds;
-        bool is_need_comm_op = false;
-        for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
-          graph.CUR_STRATEGY_ID = cur_strategy_id;
-          auto& ds_grad = grad_inputs[i]->get_distributed_states();
-          if (ds_grad.is_valid()) {
-            // HT_LOG_DEBUG << local_device << ": " << "grad_op: " << grad_op << ": states: " << ds_grad.ds_info() << ", shape: " << grad_inputs[i]->shape();
-            if (ds_grad.get_dim(-2) > 1) { // partial->duplicate to sync the gradients for dp
-              int32_t device_num = ds_grad.get_device_num();
-              // std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
-              std::pair<std::vector<int32_t>, int32_t> src2dst;
-              if (is_variable_op(op->input(i)->producer()) && op->input(i)->get_distributed_states().zero()) {
-                // attention: the result tensor was dp grouped split0, not really split0!
-                // so should do allgather still within the same dp group later! 
-                src2dst = {{-2}, 0}; // reduce-scatter
-                // Question: consider exec graph switch
-                // for row parallel whose split is at dim 1
-                // maybe it's a better option to set src2dst = {{-2}, 1}
+        // handle identify backward allreduce or varibale gradient all-reduce/reduce-scatter
+        // other case should be handled by CommOp DoGradient
+        if (!is_comm_op(op->input(i)->producer())) {
+          auto& graph = grad_inputs[i]->graph();
+          DistributedStatesList multi_dst_ds;
+          bool is_need_comm_op = false;
+          for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
+            graph.CUR_STRATEGY_ID = cur_strategy_id;
+            auto& ds_grad = grad_inputs[i]->get_distributed_states();
+            if (ds_grad.is_valid()) {
+              // HT_LOG_DEBUG << local_device << ": " << "grad_op: " << grad_op << ": states: " << ds_grad.ds_info() << ", shape: " << grad_inputs[i]->shape();
+              if (ds_grad.get_dim(-2) > 1) { // partial->duplicate to sync the gradients for dp
+                int32_t device_num = ds_grad.get_device_num();
+                // std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
+                std::pair<std::vector<int32_t>, int32_t> src2dst;
+                if (is_variable_op(op->input(i)->producer()) && op->input(i)->get_distributed_states().zero()) {
+                  // attention: the result tensor was dp grouped split0, not really split0!
+                  // so should do allgather still within the same dp group later! 
+                  src2dst = {{-2}, 0}; // reduce-scatter
+                  // Question: consider exec graph switch
+                  // for row parallel whose split is at dim 1
+                  // maybe it's a better option to set src2dst = {{-2}, 1}
+                } else {
+                  src2dst = {{-2}, -1}; // allreduce
+                }
+                std::unordered_map<int32_t, int32_t> res_states = ds_grad.combine_states(src2dst);
+                std::vector<int32_t> res_order = ds_grad.combine_order(src2dst);
+                DistributedStates ds_dst({device_num, res_states, res_order});
+                HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": " 
+                  << "backward: partial to duplicate: " << grad_inputs[i]
+                  << ", src states: " << ds_grad.ds_info()
+                  << ", dst states: " << ds_dst.ds_info();
+                multi_dst_ds.push_back(ds_dst);
+                is_need_comm_op = true;
               } else {
-                src2dst = {{-2}, -1}; // allreduce
+                multi_dst_ds.push_back(ds_grad);
               }
-              std::unordered_map<int32_t, int32_t> res_states = ds_grad.combine_states(src2dst);
-              std::vector<int32_t> res_order = ds_grad.combine_order(src2dst);
-              DistributedStates ds_dst({device_num, res_states, res_order});
-              HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": " 
-                << "backward: partial to duplicate: " << grad_inputs[i]
-                << ", src states: " << ds_grad.ds_info()
-                << ", dst states: " << ds_dst.ds_info();
-              multi_dst_ds.push_back(ds_dst);
-              is_need_comm_op = true;
             } else {
-              multi_dst_ds.push_back(ds_grad);
+              HT_LOG_ERROR << "ds_grad is invalid!";
             }
-          } else {
-            HT_LOG_ERROR << "ds_grad is invalid!";
           }
-        }
-        graph.CUR_STRATEGY_ID = 0;
-        if (is_need_comm_op) {
-          final_grad = MakeCommOp(grad_inputs[i], multi_dst_ds, 
-            OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
-          final_grad->set_is_grad(true);
-          final_grad->producer()->set_fw_op_id(op->id());
+          graph.CUR_STRATEGY_ID = 0;
+          if (is_need_comm_op) {
+            final_grad = MakeCommOp(grad_inputs[i], multi_dst_ds, 
+              OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce
+            final_grad->set_is_grad(true);
+            final_grad->producer()->set_fw_op_id(op->id());
+          }
         }
         auto input = op->input(i);
         auto it = tensor_to_grads.find(input->id());

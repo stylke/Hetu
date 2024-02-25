@@ -99,6 +99,11 @@ def train_dataset_provider(args):
         merge_file=args.merge_file)
     return train_dataset
 
+def get_position_ids(gbs_per_dp, seq_len): 
+    position_ids = np.arange(0, seq_len, dtype=np.int64) # [1, seq_len]
+    position_ids = np.tile(position_ids, [gbs_per_dp, 1]) # [dp_size, seq_len]
+    return position_ids
+
 def train_data_iterator(dataset, consumed_samples, mbs, dp_rank, dp_size):
     # print(f'new dataloader: consumed_samples = {consumed_samples}')
     train_dataloader = build_pretraining_data_loader(dataset, consumed_samples, mbs, dp_rank, dp_size)
@@ -203,7 +208,7 @@ def pretrain(args):
         label_ds = label_multi_ds[strategy_id]
         label_device_group = label_device_groups[strategy_id]
 
-        # device in same dp_group will read the same batch data
+        # device in same dp_group will read the same batch data, idx=-1 means no need to read data
         dup_group_idx, dup_group_num = -1, -1
         if input_device_group.contains(local_device):
             local_device_idx = input_device_group.get_index(local_device)
@@ -214,7 +219,8 @@ def pretrain(args):
             dup_group_idx = label_ds.get_dup_group_index(local_device_idx)
             dup_group_num = label_ds.get_dim(0)
         else:
-            raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
+            # raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
+            dup_group_num = input_ds.get_dim(0)
 
         dp_rank = dup_group_idx
         dp_size = dup_group_num
@@ -229,37 +235,48 @@ def pretrain(args):
 
         # if dp_size * mbs changes, then should use the new dataloader
         # start_time = time.time()
-        train_iter = train_data_iterator(train_dataset, consumed_samples, micro_batch_size, dp_rank, dp_size) # need cache?
+        if dp_rank != -1:
+            train_iter = train_data_iterator(train_dataset, consumed_samples, micro_batch_size, dp_rank, dp_size) # need cache?
+        else:
+            train_iter = None
         # end_time = time.time()
         # print(f'{local_device}: create dataloader cost {end_time - start_time} s')
 
         # profile_memory()
+        
+        if train_iter:
+            # load data for each dp
+            micro_batches = []
+            for _ in range(num_micro_batches):
+                micro_batch = next(train_iter)
+                micro_batches.append(micro_batch)
+            micro_batches = np.concatenate(micro_batches, axis=0) # [num_micro_batches, micro_batch_size, max_seq_len + 1]
+            # padding sequence
+            micro_batches = micro_batches.reshape(gbs_per_dp, -1) # [gbs_per_dp, seq_len + 1]
+            labels = micro_batches[:, 1:] # [gbs_per_dp, seq_len]
+            tokens = micro_batches[:, :-1] # [gbs_per_dp, seq_len]
+            _attention_mask, _position_ids = get_mask_and_position_ids(tokens, train_dataset.encoder.pad_id())
+            _token_type_ids = np.zeros([gbs_per_dp, seq_len])
 
-        # load data for each dp
-        micro_batches = []
-        for _ in range(num_micro_batches):
-            micro_batch = next(train_iter)
-            micro_batches.append(micro_batch)
-        micro_batches = np.concatenate(micro_batches, axis=0) # [num_micro_batches, micro_batch_size, max_seq_len + 1]
-        # padding sequence
-        micro_batches = micro_batches.reshape(gbs_per_dp, -1) # [gbs_per_dp, seq_len + 1]
-        labels = micro_batches[:, 1:] # [gbs_per_dp, seq_len]
-        tokens = micro_batches[:, :-1] # [gbs_per_dp, seq_len]
-        _attention_mask, _position_ids = get_mask_and_position_ids(tokens, train_dataset.encoder.pad_id())
-        _token_type_ids = np.zeros([gbs_per_dp, seq_len])
-
+            feed_dict = {
+                input_ids: tokens.astype(np.int64),
+                position_ids: _position_ids.astype(np.int64), 
+                token_type_ids: _token_type_ids.astype(np.int64),
+                attention_mask: _attention_mask.astype(np.int64),
+                masked_lm_labels: labels.astype(np.int64),
+            }
+        else: # fake data
+            feed_dict = {
+                input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64), 
+                token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
+                masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+            }
         # prepare_end_time = time.time()
         # print(f'{local_device}: prepare time = {prepare_end_time - prepare_start_time} s')
-
-        start_time = time.time()
-        feed_dict = {
-            input_ids: tokens.astype(np.int64),
-            position_ids: _position_ids.astype(np.int64), 
-            token_type_ids: _token_type_ids.astype(np.int64),
-            attention_mask: _attention_mask.astype(np.int64),
-            masked_lm_labels: labels.astype(np.int64),
-        }
         # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
+        start_time = time.time()
         results = train_op.graph.run(loss_mean, 
                                         [loss_mean, lm_logits, train_op], 
                                         feed_dict = feed_dict, 
@@ -267,10 +284,10 @@ def pretrain(args):
                                         cur_strategy_id = strategy_id,
                                         run_level = run_level,
                                         grad_scale = 1.0) 
+        end_time = time.time()
         # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run end, consumed_samples = {consumed_samples}")
         # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
         # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
-        end_time = time.time()
 
         if run_level == ht.run_level("topo"):
             print(f"{local_device}: [Epoch {epoch}] [strategy {strategy_id}] (step {step}): cache topo, time = {end_time - start_time:.4f} s")

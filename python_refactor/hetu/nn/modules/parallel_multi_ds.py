@@ -103,8 +103,8 @@ class HtMultiParallelLayerNorm(Module):
                                               device_groups=self.device_groups, name=f'{name}_bias')
 
     def forward(self, input_p):
-        return hetu.layer_norm(input_p, self.weight, self.bias, self.normalized_shape, self.eps, 
-                               device_groups=self.device_groups, name=self.name)[0]
+        return hetu.fused_layernorm(input_p, self.weight, self.bias, self.normalized_shape, self.eps, 
+                                     device_groups=self.device_groups, name=self.name)[0]      
 
 class HtMultiParallelEmbedding(Module):
     def __init__(self, num_embeddings, embedding_dim, multi_ds_parallel_config, 
