@@ -13,6 +13,7 @@ update.sh
 cmake/config.cmake
 .hypothesis/
 examples/nlp/gpt/_cache.pkl
+examples/nlp/gpt/experiments/
 third_party/nccl/
 
 # Python
