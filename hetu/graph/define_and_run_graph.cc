@@ -2,6 +2,8 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/ops/variable.h"
 #include "hetu/graph/autocast/autocast.h"
+#include "hetu/graph/recompute/recompute.h"
+#include "hetu/graph/offload/activation_cpu_offload.h"
 
 namespace hetu {
 namespace graph {
@@ -11,7 +13,9 @@ Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
   if (!op_meta.device_group.empty() && std::find(_device_groups.begin(), _device_groups.end(), op_meta.device_group) == _device_groups.end())
     _device_groups.push_back(op_meta.device_group);
-  // HT_LOG_TRACE << name() << " make op: " << op_meta.name;
+  // for optimization passes
+  op_meta = op_meta.set_is_recompute(Recompute::enabled())
+                   .set_is_cpu_offload(ActivationCPUOffload::enabled());
   return MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
 }
 

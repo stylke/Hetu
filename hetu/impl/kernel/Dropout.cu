@@ -76,40 +76,6 @@ void DropoutCuda(const NDArray& input, double drop_rate, uint64_t seed,
                       out_offset_calculator_arr}, stream);
 }
 
-void DropoutGradientWithRecomputationCuda(const NDArray& grad, double drop_rate,
-                                          uint64_t seed, NDArray& output,
-                                          const Stream& stream) {
-  HT_ASSERT_CUDA_DEVICE(grad);
-  HT_ASSERT_SAME_DEVICE(grad, output);
-  HT_ASSERT_SAME_SHAPE(grad, output);
-  size_t size = grad->numel();
-  if (size == 0)
-    return;
-  HT_ASSERT(seed != 0)
-    << "Gradient fn of dropout with recomputation "
-    << "must be called with an explicitly provided random seed";
-  dim3 blocks, threads;
-  threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  CUDAStream cuda_stream(stream);
-  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
-  NDArray grad_offset_calculator_arr, out_offset_calculator_arr;
-  OffsetCalculator *grad_offset_calculator, *out_offset_calculator;
-  std::tie(grad_offset_calculator_arr, grad_offset_calculator) =
-    AllocOffsetCalculator(grad, stream);
-  std::tie(out_offset_calculator_arr, out_offset_calculator) = 
-    AllocOffsetCalculator(output, stream);
-  HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "DropoutCuda", [&]() {
-    dropout_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
-      grad->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
-      static_cast<float>(drop_rate), size,
-      GetCUDARandomState(cuda_stream.device_id(), seed, 4),
-      grad_offset_calculator, out_offset_calculator);
-  });
-  NDArray::MarkUsedBy({grad, output, grad_offset_calculator_arr,
-                      out_offset_calculator_arr}, stream);
-}
-
 void DropoutGradientCuda(const NDArray& grad, const NDArray& fw_output,
                          double drop_rate, NDArray& output,
                          const Stream& stream) {

@@ -122,14 +122,12 @@ DECLARE_KERNEL_CPU_AND_CUDA(Dot, const NDArray&, const NDArray&,
                             NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Dropout, const NDArray&, double, uint64_t, NDArray&,
                             const Stream&);
-DECLARE_KERNEL_CPU_AND_CUDA(DropoutGradientWithRecomputation, const NDArray&,
-                            double, uint64_t, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(DropoutGradient, const NDArray&, const NDArray&,
                             double, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Dropout2d, const NDArray&, double, uint64_t,
                             NDArray&, const Stream&);
-DECLARE_KERNEL_CPU_AND_CUDA(Dropout2dGradientWithRecomputation, const NDArray&,
-                            double, uint64_t, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(Dropout2dGradient, const NDArray&, const NDArray&,
+                            double, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(EmbeddingLookup, const NDArray&, const NDArray&,
                             NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(EmbeddingLookupGradient, const NDArray&,

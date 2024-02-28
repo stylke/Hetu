@@ -177,6 +177,15 @@ class Sequential(Module):
             self.append(layer)
         return self
 
+    def recompute(self) -> 'Sequential':
+        for layer in self:
+            layer = layer.recompute()
+        return self
+
+    def cpu_offload(self) -> 'Sequential':
+        for layer in self:
+            layer = layer.cpu_offload()
+        return self
 
 class ModuleList(Module):
 

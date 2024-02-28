@@ -85,6 +85,23 @@ PyObject* PyTensor_make_subclass(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_make_recompute(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "_make_recompute(bool is_recompute=True)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    bool is_recompute = parsed_args.get_bool_or_default(0);
+    self->tensor->producer()->op_meta().set_is_recompute(is_recompute);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  Py_RETURN_NONE;
+  HT_PY_FUNC_END
+}
+
 void PyTensor_dealloc(PyTensor* self) {
   (&self->tensor)->~Tensor();
   Py_TYPE(self)->tp_free(self);
@@ -154,6 +171,12 @@ PyObject* PyTensor_symbolic_shape(PyTensor* self) {
     self->tensor->init_symbolic_shape(); 
   }
   return PySyShape_New(self->tensor->symbolic_shape());
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_is_contiguous(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  Py_RETURN_BOOLEAN_COND(self->tensor->is_contiguous());
   HT_PY_FUNC_END
 }
 
@@ -478,7 +501,9 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"get_device_group", (PyCFunction) PyTensor_get_device_group, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
     {"symbolic", (PyCFunction) PyTensor_symbolic, METH_NOARGS, nullptr }, 
+    {"is_contiguous", (PyCFunction) PyTensor_is_contiguous, METH_NOARGS, nullptr },
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"_make_recompute", (PyCFunction) PyTensor_make_recompute, METH_VARARGS | METH_KEYWORDS, nullptr },
     {nullptr}
   });
   AddPyMethodDefs(ret, hetu::graph::get_registered_tensor_methods());
