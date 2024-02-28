@@ -56,7 +56,7 @@ class DefineAndRunGraph : public Graph {
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);
 
-  void Instantiate(const Tensor2ShapeMap& shape_plan);
+  void Instantiate(Tensor2ShapeMap& shape_plan);
 
   void ResetVariableDataInner(const Tensor& tensor,
                               const Initializer& init) override;

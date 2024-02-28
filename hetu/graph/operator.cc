@@ -247,7 +247,7 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
     if (!exist_none_ds) {
       _body->DeduceStates(_inputs, _outputs, _op_meta);
     } else if (exist_ds) {
-      HT_LOG_ERROR << "Only part of " << name() << " inputs has distributed states!";
+      HT_RUNTIME_ERROR << "Only part of " << name() << " inputs has distributed states!";
     }
   }
 }

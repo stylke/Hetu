@@ -421,7 +421,8 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             }
           }
           HT_LOG_DEBUG << local_device << ": keys = " << keys << "; indices = " << indices << "; splits = " << splits;
-          Tensor split_output = MakeSplitOp(input, keys, indices, splits, OpMeta().set_is_deduce_states(false));
+          Tensor split_output = MakeSplitOp(input, keys, indices, splits, OpMeta().set_is_deduce_states(false)
+                                                                                  .set_name(input->name() + "_Split"));
           RecordTensorShape(split_output->id(), split_output->shape());
           auto& split_op = split_output->producer();
           split_op->MapToParallelDevices(src_group);
@@ -442,9 +443,11 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           result = all_reduce_output;
           HT_LOG_DEBUG << local_device << ": substitute comm_op to all_reduce_op: " << comm_group;        
         } else if (comm_type == ALL_GATHER_OP) {
-          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
+          const auto& dst_ds = comm_op_impl.get_dst_distributed_states();
+          int32_t gather_dim = input->get_distributed_states().get_split_dim(dst_ds);
+          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, gather_dim);
           Tensor all_gather_output = MakeAllGatherOp(
-            input, comm_group,
+            input, comm_group, gather_dim,
             OpMeta().set_device_group(src_group)
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllGather"));
@@ -455,10 +458,12 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           result = all_gather_output;
           HT_LOG_DEBUG << local_device << ": substitute comm_op to all_gather_op: " << comm_group;
         } else if (comm_type == REDUCE_SCATTER_OP) {
+          const auto& src_ds = input->get_distributed_states();
+          int32_t scatter_dim = comm_op_impl.get_dst_distributed_states().get_split_dim(src_ds);
           DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2);
           Tensor reduce_scatter_output =  MakeReduceScatterOp(
-            input, comm_group,
-            comm_op_impl.reduction_type(), false,
+            input, comm_group, comm_op_impl.reduction_type(),
+            scatter_dim, false,
             OpMeta().set_device_group(src_group)
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_ReduceScatter"));

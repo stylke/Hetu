@@ -90,6 +90,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
       << "Adam: comm_group num must equal to partial size!";
     auto param_size = param->numel();
     auto param_size_per_scatter = DIVUP(param_size, scatter_num); // todo: padding for reduce-scatter & all-gather
+    const auto& param_ds = op->input(0)->get_distributed_states();
     auto scatter_index = partial_grad->get_distributed_states().map_device_to_state_index(local_device_index)[-2];
     auto param_start_index = param_size_per_scatter * scatter_index;
     auto param_end_index = param_start_index + param_size_per_scatter;
@@ -122,7 +123,8 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
     // in-place allgather
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), 
                                     hetu::impl::AllGather, param_scatter, param, 
-                                    comm_group, op->instantiation_ctx().stream());
+                                    comm_group, op->input(1)->get_distributed_states().get_split_dim(param_ds),
+                                    op->instantiation_ctx().stream());
   }
 }
 

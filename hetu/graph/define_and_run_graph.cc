@@ -98,7 +98,7 @@ DeviceGroup DefineAndRunGraph::GetVariableDeviceGroupInner(const Tensor& tensor)
   return device_group;
 }
 
-void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
+void DefineAndRunGraph::Instantiate(Tensor2ShapeMap& shape_plan) {
 
   auto exec_graph_num = _exec_graph_plan_pool.size();
   Tensor2ShapeMap exec_shape_plan;
@@ -124,8 +124,11 @@ void DefineAndRunGraph::Instantiate(const Tensor2ShapeMap& shape_plan) {
 
   auto put_exec_output = [&](Tensor& tensor, Tensor& exec_tensor) -> void {
     auto plan_it = shape_plan.find(tensor->id());
-    if (plan_it != shape_plan.end())
+    if (plan_it != shape_plan.end()) {
       exec_tensor->set_shape(plan_it->second);
+    } else {
+      shape_plan[tensor->id()] = exec_tensor->shape();
+    }
     // Else: if the tensor to instantiate is not in the shape plan, 
     // then the tensor won't be used in the exec graph.
     // So we just leave its shape to its default.
@@ -314,6 +317,10 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     };
     OpRefList topo = Graph::TopoSort(fetches, -1, is_feed_dict_op);
     HT_LOG_DEBUG << local_device << ": global topo before deducing shape plan is " << topo;
+    // deprecated, but maybe useful some day
+    // *now move all the logic of inferring shape and distributed_states to Instantiate()
+    // that is because MakeOp can handle most of the cases automatically
+    /*
     RuntimeContext runtime_ctx(topo.size());
     // 扫描global topo并推导新的shape plan
     for (auto& op_ref : topo) {
@@ -370,6 +377,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         shape_plan.insert(std::make_pair(op->output(i)->id(), std::move(output_shapes[i]))); // move constructor
       }
     }
+    */
+
     Instantiate(shape_plan);
     // TODO
     // 1、根据topo和shape plan，指定新的并行方案

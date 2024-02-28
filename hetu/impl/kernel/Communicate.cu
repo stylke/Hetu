@@ -20,18 +20,18 @@ void AllReduceCuda(const NDArray& input, NDArray& output, ReductionType red_type
 }
 
 void AllGatherCuda(const NDArray& input, NDArray& output,
-                   const DeviceGroup& device_group, const Stream& stream) {
+                   const DeviceGroup& device_group, int32_t gather_dim, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->AllGather(input, output); 
+  comm_group->AllGather(input, output, gather_dim); 
   NDArray::MarkUsedBy({input, output}, stream);                   
 }
 
 void ReduceScatterCuda(const NDArray& input, NDArray& output, ReductionType red_type,
-                   const DeviceGroup& device_group, const Stream& stream) {
+                   const DeviceGroup& device_group, int32_t scatter_dim, const Stream& stream) {
   auto ranks = DeviceGroupToWorldRanks(device_group);
   auto& comm_group = NCCLCommunicationGroup::GetOrCreate(ranks, stream);
-  comm_group->ReduceScatter(input, output, red_type);
+  comm_group->ReduceScatter(input, output, scatter_dim, red_type);
   NDArray::MarkUsedBy({input, output}, stream);  
 }
 

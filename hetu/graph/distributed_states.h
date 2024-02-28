@@ -109,6 +109,7 @@ class DistributedStates {
   bool check_reduce(const DistributedStates& dst_distributed_states) const;  
 
   int32_t get_dim(int32_t index) const;
+  int32_t get_split_dim(const DistributedStates& merged_distributed_states) const;
   std::vector<int32_t> get_loop_sizes() const;
   std::unordered_map<int32_t, int32_t> map_device_to_state_index(int32_t device_index) const;
   int32_t get_dup_group_index(int32_t device_index) const;

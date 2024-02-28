@@ -16,8 +16,6 @@ void ArangeCuda(double start, double step, NDArray& output, const Stream& stream
     output->dtype(), spec_t, "RangeCuda", [&]() {
       launch_loop_kernel<spec_t>(output, size, stream,
                                  [start, step] __device__ (int x) -> spec_t {
-                                   spec_t start = static_cast<spec_t>(start);
-                                   spec_t step = static_cast<spec_t>(step);
                                    return static_cast<spec_t>(start + step * size_t(x));
                                  });
   });

@@ -81,13 +81,13 @@ class CommunicationGroupDef : public shared_ptr_target {
                        << "\" is not defined.";
   }
 
-  virtual void AllGather(const NDArray& input, NDArray& output) {
+  virtual void AllGather(const NDArray& input, NDArray& output, int32_t gather_dim = 0) {
     HT_NOT_IMPLEMENTED << "AllGather fn of backend \"" << backend()
                        << "\" is not defined.";
   }
 
   virtual void ReduceScatter(const NDArray& input, NDArray& output,
-                             ReductionType red_type = kSUM) {
+                             int32_t scatter_dim = 0, ReductionType red_type = kSUM) {
     HT_NOT_IMPLEMENTED << "ReduceScatter fn of backend \"" << backend()
                        << "\" is not defined.";
   }

@@ -44,7 +44,7 @@ class AttentionOpImpl final : public OpInterface {
   DoInferMeta(const TensorList& inputs) const override {
     std::vector<NDArrayMeta> out_metas = {};
     NDArrayMeta base = inputs.at(0)->meta();
-    out_metas.emplace_back(base);
+    out_metas.emplace_back(base.set_shape(inputs.at(0)->shape()));
     const int batch_size = inputs.at(0)->shape(0);
     const int seqlen_q = inputs.at(0)->shape(1);
     const int num_heads = inputs.at(0)->shape(2);
@@ -87,6 +87,10 @@ class AttentionOpImpl final : public OpInterface {
   bool _return_softmax;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const AttentionOpImpl&>(rhs);
@@ -139,6 +143,10 @@ class AttentionGradientOpImpl final : public OpInterface {
   bool _is_causal;
 
  public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ = reinterpret_cast<const AttentionGradientOpImpl&>(rhs);

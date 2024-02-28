@@ -325,9 +325,9 @@ DECLARE_KERNEL_CPU_AND_CUDA(BatchedISendIRecv, const NDArrayList&,
                             const std::vector<Device>&, const std::vector<Device>&, 
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(AllGather, const NDArray&, NDArray&,
-                            const DeviceGroup&, const Stream&);
+                            const DeviceGroup&, int32_t gather_dim, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ReduceScatter, const NDArray&, NDArray&, ReductionType,
-                            const DeviceGroup&, const Stream&);
+                            const DeviceGroup&, int32_t scatter_dim, const Stream&);
 /******************************************************
  * Dispatching kernels for operations
  ******************************************************/

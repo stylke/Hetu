@@ -230,8 +230,7 @@ HTShapeList AllReduceOpImpl::DoInferShape(Operator& op,
 NDArrayList AllReduceOpImpl::DoCompute(Operator& op,
                                        const NDArrayList& inputs,
                                        RuntimeContext& ctx) const {
-  // NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
-  NDArrayList outputs = inputs; // just inplace here
+  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::AllReduce, inputs.at(0),
                                   outputs.at(0), reduction_type(), _comm_group, // _comm_group is a subset of placement_group
@@ -421,7 +420,8 @@ AllGatherOpImpl::DoInferMeta(const TensorList& inputs) const {
   const Tensor& input = inputs.at(0);
   DataType dtype = input->dtype();
   HTShape gather_shape = input->shape();
-  gather_shape[0] *= _comm_group.num_devices();
+  int32_t gather_dim = get_gather_dim();
+  gather_shape[gather_dim] *= _comm_group.num_devices();
   return {NDArrayMeta().set_dtype(dtype).set_shape(gather_shape)};
 }
 
@@ -429,7 +429,8 @@ HTShapeList AllGatherOpImpl::DoInferShape(Operator& op,
                                           const HTShapeList& input_shapes,
                                           RuntimeContext& runtime_ctx) const {
   HTShape gather_shape = input_shapes.at(0);
-  gather_shape[0] *= _comm_group.num_devices();
+  int32_t gather_dim = get_gather_dim();
+  gather_shape[gather_dim] *= _comm_group.num_devices();
   return {gather_shape};  
 }
 
@@ -443,7 +444,7 @@ void AllGatherOpImpl::DoCompute(Operator& op,
 
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::AllGather, inputs.at(0), outputs.at(0), 
-                                  _comm_group, op->instantiation_ctx().stream());
+                                  _comm_group, get_gather_dim(), op->instantiation_ctx().stream());
 }
 
 bool ReduceScatterOpImpl::DoMapToParallelDevices(Operator& op,
@@ -469,9 +470,10 @@ ReduceScatterOpImpl::DoInferMeta(const TensorList& inputs) const {
   const Tensor& input = inputs.at(0);
   DataType dtype = input->dtype();
   HTShape scatter_shape = input->shape();
-  scatter_shape[0] /= _comm_group.num_devices();
-  HT_ASSERT(scatter_shape[0] >= 1) << "ReduceScatter: input shape[0]: " 
-    << input->shape()[0] << " must >= comm devices num: " << _comm_group.num_devices();  
+  int32_t scatter_dim = get_scatter_dim();
+  scatter_shape[scatter_dim] /= _comm_group.num_devices();
+  HT_ASSERT(scatter_shape[scatter_dim] >= 1) << "ReduceScatter: input shape[" << scatter_dim << "]: " 
+    << input->shape()[scatter_dim] << " must >= comm devices num: " << _comm_group.num_devices();  
   return {NDArrayMeta().set_dtype(dtype).set_shape(scatter_shape)};
 }
 
@@ -479,9 +481,10 @@ HTShapeList ReduceScatterOpImpl::DoInferShape(Operator& op,
                                               const HTShapeList& input_shapes,
                                               RuntimeContext& runtime_ctx) const {
   HTShape scatter_shape = input_shapes.at(0);
-  scatter_shape[0] /= _comm_group.num_devices();
-  HT_ASSERT(scatter_shape[0] >= 1) << "ReduceScatter: input shape[0]: " 
-    << input_shapes.at(0)[0] << " must >= comm devices num: " << _comm_group.num_devices();  
+  int32_t scatter_dim = get_scatter_dim();
+  scatter_shape[scatter_dim] /= _comm_group.num_devices();
+  HT_ASSERT(scatter_shape[scatter_dim] >= 1) << "ReduceScatter: input shape[" << scatter_dim << "]: " 
+    << input_shapes.at(0)[scatter_dim] << " must >= comm devices num: " << _comm_group.num_devices();  
   return {scatter_shape};
 }
 
@@ -493,25 +496,24 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
     << "Data type mismatched for ReduceScatter communication: " << inputs.at(0)->dtype()
     << " vs. " << op->input(0)->dtype();
 
-  // if (inplace()) {
-  // just inplace here
-  NDArrayMeta meta = inputs.at(0)->meta();
-  HTShape scatter_shape = inputs.at(0)->shape();
-  scatter_shape[0] /= _comm_group.num_devices();
-  meta.set_shape(scatter_shape);
-  // int rank = GetWorldRank();
-  int rank = _comm_group.get_index(op->placement());
-  size_t storage_offset = rank * (inputs.at(0)->numel() / _comm_group.num_devices());
-  NDArray output = NDArray(meta, inputs.at(0)->storage(), inputs.at(0)->storage_offset() + storage_offset);
-  outputs.emplace_back(output);
-  // }
-  // else {
-  //   outputs = DoAllocOutputs(op, inputs, ctx);
-  // }
+  if (inplace()) {
+    NDArrayMeta meta = inputs.at(0)->meta();
+    HTShape scatter_shape = inputs.at(0)->shape();
+    scatter_shape[0] /= _comm_group.num_devices();
+    meta.set_shape(scatter_shape);
+    // int rank = GetWorldRank();
+    int rank = _comm_group.get_index(op->placement());
+    size_t storage_offset = rank * (inputs.at(0)->numel() / _comm_group.num_devices());
+    NDArray output = NDArray(meta, inputs.at(0)->storage(), inputs.at(0)->storage_offset() + storage_offset);
+    outputs.emplace_back(output);
+  }
+  else {
+    outputs = DoAllocOutputs(op, inputs, ctx);
+  }
 
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::ReduceScatter, inputs.at(0), outputs.at(0), 
-                                  reduction_type(), _comm_group, op->instantiation_ctx().stream());
+                                  reduction_type(), _comm_group, get_scatter_dim(), op->instantiation_ctx().stream());
   return outputs;
 }
 
@@ -606,21 +608,21 @@ Tensor MakeBatchedISendIRecvOp(TensorList inputs,
                         src_devices, comm_devices, dtype), inputs, std::move(op_meta))->output(0);  
 }
 
-Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group, int32_t gather_dim,
                        OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<AllGatherOpImpl>(comm_group, op_meta.device_group), 
+  return Graph::MakeOp(std::make_shared<AllGatherOpImpl>(comm_group, gather_dim, op_meta.device_group), 
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, 
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, int32_t scatter_dim,
                            bool inplace, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, kSUM, inplace, op_meta.device_group), 
+  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, scatter_dim, kSUM, inplace, op_meta.device_group), 
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, 
-                           ReductionType red_type, bool inplace, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, red_type, inplace, op_meta.device_group), 
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, ReductionType red_type,
+                           int32_t scatter_dim, bool inplace, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(comm_group, scatter_dim, red_type, inplace, op_meta.device_group), 
                       {std::move(input)}, std::move(op_meta))->output(0);
 }
 

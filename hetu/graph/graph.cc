@@ -198,7 +198,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         DistributedStates ds_dst = filtered[0]->get_distributed_states();
         grad_sum = MakeCommOp(partial_grad_sum, ds_dst, OpMeta().set_name("comm_op_after_partial_grad_sum"));
       } else {
-        grad_sum = MakeSumOp(filtered);
+        grad_sum = MakeSumOp(filtered, OpMeta().set_name("sum_op_for_partial_grad"));
       }
       grad_sum->set_is_grad(true);
       grad_sum->producer()->set_fw_op_id(fw_op_id);
