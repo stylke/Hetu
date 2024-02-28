@@ -12,7 +12,7 @@ VOCAB_FILE=${ROOT_FOLDER}/vocab.json
 MERGE_FILE=${ROOT_FOLDER}/merges.txt
 
 export NCCL_DEBUG=VERSION
-export HETU_INTERNAL_LOG_LEVEL=INFO
+export HETU_INTERNAL_LOG_LEVEL=WARN
 mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python3 train_hetu_gpt_ds_parallel.py \

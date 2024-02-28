@@ -364,6 +364,6 @@ class GPTLMHeadModel(ht.nn.Module):
                 # print('use commom cross entropy')
                 loss = ht.softmax_cross_entropy_sparse(shift_lm_logits,
                     shift_labels, ignored_index = -1, reduction = "mean")
-        output = (shift_lm_logits,)
-        output = ((loss,) + output) if loss is not None else output
-        return output # ((loss), (shift_lm_logits))
+        # output = (shift_lm_logits,)
+        # output = ((loss,) + output) if loss is not None else output
+        return loss # ((loss), (shift_lm_logits))

@@ -116,7 +116,7 @@ def pretrain(args):
     masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=label_ds, device_group=label_device_group, name='masked_lm_labels')
 
     print(f'{local_device}: build model begin...')
-    loss, lm_logits = model(input_ids=input_ids,
+    loss = model(input_ids=input_ids,
                             attention_mask=attention_mask,
                             # token_type_ids=token_type_ids,
                             labels=masked_lm_labels)
@@ -195,7 +195,7 @@ def pretrain(args):
             # run exec graph
             start_time = time.time()
             results = train_op.graph.run(loss_mean, 
-                                        [loss_mean, lm_logits, train_op], 
+                                        [loss_mean, train_op], 
                                         feed_dict = feed_dict, 
                                         num_micro_batches = num_micro_batches)
             end_time = time.time()
