@@ -420,7 +420,8 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
       // 修正版greedy
       if (_switcher->_algorithm_level == SWITCH_ALGORITHM_LEVEL::NEW_GREEDY) {
         size_t best_send_num, round = 0;
-        auto& device_val_mapping = _switcher->_device_val_mapping;
+        auto& intra_device_val_mapping = _switcher->_intra_device_val_mapping;
+        auto& inter_device_val_mapping = _switcher->_inter_device_val_mapping;
         size_t min_val = std::numeric_limits<size_t>::max();
         for (size_t j = 0; j < owned_len; ++j) {
           const auto& p2p_route = GetP2PRoute(_owned_devices[j], recv_device);
@@ -429,9 +430,9 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
             round++;
             continue;
           }
-          auto it = device_val_mapping.find(_owned_devices[j]);
+          auto it = intra_device_val_mapping.find(_owned_devices[j]);
           // 相当于通信为0
-          if (it == device_val_mapping.end()) {
+          if (it == intra_device_val_mapping.end()) {
             best_send_num = j;
             break;
           }
@@ -444,9 +445,9 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
         // 如果不得不跨机，那么再扫一遍
         if (round == owned_len) {
           for (size_t j = 0; j < owned_len; ++j) {
-            auto it = device_val_mapping.find(_owned_devices[j]);
+            auto it = inter_device_val_mapping.find(_owned_devices[j]);
             // 相当于通信为0
-            if (it == device_val_mapping.end()) {
+            if (it == inter_device_val_mapping.end()) {
               best_send_num = j;
               break;
             }
@@ -460,10 +461,9 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
         // 更新device_val_mapping
         const auto& p2p_route = GetP2PRoute(_owned_devices[best_send_num], recv_device);
         if (p2p_route.route_level() >= P2P_ROUTE_LEVEL::NET) {
-          // 目前hard-coded一个10
-          device_val_mapping[_owned_devices[best_send_num]] += numel() * 10;
+          inter_device_val_mapping[_owned_devices[best_send_num]] += numel();
         } else {
-          device_val_mapping[_owned_devices[best_send_num]] += numel();
+          intra_device_val_mapping[_owned_devices[best_send_num]] += numel();
         }
         send_tensor = _owned_slice_instances[best_send_num];
         send_device = _owned_devices[best_send_num];

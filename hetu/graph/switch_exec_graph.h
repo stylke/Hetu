@@ -497,7 +497,9 @@ class SwitchExecGraph {
     // comm plan related
     SWITCH_ALGORITHM_LEVEL _algorithm_level = SWITCH_ALGORITHM_LEVEL::NEW_GREEDY; // 采用的算法
     DevicePair2Val _p2p_val_mapping; // deprecated: 记录了每两个device之间的p2p通信通路的总value（目前value是指次数）
-    Device2Val _device_val_mapping; // 记录每个device的value（目前value指发送数据的量除以带宽）（**热切换场景下接收数据的量固定）
+    // 同一个device的intra和inter的通信可以overlap
+    Device2Val _intra_device_val_mapping; // 记录intra node的device通信的value（目前value指发送数据的量除以带宽）（**热切换场景下接收数据的量固定）
+    Device2Val _inter_device_val_mapping; // 记录inter node的device通信的value（目前value指发送数据的量除以带宽）（**热切换场景下接收数据的量固定）
     Device2DTListPairMap _send_mapping; // 记录了每个device要send的(device, tensor)的pair
     Device2DTListPairMap _recv_mapping; // 记录了每个device要recv的(device, placeholder的tensor（之后会替换）)的pair
     std::vector<std::shared_ptr<ParamBlock>> _param_blocks; // 记录了graph所包含的所有的抽象ParamBlock
