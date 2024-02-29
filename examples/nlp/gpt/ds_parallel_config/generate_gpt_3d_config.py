@@ -3,6 +3,8 @@ import json
 import os
 
 def generate_gpt_3d_config(num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+    if dp == 1:
+        zero = False
     num_layers_per_stage = num_layers // pp
     num_devices_per_stage = num_gpus // pp
     device_groups = [list(range(stage_id * num_devices_per_stage, (stage_id + 1) * num_devices_per_stage)) for stage_id in range(pp)]
@@ -105,7 +107,7 @@ def generate_gpt_3d_config(num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=Tru
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--num_layers', type=int, default=32, help='num layers of gpt.'
+        '--model_size', type=str, default='7b', help='size of gpt, 7b or 13b.'
     )
     parser.add_argument(
         '--num_gpus', type=int, default=8, help='num of gpus.'
@@ -126,8 +128,15 @@ if __name__ == '__main__':
     #     '--save_folder', type=str, default='./'
     # )
     args = parser.parse_args()
-    ds_parallel_config = generate_gpt_3d_config(args.num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
-    save_folder = f'./ds_parallel_config/gpus{args.num_gpus}'
+    if args.model_size == '7b':
+        num_layers = 32
+    elif args.model_size == '13b':
+        num_layers = 40
+    else:
+        assert 'now only support 7b or 13b!'
+        
+    ds_parallel_config = generate_gpt_3d_config(num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    save_folder = f'./ds_parallel_config/gpus{args.num_gpus}/{args.model_size}'
     file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
