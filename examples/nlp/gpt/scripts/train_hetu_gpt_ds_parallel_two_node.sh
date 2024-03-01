@@ -32,4 +32,4 @@ python train_hetu_gpt_ds_parallel.py \
 --dropout_prob 0.1 \
 --bf16 \
 --use_flash_attn \
---use_two_node \
+--use_multi_node \

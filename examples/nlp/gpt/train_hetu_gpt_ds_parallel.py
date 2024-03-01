@@ -14,15 +14,16 @@ from queue import Queue
 local_device = None
 all_devices = None
 
-def distributed_init(use_two_node: bool = False):
-    if use_two_node:
+def distributed_init(use_multi_node: bool = False):
+    if use_multi_node:
         hostname = socket.gethostname()
-        if hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-master-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-0'
-        elif hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-worker-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-1'
-        else:
-            raise ValueError(f"Unknown hostname: {hostname}")
+        os.environ['HETU_LOCAL_HOSTNAME'] = hostname
+        #if hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-master-0':
+        #    os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-0'
+        #elif hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-worker-0':
+        #    os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-1'
+        #else:
+        #    raise ValueError(f"Unknown hostname: {hostname}")
 
     global local_device, all_devices
     ht.init_comm_group(8)
@@ -204,11 +205,13 @@ def pretrain(args):
                 loss_out = results[0].numpy(force=True).mean()
                 print('%s: [Epoch %d] (Iteration %d, consumed_samples = %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step, consumed_samples, loss_out, end_time-start_time))
 
+                if step == 10 and dp_rank == 0:
+                    os.system('nvidia-smi')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
+        "--use_multi_node", action="store_true", help="use multi node (like 2x8 gpus) to run script."
     )
     parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'
@@ -281,7 +284,7 @@ if __name__ == '__main__':
         "--bf16", action="store_true", help="Use bfloat16."
     )
     args = parser.parse_args()
-    distributed_init(args.use_two_node)
+    distributed_init(args.use_multi_node)
     with ht.graph("define_and_run"):
         if args.bf16:
             precision = "ht.bfloat16"
