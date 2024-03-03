@@ -238,6 +238,8 @@ def pretrain(args):
                 if label_device_group.contains(local_device):
                     loss_out = results[0].numpy(force=True).mean()
                     print(f"{local_device}: loss = {loss_out} and time = {end_time - start_time}")
+            else:
+                print(f"{local_device}: time = {end_time - start_time}")
             return
     
     # 单次切换实验
@@ -264,8 +266,9 @@ def pretrain(args):
             os.killpg(0, signal.SIGTERM)
                 
     def test_single_switch():
-        run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 1, run_level = ht.run_level("alloc"))
-        run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 2, run_level = ht.run_level("alloc"))
+        for _ in range(10):
+            run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 0, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 5, run_level = ht.run_level("grad"))
     
     # 单轮样例 
     def test_single_round(): 
@@ -282,16 +285,17 @@ def pretrain(args):
         # bf16参数切换到dp8并用累计梯度的方式训练、切换到tp8然后更新
         # 第一个循环会很慢是因为要算topo & 算切换方案 & 进行很多cudaMalloc
         for round in range(10):
-            run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
+            run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
             # run_plan(global_batch_size = 8, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 16, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 8, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 4, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
+            run_plan(global_batch_size = 128, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 32, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 64, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
             print(f"round {round} finished")
     
     run_experiment()
     # test_single_switch()
+    # test_multi_round()
     
 
 if __name__ == '__main__':

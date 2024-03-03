@@ -16,18 +16,19 @@ NDArrayList ArrayReshapeOpImpl::DoCompute(Operator& op,
 TensorList ArrayReshapeOpImpl::DoGradient(Operator& op, 
                                           const TensorList& grad_outputs) const {
   if (symbolic()) {
-    //要将输入的tensor设置成symbolic的，之后shape发生改变时，
+    // 要将输入的tensor设置成symbolic的，之后shape发生改变时，
     // 直接overwrite该tensor中的symbolic shape的value即可，
-    // 后续rrayReshapeGradientOp算子的shape均会发生改变
+    // 后续ArrayReshapeGradientOp算子的shape均会发生改变
     op->input(0)->init_symbolic_shape(); // leaf
     return {op->requires_grad(0) ? MakeArrayReshapeGradientOp(grad_outputs.at(0), op->input(0), op->input(0)->symbolic_shape(),
                                                             op->grad_op_meta().set_name(op->grad_name()))
                                  : Tensor()};
   }
-  else
+  else {
     return {op->requires_grad(0) ? MakeArrayReshapeGradientOp(grad_outputs.at(0), op->input(0), op->input(0)->shape(),
                                                               op->grad_op_meta().set_name(op->grad_name()))
                                  : Tensor()};
+  }
 }
 
 HTShapeList ArrayReshapeOpImpl::DoInferShape(Operator& op, 

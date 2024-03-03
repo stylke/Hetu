@@ -181,11 +181,17 @@ class ExecutableGraph : public Graph {
 
   void AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ctx_list);
 
+  // plan相关
+  ExecutePlan _execute_plan;
+  Tensor2ShapeMap _shape_plan;
+
+  // run相关
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
   std::vector<DeviceGroup> _stages;
   int _num_micro_batches;
-  ExecutePlan _execute_plan;
-  Tensor2ShapeMap _shape_plan;
+  std::vector<std::unique_ptr<Event>> _p2p_events;
+
+  // switch相关
   std::shared_ptr<ParamBuffer> _origin_param_buffer;
   std::shared_ptr<ParamBuffer> _transfer_param_buffer;
   std::shared_ptr<ParamBuffer> _current_grad_buffer; // deprecated
@@ -194,10 +200,19 @@ class ExecutableGraph : public Graph {
   Tensor2TensorMap _grad_map; // origin param到未substitue comm op前的grad的映射
   Tensor2TensorMap _grad_grad_map; // 未substitue comm op前的grad到substitue comm op后的grad的映射
   Tensor2TensorMap _reversed_grad_grad_map; // substitue comm op后的grad到未substitue comm op前的grad的映射
-  bool _use_current_grad_buffer{true};
+  bool _use_current_grad_buffer{false};
   double _grad_scale; 
-  std::vector<std::unique_ptr<Event>> _p2p_events;
-  std::vector<std::unique_ptr<Event>> _grad_events;
+
+  // 记录上一个图的param切换完的event
+  std::unordered_map<TensorId, std::unique_ptr<Event>> _switch_param_events;
+  // 记录上一个图的grad切换完的event
+  std::unordered_map<TensorId, std::unique_ptr<Event>> _switch_grad_events; // 注意这里的TensorId是未substitue comm op前的grad
+  // 记录当前图的param不再用的event
+  // 即意味着可以开始切换param了
+  std::unordered_map<TensorId, std::unique_ptr<Event>> _run_param_events; 
+  // 记录当前图的grad计算完的event
+  // 即意味着可以开始切换grad了
+  std::unordered_map<TensorId, std::unique_ptr<Event>> _run_grad_events; // 注意这里的TensorId是未substitue comm op后的grad
 };
 
 } // namespace graph

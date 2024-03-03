@@ -20,7 +20,8 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
                          const Stream& stream = Stream()) override;
 
   DataPtr BorrowDataSpace(void* ptr, size_t num_bytes,
-                          DataPtrDeleter deleter) override;
+                          DataPtrDeleter deleter,
+                          const Stream& stream = Stream()) override;
 
   void FreeDataSpace(DataPtr data_ptr) override;
 

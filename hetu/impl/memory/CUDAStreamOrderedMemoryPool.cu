@@ -88,7 +88,8 @@ DataPtr CUDAStreamOrderedMemoryPool::AllocDataSpace(size_t num_bytes,
 }
 
 DataPtr CUDAStreamOrderedMemoryPool::BorrowDataSpace(void*, size_t,
-                                                     DataPtrDeleter) {
+                                                     DataPtrDeleter,
+                                                     const Stream&) {
   // TODO: support customized deleter when freeing the memory 
   // so that we can support borrowing on CUDA devices
   HT_NOT_IMPLEMENTED << name()

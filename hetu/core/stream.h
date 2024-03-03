@@ -9,10 +9,12 @@ constexpr int32_t HT_NUM_STREAMS_PER_DEVICE = 1 << 4;
 constexpr StreamIndex kUndeterminedStream = -1;
 constexpr StreamIndex kBlockingStream = 0;
 constexpr StreamIndex kComputingStream = 1;
-constexpr StreamIndex kH2DStream = 2;
-constexpr StreamIndex kD2HStream = 3;
-constexpr StreamIndex kP2PStream = 4;
-constexpr StreamIndex kCollectiveStream = 5;
+constexpr StreamIndex kSwitchComputingStream = 2;
+constexpr StreamIndex kH2DStream = 3;
+constexpr StreamIndex kD2HStream = 4;
+constexpr StreamIndex kP2PStream = 5;
+constexpr StreamIndex kCollectiveStream = 6;
+constexpr StreamIndex kSwitchCollectiveStream = 7;
 constexpr StreamIndex kJoinStream = HT_NUM_STREAMS_PER_DEVICE - 1;
 
 using PackedStreamId = uint16_t;

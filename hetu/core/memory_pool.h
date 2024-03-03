@@ -34,7 +34,8 @@ class MemoryPool {
                                  const Stream& stream = Stream()) = 0;
 
   virtual DataPtr BorrowDataSpace(void* ptr, size_t num_bytes,
-                                  DataPtrDeleter deleter) = 0;
+                                  DataPtrDeleter deleter,
+                                  const Stream& stream = Stream()) = 0;
 
   virtual void FreeDataSpace(DataPtr data_ptr) = 0;
 

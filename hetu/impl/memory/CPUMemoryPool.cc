@@ -68,11 +68,14 @@ DataPtr CPUMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
 }
 
 DataPtr CPUMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
-                                       DataPtrDeleter deleter) {
+                                       DataPtrDeleter deleter,
+                                       const Stream& stream) {
   HT_VALUE_ERROR_IF(ptr == nullptr || num_bytes == 0)
     << "Borrowing an empty storage is not allowed";
   HT_VALUE_ERROR_IF(!deleter)
     << "Deleter must not be empty when borrowing storages";
+  HT_VALUE_ERROR_IF(stream.is_defined() && !stream.is_blocking())
+    << "Stream must be blocking if provided";
   
   std::lock_guard<std::mutex> lock(_mtx);
   // Note: The borrowed memory must be ready, so we use blocking stream here

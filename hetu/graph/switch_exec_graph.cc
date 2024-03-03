@@ -93,8 +93,8 @@ static void WarmUpComm(const std::unordered_set<Device>& comm_set) {
   std::sort(ranks.begin(), ranks.end());
   HT_LOG_DEBUG << "all-to-all warm up for " << comm_set
     << ", whose ranks after sort = " << ranks;
-  auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, Stream(local_device, kP2PStream));
-  auto data = NDArray::empty({comm_set.size()}, local_device, kFloat32, kP2PStream);
+  auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, Stream(local_device, kSwitchCollectiveStream));
+  auto data = NDArray::empty({comm_set.size()}, local_device, kFloat32, kSwitchCollectiveStream);
   comm_group->AlltoAll(data, data);
 }
 
@@ -142,7 +142,7 @@ static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer) {
     auto& contiguous_op = new_tensor->producer();
     if (tensor->placement() == local_device) {
       contiguous_op->MapToParallelDevices(tensor->placement_group());
-      contiguous_op->Instantiate(local_device, kComputingStream);
+      contiguous_op->Instantiate(local_device, kSwitchComputingStream);
       // 将contiguous算子插入到BatchedIsendIrecv/Slice算子和concat算子之间
       auto& consumer = tensor->consumer(0);
       HT_ASSERT(is_concat_op(consumer) && consumer->num_inputs() == 1)
@@ -154,7 +154,10 @@ static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer) {
   }
 }
 
-void ParamBuffer::Alloc(const Stream& stream, bool use_nccl, ncclComm_t comm) {
+void ParamBuffer::Alloc(const Stream& stream, 
+                        bool use_nccl, 
+                        ncclComm_t comm,
+                        bool use_async) {
   TIK(alloc_time);
   auto local_device = hetu::impl::comm::GetLocalDevice(); 
   hetu::cuda::CUDADeviceGuard guard(local_device.index());
@@ -193,7 +196,12 @@ void ParamBuffer::Alloc(const Stream& stream, bool use_nccl, ncclComm_t comm) {
         _free_time = COST_MSEC(free_time);
       }));
   } else {
-    cudaError_t status = cudaMalloc(&_raw_ptr, _buffer_size);
+    cudaError_t status;
+    if (!use_async || stream.is_blocking()) {
+      status = cudaMalloc(&_raw_ptr, _buffer_size);
+    } else {
+      status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
+    }
     if (status != cudaSuccess) {
       HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
     }
@@ -203,7 +211,12 @@ void ParamBuffer::Alloc(const Stream& stream, bool use_nccl, ncclComm_t comm) {
         hetu::cuda::CUDADeviceGuard guard(data_ptr.device.index());
         HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
           << " will free " << (double)_buffer_size / (1024 * 1024) << " MiB";  
-        cudaError_t status = cudaFree(data_ptr.ptr);
+        cudaError_t status;
+        if (!use_async || stream.is_blocking()) {
+          status = cudaFree(data_ptr.ptr);
+        } else {
+          status = cudaFreeAsync(data_ptr.ptr, hetu::impl::CUDAStream(stream).cuda_stream());
+        }
         if (status != cudaSuccess) {
           HT_RUNTIME_ERROR << "cudaFree failed: " << cudaGetErrorString(status);
         }
@@ -215,12 +228,17 @@ void ParamBuffer::Alloc(const Stream& stream, bool use_nccl, ncclComm_t comm) {
 #else
   // Use AllocDataSpace will cause OOM
   /*
-  // Note that we need to use kP2PStream for BufferBatchedIsendIrecv
+  // Note that we need to use kSwitchCollectiveStream for BufferBatchedIsendIrecv
   _storage = std::make_shared<NDArrayStorage>(AllocFromMemoryPool(local_device, _buffer_size, stream));
   _raw_ptr = _storage->mutable_data();
   */
   // Use BorrowDataSpace
-  cudaError_t status = cudaMalloc(&_raw_ptr, _buffer_size);
+  cudaError_t status;
+  if (!use_async || stream.is_blocking()) {
+    status = cudaMalloc(&_raw_ptr, _buffer_size);
+  } else {
+    status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
+  }
   if (status != cudaSuccess) {
     HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
   }
@@ -230,7 +248,12 @@ void ParamBuffer::Alloc(const Stream& stream, bool use_nccl, ncclComm_t comm) {
       hetu::cuda::CUDADeviceGuard guard(data_ptr.device.index());
       HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
         << " will free " << (double)_buffer_size / (1024 * 1024) << " MiB";  
-      cudaError_t status = cudaFree(data_ptr.ptr);
+      cudaError_t status;
+      if (!use_async || stream.is_blocking()) {
+        status = cudaFree(data_ptr.ptr);
+      } else {
+        status = cudaFreeAsync(data_ptr.ptr, hetu::impl::CUDAStream(stream).cuda_stream());
+      }
       if (status != cudaSuccess) {
         HT_RUNTIME_ERROR << "cudaFree failed: " << cudaGetErrorString(status);
       }
@@ -241,9 +264,10 @@ void ParamBuffer::Alloc(const Stream& stream, bool use_nccl, ncclComm_t comm) {
 #endif
   _stream = stream;
   _is_allocated = true;
-  HT_LOG_DEBUG << local_device << ": " << _name << " param buffer alloc end";  
   TOK(alloc_time);
   _alloc_time = COST_MSEC(alloc_time);
+  HT_LOG_DEBUG  << _name << " param buffer"
+    << " alloc " << (double)_buffer_size / (1024 * 1024) << " MiB and cost " << _alloc_time << " ms";  
 }
 
 void ParamBuffer::Free() {
@@ -251,6 +275,8 @@ void ParamBuffer::Free() {
   _raw_ptr = nullptr;
   _is_allocated = false;
   _is_auxiliary = false;
+  HT_LOG_DEBUG << _name << " param buffer"
+    << " free " << (double)_buffer_size / (1024 * 1024) << " MiB and cost " << _free_time << " ms";  
 }
 
 void ParamBuffer::Bind(const std::shared_ptr<NDArrayStorage>& storage) {
@@ -534,7 +560,7 @@ void SwitchExecGraph::MakeAllParamSlices(const Tensor& param, ParamBlock& block,
     // 其他device上生成的不需要map placement_group和placement
     if (hetu::impl::comm::GetLocalDevice() == device) { 
       split_op->MapToParallelDevices(group);
-      split_op->Instantiate(device, kComputingStream);
+      split_op->Instantiate(device, kSwitchComputingStream);
     }
     // dup会导致一个param_slice对应多个slice_instance
     // 这也是这个优化问题之所以这么复杂的原因
@@ -591,7 +617,7 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
   // 其他device上生成的不需要map placement_group和placement
   if (hetu::impl::comm::GetLocalDevice() == device) { 
     concatenate_op->MapToParallelDevices(group);
-    concatenate_op->Instantiate(device, kComputingStream);
+    concatenate_op->Instantiate(device, kSwitchComputingStream);
   }  
   return concatenate_output;
 }
@@ -805,6 +831,9 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
     // 两个图都在（这种情况才是我们核心要考虑的）
     else {
       HT_LOG_DEBUG << local_device << ": param " << define_param << " is in both graphs";
+      // 注意这里用了一个trick
+      // 如果是param那么这里的iter都是tensor_to_exec_tensor_mapping的iter
+      // 如果是grad那么这里的iter都是grad_map的iter
       auto& before_param = before_it->second;
       auto& after_param = after_it->second;
       HT_ASSERT(before_param->global_shape() == after_param->global_shape())
@@ -859,12 +888,12 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
                                           OpMeta().set_device_groups({src_group}).set_name(before_param->name() + "_comm_input"));
       if (src_group.contains(local_device)) {
         comm_input->producer()->MapToParallelDevices(src_group);
-        comm_input->producer()->Instantiate(local_device, kComputingStream);
+        comm_input->producer()->Instantiate(local_device, kSwitchComputingStream);
         // 只求comm graph的topo的话并不需要实际的feed dict
         if (switch_level != SWITCH_LEVEL::TOPO) {
           auto comm_input_data_it = before_graph->_preserved_data.find(before_param->id());
           HT_ASSERT(comm_input_data_it != before_graph->_preserved_data.end())
-            << "something wrong, the data to switch in the before graph is not available";
+            << "something wrong, the data of " << before_param << " to switch in the before graph is not available";
           HT_ASSERT(comm_input->shape() == comm_input_data_it->second->shape())
             << "comm graph placeholder shape " << comm_input->shape() << " should be equal to"
             << " the shape of the preserved data " << comm_input_data_it->second->shape();
@@ -936,7 +965,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
     HT_ASSERT(send_tensor->placement_group().contains(local_device))
       << "send tensor should already be instantiated locally";
     contiguous_op->MapToParallelDevices(send_tensor->placement_group());
-    contiguous_op->Instantiate(local_device, kComputingStream);
+    contiguous_op->Instantiate(local_device, kSwitchComputingStream);
     contiguous_send_tensors.push_back(std::move(contiguous_send_tensor));
     */
     // 给所有发向同一个device的tensor记录一个ParamBuffer
@@ -958,7 +987,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
                                         OpMeta().set_is_deduce_states(false));
   auto& batched_isend_irecv_op = result->producer();
   batched_isend_irecv_op->MapToParallelDevices(comm_device_group);
-  batched_isend_irecv_op->Instantiate(local_device, kP2PStream);
+  batched_isend_irecv_op->Instantiate(local_device, kSwitchCollectiveStream);
   TensorList recv_tensors = batched_isend_irecv_op->outputs();
   // we need to add dummy link for topo sort
   // 只有send没有recv
@@ -1051,8 +1080,8 @@ void SwitchExecGraph::BufferBatchedIsendIrecvExec(const hetu::impl::comm::NCCLCo
     recv_data_list.push_back(std::move(recv_data));
   }
   comm_nccl_group->BatchedISendIRecv(tasks);
-  NDArray::MarkUsedBy(send_data_list, Stream(local_device, kP2PStream));
-  NDArray::MarkUsedBy(recv_data_list, Stream(local_device, kP2PStream));
+  NDArray::MarkUsedBy(send_data_list, Stream(local_device, kSwitchCollectiveStream));
+  NDArray::MarkUsedBy(recv_data_list, Stream(local_device, kSwitchCollectiveStream));
   HT_LOG_DEBUG << local_device << ": BufferBatchedIsendIrecvExec is done";
 }
 
@@ -1112,10 +1141,10 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
     NDArrayMeta buffer_data_meta = input_meta.set_shape(input->shape()); // contiguous meta!!!
     auto buffer_data = NDArray(buffer_data_meta, buffer->AsStorage(), buffer->GetElementOffest(input));
     auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
-    auto stream = Stream(local_device, kComputingStream);
+    auto stream = Stream(local_device, kSwitchComputingStream);
     event->Record(stream);
     _buffer_transfer_events.emplace_back(std::move(event));
-    NDArray::contiguous(data, kComputingStream, buffer_data); // data ---> buffer_data
+    NDArray::contiguous(data, kSwitchComputingStream, buffer_data); // data ---> buffer_data
     NDArray::MarkUsedBy(data, stream);
     NDArray::MarkUsedBy(buffer_data, stream);
     event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
@@ -1127,7 +1156,7 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
     }
   }
   // 同步
-  // 保证op_stream在kComputingStream之后
+  // 保证op_stream在kSwitchComputingStream之后
   auto buffer_transfer_events_len = _buffer_transfer_events.size() / 2;
   for (size_t i = 0; i < buffer_transfer_events_len; ++i) {
     // 用end event进行同步
@@ -1291,7 +1320,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   std::transform(_comm_set.begin(), _comm_set.end(), comm_ranks.begin(), 
                  [&](const Device& device) { return hetu::impl::comm::DeviceToWorldRank(device); });
   std::sort(comm_ranks.begin(), comm_ranks.end());
-  auto& comm_nccl_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(comm_ranks, Stream(local_device, kP2PStream));
+  auto& comm_nccl_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(comm_ranks, Stream(local_device, kSwitchCollectiveStream));
   std::call_once(warmup_flags[comm_device_group], 
                  WarmUpComm, 
                  _comm_set);
@@ -1363,7 +1392,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       }
     }
     if (!send_buffer->IsAllocated()) {
-      send_buffer->Alloc(Stream(local_device, kP2PStream), false, comm_nccl_group->GetComm());
+      send_buffer->Alloc(Stream(local_device, kSwitchCollectiveStream), false, comm_nccl_group->GetComm());
     }
   }
   if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
@@ -1404,8 +1433,8 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       if (!_concat_buffer->IsAllocated()) {
         // 分配concat的buffer
         // TODO: 目前可能显存溢出，之后应该考虑在溢出时扫描mempool中的free_event
-        // 目前kComputingStream的concat_buffer的显存只能确保可以重用send_buffer释放出的显存
-        _concat_buffer->Alloc(Stream(local_device, kComputingStream));
+        // 目前kSwitchComputingStream的concat_buffer的显存只能确保可以重用send_buffer释放出的显存
+        _concat_buffer->Alloc(Stream(local_device, kSwitchComputingStream));
       }
       auto& output = op->output(0);
       auto output_data = NDArray(output->meta(), _concat_buffer->AsStorage(), _concat_buffer->GetElementOffest(output));
@@ -1439,6 +1468,25 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     // 记录输出值
     for (size_t i = 0; i < op->num_outputs(); ++i) {
       tensor2data[op->output(i)->id()] = output_vals[i];
+      // 如果是最后的输出
+      // 我们记录一些async的event
+      // 这样可以在下一个exec graph跑的时候再进行同步
+      auto it = _comm_results_mapping.find(op->output(i)->id());
+      if (it != _comm_results_mapping.end()) {
+        // 如果是param
+        if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM 
+            || switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+          auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+          event->Record(op->instantiation_ctx().stream());
+          _switch_graph_pair.second->_switch_param_events[it->second->id()] = std::move(event);
+        }
+        // 如果是grad
+        else {
+          auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
+          event->Record(op->instantiation_ctx().stream());
+          _switch_graph_pair.second->_switch_grad_events[it->second->id()] = std::move(event);
+        }
+      }
     }
   }
   HT_LOG_DEBUG << "switch exec graph topo end";
@@ -1488,16 +1536,16 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   _switch_graph_pair.first->_preserved_data.clear();
   */
 
-  // stream同步
-  // *****TODO: 理论上这里不需要同步
-  // 可以放在下一个exec graph需要某一个variable时再进行同步
-  TensorList fetches(_comm_results);
-  fetches.insert(fetches.end(), _dummy_links.begin(), _dummy_links.end());
-  for (const auto fetch : fetches) {
-    fetch->producer()->Sync();
-  }  
+  // 非profile情形下这里不需要同步
+  // 下一个exec graph需要某一个param时再进行sync
   
   if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
+    // stream同步
+    TensorList fetches(_comm_results);
+    fetches.insert(fetches.end(), _dummy_links.begin(), _dummy_links.end());
+    for (const auto& fetch : fetches) {
+      fetch->producer()->Sync();
+    }  
     TOK(switch_params_running); // 结束计时
     // rank同步（不同rank耗时不一样，因此放在TOK之后）
     // 这里对全部rank进行同步
@@ -1511,7 +1559,9 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     */
     auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
     mpi_group->Barrier(true);
-    HT_LOG_INFO << local_device << ": switch params running time = " << COST_MSEC(switch_params_running) << " ms";
+    std::string log_prefix = (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM ||switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) ?
+                             "param" : "grad";
+    HT_LOG_INFO << local_device << ": " << log_prefix << " switch running time = " << COST_MSEC(switch_params_running) << " ms";
     char* switch_log_file = std::getenv("HETU_SWITCH_LOG_FILE");
     if (switch_log_file != nullptr && hetu::impl::comm::GetWorldRank() == 0) {
       std::ofstream file;
@@ -1535,7 +1585,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   std::string log_prefix = (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM ||switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) ?
                            "param" : "grad";
   HT_LOG_INFO << local_device << ": " << log_prefix << " switch from " << _switch_graph_pair.first->name()
-   << " to " << _switch_graph_pair.second->name() << " is done";
+   << " to " << _switch_graph_pair.second->name() << " is done (async)";
   // HT_RUNTIME_ERROR << local_device << ": breakpoint";
 }
 

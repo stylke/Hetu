@@ -1,6 +1,6 @@
 # NCCL_DEBUG=info
 NUM_LAYERS=${1:-32}
-HIDDEN_SIZE=${2:-4096}
+HIDDEN_SIZE=${2:-512}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-128}
 GLOBAL_BATCH_SIZE=${5:-16}
@@ -12,8 +12,8 @@ LD_LIBRARY_PATH="${HETU_HOME}/build/lib:${LD_LIBRARY_PATH}"
 PYTHONPATH="${HETU_HOME}/python_refactor:${HETU_HOME}/build/lib:${PYTHONPATH}"
 
 export HETU_SWITCH_ALGORITHM=NEW_GREEDY
-export HETU_SWITCH_PROFILE=NVLINK
-export HETU_INTERNAL_LOG_LEVEL=INFO
+export HETU_SWITCH_PROFILE=INFO
+export HETU_INTERNAL_LOG_LEVEL=WARN
 
 mpirun --allow-run-as-root -np 16 \
 -H job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-master-0:8,job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-worker-0:8 \

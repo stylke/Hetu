@@ -411,6 +411,20 @@ class OpDef : public shared_ptr_target {
       << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
       << ", got micro batch id: " << micro_batch_id;
     BlockOrSyncAllInputs(runtime_ctx, micro_batch_id);
+    // set symbolic shape at input time will cost more
+    /*
+    for (size_t i = 0; i < inputs.size(); i++) {
+      if (input(i)->symbolic()) {
+        HT_LOG_INFO << "exec op " << name()
+          << " input " << i << " has " << input(i)->symbolic_shape();
+        if (is_SyShape_leaf(input(i)->symbolic_shape())) {
+          input(i)->set_symbolic_shape(inputs[i]->shape());
+          HT_LOG_TRACE << "set symbolic shape of exec op " << name()
+            << " input " << i << " to " << inputs[i]->shape();
+        }
+      }
+    }
+    */
     // correctness debug
     /*
     HTShapeList input_shapes;

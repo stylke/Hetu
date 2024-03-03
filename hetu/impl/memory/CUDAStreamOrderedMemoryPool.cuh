@@ -14,7 +14,7 @@ class CUDAStreamOrderedMemoryPool final : public CUDAMemoryPool {
 
   DataPtr AllocDataSpace(size_t num_bytes, const Stream& stream = Stream());
 
-  DataPtr BorrowDataSpace(void* ptr, size_t num_bytes, DataPtrDeleter deleter);
+  DataPtr BorrowDataSpace(void* ptr, size_t num_bytes, DataPtrDeleter deleter, const Stream& stream = Stream());
 
   void FreeDataSpace(DataPtr data_ptr);
 

@@ -150,6 +150,8 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
             << transfer_param << " already has the data";
         } 
         // 冷启动
+        // 这种也包括了单策略一直训练
+        // 即每次不需要再单独分配transfer param buffer但需要重新进行transfer
         else {
           // alloc and compute origin param
           auto origin_param = op->Compute({}, runtime_ctx_list[0]);
@@ -184,21 +186,21 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
         _current_grad_buffer->Alloc(Stream(local_device, kBlockingStream));
         HT_LOG_DEBUG << local_device << ": alloc current grad buffer "
           << ", the size is " << _current_grad_buffer->size();
-        for (const auto& current_grad : _current_grad_buffer->tensor_list()) {
-          auto current_grad_data = NDArray(current_grad->meta(),
-                                           _current_grad_buffer->AsStorage(), 
-                                           _current_grad_buffer->GetElementOffest(current_grad));
-          // 添加runtime allocation
-          for (auto& runtime_ctx : runtime_ctx_list) {
-            auto it = _grad_grad_map.find(current_grad->id());
-            HT_ASSERT(it != _grad_grad_map.end())
-              << "cannot find the mapping of " << current_grad << " in the grad grad map";
-            runtime_ctx.add_runtime_allocation(it->second->id(), current_grad_data);
-          }
-          // 注意与param不同的是
-          // 这里不能添加runtime skipped
-          // 因为grad还是要计算的
+      }
+      for (const auto& current_grad : _current_grad_buffer->tensor_list()) {
+        auto current_grad_data = NDArray(current_grad->meta(),
+                                         _current_grad_buffer->AsStorage(), 
+                                         _current_grad_buffer->GetElementOffest(current_grad));
+        // 添加runtime allocation
+        for (auto& runtime_ctx : runtime_ctx_list) {
+          auto it = _grad_grad_map.find(current_grad->id());
+          HT_ASSERT(it != _grad_grad_map.end())
+            << "cannot find the mapping of " << current_grad << " in the grad grad map";
+          runtime_ctx.add_runtime_allocation(it->second->id(), current_grad_data);
         }
+        // 注意与param不同的是
+        // 这里不能添加runtime skipped
+        // 因为grad还是要计算的
       }
     }
     // 使用accumulate_grad_buffer
@@ -500,7 +502,7 @@ void ExecutableGraph::InsertContiguousOp(const OpRefList& topo_order) {
                          << " is not contiguous for op " << op->body().type()
                          << ". But it may have a contiguous copy, use it instead";
             auto contig_op = _op_indexing[op_id.value()];
-            ReplaceInput(op, i, contig_op->output(0));
+            Graph::ReplaceInput(op, i, contig_op->output(0));
           } else {
             HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": Make Contiguous op for tensor " << input->name()
                          << " while making " << op->body().type() << " op.";
@@ -511,7 +513,7 @@ void ExecutableGraph::InsertContiguousOp(const OpRefList& topo_order) {
             auto& contig_op = contig_input->producer();
             contig_op->MapToParallelDevices(input_op->placement_group());
             contig_op->Instantiate(local_device, kComputingStream);
-            ReplaceInput(op, i, contig_input);
+            Graph::ReplaceInput(op, i, contig_input);
           }
         }
       }
@@ -1098,7 +1100,9 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       continue;
     }
     // just convert fp32 -> bf16, fp16 in micro batch 0
+    // though it is actually put in runtime_skipped already
     if (op->num_outputs() > 0 && dtype_transfer_tensor.find(op->output(0)->id()) != dtype_transfer_tensor.end() && micro_batch_id > 0) {
+      HT_RUNTIME_ERROR << "unreachable";
       continue;
     }
     // in pipeline(shared_weight_p2p not empty), shared weight p2p ops only execute in micro batch 0
@@ -1136,14 +1140,19 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
           auto accumulate_grad_data = NDArray(grad->meta(), 
                                               _accumulate_grad_buffer->AsStorage(), 
                                               _accumulate_grad_buffer->GetElementOffest(grad_in_buffer));
-          auto grad_stream = Stream(grad_op->placement(),
-                                    grad_op->instantiation_ctx().stream_index);
+          auto grad_stream = grad_op->instantiation_ctx().stream(); 
           if (_grad_scale != 1) {
             NDArray::mul(current_grad_data,
                          _grad_scale,
                          grad_stream.stream_index(),
                          current_grad_data);
           }
+          // 如果有一些累计梯度是switch过来的
+          // 那么我们这里进行实际的sync
+          auto event_it = _switch_grad_events.find(grad_in_buffer->id());
+          if (event_it != _switch_grad_events.end()) {
+            event_it->second->Block(grad_stream);
+          } 
           NDArray::add(current_grad_data, 
                        accumulate_grad_data, 
                        grad_stream.stream_index(),
@@ -1151,8 +1160,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         }
         // 需要记录grad op的event来在结束时同步
         auto event = std::make_unique<hetu::impl::CUDAEvent>(grad_op->placement());
-        event->Record(Stream(grad_op->placement(), grad_op->instantiation_ctx().stream_index));
-        _grad_events.emplace_back(std::move(event));
+        event->Record(grad_op->instantiation_ctx().stream());
+        _run_grad_events[grad->id()] = std::move(event);
         tensor2data.erase(grad); // 清除tensor2data中该grad的引用计数
         continue;
       }
@@ -1180,6 +1189,12 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
                          grad_stream.stream_index(),
                          current_grad_data);
           }
+          // 如果有一些累计梯度是switch过来的
+          // 那么我们这里进行实际的sync
+          auto event_it = _switch_grad_events.find(grad_in_buffer->id());
+          if (event_it != _switch_grad_events.end()) {
+            event_it->second->Block(grad_stream);
+          } 
           NDArray::add(current_grad_data, 
                        accumulate_grad_data, 
                        grad_stream.stream_index(),
@@ -1224,8 +1239,16 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     for (const auto& input : op->inputs()) {
       NDArray input_val;
       if (_preserved_data.find(input->id()) != _preserved_data.end()) {
-        input_val = _preserved_data[input->id()];     
-      } else {
+        input_val = _preserved_data[input->id()];
+        // 如果有一些_preserved_data是switch过来的
+        // 那么我们这里进行实际的sync
+        auto event_it = _switch_param_events.find(input->id());
+        if (event_it != _switch_param_events.end()) {
+          event_it->second->Block(op->instantiation_ctx().stream());
+        }     
+      } 
+      // 其余情况从tensor2data中fetch
+      else {
         auto it = tensor2data.find(input->id());
         HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
           << "Failed to execute the \"" << op->type() << "\" operation "
@@ -1272,7 +1295,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         if (grad_accumulation.find(output->id()) == grad_accumulation.end()) {
           grad_accumulation[output->id()] = output_vals[i];
         } else {
-          grad_accumulation[output->id()] = NDArray::add(grad_accumulation[output->id()], output_vals[i], op->instantiation_ctx().stream_index);
+          NDArray::add(grad_accumulation[output->id()], output_vals[i], 
+                       op->instantiation_ctx().stream_index, grad_accumulation[output->id()]); // inplace
         }
         if (grad_accumulation_finished) {
           tensor2data[output->id()] = grad_accumulation[output->id()];
@@ -1825,10 +1849,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // 仅仅是算出grad但不更新
   // 这里需要先对grad op进行sync
   if (_run_level == RunLevel::GRAD) {
-    for (auto& event : _grad_events) {
-      event->Sync();
+    // 理论上这里我们可以不让_run_grad_events同步
+    // 假如之后切换到别的exec graph的话再在切换grad的时候再进行同步
+    for (const auto& event_it : _run_grad_events) {
+      event_it.second->Sync();
     }
-    _grad_events.clear();
+    _run_grad_events.clear();
     // Question: 可能单独设计接口指定dst exec graph去切换能更快更省显存
     // 即，当前current_grad_buffer切换到dst exec graph后再加到accumulate_grad_buffer上
     // 但dp8逐渐切换到tp8的例子里，逐一切换和直接切换到dst并无明显区别
@@ -1853,13 +1879,24 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                          kBlockingStream,
                          current_grad_buffer_data);
           }
+          // 如果有一些累计梯度是switch过来的
+          // 那么我们这里进行实际的sync
+          for(const auto& event_it : _switch_grad_events) {
+            event_it.second->Sync();
+          } 
+          // 当前的计算的梯度也需要sync
+          for(const auto& event_it : _run_grad_events) {
+            event_it.second->Sync();
+          } 
           NDArray::add(current_grad_buffer_data, 
                        accumulate_grad_buffer_data, 
                        kBlockingStream,
                        accumulate_grad_buffer_data);
         }
         // 释放当前grad
-        _current_grad_buffer->Free();
+        // 2024.3.3 update
+        // 把current grad buffer的清理放在需要热切换的时候
+        // _current_grad_buffer->Free();
       }
     } 
     // 为节省显存峰值，可以不使用current_grad_buffer
@@ -1871,7 +1908,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     SwitchExecGraph::ProfileMemory(name() + " run GRAD end");
     return {};
   }
-  _grad_events.clear();
+  _run_grad_events.clear();
   // ********************** Run Level Check Point **********************
 
   HT_LOG_DEBUG << local_device << ": 4. get results[begin]";
@@ -1923,6 +1960,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // origin param buffer不能被清理掉
   // accumulate grad buffer如果存在需要被清理掉
   // current grad buffer需要被清理掉
+  // 2024.3.3 update
+  // 考虑到单策略alloc和free具有一定耗时
+  // 因此把transfer param buffer和current grad buffer的清理放在需要热切换的时候
   if (_run_level == RunLevel::UPDATE) {
     if (!_transfer_param_buffer->IsEmpty()) {
       HT_ASSERT(_transfer_param_buffer->IsAllocated()) 
@@ -1940,7 +1980,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           _preserved_data.erase(data_it);
         }
       }
-      _transfer_param_buffer->Free();
+      // _transfer_param_buffer->Free();
     }
     if (_accumulate_grad_buffer->IsAllocated()) {
       // 已经对fetches sync过了
@@ -1950,7 +1990,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (_use_current_grad_buffer) {
       HT_ASSERT(_current_grad_buffer->IsAllocated())
         << "current grad buffer should be allocated in RunLevel::UPDATE";
-      _current_grad_buffer->Free();
+      // _current_grad_buffer->Free();
     }
     SwitchExecGraph::ProfileMemory(name() + " run UPDATE end");
   }

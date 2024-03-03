@@ -481,6 +481,15 @@ class Graph {
   static void 
   ReplaceInput(Operator& op, size_t input_index, Tensor& new_input) {
     auto& old_input = op->_inputs[input_index];
+    // stride may not be equal
+    // since we need to replace the uncontiguous tensor
+    HT_ASSERT(old_input->shape() == new_input->shape())
+      << "ReplaceInput can only used when the new tensor shape is equal to the old one"
+      << ", but the new tensor " << new_input << " shape is " << new_input->shape()
+      << " and the old tensor " << old_input << " shape is " << old_input->shape();
+    if (old_input->symbolic()) {
+      new_input->copy_symbolic_shape(old_input->symbolic_shape());
+    }
     old_input->DelConsumer(op);
     op->_inputs[input_index] = new_input;
     new_input->AddConsumer(op);
@@ -489,10 +498,17 @@ class Graph {
   static void 
   ReplaceOutput(Operator& op, size_t output_index, Tensor& new_output) {
     auto& old_output = op->_outputs[output_index];
-    HT_ASSERT(old_output->meta() == new_output->meta())
-      << "ReplaceOutput can only used when the new tensor meta is equal to the old one";
+    // stride may not be equal
+    // since we need to replace the uncontiguous tensor
+    HT_ASSERT(old_output->shape() == new_output->shape())
+      << "ReplaceOutput can only used when the new tensor shape is equal to the old one"
+      << ", but the new tensor " << new_output << " shape is " << new_output->shape()
+      << " and the old tensor " << old_output << " shape is " << old_output->shape();
     HT_ASSERT(old_output->num_consumers() == 0)
       << "ReplaceOutput can only used when the old tensor has no consumers (guarantee the safeness of topo)";
+    if (old_output->symbolic()) {
+      new_output->copy_symbolic_shape(old_output->symbolic_shape());
+    }
     op->_outputs[output_index] = new_output;
     new_output->set_producer_id(op->id());
   }

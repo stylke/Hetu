@@ -183,7 +183,8 @@ void CUDACachingMemoryPool::EmptyCache() {
 }
 
 DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
-                                               DataPtrDeleter deleter) {
+                                               DataPtrDeleter deleter,
+                                               const Stream& stream) {
   HT_VALUE_ERROR_IF(ptr == nullptr || num_bytes == 0)
     << "Borrowing an empty storage is not allowed";
   HT_VALUE_ERROR_IF(!deleter)
@@ -193,7 +194,7 @@ DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
   WatchEvents();
   // Note: The borrowed memory must be ready, so we use blocking stream here
   DataPtr data_ptr{ptr, num_bytes, device(), next_id()};
-  Stream borrow_stream = Stream(device(), kBlockingStream);
+  Stream borrow_stream = stream.is_defined() ? stream : Stream(device(), kBlockingStream);
   uint64_t borrow_at = next_clock();
   auto insertion = _data_ptr_info.emplace(data_ptr.id,
                                           CudaDataPtrInfo(data_ptr.ptr, data_ptr.size,
@@ -222,6 +223,7 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
 
   // method 1: for borrow data we free it directly
   // we should block the used streams here
+  /*
   if (info.deleter) {
     // Stream::unpack(info.alloc_stream).Sync();
     auto& used_streams = info.used_streams;
@@ -232,6 +234,7 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     _data_ptr_info.erase(it);
     return;
   }
+  */
 
   // method 2: move borrow data actual free to WatchEvents()
   // we only record the free event here

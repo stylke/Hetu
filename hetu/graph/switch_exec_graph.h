@@ -213,8 +213,13 @@ class ParamBuffer {
       HT_RUNTIME_ERROR << "Can't find tensor " << tensor << " in the ParamBuffer " << _name;
     }
 
-    void Alloc(const Stream& stream, bool use_nccl = false, ncclComm_t comm = nullptr); // stream is unused actually (borrow data must use kBlockingStream)
+    void Alloc(const Stream& stream, 
+               bool use_nccl = false, 
+               ncclComm_t comm = nullptr,
+               bool use_async = false); // stream is unused actually (cudaMallocAsync is tooooo slow!)
+
     void Free();
+    
     void Bind(const std::shared_ptr<NDArrayStorage>& storage); // bind to a customized storage rather than alloc by itself
 
   protected:
