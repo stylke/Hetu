@@ -3,7 +3,7 @@ import hetu as ht
 from hetu_gpt_ds_parallel import GPTLMHeadModel
 from hetu.nn.modules.parallel_ds import config2ds
 from gpt_config import GPTConfig
-from load_data import DataLoaderForGPT
+from data_utils import GPTJsonDataset, get_mask_and_position_ids, build_pretraining_data_loader
 import numpy as np
 import time
 import argparse
@@ -14,15 +14,16 @@ from queue import Queue
 local_device = None
 all_devices = None
 
-def distributed_init(use_two_node: bool = False):
-    if use_two_node:
+def distributed_init(use_multi_node: bool = False):
+    if use_multi_node:
         hostname = socket.gethostname()
-        if hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-master-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-0'
-        elif hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-worker-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-1'
-        else:
-            raise ValueError(f"Unknown hostname: {hostname}")
+        os.environ['HETU_LOCAL_HOSTNAME'] = hostname
+        #if hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-master-0':
+        #    os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-0'
+        #elif hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-worker-0':
+        #    os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-1'
+        #else:
+        #    raise ValueError(f"Unknown hostname: {hostname}")
 
     global local_device, all_devices
     ht.init_comm_group(8)
@@ -54,10 +55,24 @@ def read_ds_parallel_config(args):
     # print(f'{local_device}: ds_parallel_config: {ds_parallel_config}')
     return ds_parallel_config
 
+def train_dataset_provider(args):
+    """Build train dataset."""
+    train_dataset = GPTJsonDataset(
+        json_file=args.json_file,
+        key=args.json_key,
+        max_seq_len=args.seq_length,
+        vocab_file=args.vocab_file,
+        merge_file=args.merge_file)
+    return train_dataset
+
+def train_data_iterator(dataset, consumed_samples, mbs, dp_rank, dp_size):
+    # print(f'new dataloader: consumed_samples = {consumed_samples}')
+    train_dataloader = build_pretraining_data_loader(dataset, consumed_samples, mbs, dp_rank, dp_size)
+    train_data_iterator = iter(train_dataloader)
+    return train_data_iterator
+
 def pretrain(args):
     ds_parallel_config = read_ds_parallel_config(args)
-    num_epochs = args.epochs
-    lr = args.lr
 
     config = GPTConfig(vocab_size=args.vocab_size, 
                        n_positions=args.seq_length,
@@ -72,22 +87,8 @@ def pretrain(args):
                        attn_pdrop=args.dropout_prob,
                        activation_function=args.hidden_act,
                        global_batch_size=args.global_batch_size,
-                       num_micro_batches=args.num_micro_batches,
                        use_flash_attn=args.use_flash_attn,
                        )
-    # Input data file names definition
-    # dict_seqlen2predlen = {128:20, 512:80}
-    # assert config.seq_len == 128 or config.seq_len == 512, "seq_len must be 128 or 512, got " + config.seq_len
-    # pred_len = dict_seqlen2predlen[config.max_position_embeddings]
-    pred_len = config.seq_len
-    dataset = args.dataset
-    if dataset not in ['wikicorpus_en', 'wiki_books']:
-        raise(NotImplementedError)
-    # file_dir = '../bert/data/hdf5_lower_case_1_seq_len_128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/%s/'%dataset
-    file_dir = './data/'    
-    file_name_format = dataset + '_training_%d.hdf5'
-    train_file_num = 1
-    train_files = [file_dir + file_name_format%file_id for file_id in range(train_file_num)]
 
     # simple check for gpt blocks range
     ranges = []
@@ -103,21 +104,22 @@ def pretrain(args):
     label_ds, label_device_group = config2ds(ds_parallel_config['label'])
     # print(f'input_ds: {input_ds}, label_ds: {label_ds}')
     
-    micro_batch_size = config.global_batch_size // config.num_micro_batches
-    dp_size = config.global_batch_size // input_ds.get_dim(0)
-    # print(f'''{local_device}: 3d parallel config: 
-    #       global_batch_size={config.global_batch_size}, num_micro_batches={config.num_micro_batches}, micro_batch_size={micro_batch_size}, dp_size={dp_size},
-    #       num_layers={config.num_hidden_layers}, hidden_size={config.hidden_size}, num_heads={config.num_attention_heads}, seq_length={config.n_positions}''')
-        
-    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=input_ds, device_group=input_device_group, name='input_ids')
-    token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=input_ds, device_group=input_device_group, name='token_type_ids')
-    attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[micro_batch_size, config.seq_len], ds=input_ds, device_group=input_device_group, name='attention_mask')
-    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=label_ds, device_group=label_device_group, name='masked_lm_labels')
+    global_batch_size = args.global_batch_size
+    micro_batch_size = args.micro_batch_size
+    seq_len = args.seq_length
+
+    dp_size = input_ds.get_dim(0)
+    mbs_times_dp = micro_batch_size * dp_size    
+
+    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='input_ids')
+    # token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='token_type_ids')
+    attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='attention_mask')
+    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=label_ds, device_group=label_device_group, name='masked_lm_labels')
 
     print(f'{local_device}: build model begin...')
-    loss, lm_logits = model(input_ids=input_ids,
+    loss = model(input_ids=input_ids,
                             attention_mask=attention_mask,
-                            token_type_ids=token_type_ids,
+                            # token_type_ids=token_type_ids,
                             labels=masked_lm_labels)
     print(f'{local_device}: build model end...')
 
@@ -129,8 +131,13 @@ def pretrain(args):
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
 
+    print(f'{local_device}: build dataset begin...')
+    train_dataset = train_dataset_provider(args)
+    print(f'{local_device}: build dataset end...')
+
     # return
-    # device in same dp_group will read the same batch data
+    # device in same dp_group will read the same batch data, idx=-1 means no need to read data
+    dup_group_idx, dup_group_num = -1, -1
     if input_device_group.contains(local_device):
         local_device_idx = input_device_group.get_index(local_device)
         dup_group_idx = input_ds.get_dup_group_index(local_device_idx)
@@ -140,45 +147,71 @@ def pretrain(args):
         dup_group_idx = label_ds.get_dup_group_index(local_device_idx)
         dup_group_num = label_ds.get_dim(0)
     else:
-        raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
-    # print(f'local deivce: {local_device}, local_device_idx: {local_device_idx}, dup_group_idx: {dup_group_idx}, dup_group_num: {dup_group_num}')
+        dup_group_num = input_ds.get_dim(0)
 
-    global_step_num = 0
-    for ep in range(num_epochs):
-        step_num = 0
-        for train_file in train_files:
-            # walkaround: dataloader读取来的seq_len必定是128的, 这里暂时手动处理下
-            # dataloader = DataLoaderForGPT(train_file, dp_size, pred_len)
-            required_batch_size = dp_size * config.seq_len // 128
-            dataloader = DataLoaderForGPT(train_file, required_batch_size, pred_len)
-            # todo: 保证dataloader.batch_num是dp的倍数
-            for i in range(dataloader.batch_num):
-                if i % dup_group_num != dup_group_idx:
-                    continue
-                start_time = time.time()
-                batch_data = dataloader.get_batch(i)
+    dp_rank = dup_group_idx
+    dp_size = dup_group_num
+    gbs_per_dp = global_batch_size // dp_size
+    mbs_times_dp = micro_batch_size * dp_size
+    assert global_batch_size % mbs_times_dp == 0, \
+        f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
+    num_micro_batches = global_batch_size // mbs_times_dp
+    print(f'{local_device}: dp_rank={dp_rank}, dp_size={dp_size}, gbs={global_batch_size}, mbs={micro_batch_size}, num_micro_batches={num_micro_batches}')
+
+    consumed_samples = 0
+    if dp_rank != -1:
+        train_iter = train_data_iterator(train_dataset, consumed_samples, micro_batch_size, dp_rank, dp_size) # need cache?
+    else:
+        train_iter = None
+
+    for ep in range(args.epochs):
+        for step in range(args.steps):
+            # load data for each dp
+            if train_iter:
+                micro_batches = []
+                for _ in range(num_micro_batches):
+                    micro_batch = next(train_iter)
+                    micro_batches.append(micro_batch)
+                micro_batches = np.concatenate(micro_batches, axis=0) # [num_micro_batches, micro_batch_size, max_seq_len + 1]
+                # padding sequence
+                micro_batches = micro_batches.reshape(gbs_per_dp, -1) # [gbs_per_dp, seq_len + 1]
+                labels = micro_batches[:, 1:] # [gbs_per_dp, seq_len]
+                tokens = micro_batches[:, :-1] # [gbs_per_dp, seq_len]
+                _attention_mask, _position_ids = get_mask_and_position_ids(tokens, train_dataset.encoder.pad_id())
+                # _token_type_ids = np.zeros([gbs_per_dp, seq_len])
+
                 feed_dict = {
-                    input_ids: batch_data['input_ids'].astype(np.int64).reshape([dp_size, config.seq_len]),
-                    token_type_ids: batch_data['token_type_ids'].astype(np.int64).reshape([dp_size, config.seq_len]),
-                    attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([dp_size, config.seq_len]),
-                    masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([dp_size, config.seq_len]),
-                    # loss_position_sum: np.array([np.where(batch_data['masked_lm_labels'].reshape(-1, 1)!=-1)[0].shape[0]]).astype(np.float32), # shape=[1,]
+                    input_ids: tokens.astype(np.int64),
+                    # token_type_ids: _token_type_ids.astype(np.int64),
+                    attention_mask: _attention_mask.astype(np.int64),
+                    masked_lm_labels: labels.astype(np.int64),
                 }
-                results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
-                end_time = time.time()
-                if label_device_group.contains(local_device):
-                    loss_out = results[0].numpy(force=True).mean()
-                    print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
-                step_num += 1
-                global_step_num += 1
-                # return
-                # if global_step_num == 20:
-                #     return
+            else: # fake data; feed_dict={} will cause segment fault?
+                feed_dict = {
+                    input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    # token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
+                    masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                }
+            # run exec graph
+            start_time = time.time()
+            results = train_op.graph.run(loss_mean, 
+                                        [loss_mean, train_op], 
+                                        feed_dict = feed_dict, 
+                                        num_micro_batches = num_micro_batches)
+            end_time = time.time()
+            consumed_samples += global_batch_size
+            if label_device_group.contains(local_device):
+                loss_out = results[0].numpy(force=True).mean()
+                print('%s: [Epoch %d] (Iteration %d, consumed_samples = %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step, consumed_samples, loss_out, end_time-start_time))
+
+                if step == 10 and dp_rank == 0:
+                    os.system('nvidia-smi')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
+        "--use_multi_node", action="store_true", help="use multi node (like 2x8 gpus) to run script."
     )
     parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'
@@ -190,10 +223,22 @@ if __name__ == '__main__':
         "--global_batch_size", type=int, default=64, help="Training batch size global"
     )
     parser.add_argument(
-        "--num_micro_batches", type=int, default=1, help="Training micro batches num for pipeline parallel"
+        "--micro_batch_size", type=int, default=2, help="Training batch size each micro batch"
     )
     parser.add_argument(
         "--dataset", type=str, default='wikicorpus_en', help="Dataset used to train."
+    )
+    parser.add_argument(
+        "--json_file", type=str, help='data json format file path'
+    )
+    parser.add_argument(
+        "--json_key", type=str, help='json key for tokens'
+    )
+    parser.add_argument(
+        "--vocab_file", type=str, help='gpt vocab file path'
+    )
+    parser.add_argument(
+        "--merge_file", type=str, help='gpt merge file path'
     )
     parser.add_argument(
         "--vocab_size", type=int, default=30522, help="Total number of vocab"
@@ -214,10 +259,15 @@ if __name__ == '__main__':
     parser.add_argument(
         "-s", "--seq_length", type=int, default=128, help="Maximum sequence len"
     )
-    parser.add_argument("-e", "--epochs", type=int,
-                        default=10, help="Number of epochs")
-    parser.add_argument("--lr", type=float, default=1e-5,
-                        help="Learning rate of adam")
+    parser.add_argument(
+        "-e", "--epochs", type=int, default=4, help="Number of epochs"
+    )
+    parser.add_argument(
+        "--steps", type=int, default=20, help="Number of steps for each epoch",
+    )
+    parser.add_argument(
+        "--lr", type=float, default=1e-5, help="Learning rate of adam"
+    )
     parser.add_argument(
         "--adam_weight_decay", type=float, default=0.01, help="Weight_decay of adam"
     )
@@ -234,7 +284,7 @@ if __name__ == '__main__':
         "--bf16", action="store_true", help="Use bfloat16."
     )
     args = parser.parse_args()
-    distributed_init(args.use_two_node)
+    distributed_init(args.use_multi_node)
     with ht.graph("define_and_run"):
         if args.bf16:
             precision = "ht.bfloat16"

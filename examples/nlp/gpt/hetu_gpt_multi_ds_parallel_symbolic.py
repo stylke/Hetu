@@ -382,6 +382,6 @@ class GPTLMHeadModel(ht.nn.Module):
             loss = ht.vocab_parallel_cross_entropy(shift_lm_logits,
                 shift_labels, ignored_index = -1, reduction = "mean")
 
-        output = (shift_lm_logits,)
-        output = ((loss,) + output) if loss is not None else output
-        return output # ((loss), (shift_lm_logits))
+        # output = (shift_lm_logits,)
+        # output = ((loss,) + output) if loss is not None else output
+        return loss # ((loss), (shift_lm_logits))

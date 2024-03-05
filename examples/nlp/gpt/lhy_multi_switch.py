@@ -167,11 +167,11 @@ def pretrain(args):
     config.seq_len_symbol = input_ids.symbolic_shape[1]
 
     # print(f'{local_device}: build model begin...')
-    loss, lm_logits = model(input_ids=input_ids,
-                            position_ids=position_ids,
-                            attention_mask=attention_mask,
-                            token_type_ids=token_type_ids,
-                            labels=masked_lm_labels)
+    loss = model(input_ids=input_ids,
+                 position_ids=position_ids,
+                 attention_mask=attention_mask,
+                 token_type_ids=token_type_ids,
+                 labels=masked_lm_labels)
     # print(f'{local_device}: build model end...')
 
     loss_mean = loss
@@ -256,7 +256,7 @@ def pretrain(args):
         }
         print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
         results = train_op.graph.run(loss_mean, 
-                                        [loss_mean, lm_logits, train_op], 
+                                        [loss_mean, train_op], 
                                         feed_dict = feed_dict, 
                                         num_micro_batches = num_micro_batches, 
                                         cur_strategy_id = strategy_id,

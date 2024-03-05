@@ -94,6 +94,14 @@ class ContextStore {
     return it->second;
   }
 
+  NDArray pop_ndarray(const std::string& key) {
+    auto it = _ctx_ndarray.find(key);
+    HT_ASSERT(it != _ctx_ndarray.end()) << "NDArray " << key << " not found";
+    NDArray result = it->second;
+    _ctx_ndarray.erase(it);
+    return result;
+  }  
+
  private:
   std::unordered_map<std::string, std::string> _ctx;
   std::unordered_map<std::string, NDArray> _ctx_ndarray;

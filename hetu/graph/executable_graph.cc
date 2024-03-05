@@ -1574,26 +1574,31 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // update op placement group = variable op placement group
       // care about the placement group binding rules based on fw_op_id in autograd code (graph.cc)
       // grad_reduce = allreduce or reduce-scatter
-      // 1. compute_op -> update_op (local_group)
+      // 1. compute_op -> (sum_op) -> update_op (local_group)
       // 2. compute_op -> grad_reduce -> update_op (local_group)
       // 3. compute_op -> sum_op -> grad_reduce -> update_op (local_group)
       // 4. compute_op -> p2p_send (group1)  p2p_recv -> update_op (group2)
       // 5. compute_op -> grad_reduce -> p2p_send (group1)  p2p_recv -> update_op (group2)
-      // 6. compute_op -> p2p_send (group1) p2p_recv -> sum_op -> (grad_reduce) -> update_op (group2)
+      // 6. compute_op -> p2p_send (group1)  p2p_recv -> sum_op -> (grad_reduce) -> update_op (group2)
 
+      // 注意：有sum op的情况下，如果不是对sum op的output做accumulation，
+      // 那么请务必把sum op的所有除了p2p recv的inputs都标注为accumulated_tensor!!!
       // local group or group2 cases (1,2,3,4,5,6)
       if (is_optimizer_update_op(op)) {
         Tensor& grad = op->input(1);
         Operator& grad_op = grad->producer();
         if (is_grad_reduce_op(grad_op) || is_sum_op(grad_op)) {
-          // case 6
+          // case 6: for sum op recv input 
           bool is_weight_share_case = false;
+          TensorList sum_inputs_except_recv;
           // share weight with dp
           if (is_sum_op(grad_op)) {
             for (auto& sum_input : grad_op->inputs()) {
               if (is_peer_to_peer_recv_op(sum_input->producer())) {
                 accumulated_ops_deque.push_back(std::ref(sum_input->producer()));
                 is_weight_share_case = true;
+              } else {
+                sum_inputs_except_recv.push_back(sum_input);
               }
             }
           }
@@ -1603,13 +1608,26 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
               if (is_peer_to_peer_recv_op(sum_input->producer())) {
                 accumulated_ops_deque.push_back(std::ref(sum_input->producer()));
                 is_weight_share_case = true;
+              } else {
+                sum_inputs_except_recv.push_back(sum_input);
               }
             }
           }
-          // case 2, 3
+          // case 6: for sum op inputs except recv
+          if (is_weight_share_case) {
+            for (auto& sum_input : sum_inputs_except_recv) {
+              accumulated_tensor.insert(sum_input->id());
+            }
+          }
+          // case 2, 3 or (case 1 with sum)
           if (!is_weight_share_case) {
-            accumulated_tensor.insert(grad_op->input(0)->id());
-            accumulated_ops_deque.push_back(std::ref(grad_op));
+            if (is_grad_reduce_op(grad_op)) {
+              accumulated_tensor.insert(grad_op->input(0)->id());
+              accumulated_ops_deque.push_back(std::ref(grad_op));
+            } else if (is_sum_op(grad_op)) { // examples: shared wte
+              accumulated_tensor.insert(grad->id());
+              accumulated_ops_deque.push_back(op_ref);
+            }
           }
         } 
         // case 4, 5
@@ -1908,7 +1926,28 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     SwitchExecGraph::ProfileMemory(name() + " run GRAD end");
     return {};
   }
+  // 说明是RunLevel::UPDATE了
+  // 提前进行一些固有map的清空（sync结果前）
+  // 这样CPU和GPU可以异步进行
   _run_grad_events.clear();
+  if (!_transfer_param_buffer->IsEmpty()) {
+    HT_ASSERT(_transfer_param_buffer->IsAllocated()) 
+      << "transfer param buffer should be allocated";
+    for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
+      auto& op = op_ref.get();
+      if (is_variable_op(op) && _parameter_ops.find(op->id()) != _parameter_ops.end()) {
+        auto it = _transfer_map.find(op->output(0)->id());
+        HT_ASSERT(it != _transfer_map.end())
+          << "The transfer map does not consist of " << op->output(0);
+        auto& transfer_param = it->second;
+        auto data_it = _preserved_data.find(transfer_param->id());
+        HT_ASSERT(data_it != _preserved_data.end())
+          << "The preserved data does not consist of " << transfer_param;
+        _preserved_data.erase(data_it);
+      }
+    }
+    // _transfer_param_buffer->Free();
+  }
   // ********************** Run Level Check Point **********************
 
   HT_LOG_DEBUG << local_device << ": 4. get results[begin]";
@@ -1964,24 +2003,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // 考虑到单策略alloc和free具有一定耗时
   // 因此把transfer param buffer和current grad buffer的清理放在需要热切换的时候
   if (_run_level == RunLevel::UPDATE) {
-    if (!_transfer_param_buffer->IsEmpty()) {
-      HT_ASSERT(_transfer_param_buffer->IsAllocated()) 
-        << "transfer param buffer should be allocated";
-      for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
-        auto& op = op_ref.get();
-        if (is_variable_op(op) && _parameter_ops.find(op->id()) != _parameter_ops.end()) {
-          auto it = _transfer_map.find(op->output(0)->id());
-          HT_ASSERT(it != _transfer_map.end())
-            << "The transfer map does not consist of " << op->output(0);
-          auto& transfer_param = it->second;
-          auto data_it = _preserved_data.find(transfer_param->id());
-          HT_ASSERT(data_it != _preserved_data.end())
-            << "The preserved data does not consist of " << transfer_param;
-          _preserved_data.erase(data_it);
-        }
-      }
-      // _transfer_param_buffer->Free();
-    }
     if (_accumulate_grad_buffer->IsAllocated()) {
       // 已经对fetches sync过了
       // 这里直接free即可

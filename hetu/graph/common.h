@@ -76,6 +76,6 @@ class SwitchExecGraph;
 
 class ParamBuffer;
 
-#define HT_MAX_NUM_MICRO_BATCHES (128)
+#define HT_MAX_NUM_MICRO_BATCHES (512)
 } // namespace graph
 } // namespace hetu
