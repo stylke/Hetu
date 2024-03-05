@@ -154,6 +154,32 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
   return outputs;
 }
 
+NDArray OpInterface::DoAllocOutput(Operator& op, const NDArrayList& inputs,
+                                   size_t idx, RuntimeContext& runtime_ctx) const {
+  auto output_size = op->num_outputs();
+  HT_ASSERT(idx < output_size)
+  << "Output index " << idx << " is out of range for op " << op
+  << " while allocating outputs";
+
+  // question: will tensor shape != NDArray shape happen in any situation
+  const auto& output_shape = runtime_ctx.get_runtime_shape(op->output(idx)->id());
+  NDArray output = NDArray::empty(output_shape,
+                                  op->instantiation_ctx().placement,
+                                  op->output(idx)->dtype(),
+                                  op->instantiation_ctx().stream_index);
+  // for some ops that rely on symbolic shape
+  if (op->output(idx)->symbolic()) {
+    HT_LOG_TRACE << ": exec op " << op 
+      << " output " << idx << " has " << op->output(idx)->symbolic_shape();
+    if (is_SyShape_leaf(op->output(idx)->symbolic_shape())) {
+      op->output(idx)->set_symbolic_shape(output_shape);
+      HT_LOG_TRACE << ": set symbolic shape of exec op " << op 
+        << " output " << idx << " to " << output_shape;
+    }
+  }
+  return output;
+}
+
 OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
              std::shared_ptr<OpInterface> body, TensorList inputs,
              OpMeta op_meta)

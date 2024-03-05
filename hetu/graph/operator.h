@@ -330,6 +330,9 @@ class OpInterface : public shared_ptr_target {
   virtual NDArrayList DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                                      RuntimeContext& runtime_ctx) const;
 
+  virtual NDArray DoAllocOutput(Operator& op, const NDArrayList& inputs,
+                                size_t idx, RuntimeContext& runtime_ctx) const;
+
   virtual void DoCompute(Operator& op, const NDArrayList& inputs,
                          NDArrayList& outputs,
                          RuntimeContext& runtime_ctx) const = 0;

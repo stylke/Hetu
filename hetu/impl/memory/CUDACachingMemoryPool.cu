@@ -84,6 +84,7 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
     // If yes, we shall free/re-use some cached memories on other streams.
     hetu::cuda::CUDADeviceGuard guard(device().index());
     void* ptr;
+    HT_LOG_DEBUG << "cuda malloc " << aligned_num_bytes << " bytes";
     CudaMalloc(&ptr, aligned_num_bytes);
     data_ptr = {ptr, aligned_num_bytes, device(), next_id()};
     _reserved += aligned_num_bytes;

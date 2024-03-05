@@ -121,10 +121,10 @@ DECLARE_KERNEL_CPU_AND_CUDA(DivElewise, const NDArray&, const NDArray&,
 DECLARE_KERNEL_CPU_AND_CUDA(Dot, const NDArray&, const NDArray&,
                             NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Dropout, const NDArray&, double, uint64_t, NDArray&,
-                            const Stream&);
+                            NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(DropoutGradient, const NDArray&, const NDArray&,
                             double, NDArray&, const Stream&);
-DECLARE_KERNEL_CPU_AND_CUDA(Dropout2d, const NDArray&, double, uint64_t,
+DECLARE_KERNEL_CPU_AND_CUDA(Dropout2d, const NDArray&, double, uint64_t, NDArray&,
                             NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Dropout2dGradient, const NDArray&, const NDArray&,
                             double, NDArray&, const Stream&);

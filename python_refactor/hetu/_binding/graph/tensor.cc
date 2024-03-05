@@ -247,6 +247,23 @@ PyObject* PyTensor_requires_grad(PyTensor* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_set_requires_grad(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "set_requires_grad(bool requires_grad=false)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    bool requires_grad = parsed_args.get_bool_or_default(0);
+    self->tensor->set_requires_grad(requires_grad);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  Py_RETURN_NONE;
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_distributed_states(PyTensor* self) {
   HT_PY_FUNC_BEGIN
   return PyDistributedStates_New(self->tensor->get_distributed_states());  
@@ -502,6 +519,7 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
     {"symbolic", (PyCFunction) PyTensor_symbolic, METH_NOARGS, nullptr }, 
     {"is_contiguous", (PyCFunction) PyTensor_is_contiguous, METH_NOARGS, nullptr },
+    {"set_requires_grad", (PyCFunction) PyTensor_set_requires_grad, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"_make_recompute", (PyCFunction) PyTensor_make_recompute, METH_VARARGS | METH_KEYWORDS, nullptr },
     {nullptr}

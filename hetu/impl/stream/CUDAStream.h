@@ -95,6 +95,7 @@ class CUDAEvent final : public Event {
       return 0;
     } else {
       float ms;
+      hetu::cuda::CUDADeviceGuard guard(device().index());
       CudaEventElapsedTime(&ms, e._event, _event);
       return static_cast<int64_t>(ms * 1000000);
     }

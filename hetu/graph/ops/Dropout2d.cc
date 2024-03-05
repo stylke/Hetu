@@ -20,21 +20,28 @@ void Dropout2dOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
   }
   HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
                                 hetu::impl::Dropout2d, inputs.at(0), 1 - keep_prob(),
-                                seed, outputs.at(0), op->instantiation_ctx().stream());
+                                seed, outputs.at(0), outputs.at(1), op->instantiation_ctx().stream());
 };
 
 NDArrayList Dropout2dOpImpl::DoCompute(Operator& op,
                                        const NDArrayList& inputs,
                                        RuntimeContext& ctx) const {
-  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  NDArrayList outputs;
+  if (inplace()) {
+    outputs = inputs;
+    outputs.push_back(DoAllocOutput(op, inputs, 1, ctx));
+  } else {
+    outputs = DoAllocOutputs(op, inputs, ctx);
+  }
   DoCompute(op, inputs, outputs, ctx);
   return outputs;
 }
 
 TensorList Dropout2dOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  return {MakeDropout2dGradientOp(grad_outputs.at(0), op->output(0),
-                                  keep_prob(), inplace(),
-                                  op->grad_op_meta().set_name(op->grad_name()))};
+  return {op->requires_grad(0) ? MakeDropout2dGradientOp(grad_outputs.at(0),
+                                  op->output(0), keep_prob(), inplace(),
+                                  op->grad_op_meta().set_name(op->grad_name()))
+                               : Tensor()};
 }
 
 void Dropout2dOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
@@ -54,13 +61,18 @@ void Dropout2dGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                         RuntimeContext& ctx) const {
   HT_DISPATCH_KERNEL_CUDA_ONLY(
     op->instantiation_ctx().placement.type(), type(), hetu::impl::Dropout2dGradient,
-    inputs.at(0), inputs.at(1), 1 - keep_prob(), outputs[0], op->instantiation_ctx().stream());
+    inputs.at(0), inputs.at(1), 1 - keep_prob(), outputs.at(0), op->instantiation_ctx().stream());
 }
 
 NDArrayList
 Dropout2dGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                    RuntimeContext& ctx) const {
-  NDArrayList outputs = fw_inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  NDArrayList outputs;
+  if (fw_inplace()) {
+    outputs.push_back(inputs[0]);
+  } else {
+    outputs.push_back(DoAllocOutput(op, inputs, 0, ctx));
+  }
   DoCompute(op, inputs, outputs, ctx);
   return outputs;
 }
@@ -81,13 +93,12 @@ Tensor MakeDropout2dInplaceOp(Tensor input, double keep_prob,
           std::move(op_meta))->output(0);
 }
 
-Tensor MakeDropout2dGradientOp(Tensor grad_output,
-                               Tensor output, double keep_prob,
-                               bool fw_inplace,
+Tensor MakeDropout2dGradientOp(Tensor grad_output, Tensor mask,
+                               double keep_prob, bool fw_inplace,
                                OpMeta op_meta) {
   return Graph::MakeOp(
           std::make_shared<Dropout2dGradientOpImpl>(keep_prob, fw_inplace),
-          {std::move(grad_output), std::move(output)},
+          {std::move(grad_output), std::move(mask)},
           std::move(op_meta))->output(0);
 }
 

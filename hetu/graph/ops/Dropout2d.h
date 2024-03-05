@@ -27,7 +27,9 @@ protected:
   DoInferMeta(const TensorList& inputs) const override {
     HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = inputs[0]->meta();
-    return {output_meta};
+    NDArrayMeta mask_meta = inputs[0]->meta();
+    mask_meta.set_dtype(DataType::BOOL);
+    return {output_meta, mask_meta};
   }
 
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
@@ -81,7 +83,6 @@ class Dropout2dGradientOpImpl final : public UnaryGradientOpImpl {
 protected:
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     NDArrayMeta output_meta = inputs[0]->meta();
     return {output_meta};
   }
@@ -94,7 +95,6 @@ protected:
                         RuntimeContext& runtime_ctx) const override;
 
   double _keep_prob;
-
   bool _fw_inplace;
 
  public:
@@ -108,9 +108,8 @@ protected:
   }
 };
 
-Tensor MakeDropout2dGradientOp(Tensor grad_output,
-                               Tensor output, double keep_prob,
-                               bool fw_inplace,
+Tensor MakeDropout2dGradientOp(Tensor grad_output, Tensor mask,
+                               double keep_prob, bool fw_inplace,
                                OpMeta op_meta = OpMeta());
 
 } // namespace graph
