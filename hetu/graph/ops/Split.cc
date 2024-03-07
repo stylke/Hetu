@@ -7,11 +7,9 @@
 namespace hetu {
 namespace graph {
 
-// 这个算子其实并不需要symbolic方法
-// 其只会在通信时使用
+// need symbolic shape
 Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
                    const HTShape& splits, OpMeta op_meta) {
-  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << op_meta.name << "type 1: use symbolic method";
   HT_ASSERT(input->has_shape());
   // get begin_pos, output_shape
   HT_ASSERT(axes.size() == splits.size());
@@ -24,8 +22,9 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
 
   // Split算子在make时，要将输入的tensor设置成symbolic的，之后shape发生改变时，
   // 直接overwrite该tensor中的symbolic shape的value即可，
-  // 后续slice算子的shape均会发生改变
-  input->init_symbolic_shape(); // leaf
+  if (!input->symbolic()) {
+    input->init_symbolic_shape(); // leaf
+  }
   const SyShape& ori_shape = input->symbolic_shape(); 
 
   int ndim = ori_shape.size();
@@ -44,15 +43,13 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
   }
 
   // 将输出的tensor设置成symbolic的
-  auto output = Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape),
+  auto output = Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), std::move(output_shape)),
                       {std::move(input)}, std::move(op_meta))->output(0);
-  output->copy_symbolic_shape(std::move(output_shape)); // not leaf
-  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 1: finish making";
+  // output->copy_symbolic_shape(std::move(output_shape)); // not leaf
   return output;
 }
 
-// 这个算子不需要symbolic方法
-// 其只会在通信时使用
+// need symbolic shape
 Tensor MakeSplitOp(Tensor input, const HTShape& indices,
                    const HTShape& splits, OpMeta op_meta) {
   HT_ASSERT(input->has_shape());
@@ -63,10 +60,13 @@ Tensor MakeSplitOp(Tensor input, const HTShape& indices,
     HT_ASSERT(indices[i] >= 0 && indices[i] < splits[i]);
   }
 
-  auto& ori_shape = input->shape(); 
+  if (!input->symbolic()) {
+    input->init_symbolic_shape(); // leaf
+  }
+  const SyShape& ori_shape = input->symbolic_shape(); 
   HT_ASSERT(len == ori_shape.size()) << "size should be equal";
-  HTShape begin_pos(len, 0);
-  HTShape output_shape(len, 0);
+  SyShape begin_pos(len, 0);
+  SyShape output_shape(len);
 
   for (int i = 0; i < len; ++i) {
     auto part_size = ori_shape[i] / splits[i];
@@ -80,19 +80,18 @@ Tensor MakeSplitOp(Tensor input, const HTShape& indices,
 
   auto output = Graph::MakeOp(std::make_shared<SliceOpImpl>(std::move(begin_pos), std::move(output_shape)),
                       {std::move(input)}, std::move(op_meta))->output(0);
-  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 2: finish making";
   return output;
 }
 
 // 这里只能做到在单一的dim上的切分
 TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
                        OpMeta op_meta) {
-  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 3: " 
-    << "input_shape = " << input->shape() << " and num_chunks = " << num_chunks;
   HT_ASSERT(input->has_shape());
   dim = NDArrayMeta::ParseAxis(dim, input->ndim());
 
-  input->init_symbolic_shape(); // leaf
+  if (!input->symbolic()) {
+    input->init_symbolic_shape(); // leaf
+  }
   const SyShape& ori_shape = input->symbolic_shape(); 
 
   auto chunk_size = ori_shape[dim] / num_chunks;
@@ -107,18 +106,17 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
     begin_pos[dim] = chunk_sum;
     chunk_sum = chunk_sum + chunk_size;
     outputs.emplace_back(Graph::MakeOp(
-                         std::make_shared<SliceOpImpl>(std::move(begin_pos), output_shape),
+                         std::make_shared<SliceOpImpl>(std::move(begin_pos), std::move(output_shape)),
                          {input}, op_meta)->output(0));
-    outputs[i]->copy_symbolic_shape(std::move(output_shape));
+    // outputs[i]->copy_symbolic_shape(std::move(output_shape));
   }
-  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " split op type 3: finish making";
   return outputs;
 }
 
 // deprecated: only used in gpt inference, before symbolic shape is realized
 TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
                        int64_t padding_axis, OpMeta op_meta) {
-  HT_LOG_WARN << "This method is almost deprecated";
+  HT_RUNTIME_ERROR << "deprecated";
   HT_ASSERT(input->has_shape());
   dim = NDArrayMeta::ParseAxis(dim, input->ndim());
   padding_axis = NDArrayMeta::ParseAxis(padding_axis, input->ndim());
@@ -144,7 +142,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
 // seems deprecated
 TensorList MakeSplitOp(Tensor input, const HTShape& chunks, int64_t dim,
                        OpMeta op_meta) {
-  HT_RUNTIME_ERROR << "This method is deprecated";
+  HT_RUNTIME_ERROR << "deprecated";
   HT_ASSERT(input->has_shape());
   dim = NDArrayMeta::ParseAxis(dim, input->ndim());
   int64_t chunk_sum = 0;

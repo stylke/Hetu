@@ -40,7 +40,7 @@ if [ "${TWO_NODE}" = true ]; then
             echo -e "\nswitch from $i to $j: " >> "$file"
             if [ "${USE_BF16}" = true ]; then
                 mpirun --allow-run-as-root -np 16 \
-                -H job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-master-0:8,job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-worker-0:8 \
+                -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
                 -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
                 -x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL \
                 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
@@ -68,7 +68,7 @@ if [ "${TWO_NODE}" = true ]; then
                 --switch_file "$file"
             else
                 mpirun --allow-run-as-root -np 16 \
-                -H job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-master-0:8,job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-worker-0:8 \
+                -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
                 -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
                 -x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL \
                 --output-filename logs/ds_parallel --merge-stderr-to-stdout \

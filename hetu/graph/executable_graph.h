@@ -73,62 +73,62 @@ class ExecutableGraph : public Graph {
     _stages = device_groups;
   }
 
-  void InitShapePlan(const Tensor2ShapeMap& shape_plan) {
-    if (_shape_plan.size() == 0) {
-      _shape_plan = shape_plan;
-    } else {
-      HT_LOG_WARN << "exec graph shape plan already has some shapes";
-      for (auto it = shape_plan.begin(); it != shape_plan.end(); ++it) {
-        RecordTensorShape(it->first, it->second);
-      }
-    }
+  void SetShapePlan(size_t num) {
+    HT_ASSERT(num < _shape_plan_pool.size())
+      << "plan number shouldn't exceed the size of the plan pool";
+    _active_shape_plan = num;
   }
 
-  void InitShapePlan(Tensor2ShapeMap&& shape_plan) {
-    if (_shape_plan.size() == 0) {
-      _shape_plan = std::move(shape_plan);
-    } else {
-      HT_LOG_WARN << "exec graph shape plan already has some shapes";
-      for (auto it = shape_plan.begin(); it != shape_plan.end(); ++it) {
-        RecordTensorShape(it->first, it->second);
-      }
-    }
+  void AddShapePlan(const Tensor2ShapeMap& shape_plan) {
+    _shape_plan_pool.emplace_back(shape_plan);
   }
 
-  void RecordTensorShape(const TensorId& key, const HTShape& value) {
-    auto it = _shape_plan.find(key);
-    if (it != _shape_plan.end()) {
+  void AddShapePlan(Tensor2ShapeMap&& shape_plan) {
+    _shape_plan_pool.emplace_back(std::move(shape_plan));
+  }
+
+  // 目前主要功能是
+  // 1、记录exec graph相较define graph新插入的tensor
+  // 2、记录新插入tensor的shape到当前的shape plan
+  void RecordExecTensor(const Tensor& tensor) {
+    auto& shape_plan = _shape_plan_pool.at(_active_shape_plan);
+    const auto& shape = tensor->shape();
+    // need to record the shape for all shape plans in the shape plan pool
+    // so we leverage _record_execute_tensor and do it lazily
+    _record_exec_tensors.emplace_back(tensor);
+    auto it = shape_plan.find(tensor->id());
+    if (it != shape_plan.end()) {
       // already existed, then must be equal
-      HT_ASSERT(it->second.size() == value.size())
-        << "Tensor " << key << " is already exited in shape plan but is unequal";
-      for (size_t i = 0; i < value.size(); i++) { 
-        HT_ASSERT(it->second[i] == value[i])
-          << "Tensor " << key << " is already exited in shape plan but is unequal";
+      HT_ASSERT(it->second.size() == shape.size())
+        << "Tensor " << tensor << " is already existed in shape plan but is unequal";
+      for (size_t i = 0; i < shape.size(); i++) { 
+        HT_ASSERT(it->second[i] == shape[i])
+          << "Tensor " << tensor << " is already existed in shape plan but is unequal";
       }
       return;
     }
-    _shape_plan.insert(std::make_pair(key, value));
+    shape_plan.insert(std::make_pair(tensor->id(), shape));
   }
 
-  void RecordTensorShape(const TensorId& key, HTShape&& value) {
-    auto it = _shape_plan.find(key);
-    if (it != _shape_plan.end()) {
-      // already existed, then must be equal
-      HT_ASSERT(it->second.size() == value.size())
-        << "Tensor " << key << " is already existed in shape plan but is unequal";
-      for (size_t i = 0; i < value.size(); i++) { 
-        HT_ASSERT(it->second[i] == value[i])
-          << "Tensor " << key << " is already existed in shape plan but is unequal";
-      }
-      return;
-    } 
-    _shape_plan.insert(std::make_pair(key, std::move(value)));
+  // 与RecordExecTensor功能相反
+  // 暂时用不到
+  /*
+  void EraseExecTensor(const Tensor& tensor) {
+    auto& shape_plan = _shape_plan_pool.at(_active_shape_plan);
+    const auto& shape = tensor->shape();
+    _erase_execute_tensor.emplace_back(tensor);
+    auto it = shape_plan.find(tensor->id());
+    HT_ASSERT(it != shape_plan.end())
+      << "Tensor " << tensor << " should exist in shape plan";
+    shape_plan.erase(it);
   }
+  */
 
-  const HTShape& GetTensorShape(const TensorId& key) const {
-    auto it = _shape_plan.find(key);
-    HT_ASSERT(it != _shape_plan.end())
-      << "Tensor " << key << " is not existed in current shape plan";
+  const HTShape& GetTensorShape(const Tensor& tensor) const {
+    const auto& shape_plan = _shape_plan_pool.at(_active_shape_plan);
+    auto it = shape_plan.find(tensor->id());
+    HT_ASSERT(it != shape_plan.end())
+      << "Tensor " << tensor << " is not existed in current shape plan";
     return it->second;
   }
 
@@ -183,7 +183,9 @@ class ExecutableGraph : public Graph {
 
   // plan相关
   ExecutePlan _execute_plan;
-  Tensor2ShapeMap _shape_plan;
+  std::vector<Tensor2ShapeMap> _shape_plan_pool;
+  size_t _active_shape_plan;
+  std::vector<Tensor> _record_exec_tensors;
 
   // run相关
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;

@@ -347,6 +347,7 @@ void DefineAndRunGraph::SetVariableDistributedStates(Operator& op, int32_t dp, i
 
 void DefineAndRunGraph::InstantiateTestCase(const OpRefList& topo,
                                             Tensor2ShapeMap& shape_plan) {
+  /*
   auto local_device = hetu::impl::comm::GetLocalDevice();
   static size_t instantiate_test_case = 1;
 
@@ -440,7 +441,7 @@ void DefineAndRunGraph::InstantiateTestCase(const OpRefList& topo,
   }
 
   // assign initial shape plan
-  exec_graph->InitShapePlan(std::move(exec_shape_plan));
+  exec_graph->AddShapePlan(std::move(exec_shape_plan));
   
   // wrap up all of this as an exec graph plan
   _exec_graph_plan_pool.emplace_back(std::move(exec_graph), 
@@ -450,6 +451,7 @@ void DefineAndRunGraph::InstantiateTestCase(const OpRefList& topo,
   Graph::pop_graph_ctx();
   HT_LOG_DEBUG << local_device << ": instantiate test case " << instantiate_test_case << " finished";
   instantiate_test_case++;
+  */
 }
 
 } // namespace graph

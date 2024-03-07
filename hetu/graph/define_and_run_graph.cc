@@ -37,7 +37,7 @@ void DefineAndRunGraph::ResetVariableDataInner(const Tensor& tensor,
   // Mark an add-on initializer.
   _add_on_inits[tensor->id()] = std::unique_ptr<Initializer>(init.copy());
   if (_is_active) {
-    auto& tensor_to_exec_tensor_mapping = _exec_graph_plan_pool[_active_plan].tensor_to_exec_tensor_mapping;
+    auto& tensor_to_exec_tensor_mapping = _exec_graph_plan_pool[_active_exec_plan].tensor_to_exec_tensor_mapping;
     auto it = tensor_to_exec_tensor_mapping.find(tensor->id());
     if (it != tensor_to_exec_tensor_mapping.end()) {
       // The op has been instantiated in the current active graph. Also let the executable graph reset it.
@@ -48,7 +48,7 @@ void DefineAndRunGraph::ResetVariableDataInner(const Tensor& tensor,
 
 NDArray DefineAndRunGraph::GetDetachedVariableDataInner(const Tensor& tensor) {
   if (_is_active) {
-    auto& tensor_to_exec_tensor_mapping = _exec_graph_plan_pool[_active_plan].tensor_to_exec_tensor_mapping;
+    auto& tensor_to_exec_tensor_mapping = _exec_graph_plan_pool[_active_exec_plan].tensor_to_exec_tensor_mapping;
     auto it_1 = tensor_to_exec_tensor_mapping.find(tensor->id());
     if (it_1 == tensor_to_exec_tensor_mapping.end()) {
       // The tensor is not in current active exec graph.
@@ -111,14 +111,117 @@ DeviceGroup DefineAndRunGraph::GetVariableDeviceGroupInner(const Tensor& tensor)
   return device_group;
 }
 
-void DefineAndRunGraph::Instantiate(const OpRefList& topo,
-                                    Tensor2ShapeMap& shape_plan) {
+// 推导define graph的shape plan
+// 以及exec graph的exec shape plan
+// 请注意二者的区别
+// 前者是用来进行plan匹配的（虽然目前feed dict固定实际上只用记录feed dict的shape）
+// 后者是实际exec graph执行时runtime ctx要用到的
+void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
+                                        const FeedDict& feed_dict,
+                                        Tensor2ShapeMap& feed_dict_shape) {
+  // *the logic of inferring the very first shape plan is in Instantiate()
+  // that is because MakeOp can handle most of the cases automatically
+  // InferShapePlan just aims to expand the shape plan pool for the data packing setting
+  auto local_device = hetu::impl::comm::GetLocalDevice(); // debug use
+  Tensor2ShapeMap shape_plan;
+  Tensor2ShapeMap exec_shape_plan;
+  RuntimeContext runtime_ctx{};
+  // 扫描global topo并推导新的shape plan
+  for (auto& op_ref : exec_graph_plan.global_topo) {
+    auto& op = op_ref.get();
+    // 设置placeholder（也有可能是中间的算子——具体要看feed_dict喂的是什么算子）的symbolic shape
+    bool handle_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
+      auto it = feed_dict.find(tensor->id());
+      if (it != feed_dict.end()) {
+        if (tensor->symbolic() && is_SyShape_leaf(tensor->symbolic_shape())) {
+          tensor->set_symbolic_shape(feed_dict_shape[tensor->id()]);
+          HT_LOG_DEBUG << local_device << ": set symbolic shape of " << op 
+            << " feed_dict tensor to " << feed_dict_shape[tensor->id()];
+        }
+        shape_plan[tensor->id()] = feed_dict_shape[tensor->id()];
+        return true;
+      }
+      return false;
+    });
+    if (handle_feed_dict_op) {
+      continue;
+    }
+    HTShapeList input_shapes;
+    input_shapes.reserve(op->num_inputs());
+    for (const auto& input : op->inputs()) {
+      auto it = shape_plan.find(input->id());
+      HT_ASSERT(it != shape_plan.end()) 
+        << "Something wrong, can't find the input shape from the current shape plan!";
+      input_shapes.push_back(it->second);
+    }
+    HTShapeList output_shapes = op->InferShape(input_shapes, runtime_ctx);
+    auto output_shapes_size = output_shapes.size();
+    for (size_t i = 0; i < output_shapes_size; i++) {
+      // 设置symbolic shape叶子节点的shape
+      // 其相关联的非叶子的symbolic shape可以直接由计算链条获得新的shape
+      if (op->output(i)->symbolic()) {
+        HT_LOG_TRACE << local_device << ": op " << op 
+          << " output " << i << " has " << op->output(i)->symbolic_shape();
+        if (is_SyShape_leaf(op->output(i)->symbolic_shape())) {
+          op->output(i)->set_symbolic_shape(output_shapes[i]);
+          HT_LOG_TRACE << local_device << ": set symbolic shape of " << op 
+            << " output " << i << " to " << output_shapes[i];
+        }
+      }
+      HT_LOG_TRACE << local_device << ": " << op->output(i) << " shape " << output_shapes[i];
+      auto it = shape_plan.find(op->output(i)->id());
+      HT_ASSERT(it == shape_plan.end()) 
+        << "Something wrong, the output shape should't exist in the current shape plan";
+      shape_plan.insert(std::make_pair(op->output(i)->id(), std::move(output_shapes[i]))); // move constructor
+    }
+  }
+  // define graph中已经推导得到的shape
+  for (const auto& kv : exec_graph_plan.tensor_to_exec_tensor_mapping) {
+    if (kv.second->producer()->num_outputs() == 0) {
+      // 说明该tensor只是extra linker而并不会具有shape
+      // 比如GroupOp
+      continue;
+    }
+    auto it = shape_plan.find(kv.first);
+    HT_ASSERT(it != shape_plan.end())
+      << "can't find shape of tensor " << kv.second << " in the shape plan";
+    exec_shape_plan[kv.second->id()] = it->second;
+  }
+  // exec graph中还有一些新增的shape
+  for (const auto& exec_tensor : exec_graph_plan.exec_graph->_record_exec_tensors) {
+    auto& exec_op = exec_tensor->producer();
+    HTShapeList exec_input_shapes;
+    exec_input_shapes.reserve(exec_op->num_inputs());
+    for (const auto& exec_input : exec_op->inputs()) {
+      auto it = exec_shape_plan.find(exec_input->id());
+      HT_ASSERT(it != exec_shape_plan.end()) 
+        << "Something wrong, can't find the input shape of " << exec_input
+        << " from the current exec shape plan!";
+      exec_input_shapes.push_back(it->second);
+    }
+    HTShapeList exec_output_shapes = exec_op->InferShape(exec_input_shapes, runtime_ctx);
+    auto exec_output_shapes_size = exec_output_shapes.size();
+    for (size_t i = 0; i < exec_output_shapes_size; i++) {
+      if (exec_op->output(i)->symbolic()) {
+        if (is_SyShape_leaf(exec_op->output(i)->symbolic_shape())) {
+          exec_op->output(i)->set_symbolic_shape(exec_output_shapes[i]);
+        }
+      }
+      exec_shape_plan.insert(std::make_pair(exec_op->output(i)->id(), std::move(exec_output_shapes[i]))); // move constructor
+    }
+  }
+  exec_graph_plan.shape_plan_pool.emplace_back(std::move(shape_plan));
+  exec_graph_plan.exec_graph->AddShapePlan(std::move(exec_shape_plan));
+}
+
+void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
+                                    Tensor2ShapeMap&& shape_plan) {
 
   // deprecated: Test Case - 手动切换并行方案（验证切换时间）
   char* env = std::getenv("HETU_PARALLEL_CHANGE_TEST");
   if (env != nullptr) {
     if (std::string(env) == "COST" && change_parallel_test_case >= 1) {
-      InstantiateTestCase(topo, shape_plan);
+      InstantiateTestCase(global_topo, shape_plan);
       change_parallel_test_case += 1;
       return;
     }
@@ -212,8 +315,8 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
     }
   };
 
-  HT_LOG_DEBUG << "Instantiating a " << type() << " graph with topo " << topo;
-  for (auto& op_ref : topo) {
+  HT_LOG_DEBUG << "Instantiating a " << type() << " graph with global topo " << global_topo;
+  for (auto& op_ref : global_topo) {
     auto& op = op_ref.get();
     HT_LOG_TRACE << "Creating an executable version of op " << op << " begin...";;
 
@@ -248,7 +351,9 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
                   auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
                                   {exec_inputs[i]}, OpMeta().set(exec_inputs[i]->producer()->op_meta()).set_name(exec_inputs[i]->producer()->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
                   HT_LOG_TRACE << "Map " << &transfer_map << " insert: " << exec_inputs[i]->id() << " -> " << exec_op->output(0)->id();
+                  // we have to set the exec shape plan manually before the initialization of the plan
                   exec_shape_plan[exec_op->output(0)->id()] = exec_op->output(0)->shape();
+                  exec_graph->_record_exec_tensors.emplace_back(exec_op->output(0));
                   exec_op->output(0)->set_multi_distributed_states(op->input(i)->multi_distributed_states()); // walkaround: set here by hand
                   if (_parameter_ops.find(op->input(i)->producer()->id()) != _parameter_ops.end()
                       && exec_inputs[i]->producer()->device_group().contains(local_device)) {
@@ -311,7 +416,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   }
 
   // assign fw_op_id map
-  for (auto& op_ref : topo) {
+  for (auto& op_ref : global_topo) {
     auto& op = op_ref.get();
     auto& exec_op = op_to_exec_op_mapping[op->id()];
     if (op->fw_op_id() != -1) {
@@ -320,7 +425,7 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   }
   
   // assign initial shape plan
-  exec_graph->InitShapePlan(std::move(exec_shape_plan));
+  exec_graph->AddShapePlan(std::move(exec_shape_plan));
 
   // assign param buffer, grad buffer and transfer map
   exec_graph->_origin_param_buffer = std::move(origin_param_buffer);
@@ -334,6 +439,8 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   _exec_graph_plan_pool.emplace_back(std::move(exec_graph), 
                                      std::move(op_to_exec_op_mapping),
                                      std::move(tensor_to_exec_tensor_mapping),
+                                     std::move(global_topo),
+                                     std::vector<Tensor2ShapeMap>{std::move(shape_plan)},
                                      CUR_STRATEGY_ID);
 
   Graph::pop_graph_ctx();
@@ -346,41 +453,20 @@ void DefineAndRunGraph::Instantiate(const OpRefList& topo,
   }
 }
 
-// TODO: merge two `Run` func
-NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
-                                   const FeedDict& feed_dict) {
-  HT_RUNTIME_ERROR << "NotImplementedError";
-  /*
-  bool has_uninstantiated_ops =
-    std::any_of(fetches.begin(), fetches.end(), [&](const Tensor& fetch) {
-      return _op_to_exec_op_mapping.find(fetch->producer_id()) ==
-        _op_to_exec_op_mapping.end();
-    });
-  if (has_uninstantiated_ops)
-    Instantiate();
-  TensorList exec_fetches;
-  exec_fetches.reserve(fetches.size());
-  for (const auto& fetch : fetches) {
-    exec_fetches.push_back(_tensor_to_exec_tensor_mapping[fetch->id()]);
-  }
-  FeedDict exec_feed_dict;
-  exec_feed_dict.reserve(feed_dict.size());
-  for (const auto& kv : feed_dict)
-    exec_feed_dict[_tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;
-  return _exec_graph->Run(exec_fetches, exec_feed_dict);
-  */
-}
-
 // 每次调用run都会从当前的define graph中
 // 生成/使用之前生成过的一个exec graph
 // 而只有当：
-// 1、并行策略 2、fetch的tensor 3、feed_dict的shape（包括batch_size以及seq_len等） 
+// 1、并行策略 2、fetch的tensor 
 // 与cache的某一个重合时，才会复用
 // 目前的写法下，我们认为并行策略已经在python端选择好了然后再传进来
+// 2024.3.6 update:
+// 目前一个exec graph支持多个shape plan
+// 即允许feed_dict的shape（包括batch_size以及seq_len等）可变
 NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches,
                                    const FeedDict& feed_dict, const int num_micro_batches,
                                    const int cur_strategy_id, RunLevel run_level, const double grad_scale) {
   _run_level = run_level;
+  CUR_STRATEGY_ID = static_cast<size_t>(cur_strategy_id);
   auto local_device = hetu::impl::comm::GetLocalDevice(); // only for debug use
   HT_LOG_DEBUG << local_device << ": [Graph Plan] obtain exec graph begin...";
 
@@ -395,56 +481,41 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     feed_dict_shape[kv.first] = micro_batches[0]->shape();
   }
 
-  // 匹配shape plan
-  size_t next_active_plan;
-  size_t plan_size = _shape_plan_pool.size();
-  size_t plan_scanned = 0;
-  HT_ASSERT(_exec_graph_plan_pool.size() == plan_size)
-    << "something wrong, the sizes of exec_graph_plan_pool and shape_plan_pool are mismatched";
-  // 逆向扫描能够更快地匹配到
-  for (auto i = static_cast<int32_t>(plan_size) - 1; i >= 0; --i)  {
-    const auto& shape_plan = _shape_plan_pool[i];
+  size_t next_active_exec_plan;
+  size_t next_active_shape_plan;
+  size_t exec_plan_pool_size = _exec_graph_plan_pool.size();
+  bool in_exec_plan_pool = false;
+  for (size_t i = 0; i < exec_plan_pool_size; i++)  {
     const auto& exec_graph_plan = _exec_graph_plan_pool[i];
-    bool plan_matched = true;
+    bool exec_plan_matched = true;
     // 先看strategy匹配不
     if (static_cast<size_t>(cur_strategy_id) != exec_graph_plan.strategy_id) {
-      plan_matched = false;
+      exec_plan_matched = false;
     }
     // 再看fetch匹配不
     for (const auto& fetch : fetches) {
       if (std::find(exec_graph_plan.fetches.begin(), exec_graph_plan.fetches.end(), fetch) == exec_graph_plan.fetches.end()) {
         HT_LOG_TRACE << local_device << ": exec_graph_plan fetches are " << exec_graph_plan.fetches 
           << " and the mismatch fetch is " << fetch;
-        plan_matched = false;
+        exec_plan_matched = false;
         break;
       }
     }
-    // 再看feed_dict匹配不
-    for (const auto& kv : feed_dict) {
-      if (!kv.second.is_defined()) continue;
-      auto it = shape_plan.find(kv.first);
-      // 1、有可能是feed_dict发生了改变（在依据topo生成的shape plan中没有feed dict）
-      // 2、有可能是feed_dict的shape发生了改变（shape对不上）
-      HT_LOG_TRACE << local_device << ": shape plan is " << shape_plan << " and key to match is "
-        << kv.first << ":" << feed_dict_shape[kv.first];
-      if (it == shape_plan.end() || it->second != feed_dict_shape[kv.first]) {
-        plan_matched = false;
-        break;
-      }
-    }
-    if (plan_matched) {
+    if (exec_plan_matched) {
       HT_LOG_TRACE << local_device << ": plan matched";
+      in_exec_plan_pool = true;
+      next_active_exec_plan = i;
       break;
     }
-    plan_scanned++;
   }
 
-  // 需要新增shape plan到shape plan pools
-  // 同时也需要新增exec graph plan到exec graph plan pools
-  if (plan_scanned == plan_size) {
-    HT_LOG_DEBUG << local_device << ": [Graph Plan] add a new shape plan and an exec graph to the pool begin...";
+  // 需要创建一个新的exec graph
+  // 用当前feed dict的shape先初始化一套shape plan
+  // 作为该exec graph的shape plan pool里的第一个
+  if (!in_exec_plan_pool) {
+    HT_LOG_DEBUG << local_device << ": [Graph Plan] add a new exec graph to the pool begin...";
     Tensor2ShapeMap shape_plan;
-    // feed_dict中的shape是确定的
+    // 后续会由feed_dict的shape在MakeOp时推导出所有的shape
     for (const auto& kv : feed_dict) {
       shape_plan[kv.first] = feed_dict_shape[kv.first];
     }
@@ -453,102 +524,69 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         return feed_dict.find(tensor->id()) != feed_dict.end();
       });
     };
-    OpRefList topo = Graph::TopoSort(fetches, -1, is_feed_dict_op);
-    HT_LOG_DEBUG << local_device << ": global topo of define graph is " << topo;
-
-    // deprecated, but maybe useful some day
-    // *now move all the logic of inferring shape and distributed_states to Instantiate()
-    // that is because MakeOp can handle most of the cases automatically
-    /*
-    RuntimeContext runtime_ctx(topo.size());
-    // std::unordered_set<TensorId> params;
-    // 扫描global topo并推导新的shape plan
-    for (auto& op_ref : topo) {
-      auto& op = op_ref.get();
-      // 设置placeholder（也有可能是中间的算子——具体要看feed_dict喂的是什么算子）的symbolic shape
-      bool handle_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
-        auto it = feed_dict.find(tensor->id());
-        if (it != feed_dict.end()) {
-          if (tensor->symbolic() && is_SyShape_leaf(tensor->symbolic_shape())) {
-            tensor->set_symbolic_shape(feed_dict_shape[tensor->id()]);
-            HT_LOG_DEBUG << local_device << ": set symbolic shape of " << op 
-              << " feed_dict tensor to " << feed_dict_shape[tensor->id()];
-          }
-          // 不需要给DefineAndRun graph中的tensor设置shape
-          // 有效的shape信息都在shape plan中
-          // HT_LOG_DEBUG << local_device << ": " << tensor << " set shape " << feed_dict_shape[tensor->id()];
-          // tensor->set_shape(feed_dict_shape[tensor->id()]);
-          return true;
-        }
-        return false;
-      });
-      if (handle_feed_dict_op) {
-        continue;
-      }
-      HTShapeList input_shapes;
-      input_shapes.reserve(op->num_inputs());
-      for (const auto& input : op->inputs()) {
-        auto it = shape_plan.find(input->id());
-        HT_ASSERT(it != shape_plan.end()) 
-          << "Something wrong, can't find the input shape from the current shape plan!";
-        input_shapes.push_back(it->second);
-      }
-      HTShapeList output_shapes = op->InferShape(input_shapes, runtime_ctx);
-      auto output_shapes_size = output_shapes.size();
-      for (size_t i = 0; i < output_shapes_size; i++) {
-        // 设置symbolic shape叶子节点的shape
-        // 其相关联的非叶子的symbolic shape可以直接由计算链条获得新的shape
-        if (op->output(i)->symbolic()) {
-          HT_LOG_DEBUG << local_device << ": op " << op 
-            << " output " << i << " has " << op->output(i)->symbolic_shape();
-          if (is_SyShape_leaf(op->output(i)->symbolic_shape())) {
-            op->output(i)->set_symbolic_shape(output_shapes[i]);
-            HT_LOG_DEBUG << local_device << ": set symbolic shape of " << op 
-              << " output " << i << " to " << output_shapes[i];
-          }
-        }
-        // 不需要给DefineAndRun graph中的tensor设置shape
-        // 有效的shape信息都在shape plan中
-        HT_LOG_WARN << local_device << ": " << op->output(i) << " shape " << output_shapes[i];
-        // op->output(i)->set_shape(output_shapes[i]);
-        auto it = shape_plan.find(op->output(i)->id());
-        HT_ASSERT(it == shape_plan.end()) 
-          << "Something wrong, the output shape should't exist in the current shape plan";
-        shape_plan.insert(std::make_pair(op->output(i)->id(), std::move(output_shapes[i]))); // move constructor
-      }
-    }
-    */
-
-    // set define_and_run_graph.CUR_STRATEGY_ID = dst id, 
-    // and then do instantiate, if not set, use default id = 0
-    CUR_STRATEGY_ID = static_cast<size_t>(cur_strategy_id);
-    HT_LOG_DEBUG << "use CUR_STRATEGY_ID = " << CUR_STRATEGY_ID << " for new executable graph...";
+    OpRefList global_topo = Graph::TopoSort(fetches, -1, is_feed_dict_op);
+    HT_LOG_DEBUG << local_device << ": global topo of define graph is " << global_topo;
     // Instantiate会将新的exec_graph_plan加入pool中
-    Instantiate(topo, shape_plan);
-    _shape_plan_pool.push_back(std::move(shape_plan));
+    Instantiate(std::move(global_topo), std::move(shape_plan));
     // 补上fetches（其在instantiate中不需要用到，但是plan需要进行记录）
     auto& new_plan = _exec_graph_plan_pool.back();
     new_plan.fetches = fetches;
-    // 新的plan就是pool里的最后一个
-    next_active_plan = plan_scanned; // _exec_graph_plan_pool.size() - 1
+    // 新的exec plan就是exec plan pool中的最后一个
+    next_active_exec_plan = _exec_graph_plan_pool.size() - 1;
+    // 新的shape plan就是shape plan pool中的第一个
+    next_active_shape_plan = 0; 
     HT_LOG_DEBUG << local_device << ": [Graph Plan] add a new shape plan and an exec graph to the pool end...";
-  } else {
-    // 因为是从后到前扫描
-    next_active_plan = _shape_plan_pool.size() - 1 - plan_scanned;
+  } 
+  // 命中pool中已有的exec graph
+  // 但可能feed dict不一样
+  // 这种情况下我们不需要生成新的exec graph
+  // 但需要推导新的shape plan
+  else {
+    auto& exec_graph_plan = _exec_graph_plan_pool[next_active_exec_plan];
+    auto shape_plan_pool_size = exec_graph_plan.shape_plan_pool.size();
+    bool in_shape_plan_pool = false;
+    for (size_t i = 0; i < shape_plan_pool_size; i++) {
+      const auto& shape_plan = exec_graph_plan.shape_plan_pool[i];
+      bool shape_plan_matched = true;
+      for (const auto& kv : feed_dict) {
+        if (!kv.second.is_defined()) continue;
+        auto it = shape_plan.find(kv.first);
+        // 1、有可能是feed_dict发生了改变（在依据global topo生成的shape plan中没有feed dict）
+        // 2、有可能是feed_dict的shape发生了改变（shape对不上）
+        HT_LOG_TRACE << local_device << ": shape plan is " << shape_plan << " and key to match is "
+          << kv.first << ":" << feed_dict_shape[kv.first];
+        if (it == shape_plan.end() || it->second != feed_dict_shape[kv.first]) {
+          shape_plan_matched = false;
+          break;
+        }
+      }
+      if (shape_plan_matched) {
+        in_shape_plan_pool = true;
+        next_active_shape_plan = i;
+        break;
+      }
+    }
+    // 如果不在shape_plan_pool中
+    // 需要推导新的shape plan
+    if (!in_shape_plan_pool) {
+      DeduceShapePlan(exec_graph_plan, feed_dict, feed_dict_shape);                                            
+      // 新的shape plan就是shape plan pool中的最后一个
+      next_active_shape_plan = exec_graph_plan.shape_plan_pool.size() - 1;
+    }
   }
 
-  // 需要切换plan
-  if (!_is_active || _active_plan != next_active_plan) {
+  // 需要切换exec graph
+  if (!_is_active || _active_exec_plan != next_active_exec_plan) {
     HT_LOG_DEBUG << local_device << ": [Graph Plan] Context switch to the new exec plan begin...";
     // 热切换
     if (_is_active) {
-      auto key = std::make_pair(_active_plan, next_active_plan);
+      auto key = std::make_pair(_active_exec_plan, next_active_exec_plan);
       if (_param_switcher_pool.find(key) == _param_switcher_pool.end()) {
-        _param_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_plan, next_active_plan);
-        _grad_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_plan, next_active_plan);
+        _param_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan);
+        _grad_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan);
       }
       // 旧的exec graph
-      auto& old_exec_graph = _exec_graph_plan_pool[_active_plan].exec_graph;
+      auto& old_exec_graph = _exec_graph_plan_pool[_active_exec_plan].exec_graph;
       // 默认的切换状态设置
       auto param_switch_mode = SWITCH_MODE::SWITCH_TRANSFER_PARAM;
       auto grad_switch_mode = SWITCH_MODE::SWITCH_ACCUMULATE_GRAD;
@@ -630,11 +668,11 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         }
       }
       /*
-      for (auto& tensor : _exec_graph_plan_pool[next_active_plan].exec_graph->_transfer_param_buffer->tensor_list()) {
+      for (auto& tensor : _exec_graph_plan_pool[next_active_exec_plan].exec_graph->_transfer_param_buffer->tensor_list()) {
         HT_LOG_INFO << local_device << ": transfer param " << tensor << " meta is " << tensor->meta() << " and device group is " << tensor->producer()->device_group()
           << " and ds is " << tensor->get_distributed_states().ds_info();
       }
-      for (auto& tensor : _exec_graph_plan_pool[next_active_plan].exec_graph->_accumulate_grad_buffer->tensor_list()) {
+      for (auto& tensor : _exec_graph_plan_pool[next_active_exec_plan].exec_graph->_accumulate_grad_buffer->tensor_list()) {
         HT_LOG_INFO << local_device << ": accumulate grad " << tensor << " meta is " << tensor->meta() << " and device group is " << tensor->producer()->device_group()
           << " and ds is " << tensor->get_distributed_states().ds_info();
       }
@@ -647,7 +685,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       _grad_switcher_pool[key]->SwitchParams(grad_switch_mode, grad_switch_level);
     }
     _is_active = true;
-    _active_plan = next_active_plan;
+    _active_exec_plan = next_active_exec_plan;
     HT_LOG_DEBUG << local_device << ": [Graph Plan] Context switch to the new exec plan end...";
   }
   HT_LOG_DEBUG << local_device << ": [Graph Plan] obtain exec graph end...";
@@ -661,13 +699,16 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   }
 
   // 运行挑选出的active exec graph
-  CUR_STRATEGY_ID = _exec_graph_plan_pool[_active_plan].strategy_id;
-  auto& exec_graph = _exec_graph_plan_pool[_active_plan].exec_graph;
-  auto& op_to_exec_op_mapping = _exec_graph_plan_pool[_active_plan].op_to_exec_op_mapping;
-  auto& tensor_to_exec_tensor_mapping = _exec_graph_plan_pool[_active_plan].tensor_to_exec_tensor_mapping;
+  auto& exec_graph = _exec_graph_plan_pool[_active_exec_plan].exec_graph;
+  auto& op_to_exec_op_mapping = _exec_graph_plan_pool[_active_exec_plan].op_to_exec_op_mapping;
+  auto& tensor_to_exec_tensor_mapping = _exec_graph_plan_pool[_active_exec_plan].tensor_to_exec_tensor_mapping;
   auto& exec_loss = tensor_to_exec_tensor_mapping[loss->id()]; 
   TensorList exec_fetches;
   FeedDict exec_feed_dict;
+
+  // 设置shape plan
+  HT_LOG_DEBUG << exec_graph->name() << " use shape plan " << next_active_shape_plan;
+  exec_graph->SetShapePlan(next_active_shape_plan);
 
   exec_fetches.reserve(fetches.size());
   for (const auto& fetch : fetches) {
@@ -693,6 +734,31 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   exec_graph->_switch_param_events.clear();
   exec_graph->_switch_grad_events.clear();
   return ret;
+}
+
+// TODO: merge two `Run` func
+NDArrayList DefineAndRunGraph::Run(const TensorList& fetches,
+                                   const FeedDict& feed_dict) {
+  HT_RUNTIME_ERROR << "NotImplementedError";
+  /*
+  bool has_uninstantiated_ops =
+    std::any_of(fetches.begin(), fetches.end(), [&](const Tensor& fetch) {
+      return _op_to_exec_op_mapping.find(fetch->producer_id()) ==
+        _op_to_exec_op_mapping.end();
+    });
+  if (has_uninstantiated_ops)
+    Instantiate();
+  TensorList exec_fetches;
+  exec_fetches.reserve(fetches.size());
+  for (const auto& fetch : fetches) {
+    exec_fetches.push_back(_tensor_to_exec_tensor_mapping[fetch->id()]);
+  }
+  FeedDict exec_feed_dict;
+  exec_feed_dict.reserve(feed_dict.size());
+  for (const auto& kv : feed_dict)
+    exec_feed_dict[_tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;
+  return _exec_graph->Run(exec_fetches, exec_feed_dict);
+  */
 }
 
 } // namespace graph

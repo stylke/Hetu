@@ -155,12 +155,16 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
       for (size_t i = 0; i < output_size; i++) {
         // question: will tensor shape != NDArray shape happen in any situation
         auto output_id = op->output(i)->id();
+        // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": get runtime shape for " << op->output(i);
         const auto& output_shape = runtime_ctx.get_runtime_shape(output_id);
         HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
           << " output " << i << " shape = " << output_shape << " ds = " << op->output(i)->get_distributed_states().ds_info();
         if (runtime_ctx.has_runtime_allocation(output_id)) {
           outputs.push_back(runtime_ctx.get_runtime_allocation(output_id));
-        } else {
+        } 
+        // alloc on-the-fly
+        // 后续要改成memory plan
+        else {
           outputs.push_back(NDArray::empty(output_shape,
                             op->instantiation_ctx().placement,
                             op->output(i)->dtype(),

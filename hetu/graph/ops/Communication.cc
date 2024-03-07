@@ -342,13 +342,13 @@ bool P2PRecvOpImpl::DoInstantiate(Operator& op, const Device& placement,
 
 std::vector<NDArrayMeta> 
 P2PRecvOpImpl::DoInferMeta(const TensorList& inputs) const {
-  return {NDArrayMeta().set_dtype(_dtype).set_shape(_shape)};
+  return {NDArrayMeta().set_dtype(_dtype).set_shape(get_shape())};
 }
 
 HTShapeList P2PRecvOpImpl::DoInferShape(Operator& op, 
                                         const HTShapeList& input_shapes,
                                         RuntimeContext& runtime_ctx) const {
-  return {_shape};
+  return {get_shape()};
 }
 
 void P2PRecvOpImpl::DoCompute(Operator& op, 
@@ -376,13 +376,14 @@ bool BatchedISendIRecvOpImpl::DoInstantiate(Operator& op, const Device& placemen
 
 std::vector<NDArrayMeta> 
 BatchedISendIRecvOpImpl::DoInferMeta(const TensorList& inputs) const {
-  if (_outputs_shape.size() == 0)
+  HTShapeList outputs_shape = get_outputs_shape();
+  if (outputs_shape.size() == 0)
     return {};
   std::vector<NDArrayMeta> output_meta_lsit;
-  for (auto& output_shape: _outputs_shape) {
+  for (auto& output_shape: outputs_shape) {
     output_meta_lsit.push_back(NDArrayMeta().set_dtype(_dtype).set_shape(output_shape));
   }
-  return std::move(output_meta_lsit);
+  return output_meta_lsit;
 }
 
 HTShapeList BatchedISendIRecvOpImpl::DoInferShape(Operator& op, 
@@ -390,16 +391,14 @@ HTShapeList BatchedISendIRecvOpImpl::DoInferShape(Operator& op,
                                                   RuntimeContext& runtime_ctx) const {
   if (_outputs_shape.size() == 0)
     return {};                                                    
-  HTShapeList outputs_shape(_outputs_shape);                                                    
-  return std::move(outputs_shape);
+  return get_outputs_shape();                                                    
 }  
 
 // deprecated: only used in gpt inference, before symbolic shape is realized
 HTShapeList BatchedISendIRecvOpImpl::DoInferDynamicShape(Operator& op, 
                                                   const HTShapeList& input_shapes,
                                                   RuntimeContext& runtime_ctx) const {                                             
-  HTShapeList outputs_shape(input_shapes);                                                    
-  return std::move(outputs_shape);
+  HT_RUNTIME_ERROR << "deprecated";
 }  
 
 void BatchedISendIRecvOpImpl::DoCompute(Operator& op, 
@@ -608,34 +607,43 @@ Tensor MakeP2PSendOp(Tensor input, DeviceGroup dst_group,
 Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
                      HTShape shape, int src_device_index, OpMeta op_meta) {
   HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
-    && op_meta.device_groups[0].num_devices() ==src_group.num_devices()))
+    && op_meta.device_groups[0].num_devices() == src_group.num_devices()))
     << "Currently we require equal tensor parallelism degree across "
     << "P2P communication. Got " << op_meta.device_groups[0] << " vs. " << src_group;
   return Graph::MakeOp(std::make_shared<P2PRecvOpImpl>(std::move(src_group), dtype, std::move(shape), 
                        src_device_index), {}, std::move(op_meta))->output(0);
 }
 
-/*
 // symbolic shape
-Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
-                               const std::vector<Device>& dst_devices, 
-                               const SyShapeList& outputs_shape, 
-                               const std::vector<Device>& src_devices, 
-                               const std::vector<Device>& comm_devices, 
-                               DataType dtype, OpMeta op_meta) {
-  if (src_devices.size() == 0)
-    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(dst_devices, outputs_shape,
-                        src_devices, comm_devices, dtype), std::move(inputs), std::move(op_meta))->out_dep_linker();
-  else
-    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(dst_devices, outputs_shape,
-                        src_devices, comm_devices, dtype), inputs, std::move(op_meta))->output(0);  
+Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
+                     SyShape shape, int src_device_index, OpMeta op_meta) {
+  HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
+    && op_meta.device_groups[0].num_devices() == src_group.num_devices()))
+    << "Currently we require equal tensor parallelism degree across "
+    << "P2P communication. Got " << op_meta.device_groups[0] << " vs. " << src_group;
+  return Graph::MakeOp(std::make_shared<P2PRecvOpImpl>(std::move(src_group), dtype, std::move(shape), 
+                       src_device_index), {}, std::move(op_meta))->output(0);
 }
-*/
 
 // fixed shape
 Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
                                std::vector<Device> dst_devices, 
                                HTShapeList outputs_shape, 
+                               std::vector<Device> src_devices, 
+                               std::vector<Device> comm_devices, 
+                               DataType dtype, OpMeta op_meta) {
+  if (src_devices.size() == 0)
+    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(std::move(dst_devices), std::move(outputs_shape),
+                        std::move(src_devices), std::move(comm_devices), dtype), std::move(inputs), std::move(op_meta))->out_dep_linker();
+  else
+    return Graph::MakeOp(std::make_shared<BatchedISendIRecvOpImpl>(std::move(dst_devices), std::move(outputs_shape),
+                        std::move(src_devices), std::move(comm_devices), dtype), std::move(inputs), std::move(op_meta))->output(0);  
+}
+
+// symbolic shape
+Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
+                               std::vector<Device> dst_devices, 
+                               SyShapeList outputs_shape, 
                                std::vector<Device> src_devices, 
                                std::vector<Device> comm_devices, 
                                DataType dtype, OpMeta op_meta) {

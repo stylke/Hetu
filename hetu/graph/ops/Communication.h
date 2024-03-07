@@ -227,10 +227,24 @@ Tensor MakeP2PSendOp(Tensor input, DeviceGroup dst_group,
 
 class P2PRecvOpImpl final : public OpInterface {
  public:
+  // symbolic shape constructor
+  P2PRecvOpImpl(DeviceGroup src_group, DataType dtype,
+                SyShape shape, int src_device_index = -1)
+  : OpInterface(quote(P2PRecvOp)), _src_group(std::move(src_group)), _dtype(dtype),
+                _shape(std::move(shape)), _src_device_index(src_device_index) {
+    HT_ASSERT(!_src_group.empty())
+      << "Please provide the \"src_group\" argument to indicate "
+      << "the source devices for P2PRecv";
+    HT_ASSERT(!_shape.empty())
+      << "P2P RecvOp require determined tensor shape to recv. Got empty shape param!";
+    HT_ASSERT(_dtype != kUndeterminedDataType)
+      << "Please specify data type for P2P communication";
+  }
+  // fixed shape constructor
   P2PRecvOpImpl(DeviceGroup src_group, DataType dtype,
                 HTShape shape, int src_device_index = -1)
   : OpInterface(quote(P2PRecvOp)), _src_group(std::move(src_group)), _dtype(dtype),
-                _shape(std::move(shape)), _src_device_index(src_device_index) {
+                _shape(shape.begin(), shape.end()), _src_device_index(src_device_index) {
     HT_ASSERT(!_src_group.empty())
       << "Please provide the \"src_group\" argument to indicate "
       << "the source devices for P2PRecv";
@@ -269,30 +283,41 @@ class P2PRecvOpImpl final : public OpInterface {
     return _src_device_index;
   } 
 
+  HTShape get_shape() const {
+    return get_HTShape_from_SyShape(_shape);
+  }
+
+  const SyShape& get_symbolic_shape() const {
+    return _shape;
+  }
+
  protected:
   DeviceGroup _src_group;
   int _src_device_index{-1};
   DataType _dtype;
-  HTShape _shape;           
+  SyShape _shape;           
 };
 
 Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
                      HTShape shape, int src_device_index = -1, 
                      OpMeta op_meta = OpMeta());
 
+// symbolic shape
+Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
+                     SyShape shape, int src_device_index = -1, 
+                     OpMeta op_meta = OpMeta());     
+
 class BatchedISendIRecvOpImpl final : public OpInterface {
  public:
-  /*
   // symbolic shape constructor
-  BatchedISendIRecvOpImpl(const std::vector<Device>& dst_devices, 
-                          const SyShapeList& outputs_shape,
-                          const std::vector<Device>& src_devices, 
-                          const std::vector<Device>& comm_devices,
+  BatchedISendIRecvOpImpl(std::vector<Device> dst_devices, 
+                          SyShapeList outputs_shape,
+                          std::vector<Device> src_devices, 
+                          std::vector<Device> comm_devices,
                           DataType dtype)
-  : OpInterface(quote(BatchedISendIRecvOp)), _dst_devices(dst_devices), 
-  _outputs_shape({}), _src_devices(src_devices), 
-  _comm_devices(comm_devices), _dtype(dtype) {}
-  */
+  : OpInterface(quote(BatchedISendIRecvOp)), _dst_devices(std::move(dst_devices)), 
+  _outputs_shape(std::move(outputs_shape)), _src_devices(std::move(src_devices)), 
+  _comm_devices(std::move(comm_devices)), _dtype(dtype) {}
   // fixed shape constructor
   BatchedISendIRecvOpImpl(std::vector<Device> dst_devices, 
                           HTShapeList outputs_shape,
@@ -300,8 +325,13 @@ class BatchedISendIRecvOpImpl final : public OpInterface {
                           std::vector<Device> comm_devices,
                           DataType dtype)
   : OpInterface(quote(BatchedISendIRecvOp)), _dst_devices(std::move(dst_devices)), 
-  _outputs_shape(std::move(outputs_shape)), _src_devices(std::move(src_devices)), 
-  _comm_devices(std::move(comm_devices)), _dtype(dtype) {}
+  _src_devices(std::move(src_devices)), 
+  _comm_devices(std::move(comm_devices)), _dtype(dtype) {
+    _outputs_shape.reserve(outputs_shape.size());
+    for (auto& output_shape : outputs_shape) {
+      _outputs_shape.emplace_back(SyShape(output_shape.begin(), output_shape.end()));
+    }
+  }
 
   uint64_t op_indicator() const noexcept override {
     return BATCHED_ISEND_IRECV_OP;
@@ -346,6 +376,19 @@ class BatchedISendIRecvOpImpl final : public OpInterface {
     return _comm_devices;
   }
 
+  HTShapeList get_outputs_shape() const {
+    HTShapeList outputs_shape;
+    outputs_shape.reserve(outputs_shape.size());
+    for (auto& output_shape : _outputs_shape) {
+      outputs_shape.emplace_back(get_HTShape_from_SyShape(output_shape));
+    }
+    return outputs_shape;
+  }
+
+  const SyShapeList& get_symbolic_outputs_shape() const {
+    return _outputs_shape;
+  }
+
  protected:
   bool DoInstantiate(Operator& op, const Device& placement,
                      StreamIndex stream_index) const override;
@@ -366,13 +409,21 @@ class BatchedISendIRecvOpImpl final : public OpInterface {
   std::vector<Device> _dst_devices; 
   std::vector<Device> _src_devices;
   std::vector<Device> _comm_devices;
-  HTShapeList _outputs_shape;
+  SyShapeList _outputs_shape;
   DataType _dtype;
 };
 
 Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
                                std::vector<Device> dst_devices, 
                                HTShapeList outputs_shape, 
+                               std::vector<Device> src_devices, 
+                               std::vector<Device> comm_devices, 
+                               DataType dtype, OpMeta op_meta = OpMeta());
+
+// symbolic shape
+Tensor MakeBatchedISendIRecvOp(TensorList inputs, 
+                               std::vector<Device> dst_devices, 
+                               SyShapeList outputs_shape, 
                                std::vector<Device> src_devices, 
                                std::vector<Device> comm_devices, 
                                DataType dtype, OpMeta op_meta = OpMeta());

@@ -19,9 +19,9 @@ all_devices = None
 def distributed_init(use_two_node: bool = False):
     if use_two_node:
         hostname = socket.gethostname()
-        if hostname == 'job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-master-0':
+        if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
             os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
-        elif hostname == 'job-b9f7b317-d1ec-4c6a-b4e4-a03c9e3b1d19-worker-0':
+        elif hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0':
             os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-2'
         else:
             raise ValueError(f"Unknown hostname: {hostname}")
@@ -284,12 +284,14 @@ def pretrain(args):
         # 在tp8上分配fp32参数和bf16参数
         # bf16参数切换到dp8并用累计梯度的方式训练、切换到tp8然后更新
         # 第一个循环会很慢是因为要算topo & 算切换方案 & 进行很多cudaMalloc
-        for round in range(10):
+        for round in range(2):
             run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
             # run_plan(global_batch_size = 8, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 128, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 128, seq_len = 64, strategy_id = 1, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 1, run_level = ht.run_level("grad"))
             run_plan(global_batch_size = 32, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
             run_plan(global_batch_size = 64, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 128, seq_len = 64, strategy_id = 1, run_level = ht.run_level("grad"))
             run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
             print(f"round {round} finished")
     

@@ -311,7 +311,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             continue;
           }
           Tensor grad_scale = MakeDivByConstOp(grad, _num_micro_batches * dp, OpMeta().set_name(grad->name() + "_scale"));
-          RecordTensorShape(grad_scale->id(), grad_scale->shape());
+          RecordExecTensor(grad_scale);
           auto& grad_scale_op = grad_scale->producer();
           grad_scale_op->MapToParallelDevices(op->placement_group());
           for (int i = grad->num_consumers() - 1; i >= 0; i--) {
@@ -368,7 +368,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             p2p_input = MakeCommOp(input_op->input(0), {input_op_impl.get_dst_distributed_states(input_op)}, dst_group);
             // since comm op will be substitued eventually, recording its shape is unnecessary
             // but here we still do it to make the code looks more consistent
-            RecordTensorShape(p2p_input->id(), p2p_input->shape());
+            RecordExecTensor(p2p_input);
           }
         } else if (is_comm_op(op)) {
           auto& op_impl = reinterpret_cast<CommOpImpl&>(op->body());
@@ -402,7 +402,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
           p2p_input = MakeCommOp(input, {input->get_distributed_states()}, dst_group);
           // since comm op will be substitued eventually, recording its shape is unnecessary
           // but here we still do it to make the code looks more consistent
-          RecordTensorShape(p2p_input->id(), p2p_input->shape());
+          RecordExecTensor(p2p_input);
         }
         auto& p2p_op = p2p_input->producer();
         // will be splited into intra_comm + p2p_send(src_group) and p2p_recv(dst_group)
@@ -471,7 +471,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
           HT_NOT_IMPLEMENTED << "We should use NCCL for P2P communication." << op->type();
           __builtin_unreachable();
         }
-        RecordTensorShape(transferred_input->id(), transferred_input->shape());
+        RecordExecTensor(transferred_input);
         auto& transfer_op = transferred_input->producer();
         if (!input_op->placement_group().empty())
           transfer_op->MapToParallelDevices(input_op->placement_group());
@@ -509,7 +509,7 @@ void ExecutableGraph::InsertContiguousOp(const OpRefList& topo_order) {
             Tensor contig_input = MakeContiguousOp(
               input, OpMeta().set_name(input->name() + "_contig")
                              .set_is_deduce_states(false));
-            RecordTensorShape(contig_input->id(), contig_input->shape());
+            RecordExecTensor(contig_input);
             auto& contig_op = contig_input->producer();
             contig_op->MapToParallelDevices(input_op->placement_group());
             contig_op->Instantiate(local_device, kComputingStream);
@@ -535,7 +535,9 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
       const auto& dst_group = comm_op_impl.dst_group(comm_op);
       Tensor& input = comm_op->input(0);
       // 标记通信算子的输入具有symbolic shape
-      // input->init_symbolic_shape();
+      if (!input->symbolic()) {
+        input->init_symbolic_shape();
+      }
       Tensor result;
 
       if (comm_op_impl.is_intra_group(comm_op) || comm_op_impl.is_inter_group(comm_op) && 
@@ -560,7 +562,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           }
           HT_LOG_DEBUG << local_device << ": keys = " << keys << "; indices = " << indices << "; splits = " << splits;
           Tensor split_output = MakeSplitOp(input, keys, indices, splits, OpMeta().set_is_deduce_states(false));
-          RecordTensorShape(split_output->id(), split_output->shape());
+          RecordExecTensor(split_output);
           auto& split_op = split_output->producer();
           split_op->MapToParallelDevices(src_group);
           split_op->Instantiate(local_device, kComputingStream);
@@ -573,7 +575,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllReduce"));
-          RecordTensorShape(all_reduce_output->id(), all_reduce_output->shape());
+          RecordExecTensor(all_reduce_output);
           auto& all_reduce_op = all_reduce_output->producer();
           all_reduce_op->MapToParallelDevices(src_group);
           all_reduce_op->Instantiate(local_device, kCollectiveStream);
@@ -586,7 +588,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllGather"));
-          RecordTensorShape(all_gather_output->id(), all_gather_output->shape());
+          RecordExecTensor(all_gather_output);
           auto& all_gather_op = all_gather_output->producer();
           all_gather_op->MapToParallelDevices(src_group);
           all_gather_op->Instantiate(local_device, kCollectiveStream);
@@ -600,7 +602,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_ReduceScatter"));
-          RecordTensorShape(reduce_scatter_output->id(), reduce_scatter_output->shape());
+          RecordExecTensor(reduce_scatter_output);
           auto& reduce_scatter_op = reduce_scatter_output->producer();
           reduce_scatter_op->MapToParallelDevices(src_group);
           reduce_scatter_op->Instantiate(local_device, kCollectiveStream);
@@ -612,8 +614,8 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           int32_t local_device_index = src_group.get_index(local_device);
           TensorList send_datas_local;
           std::vector<int32_t> dsts_local;
-          HTShapeList recv_shapes_local;
-          // SyShapeList recv_shapes_local;
+          SyShapeList recv_shapes_local;
+          // HTShapeList recv_shapes_local;
           std::vector<int32_t> srcs_local;
           Tensor self_send_data;
           std::vector<std::pair<int32_t, int32_t>> send_pairs;
@@ -636,8 +638,11 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
               } 
               // local device recv from other devices
               if (used_device_index != local_device_index && dsts[i] == local_device_index) {
-                recv_shapes_local.push_back(send_datas[i]->shape());
-                // recv_shapes_local.push_back(send_datas[i]->symbolic_shape());
+                if (!send_datas[i]->symbolic()) {
+                  send_datas[i]->init_symbolic_shape();
+                }
+                recv_shapes_local.push_back(send_datas[i]->symbolic_shape());
+                // recv_shapes_local.push_back(send_datas[i]->shape());
                 srcs_local.push_back(used_device_index);              
               }
               // special case: local device send to self
@@ -681,7 +686,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           batched_isend_irecv_op->Instantiate(local_device, kP2PStream);
           TensorList recv_datas_local = batched_isend_irecv_op->outputs();
           for (const auto& recv_data_local : recv_datas_local) {
-            RecordTensorShape(recv_data_local->id(), recv_data_local->shape());
+            RecordExecTensor(recv_data_local);
           }
 
           HT_LOG_DEBUG << local_device << ": cross receive begin!";
@@ -706,7 +711,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             src_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
           // since send_out_dep_linker has an empty shape and is useless, recording its shape is unnecessary
           // but here we still do it to make the code looks more consistent
-          RecordTensorShape(send_out_dep_linker->id(), send_out_dep_linker->shape());
+          RecordExecTensor(send_out_dep_linker);
           auto& send_op = send_out_dep_linker->producer();
           send_op->MapToParallelDevices(src_group);
           send_op->Instantiate(local_device, kP2PStream);
@@ -719,9 +724,12 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         // p2p recv
         HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group;
         Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
-        Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->shape(),
+        if (!output->symbolic()) {
+          output->init_symbolic_shape();
+        }
+        Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->symbolic_shape(),
           dst_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
-        RecordTensorShape(recv_output->id(), recv_output->shape());
+        RecordExecTensor(recv_output);
         auto& recv_op = recv_output->producer();
         recv_op->MapToParallelDevices(dst_group);
         recv_op->Instantiate(local_device, kP2PStream);
@@ -800,7 +808,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
         part_result_list.push_back(part_result);
       }
       auto sum_output = MakeSumOp(part_result_list, OpMeta().set_is_deduce_states(false));
-      RecordTensorShape(sum_output->id(), sum_output->shape());
+      RecordExecTensor(sum_output);
       auto& sum_op = sum_output->producer();
       if (used_device_index == local_device_index) {
         sum_op->MapToParallelDevices(src_group);
@@ -838,7 +846,7 @@ Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Opera
             part_result_list.push_back(part_result);
           }
           auto concatenate_output = MakeConcatenateOp(part_result_list, cur_dim, OpMeta().set_is_deduce_states(false));
-          RecordTensorShape(concatenate_output->id(), concatenate_output->shape());
+          RecordExecTensor(concatenate_output);
           auto& concatenate_op = concatenate_output->producer();
           if (used_device_index == local_device_index) {
             concatenate_op->MapToParallelDevices(src_group);
@@ -917,7 +925,7 @@ void ExecutableGraph::CrossSend(std::unordered_map<int32_t, int32_t> split_cur_s
       }
       // split_op: 把tensor在keys这些dimension上按照splits[key]份数切分, 并取出第indices[key]份, 作为要send的数据切片
       auto split_output = MakeSplitOp(comm_op->input(0), keys, indices, splits, OpMeta().set_is_deduce_states(false));
-      RecordTensorShape(split_output->id(), split_output->shape());
+      RecordExecTensor(split_output);
       auto& split_op = split_output->producer();
       if (used_device_index == local_device_index) { // 其他device上生成的用于替换comm_op不需要map placement_group和placement
         split_op->MapToParallelDevices(src_group);
@@ -1737,7 +1745,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // pipeline compute
   // runtimectx for m micro batches
   std::vector<RuntimeContext> runtime_ctx_list(num_micro_batches, 
-    RuntimeContext(_execute_plan.local_topo.size(), _shape_plan));
+    RuntimeContext(_execute_plan.local_topo.size(), _shape_plan_pool.at(_active_shape_plan)));
   // tensor data for m micro batches
   std::vector<Tensor2NDArrayMap> tensor2data_list(num_micro_batches);
   // tensor degrees for m micro batches, if degree=0 && not in fetches, free memory for this tensor
