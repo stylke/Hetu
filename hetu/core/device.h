@@ -205,7 +205,8 @@ using DeviceGroupList = std::vector<DeviceGroup>;
 class DeviceGroup {
  public:
   DeviceGroup(const std::vector<Device>& devices) : _devices(devices) {
-    std::sort(_devices.begin(), _devices.end());
+    // note the order of device group is important to recognize the heterogenous pipelines
+    // std::sort(_devices.begin(), _devices.end());
     _devices.erase(std::unique(_devices.begin(), _devices.end()),
                    _devices.end());
   }
@@ -214,7 +215,7 @@ class DeviceGroup {
     _devices.reserve(devices.size());
     for (const auto& device : devices)
       _devices.emplace_back(device);
-    std::sort(_devices.begin(), _devices.end());
+    // std::sort(_devices.begin(), _devices.end());
     _devices.erase(std::unique(_devices.begin(), _devices.end()),
                    _devices.end());
   }

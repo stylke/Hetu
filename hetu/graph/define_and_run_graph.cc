@@ -17,19 +17,14 @@ static size_t change_parallel_test_case = 0;
 Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
                                          TensorList inputs, OpMeta op_meta) {
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
-  // init multi device_groups for multi ds
-  if (op_meta.device_groups.size() == NUM_STRATEGY) {
-    if (_multi_device_groups.empty()) {
-      _multi_device_groups.resize(NUM_STRATEGY, DeviceGroupList());
-    }
-    for (size_t i = 0; i < NUM_STRATEGY; i++) {
-      if (!op_meta.device_groups[i].empty() && std::find(_multi_device_groups[i].begin(), _multi_device_groups[i].end(), op_meta.device_groups[i]) == _multi_device_groups[i].end())
-        _multi_device_groups[i].push_back(op_meta.device_groups[i]);
-    }
-  }
-
   // HT_LOG_TRACE << name() << " make op: " << op_meta.name;
-  return MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
+  auto& op = MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
+  // record the ops that have an explicit device group setting
+  // which will then used to deduce the pp stages
+  if (op->device_groups().size() == NUM_STRATEGY) {
+    _ops_with_device_groups.emplace_back(op);
+  } 
+  return _op_indexing[op->id()];
 }
 
 void DefineAndRunGraph::ResetVariableDataInner(const Tensor& tensor,
@@ -109,6 +104,123 @@ DeviceGroup DefineAndRunGraph::GetVariableDeviceGroupInner(const Tensor& tensor)
   HT_RUNTIME_ERROR_IF(device_group.empty()) << "You are getting an empty device group, please ensure you have set "
     << tensor->producer() << " a device group before!";
   return device_group;
+}
+
+// 推导define graph在cur_strategy_id下的pipeline构造
+void DefineAndRunGraph::DeducePipeline(size_t cur_strategy_id) {
+  auto old_strategy_id = CUR_STRATEGY_ID;
+  CUR_STRATEGY_ID = cur_strategy_id;
+  std::unordered_map<Device, int32_t> device_to_p2pline_idx_map;
+  std::unordered_map<int32_t, std::vector<Device>> p2plines;
+  std::unordered_map<int32_t, DeviceGroupList> pipelines;
+  int32_t total_p2pline = -1;
+  int32_t total_pipeline = std::numeric_limits<int32_t>::max();
+  // 得到有多少条p2pline以及每条p2pline所含的gpu
+  // 注意这一步里的p2pline并不是最终的pipeline
+  // 其还需要经过merge操作
+  // 最终merge后的pipeline个数取决于最小的dup数量
+  // 以dp2tp2pp2为例
+  // bias的dup为4但weight的dup为2
+  // 那么在一开始会生成四条pipeline但实际最终merge后pipeline条数为2
+  // 考虑到更复杂的混合并行也应该是如此
+  // 其本质是除了dup外就是split而split一定不能使用不同的feed dict的data
+  // 因此做split的参数最终一定要求是在同一个pipeline中
+  // 再扫一遍得到每条pipeline
+  for (const auto& op : _ops_with_device_groups) {
+    // deduce pipeline的stages时只需要用到模型的parameters
+    if (_parameter_ops.find(op->id()) == _parameter_ops.end()) {
+      continue;
+    }
+    auto& device_group = op->device_group();
+    auto& ds = op->output(0)->cur_distributed_states();
+    // HT_LOG_INFO << op << " device group: " << device_group << " and ds: " << ds.ds_info();
+    HT_ASSERT(!device_group.empty() && !ds.is_none())
+      << "device group & ds of " << op << " shouldn't be empty";
+    auto num_devices = device_group.num_devices();
+    total_pipeline = std::min(total_pipeline, ds.states(-1));
+    if (total_p2pline == -1) {
+      total_p2pline = num_devices;
+    } else {
+      HT_ASSERT(total_p2pline == num_devices)
+        << "currently assume all devices will participate in the pipeline parallel"
+        << ", and each parameter locates at a same amount of devices";
+    }
+    HT_LOG_WARN_IF(ds.order(0) != -1) 
+      << op << " is a parameter, which is suggested to put dup at the first position in the ds order sequence"
+      << ", but now the ds is: " << ds.ds_info();
+    for (int32_t i = 0; i < num_devices; i++) {
+      auto state_index = ds.map_device_to_state_index(i);
+      // 按照split倒序然后dup的order找到其所在的p2pline
+      std::vector<int32_t> keys;
+      for (const auto& kv : state_index) {
+        keys.emplace_back(kv.first);
+      }
+      std::sort(keys.rbegin(), keys.rend());
+      int32_t interval = 1;
+      int32_t new_idx = 0;
+      for (int32_t key : keys) {
+        new_idx += state_index[key] * interval;
+        interval *= ds.states(key);
+      }
+      if (device_to_p2pline_idx_map.find(device_group.get(i)) != device_to_p2pline_idx_map.end()) {
+        HT_ASSERT(device_to_p2pline_idx_map[device_group.get(i)] == new_idx)
+          << "device " << device_group.get(i) << " is in two p2plines, which will cause chaos"
+          << ", the existing p2pline is " << device_to_p2pline_idx_map[device_group.get(i)]
+          << " and the new p2pline is " << new_idx; 
+      } else {
+        device_to_p2pline_idx_map[device_group.get(i)] = new_idx;
+      }
+      if (p2plines.find(new_idx) == p2plines.end()) {
+        p2plines[new_idx] = std::vector<Device>{device_group.get(i)};
+      } else {
+        bool repetitive_device = false;
+        for (const auto& device : p2plines[new_idx]) {
+          if (device == device_group.get(i)) {
+            repetitive_device = true;
+            break;
+          }
+        }
+        if (!repetitive_device) {
+          p2plines[new_idx].emplace_back(device_group.get(i));
+        }
+      }
+    }
+  }
+  // merge相邻的p2pline
+  // 形成最终的pipeline
+  HT_ASSERT(total_p2pline % total_pipeline == 0)
+    << "total number of p2pline should be divided by total number of pipeline";
+  int32_t merge_ratio = total_p2pline / total_pipeline;
+  for (int32_t i = 0; i < total_pipeline; i++) {
+    pipelines[i] = DeviceGroupList();
+    int32_t total_stage = -1;
+    std::vector<std::vector<Device>> stages;
+    for (int32_t j = i * merge_ratio; j < (i + 1) * merge_ratio; j++) {
+      if (total_stage == -1) {
+        total_stage = p2plines[j].size();
+        for (const auto& device : p2plines[j]) {
+          stages.emplace_back(std::vector<Device>{device});
+        }
+      } else {
+        HT_ASSERT(total_stage == p2plines[j].size())
+          << "can't merge p2plines with different stages";
+        for (int32_t stage_num = 0; stage_num < total_stage; stage_num++) {
+          stages.at(stage_num).emplace_back(p2plines[j][stage_num]);
+        }
+      }
+    }
+    for (const auto& stage : stages) {
+      pipelines[i].emplace_back(DeviceGroup(stage));
+    }
+  }
+  // 记录当前strategy下的device到pipeline映射
+  for (const auto& kv : device_to_p2pline_idx_map) {
+    const auto& device = kv.first;
+    const auto& p2pline_idx = kv.second;
+    const auto pipeline_idx = p2pline_idx / merge_ratio;
+    _multi_pipeline_maps[CUR_STRATEGY_ID][device] = pipelines[pipeline_idx];
+  }
+  CUR_STRATEGY_ID = old_strategy_id;
 }
 
 // 推导define graph的shape plan
@@ -252,7 +364,11 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   Graph::push_graph_ctx(exec_graph->id());
 
   // assign pp stages
-  exec_graph->SetStages(_multi_device_groups[CUR_STRATEGY_ID]);
+  if (_multi_pipeline_maps.find(CUR_STRATEGY_ID) == _multi_pipeline_maps.end()) {
+    _multi_pipeline_maps[CUR_STRATEGY_ID] = Device2PipelineMap();
+    DeducePipeline(CUR_STRATEGY_ID);
+  }
+  exec_graph->SetPipeline(_multi_pipeline_maps[CUR_STRATEGY_ID]);
 
   auto get_exec_input = [&](const Tensor& input) -> Tensor {
     auto it = tensor_to_exec_tensor_mapping.find(input->id());
@@ -670,11 +786,11 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       /*
       for (auto& tensor : _exec_graph_plan_pool[next_active_exec_plan].exec_graph->_transfer_param_buffer->tensor_list()) {
         HT_LOG_INFO << local_device << ": transfer param " << tensor << " meta is " << tensor->meta() << " and device group is " << tensor->producer()->device_group()
-          << " and ds is " << tensor->get_distributed_states().ds_info();
+          << " and ds is: " << tensor->get_distributed_states().ds_info();
       }
       for (auto& tensor : _exec_graph_plan_pool[next_active_exec_plan].exec_graph->_accumulate_grad_buffer->tensor_list()) {
         HT_LOG_INFO << local_device << ": accumulate grad " << tensor << " meta is " << tensor->meta() << " and device group is " << tensor->producer()->device_group()
-          << " and ds is " << tensor->get_distributed_states().ds_info();
+          << " and ds is: " << tensor->get_distributed_states().ds_info();
       }
       */
       // 实际热切换

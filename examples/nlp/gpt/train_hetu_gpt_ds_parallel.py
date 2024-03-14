@@ -94,7 +94,7 @@ def pretrain(args):
     ranges = []
     for _, block_config in ds_parallel_config['gpt']['blocks'].items():
         ranges.append(block_config['range'])
-    assert ranges[0][0] == 0 and ranges[-1][1] == config.num_hidden_layers-1, \
+    assert ranges[0][0] == 0 and ranges[-1][-1] == config.num_hidden_layers-1, \
         f"gpt blocks range: {ranges} is conflict with num_hidden_layers: {config.num_hidden_layers}!"
 
     # Hetu model definition

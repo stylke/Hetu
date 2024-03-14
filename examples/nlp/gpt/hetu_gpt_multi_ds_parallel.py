@@ -18,7 +18,7 @@ def get_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
             else:
                 for value in config.values():
                     if type(value) == dict:
-                        if "range" in value and (_range < value["range"][0] or _range > value["range"][1]):
+                        if "range" in value and (_range < value["range"][0] or _range > value["range"][-1]):
                             continue
                         config_queue.put(value)
     assert len(multi_ds_parallel_config) == len(ds_parallel_configs), 'ds_parallel_configs parse error!'

@@ -67,6 +67,7 @@ struct is_tensor_list<TensorList> : std::true_type {};
 using GraphId = uint64_t;
 using GraphName = std::string;
 using FeedDict = Tensor2NDArrayMap;
+using Device2PipelineMap = std::unordered_map<Device, DeviceGroupList>;
 class Graph;
 class EagerGraph;
 class DefineByRunGraph;
