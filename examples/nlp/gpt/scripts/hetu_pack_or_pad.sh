@@ -2,9 +2,9 @@
 NUM_LAYERS=${1:-32}
 HIDDEN_SIZE=${2:-4096}
 NUM_HEADS=${3:-32}
-SEQ_LEN=${4:-128}
-GLOBAL_BATCH_SIZE=${5:-8}
-MICRO_BATCH_SIZE=${6:-2}
+SEQ_LEN=${4:-32}
+GLOBAL_BATCH_SIZE=${5:-32}
+MICRO_BATCH_SIZE=${6:-8}
 
 ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
@@ -19,8 +19,8 @@ export HETU_INTERNAL_LOG_LEVEL=WARN
 mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python3 hetu_pack_or_pad.py \
---num_strategy=1 \
---ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json \
+--num_strategy=2 \
+--ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json,ds_parallel_config/hetero_dp2_tp2_pp2.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --micro_batch_size $MICRO_BATCH_SIZE \
 --json_file $JSON_FILE \
@@ -40,4 +40,6 @@ python3 hetu_pack_or_pad.py \
 --dropout_prob 0.1 \
 --bf16 \
 --use_flash_attn \
+--hetero_data \
+--hetero_pipeline
 

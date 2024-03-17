@@ -1,0 +1,7 @@
+set(HETU_CUDA_WORKLOAD_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+file(GLOB HETU_CUDA_WORKLOAD_SRC ${HETU_CUDA_WORKLOAD_SRC_DIR}/workload_*.cu)
+foreach(workload ${HETU_CUDA_WORKLOAD_SRC})
+  get_filename_component(WName ${workload} NAME_WE)
+  add_executable(${WName} ${workload})
+  set_property(TARGET ${WName} PROPERTY CUDA_ARCHITECTURES ${HETU_CUDA_ARCH})
+endforeach()

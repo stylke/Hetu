@@ -64,8 +64,8 @@
                     }
                 }
             },
-            "blocks16-23": {
-                "range": [16,23],
+            "blocks16-28": {
+                "range": [16,28],
                 "layernorm1": {
                     "split": {},
                     "dup": 4,
@@ -107,8 +107,8 @@
                     }
                 }
             },
-            "blocks24-31": {
-                "range": [24,31],
+            "blocks29-31": {
+                "range": [29,31],
                 "layernorm1": {
                     "split": {},
                     "dup": 4,

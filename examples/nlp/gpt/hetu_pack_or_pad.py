@@ -1,4 +1,5 @@
 import os
+import math
 import hetu as ht
 from hetu_gpt_multi_ds_parallel_symbolic import GPTLMHeadModel
 from hetu.nn.modules.parallel_multi_ds import config2ds, get_device_index
@@ -228,6 +229,21 @@ def pretrain(args):
         assert global_batch_size % mbs_times_dp == 0, \
             f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
         num_micro_batches = global_batch_size // mbs_times_dp
+        
+        # heterogenous pipeline test case
+        if args.hetero_data:
+            batch_ratio = 4
+            if dp_rank == 1:
+                micro_batch_size = int(global_batch_size // num_micro_batches / batch_ratio)
+                gbs_per_dp = micro_batch_size * num_micro_batches
+                mbs_times_dp = micro_batch_size * dp_size
+            elif dp_rank == 0:
+                micro_batch_size = global_batch_size // num_micro_batches - int(global_batch_size // num_micro_batches / batch_ratio)
+                gbs_per_dp = micro_batch_size * num_micro_batches
+                mbs_times_dp = micro_batch_size * dp_size
+            else:
+                raise(RuntimeError)
+                
         config.mbs_times_dp_symbol.set_data(mbs_times_dp)
         config.seq_len_symbol.set_data(seq_len)
         print(f'{local_device}: dp_rank={dp_rank}, dp_size={dp_size}, gbs={global_batch_size}, mbs={micro_batch_size}, num_micro_batches={num_micro_batches}')
@@ -307,6 +323,9 @@ def pretrain(args):
     
     # 多轮样例
     def test_multi_round():
+        strategy_id = 0
+        if args.hetero_pipeline:
+            strategy_id = 1
         for epoch in range(args.epochs):
             consumed_samples = 0 # should be reset when run next epoch
             consumed_samples = run_plan(epoch = epoch,
@@ -315,7 +334,7 @@ def pretrain(args):
                                         global_batch_size = args.global_batch_size, 
                                         micro_batch_size = args.micro_batch_size, 
                                         seq_len = args.seq_length, 
-                                        strategy_id = 0, 
+                                        strategy_id = strategy_id, 
                                         run_level = ht.run_level("update"))
             print(f"epoch {epoch} finished, consumed_samples = {consumed_samples}")
     
@@ -324,6 +343,12 @@ def pretrain(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--hetero_pipeline", action="store_true", help="use heterogenous pipeline."
+    )
+    parser.add_argument(
+        "--hetero_data", action="store_true", help="use heterogenous pipeline."
+    )
     parser.add_argument(
         "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
     )

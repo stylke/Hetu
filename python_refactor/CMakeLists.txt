@@ -1,18 +1,15 @@
-find_package(pybind11 2.6)
-if(NOT pybind11_FOUND)
-  message(STATUS "pybind11 not found, fetching...")
-  include(FetchContent)
-  FetchContent_Declare(
-    pybind11
-    URL ${CMAKE_SOURCE_DIR}/third_party/pybind11/pybind11-2.6.2.zip
-    # GIT_REPOSITORY https://github.com/pybind/pybind11
-    # GIT_TAG        v2.6.2
-  )
-  FetchContent_GetProperties(pybind11)
-  if(NOT pybind11_POPULATED)
-    FetchContent_Populate(pybind11)
-    add_subdirectory(${pybind11_SOURCE_DIR} ${pybind11_BINARY_DIR})
-  endif()
+include(FetchContent)
+FetchContent_Declare(
+  pybind11
+  URL ${CMAKE_SOURCE_DIR}/third_party/pybind11/pybind11-2.6.2.zip
+  DOWNLOAD_EXTRACT_TIMESTAMP true
+  # GIT_REPOSITORY https://github.com/pybind/pybind11
+  # GIT_TAG        v2.6.2
+)
+FetchContent_GetProperties(pybind11)
+if(NOT pybind11_POPULATED)
+  FetchContent_Populate(pybind11)
+  add_subdirectory(${pybind11_SOURCE_DIR} ${pybind11_BINARY_DIR})
 endif()
 find_package(Python3 COMPONENTS Interpreter NumPy REQUIRED)
 
