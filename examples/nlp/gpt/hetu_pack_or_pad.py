@@ -232,7 +232,7 @@ def pretrain(args):
         
         # heterogenous pipeline test case
         if args.hetero_data:
-            batch_ratio = 4
+            batch_ratio = 8
             if dp_rank == 1:
                 micro_batch_size = int(global_batch_size // num_micro_batches / batch_ratio)
                 gbs_per_dp = micro_batch_size * num_micro_batches

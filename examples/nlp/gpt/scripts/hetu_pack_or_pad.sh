@@ -1,10 +1,10 @@
 # NCCL_DEBUG=info
 NUM_LAYERS=${1:-32}
-HIDDEN_SIZE=${2:-4096}
+HIDDEN_SIZE=${2:-2048}
 NUM_HEADS=${3:-32}
-SEQ_LEN=${4:-32}
-GLOBAL_BATCH_SIZE=${5:-32}
-MICRO_BATCH_SIZE=${6:-8}
+SEQ_LEN=${4:-512}
+GLOBAL_BATCH_SIZE=${5:-128}
+MICRO_BATCH_SIZE=${6:-16}
 
 ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
@@ -40,6 +40,4 @@ python3 hetu_pack_or_pad.py \
 --dropout_prob 0.1 \
 --bf16 \
 --use_flash_attn \
---hetero_data \
---hetero_pipeline
 

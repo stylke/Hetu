@@ -6,9 +6,9 @@ SEQ_LEN=${4:-128}
 GLOBAL_BATCH_SIZE=${5:-8}
 NUM_MICRO_BATCHES=${6:-2}
 
-export NCCL_DEBUG=DEBUG
+export NCCL_DEBUG=VERSION
 export HETU_SWITCH_ALGORITHM=NEW_GREEDY
-export HETU_SWITCH_PROFILE=INFO
+export HETU_SWITCH_PROFILE=TRACE
 export HETU_INTERNAL_LOG_LEVEL=INFO
 mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
