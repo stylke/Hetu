@@ -14,7 +14,7 @@ mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python3 lhy_hetero.py \
 --num_strategy=2 \
---ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json,ds_parallel_config/hetero_dp2_tp2_pp2.json \
+--ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json,ds_parallel_config/hetero/dp2_tp2_pp2.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --num_micro_batches $NUM_MICRO_BATCHES \
 --dataset wikicorpus_en \

@@ -710,7 +710,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             HT_LOG_DEBUG << local_device << ": redundant p2p send from " 
               << src_group << " to " << dst_group;
           } else {
-            HT_LOG_DEBUG << local_device << ": send to stage " << dst_group;
+            HT_LOG_DEBUG << local_device << ": send from stage " << src_group << " to " << dst_group;
             Tensor send_out_dep_linker = MakeP2PSendOp(result, dst_group, 
               src_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
             // since send_out_dep_linker has an empty shape and is useless, recording its shape is unnecessary
@@ -731,7 +731,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           HT_LOG_DEBUG << local_device << ": redundant p2p recv from " 
             << src_group << " to " << dst_group;
         } else {
-          HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group;
+          HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group << " to " << dst_group;
           Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
           if (!output->symbolic()) {
             output->init_symbolic_shape();
@@ -1333,6 +1333,14 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
                                  const FeedDict& feed_dict, const int num_micro_batches,
                                  const int cur_strategy_id, RunLevel run_level, const double grad_scale) {
+  
+  bool is_analysis_straggler = false;
+  char* env = std::getenv("HETU_STRAGGLER");
+  if (env != nullptr) {
+    if (std::string(env) == "ANALYSIS") {
+      is_analysis_straggler = true;
+    }
+  }
   TIK(run);
   _run_level = run_level;
   _grad_scale = grad_scale;
@@ -2039,13 +2047,17 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   }
   // ********************** Run Level Check Point **********************
 
+  bool is_analysis_perf = false;
+  if (is_analysis_perf || is_analysis_straggler) {
+    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+    comm_group->Barrier(true);
+  }
   TOK(run);
   HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)
                << " ms";
   
   // get op execute time, sort and analysis
-  bool is_analysis_perf = false;
-  if (is_analysis_perf) {
+  if (is_analysis_perf || is_analysis_straggler) {
     TIK(free);
     runtime_ctx_list.clear();
     tensor2data_list.clear();
@@ -2126,16 +2138,23 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         pp_p2p_time += op_time.second * 1.0 / 1e6;
       }
     }
-    HT_LOG_INFO << local_device << ": " 
-                << "\ntotal run time: " << COST_MSEC(run) << " ms, "
-                << "compute time: " << compute_time << " ms, "
-                << "tp p2p time: " << tp_p2p_time << " ms, "
-                << "tp collective time: " << tp_collective_time << " ms, "
-                << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
-                << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
-                << "blocking time: " << blocking_time << " ms, "
-                << "other time: " << other_time << " ms" << std::endl
-                << out.str();
+    if (is_analysis_perf) {
+      HT_LOG_INFO << local_device << ": " 
+                  << "\ntotal run time: " << COST_MSEC(run) << " ms, "
+                  << "compute time: " << compute_time << " ms, "
+                  << "tp p2p time: " << tp_p2p_time << " ms, "
+                  << "tp collective time: " << tp_collective_time << " ms, "
+                  << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
+                  << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                  << "blocking time: " << blocking_time << " ms, "
+                  << "other time: " << other_time << " ms" << std::endl
+                  << out.str();
+    }
+    if (is_analysis_straggler) {
+      HT_LOG_WARN << local_device << ": " 
+                  << "\ntotal run time: " << COST_MSEC(run) << " ms, "
+                  << "compute time: " << compute_time << " ms";
+    }
   }
   _p2p_events.clear();
   return results;

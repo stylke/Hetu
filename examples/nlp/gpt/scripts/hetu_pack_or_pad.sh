@@ -4,7 +4,7 @@ HIDDEN_SIZE=${2:-2048}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-512}
 GLOBAL_BATCH_SIZE=${5:-128}
-MICRO_BATCH_SIZE=${6:-16}
+MICRO_BATCH_SIZE=${6:-4}
 
 ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
@@ -16,6 +16,7 @@ export NCCL_DEBUG=VERSION
 export HETU_SWITCH_ALGORITHM=NEW_GREEDY
 export HETU_SWITCH_PROFILE=INFO
 export HETU_INTERNAL_LOG_LEVEL=WARN
+export HETU_STRAGGLER=ANALYSIS
 mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python3 hetu_pack_or_pad.py \

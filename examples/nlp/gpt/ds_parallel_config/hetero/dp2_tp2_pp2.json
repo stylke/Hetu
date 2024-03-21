@@ -1,0 +1,2747 @@
+{
+    "zero": false,
+    "devices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+    ],
+    "input": {
+        "split": {
+            "0": 2
+        },
+        "dup": 2,
+        "device_group": [
+            0,
+            1,
+            2,
+            3
+        ],
+        "type": "placeholder"
+    },
+    "gpt": {
+        "wte": {
+            "split": {
+                "0": 2
+            },
+            "dup": 2,
+            "device_group": [
+                0,
+                1,
+                2,
+                3
+            ],
+            "type": "variable"
+        },
+        "wpe": {
+            "split": {},
+            "dup": 4,
+            "device_group": [
+                0,
+                1,
+                2,
+                3
+            ],
+            "type": "variable"
+        },
+        "blocks": {
+            "blocks0": {
+                "range": [
+                    0
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks1": {
+                "range": [
+                    1
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks2": {
+                "range": [
+                    2
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks3": {
+                "range": [
+                    3
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks4": {
+                "range": [
+                    4
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks5": {
+                "range": [
+                    5
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks6": {
+                "range": [
+                    6
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks7": {
+                "range": [
+                    7
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks8": {
+                "range": [
+                    8
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks9": {
+                "range": [
+                    9
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks10": {
+                "range": [
+                    10
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks11": {
+                "range": [
+                    11
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks12": {
+                "range": [
+                    12
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks13": {
+                "range": [
+                    13
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks14": {
+                "range": [
+                    14
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks15": {
+                "range": [
+                    15
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        0,
+                        1,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            0,
+                            1,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks16": {
+                "range": [
+                    16
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks17": {
+                "range": [
+                    17
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks18": {
+                "range": [
+                    18
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks19": {
+                "range": [
+                    19
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks20": {
+                "range": [
+                    20
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks21": {
+                "range": [
+                    21
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks22": {
+                "range": [
+                    22
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks23": {
+                "range": [
+                    23
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks24": {
+                "range": [
+                    24
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks25": {
+                "range": [
+                    25
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks26": {
+                "range": [
+                    26
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks27": {
+                "range": [
+                    27
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        2,
+                        3
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            2,
+                            3
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks28": {
+                "range": [
+                    28
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        6,
+                        7
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        6,
+                        7
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks29": {
+                "range": [
+                    29
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        6,
+                        7
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        6,
+                        7
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks30": {
+                "range": [
+                    30
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        6,
+                        7
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        6,
+                        7
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    }
+                }
+            },
+            "blocks31": {
+                "range": [
+                    31
+                ],
+                "layernorm1": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        6,
+                        7
+                    ],
+                    "type": "variable"
+                },
+                "attn": {
+                    "qkv": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    },
+                    "dense": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    }
+                },
+                "layernorm2": {
+                    "split": {},
+                    "dup": 4,
+                    "device_group": [
+                        4,
+                        5,
+                        6,
+                        7
+                    ],
+                    "type": "variable"
+                },
+                "mlp": {
+                    "dense_h_to_4h": {
+                        "split": {
+                            "1": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    },
+                    "dense_4h_to_h": {
+                        "split": {
+                            "0": 2
+                        },
+                        "dup": 2,
+                        "device_group": [
+                            4,
+                            5,
+                            6,
+                            7
+                        ],
+                        "type": "variable"
+                    }
+                }
+            }
+        },
+        "layernorm_final": {
+            "split": {},
+            "dup": 4,
+            "device_group": [
+                4,
+                5,
+                6,
+                7
+            ],
+            "type": "variable"
+        }
+    },
+    "lm_head": {
+        "split": {
+            "1": 2
+        },
+        "dup": 2,
+        "device_group": [
+            4,
+            5,
+            6,
+            7
+        ],
+        "type": "variable"
+    },
+    "label": {
+        "split": {
+            "0": 2
+        },
+        "dup": 2,
+        "device_group": [
+            4,
+            5,
+            6,
+            7
+        ],
+        "type": "placeholder"
+    }
+}

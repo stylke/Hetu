@@ -4,7 +4,7 @@ HIDDEN_SIZE=${2:-512}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-128}
 GLOBAL_BATCH_SIZE=${5:-16}
-NUM_MICRO_BATCHES=${6:-2}
+NUM_MICRO_BATCHES=${6:-4}
 
 PATH="/home/pkuhetu/envs/miniconda3/envs/hetu-py/bin:${PATH}"
 HETU_HOME="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../../../" && pwd )"
@@ -15,14 +15,19 @@ export HETU_SWITCH_ALGORITHM=NEW_GREEDY
 export HETU_SWITCH_PROFILE=INFO
 export HETU_INTERNAL_LOG_LEVEL=INFO
 
+export NCCL_DEBUG=WARN
+export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7
+export NCCL_IB_GID_INDEX=3
+
 mpirun --allow-run-as-root -np 16 \
 -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
 -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
+-x NCCL_DEBUG -x NCCL_IB_HCA -x NCCL_IB_GID_INDEX \
 -x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python lhy_two_node_multi_switch.py \
---num_strategy=7 \
---ds_parallel_config ds_parallel_config/two_node/dp4_tp2_pp2.json,ds_parallel_config/two_node/dp2_tp4_pp2.json,ds_parallel_config/two_node/dp16.json,ds_parallel_config/two_node/dp8_tp2.json,ds_parallel_config/two_node/dp4_tp4.json,ds_parallel_config/two_node/dp2_tp8.json,ds_parallel_config/two_node/tp16.json \
+--num_strategy=8 \
+--ds_parallel_config ds_parallel_config/two_node/dp2_tp2_pp4.json,ds_parallel_config/two_node/dp4_tp2_pp2.json,ds_parallel_config/two_node/dp2_tp4_pp2.json,ds_parallel_config/two_node/dp16.json,ds_parallel_config/two_node/dp8_tp2.json,ds_parallel_config/two_node/dp4_tp4.json,ds_parallel_config/two_node/dp2_tp8.json,ds_parallel_config/two_node/tp16.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --num_micro_batches $NUM_MICRO_BATCHES \
 --dataset wikicorpus_en \

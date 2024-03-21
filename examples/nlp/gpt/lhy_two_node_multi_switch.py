@@ -197,6 +197,7 @@ def pretrain(args):
         label_ds = label_multi_ds[strategy_id]
         label_device_group = label_device_groups[strategy_id]
         # device in same dp_group will read the same batch data
+        dup_group_idx, dup_group_num = -1, -1
         if input_device_group.contains(local_device):
             local_device_idx = input_device_group.get_index(local_device)
             dup_group_idx = input_ds.get_dup_group_index(local_device_idx)
@@ -206,41 +207,39 @@ def pretrain(args):
             dup_group_idx = label_ds.get_dup_group_index(local_device_idx)
             dup_group_num = label_ds.get_dim(0)
         else:
-            raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
+            dup_group_num = input_ds.get_dim(0)
+            # raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
         # print(f'local deivce: {local_device}, local_device_idx: {local_device_idx}, dup_group_idx: {dup_group_idx}, dup_group_num: {dup_group_num}')
 
         # profile_memory()
 
-        for i in range(1000):
-            if i % dup_group_num != dup_group_idx:
-                continue
-            start_time = time.time()
-            feed_dict = {
-                input_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
-                position_ids: get_position_ids(dp_size, seq_len).astype(np.int64), 
-                token_type_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
-                attention_mask: np.zeros([dp_size, seq_len]).astype(np.float32),
-                masked_lm_labels: np.zeros([dp_size, seq_len]).astype(np.int64),
-            }
-            # print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run begin")
-            results = train_op.graph.run(loss_mean, 
-                                         [loss_mean, train_op], 
-                                         feed_dict = feed_dict, 
-                                         num_micro_batches = config.num_micro_batches, 
-                                         cur_strategy_id = strategy_id,
-                                         run_level = run_level,
-                                         grad_scale = 1.0) 
-            # print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run end")
-            # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
-            # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
-            end_time = time.time()
-            if run_level == ht.run_level("update"):
-                if label_device_group.contains(local_device):
-                    loss_out = results[0].numpy(force=True).mean()
-                    print(f"{local_device}: loss = {loss_out} and time = {end_time - start_time}")
-            else:
-                print(f"{local_device}: time = {end_time - start_time}")
-            return
+        start_time = time.time()
+        feed_dict = {
+            input_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
+            position_ids: get_position_ids(dp_size, seq_len).astype(np.int64), 
+            token_type_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
+            attention_mask: np.zeros([dp_size, seq_len]).astype(np.float32),
+            masked_lm_labels: np.zeros([dp_size, seq_len]).astype(np.int64),
+        }
+        # print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run begin")
+        results = train_op.graph.run(loss_mean, 
+                                        [loss_mean, train_op], 
+                                        feed_dict = feed_dict, 
+                                        num_micro_batches = config.num_micro_batches, 
+                                        cur_strategy_id = strategy_id,
+                                        run_level = run_level,
+                                        grad_scale = 1.0) 
+        # print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run end")
+        # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
+        # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
+        end_time = time.time()
+        if run_level == ht.run_level("update"):
+            if label_device_group.contains(local_device):
+                loss_out = results[0].numpy(force=True).mean()
+                print(f"{local_device}: loss = {loss_out} and time = {end_time - start_time}")
+        else:
+            print(f"{local_device}: time = {end_time - start_time}")
+        return
     
     # 单次切换实验
     def run_experiment():
@@ -267,8 +266,8 @@ def pretrain(args):
                 
     def test_single_switch():
         for _ in range(10):
-            run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 0, run_level = ht.run_level("grad"))
-            run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 5, run_level = ht.run_level("grad"))
+            run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 0, run_level = ht.run_level("update"))
+            # run_plan(global_batch_size = 64, seq_len = 32, strategy_id = 5, run_level = ht.run_level("grad"))
     
     # 单轮样例 
     def test_single_round(): 
@@ -295,8 +294,8 @@ def pretrain(args):
             run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
             print(f"round {round} finished")
     
-    run_experiment()
-    # test_single_switch()
+    # run_experiment()
+    test_single_switch()
     # test_multi_round()
     
 

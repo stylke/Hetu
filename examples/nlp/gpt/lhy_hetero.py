@@ -255,8 +255,8 @@ def pretrain(args):
         run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 1, run_level = ht.run_level("grad"))    
     
     # test_homo()
-    # test_hetero()
-    test_homo_hetero_switch()
+    test_hetero()
+    # test_homo_hetero_switch()
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
