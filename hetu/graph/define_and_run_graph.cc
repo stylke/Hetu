@@ -145,9 +145,11 @@ void DefineAndRunGraph::DeducePipeline(size_t cur_strategy_id) {
         << "currently assume all devices will participate in the pipeline parallel"
         << ", and each parameter locates at a same amount of devices";
     }
-    HT_LOG_WARN_IF(ds.order(0) != -1) 
-      << op << " is a parameter, which is suggested to put dup at the first position in the ds order sequence"
-      << ", but now the ds is: " << ds.ds_info();
+    if (ds.states(-1) != 1) {
+      HT_LOG_WARN_IF(ds.order(0) != -1) 
+        << op << " is a parameter, which is suggested to put dup at the first position in the ds order sequence"
+        << ", but now the ds is: " << ds.ds_info();
+    }
     for (int32_t i = 0; i < num_devices; i++) {
       auto state_index = ds.map_device_to_state_index(i);
       // 按照split倒序然后dup的order找到其所在的p2pline

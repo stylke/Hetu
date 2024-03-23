@@ -6,13 +6,27 @@
 #include "hetu/utils/emhash7_hashmap.h"
 #include "hetu/utils/robin_hood_hashing.h"
 #include <deque>
+#include <map>
+
 
 namespace hetu {
 namespace impl {
 
+struct DataPtrLookupTable {
+  std::set<DataPtr, bool (*)(const DataPtr& a, const DataPtr& b)> table;
+
+  DataPtrLookupTable(size_t capacity = 1024)
+  : table([](const DataPtr& a, const DataPtr& b) -> bool { 
+      if(a.size != b.size)
+        return a.size < b.size; 
+      else
+        return a.ptr < b.ptr;
+    }) {}
+};
+
 class CUDACachingMemoryPool final : public CUDAMemoryPool {
  public:
-  CUDACachingMemoryPool(DeviceIndex device_id);
+  CUDACachingMemoryPool(DeviceIndex device_id, size_t _max_split_size);
 
   ~CUDACachingMemoryPool();
 
@@ -25,7 +39,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
 
   void FreeDataSpace(DataPtr data_ptr) override;
 
-  void EmptyCache() override;
+  bool EmptyCache() override;
 
   void MarkDataSpaceUsedByStream(DataPtr data_ptr,
                                  const Stream& stream) override;
@@ -51,26 +65,46 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     OCCUPIED_BY_ALLOC_STREAM = 0,
     OCCUPIED_BY_MULTI_STREAMS,
     AVAILABLE_FOR_ALLOC_STREAM,
-    UNAVAILABLE_UNTIL_FREE
+    UNAVAILABLE_UNTIL_FREE,
+    AVAILABLE_FOR_ALL_STREAM
   };
 
+  // NOTE: 从PyTorch借鉴的20MB"剩余量"限额
+  const size_t kMaxInternalFragment = 20971520;
+  const size_t kMinSplitRemaining = 1048576; // 1MB
+
+  // Pack malloc requests in buffer, which aims at using "split ptr" feature
+  // to reduce cudaMalloc invoke times.
+  const size_t kMallocMinBuffer = 2097152; 
+  const size_t kMallocRoundUp = 2097152; 
+  const size_t kMallocLargeBuffer = 10485760;
+  size_t max_split_size{209715200}; // in bytes
+
+  // Record stream info of an allocated pointer.
   struct CudaDataPtrInfo {
     void* ptr;
     size_t num_bytes;
     PackedStreamId alloc_stream;
     std::unordered_set<PackedStreamId> used_streams;
     DataPtrDeleter deleter;
+    DataPtrId id;
+    
     OccupationStatus status;
     mempool_clock_t alloc_at;
-    mempool_clock_t free_at;
+    mempool_clock_t free_at; // free_at should be set only when inserting ptr table
     uint32_t free_event_cnt;
 
+    DataPtrLookupTable* cached_pool{nullptr};
+    std::shared_ptr<CudaDataPtrInfo> prev{nullptr};
+    std::shared_ptr<CudaDataPtrInfo> next{nullptr};
+
     CudaDataPtrInfo(void* ptr_, size_t num_bytes_, const Stream& alloc_stream_,
-                    mempool_clock_t alloc_at_, DataPtrDeleter deleter_ = {})
+                    mempool_clock_t alloc_at_, DataPtrId id_, DataPtrDeleter deleter_ = {})
     : ptr(ptr_),
       num_bytes(num_bytes_),
       alloc_stream(alloc_stream_.pack()),
       alloc_at(alloc_at_), 
+      id(id_),
       deleter(deleter_),
       free_at(0), 
       free_event_cnt(0) {
@@ -87,33 +121,50 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     }
 
     inline bool allocated() const noexcept {
-      return alloc_at >= free_at;
+      return alloc_at > free_at;
+    }
+
+    inline bool is_split() const noexcept {
+      return prev != nullptr || next != nullptr;
+    }
+  
+    inline void refresh() {
+      used_streams.clear();
+      status = OccupationStatus::AVAILABLE_FOR_ALL_STREAM;
+      alloc_at = 0;
+      free_at = 0;
+      free_event_cnt = 0;
     }
   };
 
-  struct DataPtrLookupTable {
-    emhash7::HashMap<size_t, std::vector<std::tuple<DataPtrId, void*, size_t>>,
-                     robin_hood::hash<size_t>>
-      table;
-    DataPtrLookupTable(size_t capacity = 1024) {
-      table.reserve(capacity);
-    }
-  };
+  bool shouldSplit(size_t allocated_size, size_t request_size);
 
   bool FindAvailableFromLookupTable(size_t num_bytes,
                                     DataPtrLookupTable& lookup_table,
-                                    bool remove_if_found, DataPtr& ret);
+                                    DataPtr& ret);
 
   void InsertAvailableToLookupTable(const DataPtr& data_ptr,
                                     DataPtrLookupTable& lookup_table);
 
   void EmptyCacheInLookupTable(DataPtrLookupTable& lookup_table,
                                bool maybe_allocated);
-  
+
+  bool ReleaseAvailableCache(DataPtrLookupTable& lookup_table, size_t request_size);
+
+  size_t GetAlignedMallocSize(size_t request_size);
+
+  bool AllocNewPtr(void* &ptr,size_t size);
+
   void WatchEvents();
 
-  // Info of all data pointers that are currently in used (allocated)
-  emhash7::HashMap<DataPtrId, CudaDataPtrInfo> _data_ptr_info;
+  DataPtrLookupTable* tryMerge(std::shared_ptr<CudaDataPtrInfo>&, DataPtrLookupTable*);
+
+  // Info of all data pointers that are currently in use (allocated)
+  // In fact, if one pointer is cached in the lookup table of
+  // peculiar stream, it will also have record in here. 
+  // NOTE: 所有allocated & unallocated指针都在这里保存记录, 希望这哥们性能不错
+  // NOTE: rehashable的容器，只能用std::shared_ptr....
+  emhash7::HashMap<DataPtrId, std::shared_ptr<CudaDataPtrInfo>> _data_ptr_info;
   // Cached data pointers that are available for specific streams
   emhash7::HashMap<PackedStreamId, std::unique_ptr<DataPtrLookupTable>>
     _available_for_single_stream;
@@ -121,12 +172,12 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   std::unique_ptr<DataPtrLookupTable> _available_for_all_streams;
   // Events to indicate whether marked usages have finished
   emhash7::HashMap<PackedStreamId,
-                   std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId,
-                                         mempool_clock_t>>>
+                   std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>>
     _free_events;
+  std::set<size_t> merged_id;
 
   size_t _allocated{0};
-  size_t _reserved{0};
+  size_t _reserved{0}; // allocated size + cached size
   size_t _peak_reserved{0};
   uint64_t _alloc_cnt{0};
   uint64_t _cuda_malloc_cnt{0};

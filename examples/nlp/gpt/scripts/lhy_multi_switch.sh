@@ -1,6 +1,6 @@
 # NCCL_DEBUG=info
 NUM_LAYERS=${1:-32}
-HIDDEN_SIZE=${2:-2560}
+HIDDEN_SIZE=${2:-512}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-128}
 # todo: should pass a gbs/mbs list
@@ -15,7 +15,7 @@ MERGE_FILE=${ROOT_FOLDER}/merges.txt
 
 export NCCL_DEBUG=VERSION
 export HETU_SWITCH_ALGORITHM=NEW_GREEDY
-export HETU_SWITCH_PROFILE=NVLINK
+export HETU_SWITCH_PROFILE=INFO
 export HETU_INTERNAL_LOG_LEVEL=INFO
 mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \

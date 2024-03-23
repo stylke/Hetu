@@ -1733,9 +1733,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         }
       }
     }
-    std::sort(ranks.begin(), ranks.end());
-    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
-    comm_group->Barrier(true);
+    if (ranks.size() >= 2) {
+      std::sort(ranks.begin(), ranks.end());
+      auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
+      comm_group->Barrier(true);
+    }
   }
   TOK(run);
   HT_LOG_DEBUG << local_device << ": prepare execution plan cost time = " << COST_MSEC(run) << " ms."; 

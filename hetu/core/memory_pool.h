@@ -17,6 +17,15 @@ struct DataPtr {
   size_t size;
   Device device;
   DataPtrId id; // id provided by the memory pool
+
+  DataPtr() = default;
+  DataPtr(const DataPtr &a) = default;
+
+  // construct a search key
+  DataPtr(size_t s, void* _ptr): size(s), ptr(_ptr) {}
+
+  DataPtr(void* _ptr, size_t _size, const Device& _device, DataPtrId _id)
+  : ptr(_ptr), size(_size), device(_device), id(_id) {}
 };
 
 using DataPtrList = std::vector<DataPtr>;
@@ -39,7 +48,7 @@ class MemoryPool {
 
   virtual void FreeDataSpace(DataPtr data_ptr) = 0;
 
-  virtual void EmptyCache() {}
+  virtual bool EmptyCache() {}
 
   virtual void MarkDataSpaceUsedByStream(DataPtr data_ptr,
                                          const Stream& stream) = 0;

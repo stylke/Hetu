@@ -292,8 +292,9 @@ def pretrain(args):
     # 单次切换
     def test_single_switch():
         consumed_samples = 0
-        consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 32, strategy_id = 1, run_level = ht.run_level("grad"))
-        consumed_samples = run_plan(consumed_samples, global_batch_size = 32, micro_batch_size = 2, seq_len = 32, strategy_id = 2, run_level = ht.run_level("grad"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 32, strategy_id = 0, run_level = ht.run_level("update"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 32, strategy_id = 0, run_level = ht.run_level("update"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 32, strategy_id = 0, run_level = ht.run_level("update"))
     
     # 单轮样例 
     def test_single_round(): 
@@ -320,9 +321,9 @@ def pretrain(args):
             consumed_samples = run_plan(consumed_samples, global_batch_size = 2, micro_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
             print(f"round {round} finished, consumed_samples = {consumed_samples}")
     
-    test_single_switch()
+    # test_single_switch()
     # test_single_round()
-    # test_multi_round()
+    test_multi_round()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
