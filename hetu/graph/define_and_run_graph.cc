@@ -7,6 +7,8 @@
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
+#include "hetu/graph/recompute/recompute.h"
+#include "hetu/graph/offload/activation_cpu_offload.h"
 
 namespace hetu {
 namespace graph {
@@ -27,8 +29,9 @@ Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
         _multi_device_groups[i].push_back(op_meta.device_groups[i]);
     }
   }
-
-  // HT_LOG_TRACE << name() << " make op: " << op_meta.name;
+  // for optimization passes
+  op_meta = op_meta.set_is_recompute(Recompute::enabled())
+                   .set_is_cpu_offload(ActivationCPUOffload::enabled());
   return MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
 }
 

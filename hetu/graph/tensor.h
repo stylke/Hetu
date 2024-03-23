@@ -19,7 +19,7 @@ struct TensorIdentifier {
 
 class TensorDef : public shared_ptr_target {
  protected:
-  friend class OperatorDef;
+  friend class OpDef;
   friend class Operator;
   friend class Tensor;
   friend class Graph;
@@ -430,6 +430,22 @@ class Tensor : public shared_ptr_wrapper<TensorDef> {
       if (!pred(op))
         return false;
     return true;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_consumer_of(Tensor& tensor, UnaryPredicate pred) {
+    for (auto& op : tensor->_consumers)
+      if (pred(op))
+        return true;
+    return false;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_consumer_of(const Tensor& tensor, UnaryPredicate pred) {
+    for (const auto& op : tensor->_consumers)
+      if (pred(op))
+        return true;
+    return false;
   }
 };
 

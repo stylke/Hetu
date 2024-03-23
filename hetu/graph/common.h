@@ -3,7 +3,7 @@
 #include "hetu/common/macros.h"
 #include "hetu/core/ndarray.h"
 #include <vector>
-// #include <queue>
+#include <queue>
 #include <deque>
 #include <type_traits>
 #include <functional>
@@ -25,6 +25,7 @@ using OpName = std::string;
 using OpList = std::vector<Operator>;
 using OpRefList = std::vector<OpRef>;
 using OpCRefList = std::vector<OpCRef>;
+using OpRefQueue = std::queue<OpRef>;
 using OpRefDeque = std::deque<OpRef>;
 using OpCRefDeque = std::deque<OpCRef>;
 using OpIdList = std::vector<OpId>;

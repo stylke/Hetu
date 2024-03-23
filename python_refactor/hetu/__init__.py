@@ -142,3 +142,25 @@ class _RunLevel(object):
         
 def run_level(type = "update"):
     return _RunLevel(type).type
+
+class _RecomputeContext(object):
+    def __enter__(self):
+        _hetu_core._internal_context.push_recompute_ctx()
+        return self
+
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_recompute_ctx()
+
+def recompute():
+    return _RecomputeContext()
+
+class _CPUOffloadContext(object):
+    def __enter__(self):
+        _hetu_core._internal_context.push_cpu_offload_ctx()
+        return self
+    
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_cpu_offload_ctx()
+
+def cpu_offload():
+    return _CPUOffloadContext()

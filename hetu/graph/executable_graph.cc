@@ -10,6 +10,8 @@
 #include "hetu/graph/ops/Arithmetics.h"
 #include "hetu/graph/ops/Loss.h"
 #include "hetu/graph/autocast/autocast.h"
+#include "hetu/graph/recompute/recompute.h"
+#include "hetu/graph/offload/activation_cpu_offload.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/core/symbol.h"
@@ -561,7 +563,8 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
             }
           }
           HT_LOG_DEBUG << local_device << ": keys = " << keys << "; indices = " << indices << "; splits = " << splits;
-          Tensor split_output = MakeSplitOp(input, keys, indices, splits, OpMeta().set_is_deduce_states(false));
+          Tensor split_output = MakeSplitOp(input, keys, indices, splits, OpMeta().set_is_deduce_states(false)
+                                                                                  .set_name(input->name() + "_Split"));
           RecordExecTensor(split_output);
           auto& split_op = split_output->producer();
           split_op->MapToParallelDevices(src_group);
@@ -582,9 +585,11 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           result = all_reduce_output;
           HT_LOG_DEBUG << local_device << ": substitute comm_op to all_reduce_op: " << comm_group;        
         } else if (comm_type == ALL_GATHER_OP) {
-          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
+          const auto& dst_ds = comm_op_impl.get_dst_distributed_states(comm_op);
+          int32_t gather_dim = input->get_distributed_states().get_split_dim(dst_ds);
+          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, gather_dim);
           Tensor all_gather_output = MakeAllGatherOp(
-            input, comm_group,
+            input, comm_group, gather_dim,
             OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_AllGather"));
@@ -595,10 +600,12 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           result = all_gather_output;
           HT_LOG_DEBUG << local_device << ": substitute comm_op to all_gather_op: " << comm_group;
         } else if (comm_type == REDUCE_SCATTER_OP) {
+          const auto& src_ds = input->get_distributed_states();
+          int32_t scatter_dim = comm_op_impl.get_dst_distributed_states(comm_op).get_split_dim(src_ds);
           DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2);
           Tensor reduce_scatter_output =  MakeReduceScatterOp(
-            input, comm_group,
-            comm_op_impl.reduction_type(), false,
+            input, comm_group, comm_op_impl.reduction_type(),
+            scatter_dim, false,
             OpMeta().set_device_groups({src_group})
                     .set_is_deduce_states(false)
                     .set_name(input->name() + "_ReduceScatter"));
@@ -1348,25 +1355,47 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       Instantiate(fetches, local_device);
       HT_LOG_DEBUG << local_device << ": [Execution Plan] Instantiate end...";
 
+      // init instantiated topo
+      OpRefList topo_before_recompute = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before recompute pass: " << topo_before_recompute;
+
+      // add recompute pass
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] recompute pass begin...";
+      Graph::push_graph_ctx(id());
+      Recompute::InsertRecomputedOps(topo_before_recompute);
+      Graph::pop_graph_ctx();
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] recompute pass end...";
+
+      // init topo with recomputed ops
+      OpRefList topo_before_activation_offload = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before activation offload pass: " << topo_before_activation_offload;
+
+      // insert activation offload ops
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] activation offload pass begin...";
+      Graph::push_graph_ctx(id());
+      ActivationCPUOffload::OffloadToCPU(topo_before_activation_offload);
+      Graph::pop_graph_ctx();
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] activation offload pass end...";
+
       // init topo contains comm_op
-      OpRefList topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
-      HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo;
+      OpRefList topo_before_substitute_comm = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo_before_substitute_comm;
 
       // substitute comm_op
       HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op begin...";
       Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
-      SubstituteCommOp(topo);
+      SubstituteCommOp(topo_before_substitute_comm);
       Graph::pop_graph_ctx();
       HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op end...";
 
       // update topo with substituted comm_ops
-      OpRefList updated_topo = Graph::TopoSort(fetches, num_ops(), is_op_computed);
-      HT_LOG_DEBUG << local_device << ": global topo before add contiguous op: " << topo;
+      OpRefList topo_before_contiguous = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before add contiguous op: " << topo_before_contiguous;
 
       // insert contiguous ops
       HT_LOG_DEBUG << local_device << ": [Execution Plan] insert contiguous op begin...";
       Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
-      InsertContiguousOp(updated_topo);
+      InsertContiguousOp(topo_before_contiguous);
       Graph::pop_graph_ctx();
       HT_LOG_DEBUG << local_device << ": [Execution Plan] insert contiguous op end...";
       is_execute_plan_changed = true;
@@ -1474,7 +1503,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // to do later update, but stage id = 0 can do aync grad_reduce immediately after weight grad was computed, which can be 
       // overlapped with backward compute(no overhead for pure dp, but may make tp backward allreduce slower)
       for (auto& op_ref : _topo) {
-        if (op_ref.get()->placement() == local_device || op_ref.get()->op_meta().is_step) {
+        if (op_ref.get()->placement() == local_device || op_ref.get()->op_meta().is_step ||
+            op_ref.get()->op_meta().is_offload) {
           // share weight p2p send op will not block anything! so treat it as commom compute op
           // fw weight share only in micro batch 0, bw weight grad share only in last micro batch
           if (is_fw_share_weight_p2p_send(op_ref) || is_bw_share_weight_grad_p2p_send(op_ref)) {

@@ -118,9 +118,9 @@ def pretrain(args):
 
     print(f'{local_device}: build model begin...')
     loss = model(input_ids=input_ids,
-                            attention_mask=attention_mask,
-                            # token_type_ids=token_type_ids,
-                            labels=masked_lm_labels)
+                 attention_mask=attention_mask,
+                 # token_type_ids=token_type_ids,
+                 labels=masked_lm_labels)
     print(f'{local_device}: build model end...')
 
     loss_mean = loss

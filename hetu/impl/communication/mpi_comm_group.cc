@@ -336,13 +336,13 @@ void MPICommunicationGroupDef::Reduce(const NDArray& input, NDArray& output,
 }
 
 void MPICommunicationGroupDef::AllGather(const NDArray& input,
-                                         NDArray& output) {
+                                         NDArray& output, int32_t gather_dim) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_CPU_DEVICE(output);
   HT_ASSERT_SAME_DTYPE(input, output);
   size_t input_size = input->numel();
   size_t output_size = output->numel();
-  HT_ASSERT(input->shape(0) * _size == output->shape(0) &&
+  HT_ASSERT(input->shape(gather_dim) * _size == output->shape(gather_dim) &&
             input_size * _size == output_size)
     << "Invalid shapes for AllGather: "
     << "(send) " << input->shape() << " vs. "
@@ -361,14 +361,14 @@ void MPICommunicationGroupDef::AllGather(const NDArray& input,
 }
 
 void MPICommunicationGroupDef::ReduceScatter(const NDArray& input,
-                                             NDArray& output,
+                                             NDArray& output, int32_t scatter_dim,
                                              ReductionType red_type) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_CPU_DEVICE(output);
   HT_ASSERT_SAME_DTYPE(input, output);
   size_t input_size = input->numel();
   size_t output_size = output->numel();
-  HT_ASSERT(input->shape(0) == output->shape(0) * _size &&
+  HT_ASSERT(input->shape(scatter_dim) == output->shape(scatter_dim) * _size &&
             input_size == output_size * _size)
     << "Invalid shapes for ReduceScatter: "
     << "(send) " << input->shape() << " vs. "

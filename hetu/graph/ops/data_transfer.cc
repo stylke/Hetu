@@ -49,11 +49,11 @@ bool DataD2HOpImpl::DoInstantiate(Operator& op, const Device& placement,
     << "The input \"" << op->input(0) << "\" must be placed on "
     << "a CUDA device. Got " << op->input(0)->placement() << ".";
   auto& inst_ctx = op->instantiation_ctx();
-  inst_ctx.placement = placement;
+  inst_ctx.placement = op->input(0)->placement();
   inst_ctx.stream_index = stream_id;
   for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) {
-    inst_ctx.start[i] = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
-    inst_ctx.stop[i] = std::make_unique<hetu::impl::CUDAEvent>(inst_ctx.placement);
+    inst_ctx.start[i] = std::make_unique<hetu::impl::CUDAEvent>(op->input(0)->placement());
+    inst_ctx.stop[i] = std::make_unique<hetu::impl::CUDAEvent>(op->input(0)->placement());
   }
   op->output(0)->set_placement(placement);
   return true;

@@ -15,7 +15,7 @@ void LayerNormOpImpl::DoCompute(Operator& op,
 }
 
 TensorList LayerNormOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  auto g_op_meta = op->grad_op_meta();
+  auto g_op_meta = op->grad_op_meta().set_name(op->grad_name(0));
   TensorList empty = {Tensor(), Tensor(), Tensor()};
   auto grad_input = op->requires_grad(0) ? MakeLayerNormGradientOp(grad_outputs.at(0), op->input(0),
                                           op->input(1), op->output(1), op->output(2),

@@ -76,7 +76,27 @@ class OpMeta {
     is_step = step;
     return *this;
   }
-  
+
+  inline OpMeta& set_origin_op_id(OpId id) {
+    origin_op_id = id;
+    return *this;
+  }
+
+  inline OpMeta& set_is_recompute(bool recompute) {
+    is_recompute = recompute;
+    return *this;
+  }
+
+  inline OpMeta& set_is_cpu_offload(bool cpu_offload) {
+    is_cpu_offload = cpu_offload;
+    return *this;
+  }
+
+  inline OpMeta& set_is_offload(bool offload) {
+    is_offload = offload;
+    return *this;
+  }
+
   inline OpMeta& set(const OpMeta& other) {
     operator=(other);
     return *this;
@@ -107,6 +127,10 @@ class OpMeta {
   Device eager_device{kUndeterminedDevice};
   DeviceGroupList device_groups; // for multi ds deduce
   TensorList extra_deps;
+  OpId origin_op_id{-1}; // for recomputation only
+  bool is_recompute{false};
+  bool is_cpu_offload{false};
+  bool is_offload{false}; // for offload D2H op only
   bool is_deduce_states{true};  
   bool is_step{false};
 };
@@ -145,10 +169,14 @@ class RuntimeContext {
   }
 
   OpRuntimeContext& get(OpId id) {
+    HT_ASSERT(_ctxs.find(id) != _ctxs.end())
+      << "Op " << id << " is not found in runtime context";
     return *_ctxs.at(id);
   }
 
   const OpRuntimeContext& get(OpId id) const {
+    HT_ASSERT(_ctxs.find(id) != _ctxs.end())
+      << "Op " << id << " is not found in runtime context";
     return *_ctxs.at(id);
   }
 
@@ -345,6 +373,9 @@ class OpInterface : public shared_ptr_target {
   virtual NDArrayList DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                                      RuntimeContext& runtime_ctx) const;
 
+  virtual NDArray DoAllocOutput(Operator& op, const NDArrayList& inputs,
+                                size_t idx, RuntimeContext& runtime_ctx) const;
+
   virtual void DoCompute(Operator& op, const NDArrayList& inputs,
                          NDArrayList& outputs,
                          RuntimeContext& runtime_ctx) const = 0;
@@ -371,6 +402,7 @@ class OpDef : public shared_ptr_target {
   friend class DefineByRunGraph;
   friend class DefineAndRunGraph;
   friend class ExecutableGraph;
+  friend class Recompute;
   struct constrcutor_access_key {};
 
  public:
@@ -536,6 +568,10 @@ class OpDef : public shared_ptr_target {
     return _op_meta;
   }
 
+  OpMeta& op_meta() {
+    return _op_meta;
+  }
+
   OpMeta grad_op_meta() const {
     return OpMeta()
       .set_stream_index(stream_index())
@@ -666,6 +702,10 @@ class OpDef : public shared_ptr_target {
 
   bool requires_grad(size_t i) const {
     return _inputs[i]->requires_grad();
+  }
+
+  bool is_bw_op() const {
+    return _fw_op_id != -1;
   }
 
  protected:
@@ -837,6 +877,28 @@ class Operator : public shared_ptr_wrapper<OpDef> {
   }
 
   template <typename UnaryPredicate>
+  static bool any_input_tensor_of(Operator& op, UnaryPredicate pred) {
+    for (auto& tensor : op->_inputs)
+      if (pred(tensor))
+        return true;
+    for (auto& tensor : op->_extra_in_dep_linkers)
+      if (pred(tensor))
+        return true;
+    return false;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_input_tensor_of(const Operator& op, UnaryPredicate pred) {
+    for (const auto& tensor : op->_inputs)
+      if (pred(tensor))
+        return true;
+    for (const auto& tensor : op->_extra_in_dep_linkers)
+      if (pred(tensor))
+        return true;
+    return false;
+  }
+
+  template <typename UnaryPredicate>
   static bool all_output_tensors_of(Operator& op, UnaryPredicate pred) {
     if (op->_outputs.empty()) {
       return pred(op->_extra_out_dep_linkers.front());
@@ -858,6 +920,30 @@ class Operator : public shared_ptr_wrapper<OpDef> {
           return false;
     }
     return true;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_output_tensor_of(Operator& op, UnaryPredicate pred) {
+    if (op->_outputs.empty()) {
+      return pred(op->_extra_out_dep_linkers.front());
+    } else {
+      for (auto& tensor : op->_outputs)
+        if (pred(tensor))
+          return true;
+    }
+    return false;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_output_tensor_of(const Operator& op, UnaryPredicate pred) {
+    if (op->_outputs.empty()) {
+      return pred(op->_extra_out_dep_linkers.front());
+    } else {
+      for (const auto& tensor : op->_outputs)
+        if (pred(tensor))
+          return true;
+    }
+    return false;
   }
 };
 
