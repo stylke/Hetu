@@ -16,12 +16,11 @@ export NCCL_DEBUG=VERSION
 export HETU_SWITCH_ALGORITHM=NEW_GREEDY
 export HETU_SWITCH_PROFILE=INFO
 export HETU_INTERNAL_LOG_LEVEL=WARN
-export HETU_STRAGGLER=ANALYSIS
 mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python3 hetu_pack_or_pad.py \
---num_strategy=2 \
---ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json,ds_parallel_config/hetero_dp2_tp2_pp2.json \
+--num_strategy=1 \
+--ds_parallel_config ds_parallel_config/dp2_tp2_pp2.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --micro_batch_size $MICRO_BATCH_SIZE \
 --json_file $JSON_FILE \

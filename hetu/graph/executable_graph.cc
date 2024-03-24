@@ -1733,9 +1733,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         }
       }
     }
-    std::sort(ranks.begin(), ranks.end());
-    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
-    comm_group->Barrier(true);
+    if (ranks.size() >= 2) {
+      std::sort(ranks.begin(), ranks.end());
+      auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
+      comm_group->Barrier(true);
+    }
   }
   TOK(run);
   HT_LOG_DEBUG << local_device << ": prepare execution plan cost time = " << COST_MSEC(run) << " ms."; 
@@ -2153,7 +2155,13 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (is_analysis_straggler) {
       HT_LOG_WARN << local_device << ": " 
                   << "\ntotal run time: " << COST_MSEC(run) << " ms, "
-                  << "compute time: " << compute_time << " ms";
+                  << "compute time: " << compute_time << " ms"
+                  << "tp p2p time: " << tp_p2p_time << " ms, "
+                  << "tp collective time: " << tp_collective_time << " ms, "
+                  << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
+                  << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                  << "blocking time: " << blocking_time << " ms, "
+                  << "other time: " << other_time << " ms" << std::endl;
     }
   }
   _p2p_events.clear();

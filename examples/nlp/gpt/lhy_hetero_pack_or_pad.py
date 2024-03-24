@@ -19,10 +19,10 @@ all_devices = None
 def distributed_init(use_two_node: bool = False):
     if use_two_node:
         hostname = socket.gethostname()
-        if hostname == 'n214-178-016':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-0'
-        elif hostname == 'n214-178-130':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-1'
+        if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
+        elif hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0':
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-2'
         else:
             raise ValueError(f"Unknown hostname: {hostname}")
 
@@ -229,6 +229,28 @@ def pretrain(args):
         assert global_batch_size % mbs_times_dp == 0, \
             f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
         num_micro_batches = global_batch_size // mbs_times_dp
+        
+        # heterogenous pipeline test case
+        if args.hetero_data:
+            hetero_pipeline_num = all_devices.get_index(local_device) % (dup_group_num * args.hetero_stage_gpus) // args.hetero_stage_gpus
+            # adjust micro_batch_size
+            '''
+            batch_ratio = 8
+            if hetero_pipeline_num == 0:
+                micro_batch_size = int(global_batch_size // num_micro_batches / batch_ratio)
+            else:
+                micro_batch_size = global_batch_size // num_micro_batches - int(global_batch_size // num_micro_batches / batch_ratio)
+            '''
+            # adjust num_micro_batches
+            normal_micro_batches = 36
+            if hetero_pipeline_num == 0:
+                num_micro_batches = global_batch_size // micro_batch_size - normal_micro_batches * (dp_size - 1)
+                assert num_micro_batches > 0, f"straggler num_micro_batches should > 0, but find it is {num_micro_batches}"
+            else:
+                num_micro_batches = normal_micro_batches
+            # re-assign
+            gbs_per_dp = micro_batch_size * num_micro_batches
+            mbs_times_dp = micro_batch_size * dp_size
                 
         config.mbs_times_dp_symbol.set_data(mbs_times_dp)
         config.seq_len_symbol.set_data(seq_len)
@@ -297,6 +319,9 @@ def pretrain(args):
     
     # 单轮样例 
     def test_single_round(): 
+        strategy_id = 0
+        if args.hetero_pipeline:
+            strategy_id = 1
         consumed_samples = 0 # should be reset when run next epoch
         consumed_samples = run_plan(epoch = 0,
                                     steps = args.steps,
@@ -304,11 +329,14 @@ def pretrain(args):
                                     global_batch_size = args.global_batch_size, 
                                     micro_batch_size = args.micro_batch_size, 
                                     seq_len = args.seq_length, 
-                                    strategy_id = 0, 
+                                    strategy_id = strategy_id, 
                                     run_level = ht.run_level("update"))
     
     # 多轮样例
     def test_multi_round():
+        strategy_id = 0
+        if args.hetero_pipeline:
+            strategy_id = 1
         for epoch in range(args.epochs):
             consumed_samples = 0 # should be reset when run next epoch
             consumed_samples = run_plan(epoch = epoch,
@@ -317,15 +345,24 @@ def pretrain(args):
                                         global_batch_size = args.global_batch_size, 
                                         micro_batch_size = args.micro_batch_size, 
                                         seq_len = args.seq_length, 
-                                        strategy_id = 0, 
+                                        strategy_id = strategy_id, 
                                         run_level = ht.run_level("update"))
             print(f"epoch {epoch} finished, consumed_samples = {consumed_samples}")
     
-    # test_single_round()
-    test_multi_round()
+    test_single_round()
+    # test_multi_round()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
+    )
+    parser.add_argument(
+        "--hetero_pipeline", action="store_true", help="use heterogenous pipeline."
+    )
+    parser.add_argument(
+        "--hetero_data", action="store_true", help="use heterogenous data for each heterogenous pipeline."
+    )
     parser.add_argument(
         "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
     )
