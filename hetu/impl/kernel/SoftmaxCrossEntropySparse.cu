@@ -260,6 +260,7 @@ void SoftmaxCrossEntropySparseCuda(const NDArray& pred, const NDArray& label,
     AllocOffsetCalculator(loss, stream);
   threads.x = MIN(MAX(32, n_cols), HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = n_rows;
+  // HT_LOG_INFO << "pred: " << pred << ", label: " << label << ", loss: " << loss;
   HT_DISPATCH_FLOATING_TYPES(
     pred->dtype(), spec_t, "SoftmaxCrossEntropySparseCuda", [&]() {
       softmax_cross_entropy_sparse_kernel<<<blocks, threads, 0, cuda_stream>>>(
@@ -267,6 +268,7 @@ void SoftmaxCrossEntropySparseCuda(const NDArray& pred, const NDArray& label,
         ignored_index, loss->data_ptr<spec_t>(), pred_offset_calculator,
         label_offset_calculator, loss_offset_calculator);
     });
+  // HT_LOG_INFO << "pred: " << pred << ", label: " << label << ", loss: " << loss;
   NDArray::MarkUsedBy({pred, label, loss, pred_offset_calculator_arr,
                       label_offset_calculator_arr, loss_offset_calculator_arr}, stream);
 }

@@ -85,6 +85,9 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
   } else {
     // 另外一些是variable但不是parameter的正常走mempool
     // 分配的是碎片化的显存
+    // mempool debug use
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": on-the-fly alloc variable " << tensor
+      << " shape = " << tensor->shape();
     _preserved_data[tensor->id()] = NDArray::empty(tensor->shape(), 
                                                    tensor->placement(), 
                                                    tensor->dtype(), 

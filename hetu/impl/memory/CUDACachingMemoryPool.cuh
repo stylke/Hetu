@@ -61,13 +61,36 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   // Status transition of FreeDataSpace (freed by user):
   // (1) if status == OCCUPIED_BY_ALLOC_STREAM, then status = AVAILABLE_FOR_ALLOC_STREAM;
   // (2) else (status == OCCUPIED_BY_MULTI_STREAMS), then status = UNAVAILABLE_UNTIL_FREE;
+  // Status transition of WatchEvent (freed by system):
+  // (1) if status == UNAVAILABLE_UNTIL_FREE, then status = AVAILABLE_FOR_ALL_STREAM;
   enum class OccupationStatus : int8_t {
     OCCUPIED_BY_ALLOC_STREAM = 0,
     OCCUPIED_BY_MULTI_STREAMS,
-    AVAILABLE_FOR_ALLOC_STREAM,
     UNAVAILABLE_UNTIL_FREE,
+    AVAILABLE_FOR_ALLOC_STREAM,
     AVAILABLE_FOR_ALL_STREAM
   };
+
+  friend std::ostream& operator<<(std::ostream& os, const OccupationStatus& status) {
+    switch (status) {
+      case OccupationStatus::OCCUPIED_BY_ALLOC_STREAM:
+        os << "OCCUPIED_BY_ALLOC_STREAM";
+        break;
+      case OccupationStatus::OCCUPIED_BY_MULTI_STREAMS:
+        os << "OCCUPIED_BY_MULTI_STREAMS";
+        break;
+      case OccupationStatus::UNAVAILABLE_UNTIL_FREE:
+        os << "UNAVAILABLE_UNTIL_FREE";
+        break;
+      case OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM:
+        os << "AVAILABLE_FOR_ALLOC_STREAM";
+        break;
+      case OccupationStatus::AVAILABLE_FOR_ALL_STREAM:
+        os << "AVAILABLE_FOR_ALL_STREAM";
+        break;
+    }
+    return os;
+  }
 
   // NOTE: 从PyTorch借鉴的20MB"剩余量"限额
   const size_t kMaxInternalFragment = 20971520;
@@ -94,7 +117,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     mempool_clock_t free_at; // free_at should be set only when inserting ptr table
     uint32_t free_event_cnt;
 
-    DataPtrLookupTable* cached_pool{nullptr};
+    DataPtrLookupTable* cached_pool{nullptr}; // 只有当其是unallocated的时候才具有
     std::shared_ptr<CudaDataPtrInfo> prev{nullptr};
     std::shared_ptr<CudaDataPtrInfo> next{nullptr};
 
@@ -127,6 +150,30 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     inline bool is_split() const noexcept {
       return prev != nullptr || next != nullptr;
     }
+
+    // Note: can_free() means all related entries are unallocated
+    inline bool can_free() const noexcept {
+      if (allocated()) {
+        return false;
+      }
+      if (is_split()) {
+        auto tmp = prev;
+        while (tmp != nullptr) {
+          if (tmp->allocated()) {
+            return false;
+          }
+          tmp = prev->prev;
+        }
+        tmp = next;
+        while (tmp != nullptr) {
+          if (tmp->allocated()) {
+            return false;
+          }
+          tmp = next->next;
+        }
+      }
+      return true;
+    }
   
     inline void refresh() {
       used_streams.clear();
@@ -137,44 +184,40 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     }
   };
 
-  bool shouldSplit(size_t allocated_size, size_t request_size);
+  bool FindAvailable(size_t num_bytes,
+                     DataPtrLookupTable& lookup_table,
+                     DataPtr& ret,
+                     bool remove_if_find = true);
 
-  bool FindAvailableFromLookupTable(size_t num_bytes,
-                                    DataPtrLookupTable& lookup_table,
-                                    DataPtr& ret);
+  void InsertAvailable(const DataPtr& data_ptr,
+                       DataPtrLookupTable& lookup_table);
 
-  void InsertAvailableToLookupTable(const DataPtr& data_ptr,
-                                    DataPtrLookupTable& lookup_table);
+  bool ReleaseOversized(DataPtrLookupTable& lookup_table, 
+                        size_t request_size);
 
-  void EmptyCacheInLookupTable(DataPtrLookupTable& lookup_table,
-                               bool maybe_allocated);
-
-  bool ReleaseAvailableCache(DataPtrLookupTable& lookup_table, size_t request_size);
+  bool ReleaseAll(DataPtrLookupTable& lookup_table,
+                  bool maybe_allocated = true);
 
   size_t GetAlignedMallocSize(size_t request_size);
 
-  bool AllocNewPtr(void* &ptr,size_t size);
+  bool AllocNewPtr(void* &ptr, size_t size);
 
   void WatchEvents();
 
-  DataPtrLookupTable* tryMerge(std::shared_ptr<CudaDataPtrInfo>&, DataPtrLookupTable*);
+  bool ShouldSplit(size_t allocated_size, size_t request_size);
 
-  // Info of all data pointers that are currently in use (allocated)
-  // In fact, if one pointer is cached in the lookup table of
-  // peculiar stream, it will also have record in here. 
-  // NOTE: 所有allocated & unallocated指针都在这里保存记录, 希望这哥们性能不错
-  // NOTE: rehashable的容器，只能用std::shared_ptr....
+  DataPtrLookupTable* TryMerge(std::shared_ptr<CudaDataPtrInfo>&, DataPtrLookupTable*);
+
+  // Info of all data pointers
+  // If one pointer is cached in the lookup table of peculiar stream, it will also have record in here. 
+  // NOTE: 所有allocated & unallocated指针都在这里保存记录
   emhash7::HashMap<DataPtrId, std::shared_ptr<CudaDataPtrInfo>> _data_ptr_info;
   // Cached data pointers that are available for specific streams
-  emhash7::HashMap<PackedStreamId, std::unique_ptr<DataPtrLookupTable>>
-    _available_for_single_stream;
+  emhash7::HashMap<PackedStreamId, std::unique_ptr<DataPtrLookupTable>> _available_for_single_stream;
   // Cached data pointers that are available for all stream
   std::unique_ptr<DataPtrLookupTable> _available_for_all_streams;
   // Events to indicate whether marked usages have finished
-  emhash7::HashMap<PackedStreamId,
-                   std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>>
-    _free_events;
-  std::set<size_t> merged_id;
+  emhash7::HashMap<PackedStreamId, std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>> _free_events;
 
   size_t _allocated{0};
   size_t _reserved{0}; // allocated size + cached size

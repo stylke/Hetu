@@ -315,7 +315,7 @@ def pretrain(args):
         for round in range(10):
             consumed_samples = run_plan(consumed_samples, global_batch_size = 2, micro_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
             # consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 2, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
-            consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 8, strategy_id = 2, run_level = ht.run_level("grad"))
             consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 2, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
             consumed_samples = run_plan(consumed_samples, global_batch_size = 4, micro_batch_size = 2, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
             consumed_samples = run_plan(consumed_samples, global_batch_size = 2, micro_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
