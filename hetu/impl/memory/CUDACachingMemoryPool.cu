@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <string>
 #include <stdexcept>
+
 namespace hetu {
 namespace impl {
 
@@ -41,82 +42,116 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
   if (num_bytes == 0)
     return DataPtr{nullptr, 0, device(), static_cast<DataPtrId>(-1)};
 
-  PackedStreamId packed_stream_id = stream.pack(); 
   std::lock_guard<std::mutex> lock(_mtx);
-
   WatchEvents();
 
-  // Update the `alloc_at` clock, which is later than the previous `free_at`
-  uint64_t alloc_at = next_clock();
-  DataPtr data_ptr;
-  data_ptr.device = device();
+  PackedStreamId packed_stream_id = stream.pack();
+  uint64_t alloc_at = next_clock(); // Update the `alloc_at` clock, which is later than the previous `free_at`
   auto alignment = get_data_alignment(); // 256 bytes
   size_t aligned_num_bytes = DIVUP(num_bytes, alignment) * alignment;
-  bool found_avaiable = false;
+  DataPtr data_ptr;
+  DataPtr curr_stream_data_ptr;
+  DataPtr all_stream_data_ptr;
+  bool found_curr_stream_available = false;
+  bool found_all_stream_available = false;
+  int32_t reuse_flag = -1; // -1 means cannot reuse; 0 means reuse curr stream cache; 1 means reuse all stream cache
 
-  DataPtrLookupTable* target_table_if_split = nullptr;
+  DataPtrLookupTable* target_table = nullptr;
+  DataPtrLookupTable* curr_stream_table = nullptr;
   auto info_it = _data_ptr_info.end();
 
   // Find among data spaces that are available only for this stream.
-  auto table_it = _available_for_single_stream.find(packed_stream_id);
-  if (table_it == _available_for_single_stream.end()) { 
-    // It might be useful later, insert anyway. 
-    auto insertion = _available_for_single_stream.emplace(packed_stream_id, std::make_unique<DataPtrLookupTable>());
-    HT_RUNTIME_ERROR_IF(!insertion.second)
-      << "Failed to insert lookup table to " << stream;
-    table_it = insertion.first;
-  } 
-  // 已经创建过available table了
-  else {
-    found_avaiable = FindAvailable(aligned_num_bytes, 
-                                   *(table_it->second), 
-                                   data_ptr);
-    if (found_avaiable) {
+  // blocking stream并不具有专属于自己的available table
+  if (!stream.is_blocking()) {
+    auto table_it = _available_for_single_stream.find(packed_stream_id);
+    if (table_it == _available_for_single_stream.end()) { 
+      auto insertion = _available_for_single_stream.emplace(packed_stream_id, std::make_unique<DataPtrLookupTable>());
+      HT_RUNTIME_ERROR_IF(!insertion.second)
+        << "Failed to insert lookup table to " << stream;
+      table_it = insertion.first;
+    } 
+    // 已经创建过available table了
+    else {
+      found_curr_stream_available = FindAvailable(aligned_num_bytes, 
+                                                  *(table_it->second), 
+                                                  curr_stream_data_ptr,
+                                                  false);
+    }
+    curr_stream_table = table_it->second.get();
+  }
+  // Find among data spaces that are available for all streams.
+  found_all_stream_available = FindAvailable(aligned_num_bytes, 
+                                             *_available_for_all_streams, 
+                                             all_stream_data_ptr,
+                                             false); 
+ 
+  // 如果curr stream和all stream的两个cache中都有可复用项
+  if (found_curr_stream_available && found_all_stream_available) {
+    // 目前的策略是优先选取best fit的
+    // 在同等best fit的条件下再优先选取curr stream的
+    // TODO: better strategy
+    if (curr_stream_data_ptr.size <= all_stream_data_ptr.size) 
+      reuse_flag = 0;
+    else
+      reuse_flag = 1;
+  }
+  // 只有curr stream的cache可以复用
+  else if (found_curr_stream_available) {
+    reuse_flag = 0;
+  }
+  // 只有all stream的cache可以复用
+  else if (found_all_stream_available) {
+    reuse_flag = 1;
+  }
+
+  if (reuse_flag != -1) {
+    if (reuse_flag == 0) {
       // mempool debug use    
-      // HT_LOG_INFO << "Find available " << data_ptr;
-      info_it = _data_ptr_info.find(data_ptr.id);
+      // HT_LOG_INFO << "Reuse curr stream available " << curr_stream_data_ptr;
+      data_ptr = curr_stream_data_ptr;
+      info_it = _data_ptr_info.find(curr_stream_data_ptr.id);
       HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
-        << "Cannot find data " << data_ptr << " from info";
+        << "Cannot find curr stream cached data " << curr_stream_data_ptr << " from info";
+      HT_ASSERT(info_it->second->cached_pool == curr_stream_table)
+        << "Assumption error";
       HT_ASSERT(info_it->second->status == OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM)
         << "Info status should be " << OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM
         << ", but it is actually " << info_it->second->status;
-      info_it->second->status = OccupationStatus::OCCUPIED_BY_ALLOC_STREAM;
-      info_it->second->alloc_at = alloc_at;
-      target_table_if_split = table_it->second.get();
-      HT_ASSERT(info_it->second->cached_pool == table_it->second.get())
-        << "Assumption error";
-      info_it->second->cached_pool = nullptr;
+      target_table = curr_stream_table;
     }
-  }
-  
-  // Find among data spaces that are available for all streams.
-  if (!found_avaiable) {
-    found_avaiable = FindAvailable(aligned_num_bytes, 
-                                   *_available_for_all_streams, 
-                                    data_ptr); 
-    if (found_avaiable) {
-      info_it = _data_ptr_info.find(data_ptr.id);
+    else if (reuse_flag == 1) {
+      // mempool debug use    
+      // HT_LOG_INFO << "Reuse all stream available " << all_stream_data_ptr;
+      data_ptr = all_stream_data_ptr;
+      info_it = _data_ptr_info.find(all_stream_data_ptr.id);
       HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
-        << "Cannot find data " << data_ptr << " from info";
+        << "Cannot find all stream cached data " << all_stream_data_ptr << " from info";
+      HT_ASSERT(info_it->second->cached_pool == _available_for_all_streams.get())
+        << "Assumption error";
       HT_ASSERT(info_it->second->status == OccupationStatus::AVAILABLE_FOR_ALL_STREAM)
         << "Info status should be " << OccupationStatus::AVAILABLE_FOR_ALL_STREAM
         << ", but it is actually " << info_it->second->status;
-      info_it->second->status = OccupationStatus::OCCUPIED_BY_ALLOC_STREAM;
-      info_it->second->alloc_at = alloc_at;
-      info_it->second->alloc_stream = packed_stream_id;
-      target_table_if_split = _available_for_all_streams.get();
-      HT_ASSERT(info_it->second->cached_pool == _available_for_all_streams.get())
-        << "Assumption error";
-      info_it->second->cached_pool = nullptr;
+      target_table = _available_for_all_streams.get();
     }
+    // reuse要修正info的部分信息
+    info_it->second->alloc_stream = packed_stream_id;
+    info_it->second->used_streams.clear();
+    if (!stream.is_blocking())
+      info_it->second->used_streams.insert(packed_stream_id);
+    info_it->second->status = OccupationStatus::OCCUPIED_BY_ALLOC_STREAM;
+    info_it->second->alloc_at = alloc_at;
+    info_it->second->cached_pool = nullptr;
+    // 从table中删除该entry
+    auto entry_it = target_table->table.find(data_ptr);
+    HT_ASSERT(entry_it != target_table->table.end())
+      << "Cannot find the entry of " << data_ptr << " in the target table";
+    target_table->table.erase(entry_it);
   }
- 
   // Cannot find any avaiable memory to re-use, then cudaMalloc from system.
   // *只有这种情况会cudaMalloc并将新分配的data ptr放入到info中
-  // 同时记录(cuda) data ptr所在的table
-  if (!found_avaiable) {
+  else {
     void* ptr;
-    // Maybe use aligned_num_bytes is better?
+    // Now use aligned_num_bytes
     // size_t malloc_size = GetAlignedMallocSize(aligned_num_bytes); 
     size_t malloc_size = aligned_num_bytes;
     // Check whether the memory limitation has been reached. 
@@ -138,8 +173,11 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
       _reserved += malloc_size;
       _peak_reserved = MAX(_peak_reserved, _reserved);
       _cuda_malloc_cnt++;
-      auto new_info = std::make_shared<CudaDataPtrInfo>(data_ptr.ptr, malloc_size, 
-                                                        stream, alloc_at, data_ptr.id);                                               
+      auto new_info = std::make_shared<CudaDataPtrInfo>(data_ptr.ptr, 
+                                                        malloc_size, 
+                                                        stream, 
+                                                        alloc_at, 
+                                                        data_ptr.id);                                               
       // 此时cudaMalloc出来的新的(cuda) data ptr还不具有cache的table
       new_info->cached_pool = nullptr; // 默认值其实就是nullptr（这里只是为了强调一下）
       auto insertion = _data_ptr_info.emplace(data_ptr.id, new_info);
@@ -154,7 +192,7 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
         << "reserved: " << _reserved / (1024 * 1024 * 1024) << " GB, "
         << "allocated: " << _allocated / (1024 * 1024 * 1024) << " GB. "
         << "Please set environment variable HETU_MAX_SPLIT_SIZE_MB smaller, "
-        << "if you find reserved-allocated is too much";
+        << "if you find reserved - allocated is too high";
     }
   }
 
@@ -172,17 +210,21 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
     // ------ create new data ptr place 2 ------ 
     auto remaining_data_ptr = DataPtr{remaining_ptr, remaining_size, device(), new_id};
     // 将remaining data ptr插入table
-    HT_ASSERT(target_table_if_split)
+    HT_ASSERT(target_table)
       << "Target table is a nullptr";
     // mempool debug use
     // HT_LOG_INFO << "[Create] create new split: " << remaining_data_ptr;
     // HT_LOG_INFO << "[Insert] split then insert to table: " << remaining_data_ptr;
-    InsertAvailable(remaining_data_ptr, *target_table_if_split);
+    InsertAvailable(remaining_data_ptr, *target_table);
     // 将remaining (cuda) data ptr插入info
-    auto new_info = std::make_shared<CudaDataPtrInfo>(remaining_ptr, remaining_size, stream, 0, new_id);
-    new_info->status = target_table_if_split == _available_for_all_streams.get() ? 
+    auto new_info = std::make_shared<CudaDataPtrInfo>(remaining_ptr, 
+                                                      remaining_size, 
+                                                      stream, 
+                                                      0, 
+                                                      new_id);
+    new_info->status = target_table == _available_for_all_streams.get() ? 
                        OccupationStatus::AVAILABLE_FOR_ALL_STREAM : OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM;
-    new_info->cached_pool = target_table_if_split;
+    new_info->cached_pool = target_table;
     auto info_insertion = _data_ptr_info.emplace(new_id, new_info);   
     HT_RUNTIME_ERROR_IF(!info_insertion.second)
       << "Failed to insert splitted (cuda) data ptr " << remaining_data_ptr << " to info"; 
@@ -195,8 +237,26 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
     if (cur_info->next != nullptr)
       cur_info->next->prev = new_info;
     cur_info->next = new_info;
+    // data ptr如果有single stream free event
+    // 那么新split出来的event和之前的应该一致
+    if (reuse_flag == 0) {
+      auto event_info_it = _available_event_info.find(data_ptr.id);
+      HT_ASSERT(event_info_it != _available_event_info.end())
+        << "Cannot find the info of single stream free event towards data ptr id " << data_ptr.id; 
+      auto available_event = event_info_it->second;
+      auto new_available_event = std::make_shared<AvailableEvent>(new_id, 
+                                                                  available_event->free_at,
+                                                                  available_event->stream,
+                                                                  available_event->event);
+      AddAvailableEvent(new_id, new_available_event);
+    }
   }
 
+  // 返回的data ptr如果是复用当前stream的available table的
+  // 那么其将会使single stream free event失效
+  if (reuse_flag == 0) {
+    DeleteAvailableEvent(data_ptr.id);
+  }
   _allocated += data_ptr.size;
   _alloc_cnt++;
   HT_LOG_TRACE << "ptr: " << data_ptr << ", alloc: " << data_ptr.size << ", stream: " << stream;
@@ -211,7 +271,7 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
   return data_ptr;
 }
 
-// deprecated
+// deprecated for now
 size_t CUDACachingMemoryPool::GetAlignedMallocSize(size_t request_size) {
   if (request_size < kMallocMinBuffer) {
     return kMallocMinBuffer;
@@ -243,11 +303,10 @@ bool CUDACachingMemoryPool::ShouldSplit(size_t size, size_t request_size) {
 }
 
 // 从available table中找到某一个满足num bytes的条目
-// *并删除
 // 如果找不到则返回false
 bool CUDACachingMemoryPool::FindAvailable(size_t num_bytes, 
                                           DataPtrLookupTable& lookup_table, 
-                                          DataPtr& ret,
+                                          DataPtr& reuse_data_ptr,
                                           bool remove_if_find) {
   // the caller should hold the mutex
   auto it = lookup_table.table.lower_bound(DataPtr(num_bytes, nullptr)); 
@@ -270,27 +329,23 @@ bool CUDACachingMemoryPool::FindAvailable(size_t num_bytes,
     if (it->size != num_bytes) {
       size_t remaining = it->size - num_bytes;
       // 只有两种情况允许使用cache的条目
-      // 1、该条目要比max_split_size小
+      // 1、该条目小于等于max_split_size小
       // 后续会split该条目
       // 一部分用于新分配的而空余的那部分重新插入
-      if (it->size > max_split_size && num_bytes <= max_split_size) {
-        // Do not split a oversized ptr
-        return false;
-      } 
       // 2、想分配的size要比max_split_size还大且剩余的内部碎片较少
       // 后续会直接占用整个条目且不进行split
-      else if (num_bytes > max_split_size && remaining > kMaxInternalFragment) {
+      if (it->size > max_split_size && remaining > kMaxInternalFragment) {
         // num_bytes > max_split_size, so we will directly allocate this large
         // ptr to request without splitting. But we need to limit the remaining 
         // size to avoid large internal fragment.
         return false;
       }
     }
-    ret = (*it);
+    reuse_data_ptr = (*it);
     // 删除条目
     if (remove_if_find) {
       // mempool debug use
-      // HT_LOG_INFO << "[Reuse] remove from table: " << ret;
+      // HT_LOG_INFO << "[Reuse] remove from table: " << reuse_data_ptr;
       lookup_table.table.erase(it);
     }
     return true;
@@ -301,12 +356,43 @@ bool CUDACachingMemoryPool::FindAvailable(size_t num_bytes,
 
 // 直接insert即可
 // 默认size从小到大排序
+// the caller should hold the mutex
 void CUDACachingMemoryPool::InsertAvailable(const DataPtr& data_ptr, 
                                             DataPtrLookupTable& lookup_table) {
-  // the caller should hold the mutex
   auto result = lookup_table.table.emplace(data_ptr);
   HT_RUNTIME_ERROR_IF(!result.second)
     << "Failed to insert key " << data_ptr.size << " to lookup table";
+}
+
+// 当某个data ptr在single stream available table但实际已经all stream available时
+// 可以考虑移动到all stream available table或其余split出的块儿所在的table
+// 调用该函数时需要保证data ptr已经真正意义上all stream available了
+// *即其对应的single stream event都已经被释放干净了
+// the caller should hold the mutex
+void CUDACachingMemoryPool::MoveAvailable(std::shared_ptr<CudaDataPtrInfo>& info) {
+  HT_ASSERT(info->status == OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM) 
+    << "Info status should be " << OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM
+    << ", but found " << info->status;
+  HT_ASSERT(info->cached_pool)
+    << "Info cached pool shouldn't be nullptr";
+  auto data_ptr = DataPtr{info->ptr, info->num_bytes, device(), info->id};
+  auto table_it = info->cached_pool->table.find(data_ptr);
+  HT_ASSERT(table_it != info->cached_pool->table.end())
+    << "Cannot find " << data_ptr << " in the original single stream available table";
+  info->cached_pool->table.erase(table_it);
+  info->cached_pool = nullptr;
+  // 此时info即将插入新的table
+  // 需要及时地进行merge操作
+  // 优先考虑放到all stream available table中cache住
+  DataPtrLookupTable* target_table = _available_for_all_streams.get();
+  info->refresh();
+  if (info->is_split())
+    target_table = TryMerge(info, target_table);
+  // Meta information of data_ptr might have change in TryMerge
+  data_ptr.ptr = info->ptr;
+  data_ptr.size = info->num_bytes;
+  info->cached_pool = target_table;
+  InsertAvailable(data_ptr, *target_table);
 }
 
 // Free some oversize pointer in the given lookup table to satisfy the request_size.
@@ -424,6 +510,7 @@ DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
 
   std::lock_guard<std::mutex> lock(_mtx);
   WatchEvents();
+
   // Note: The borrowed memory must be ready, so we use blocking stream here
   DataPtr data_ptr{ptr, num_bytes, device(), next_id()};
   Stream borrow_stream = stream.is_defined() ? stream : Stream(device(), kBlockingStream);
@@ -515,31 +602,51 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     for (auto s_id : used_streams) {
       auto event = std::make_unique<CUDAEvent>(data_ptr.device, false);
       event->Record(Stream::unpack(s_id));
-      _free_events[s_id].emplace_back(
+      _multi_stream_free_events[s_id].emplace_back(
         std::make_tuple(std::move(event), data_ptr.id));
     }
-    info->free_event_cnt += used_streams.size();
+    info->multi_stream_free_event_cnt += used_streams.size();
     _free_cnt++;
     return;
   }
 
   // stream独占
   if (info->status == OccupationStatus::OCCUPIED_BY_ALLOC_STREAM) {
-    info->status = OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM;
+    DataPtrLookupTable* target_table = nullptr;
+    auto stream = Stream::unpack(info->alloc_stream);
     info->free_at = free_at;
-    DataPtrLookupTable* target_table = _available_for_single_stream[info->alloc_stream].get();
+    // blocking stream上释放的东西所有stream之后都能用
+    if (stream.is_blocking()) {
+      info->status = OccupationStatus::AVAILABLE_FOR_ALL_STREAM;
+      target_table = _available_for_all_streams.get();
+    }
+    // 其余情况只能先放到single stream available table
+    else {
+      info->status = OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM;
+      target_table = _available_for_single_stream[info->alloc_stream].get();
+      // 插入event并在之后的WatchEvent中处理
+      // 来让AVAILABLE_FOR_ALLOC_STREAM到AVAILABLE_FOR_ALL_STREAM进行转换
+      auto event = std::make_shared<CUDAEvent>(data_ptr.device, false);
+      event->Record(stream); 
+      auto available_event = std::make_shared<AvailableEvent>(info->id, 
+                                                              free_at, 
+                                                              info->alloc_stream, 
+                                                              event);
+      AddAvailableEvent(info->id, available_event);
+    }
+    // 考虑是否可以merge
     if (info->is_split())
       target_table = TryMerge(info, target_table); 
     // Meta information of data_ptr might have change in TryMerge
     data_ptr.size = info->num_bytes;
-    data_ptr.ptr = info->ptr;
-    HT_ASSERT(data_ptr.id == info->id)
-      << "The data ptr id and the info id are mismatched"; 
+    data_ptr.ptr = info->ptr; 
     info->cached_pool = target_table;
-    // mempool debug use
-    // HT_LOG_INFO << "[Insert] free occupy then insert to table: " << data_ptr;
     InsertAvailable(data_ptr, *target_table); 
     _allocated -= info->num_bytes;
+    // mempool debug use
+    // HT_LOG_INFO << "[Insert] free occupy then insert to table: " << data_ptr;
+    HT_ASSERT(data_ptr.id == info->id)
+      << "The data ptr id and the info id are mismatched";
   } 
   // 当前被很多stream占用
   // 需要插入event等到所有stream都完成
@@ -549,9 +656,9 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     for (auto s_id : used_streams) {
       auto event = std::make_unique<CUDAEvent>(data_ptr.device, false);
       event->Record(Stream::unpack(s_id)); 
-      _free_events[s_id].emplace_back(std::make_tuple(std::move(event), data_ptr.id));
+      _multi_stream_free_events[s_id].emplace_back(std::make_tuple(std::move(event), data_ptr.id));
     }
-    info->free_event_cnt += used_streams.size();
+    info->multi_stream_free_event_cnt += used_streams.size();
   } 
   else {
     HT_RUNTIME_ERROR << "Unexpected occupation status ("
@@ -563,11 +670,12 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   _free_cnt++;
 }
 
-// Try to merge blocks. It assume that data_ptr has not been inserted into any
-// lookup table. It will check if there are adjacent splitted ptr and try to merge them. 
+// Try to merge blocks. It assume that data_ptr has not been inserted into any lookup table. 
+// It will check if there are adjacent splitted ptr and try to merge them. 
 // "data_ptr" refers to newly released ptr, and "table" refers to the lookup 
 // table where the ptr was originally intended to be inserted in.
 // Return a pointer of the target lookup table which we want to insert the merged ptr in.
+// Caller should hold the mutex.
 DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrInfo>& data_info, 
                                                     DataPtrLookupTable* table) {
   // Decide which lookup table will the merged ptr be inserted in.
@@ -578,6 +686,8 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
     << "TryMerge can only used when info status is available to alloc";
   HT_ASSERT(data_info->cached_pool == nullptr)
     << "TryMerge should guarantee the data ptr is not cached but released just now";
+  // 功能函数1
+  // 获取最终应该往哪个table去merge
   auto table_selection = [&](DataPtrLookupTable* src, DataPtrLookupTable* dst) -> DataPtrLookupTable* {
     // 在一个table中
     // 可以直接merge
@@ -597,10 +707,61 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
         return nullptr;
     }
   };
+  // 功能函数2
+  // 将old info往new info上头merge时
+  // 处理二者的single stream free event
+  auto handle_available_event = [&](std::shared_ptr<CudaDataPtrInfo>& new_info, 
+                                    std::shared_ptr<CudaDataPtrInfo>& old_info,
+                                    bool new_is_available_for_all) -> void {
+    // new info具有available event
+    // 这个时候要将new info和old info中最新的event作为最终的event
+    if (!new_is_available_for_all) {
+      // 因此如果old info没有event
+      // 直接返回即可
+      if (old_info->status == OccupationStatus::AVAILABLE_FOR_ALL_STREAM) {
+        return;
+      }
+      auto old_event_info_it = _available_event_info.find(old_info->id);
+      HT_ASSERT(old_event_info_it != _available_event_info.end())
+        << "Cannot find the info of single stream free event towards data ptr id " << old_info->id; 
+      auto old_available_event = old_event_info_it->second;
+      auto new_event_info_it = _available_event_info.find(new_info->id);
+      HT_ASSERT(new_event_info_it != _available_event_info.end())
+        << "Cannot find the info of single stream free event towards data ptr id " << new_info->id; 
+      auto new_available_event = new_event_info_it->second;
+      auto final_available_event = std::make_shared<AvailableEvent>(new_info->id, 
+                                                                    new_available_event->free_at, 
+                                                                    new_available_event->stream, 
+                                                                    new_available_event->event);
+      if (old_available_event->free_at > new_available_event->free_at) {
+        final_available_event->free_at = old_available_event->free_at;
+        final_available_event->event = old_available_event->event;
+      }
+      DeleteAvailableEvent(old_info->id);
+      DeleteAvailableEvent(new_info->id);
+      AddAvailableEvent(new_info->id, final_available_event);
+    }
+    // new info不具有available event
+    else {
+      auto old_event_info_it = _available_event_info.find(old_info->id);
+      HT_ASSERT(old_event_info_it != _available_event_info.end())
+        << "Cannot find the info of single stream free event towards data ptr id " << old_info->id; 
+      auto old_available_event = old_event_info_it->second;
+      auto new_available_event = std::make_shared<AvailableEvent>(new_info->id, 
+                                                                  old_available_event->free_at, 
+                                                                  old_available_event->stream, 
+                                                                  old_available_event->event);
+      DeleteAvailableEvent(old_info->id);
+      AddAvailableEvent(new_info->id, new_available_event);
+    }
+  };
+
+  // 实际TryMerge部分
   // 如果是split出来的
   // 我们把剩余部分从
   // 1、available table 以及 2、info
   // 中删去并重新合并（向now靠齐）
+  // 同时也要处理三者的single stream free event
   if (data_info->prev != nullptr && !data_info->prev->allocated()) {
     auto prev_info = data_info->prev; 
     HT_ASSERT(prev_info->status >= OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM)
@@ -610,6 +771,9 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
       << "Prev info cached pool shouldn't be nullptr";
     auto try_merge_table = table_selection(table, prev_info->cached_pool);
     if (try_merge_table) {
+      // 调整available event
+      if (try_merge_table != _available_for_all_streams.get())
+        handle_available_event(data_info, prev_info, table == _available_for_all_streams.get());
       table = try_merge_table;
       auto prev_data_ptr = DataPtr{prev_info->ptr, prev_info->num_bytes, device(), prev_info->id};
       auto table_it = prev_info->cached_pool->table.find(prev_data_ptr);
@@ -629,7 +793,7 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
       _data_ptr_info.erase(info_it);
     }
   }
-  if (data_info->next != nullptr && !data_info->next->allocated()){
+  if (data_info->next != nullptr && !data_info->next->allocated()) {
     auto next_info = data_info->next; 
     HT_ASSERT(next_info->status >= OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM)
       << "Next info status should be available to alloc"
@@ -638,6 +802,9 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
       << "Next info cached pool shouldn't be nullptr";
     auto try_merge_table = table_selection(table, next_info->cached_pool);
     if (try_merge_table) {
+      // 调整available event
+      if (try_merge_table != _available_for_all_streams.get())
+        handle_available_event(data_info, next_info, table == _available_for_all_streams.get());
       table = try_merge_table;
       auto next_data_ptr = DataPtr{next_info->ptr, next_info->num_bytes, device(), next_info->id};
       auto table_it = next_info->cached_pool->table.find(next_data_ptr);
@@ -658,7 +825,7 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
   }
   HT_ASSERT(table)
     << "Table shouldn't be nullptr";
-  // 修正status
+  // 修正最终的status
   if (table == _available_for_all_streams.get()) 
     data_info->status = OccupationStatus::AVAILABLE_FOR_ALL_STREAM;
   else
@@ -667,9 +834,73 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
 }
 
 // the caller should hold the mutex
+void CUDACachingMemoryPool::AddAvailableEvent(DataPtrId data_ptr_id, std::shared_ptr<AvailableEvent>& available_event) {
+  auto event_info_insertion = _available_event_info.emplace(data_ptr_id, available_event);
+  HT_RUNTIME_ERROR_IF(!event_info_insertion.second)
+    << "Failed to insert the info of single stream free event towards data ptr id " << data_ptr_id;
+  auto event_table_it = _single_stream_free_events.find(available_event->stream);
+  if (event_table_it == _single_stream_free_events.end()) {
+    auto table_insertion = _single_stream_free_events.emplace(available_event->stream, std::make_unique<AvailableEventLookupTable>());
+    HT_RUNTIME_ERROR_IF(!table_insertion.second)
+      << "Failed to insert available stream table for stream " << available_event->stream;
+    event_table_it = table_insertion.first;
+  }
+  auto event_insertion = event_table_it->second->table.emplace(*available_event);
+  HT_RUNTIME_ERROR_IF(!event_insertion.second)
+    << "Failed to insert single stream free event towards data ptr id  " << data_ptr_id;
+}
+
+// the caller should hold the mutex
+void CUDACachingMemoryPool::DeleteAvailableEvent(DataPtrId data_ptr_id) {
+  auto event_info_it = _available_event_info.find(data_ptr_id);
+  HT_ASSERT(event_info_it != _available_event_info.end())
+    << "Cannot find the info of single stream free event towards data ptr id " << data_ptr_id; 
+  auto available_event = event_info_it->second;
+  auto event_table_it = _single_stream_free_events.find(available_event->stream);
+  HT_ASSERT(event_table_it != _single_stream_free_events.end())
+    << "Cannot find the available event table for stream " << available_event->stream;
+  auto event_it = event_table_it->second->table.find(*available_event);
+  HT_ASSERT(event_it != event_table_it->second->table.end())
+    << "Cannot find the single stream free event towards data ptr id " << data_ptr_id;
+  // 删除
+  event_table_it->second->table.erase(event_it);
+  _available_event_info.erase(event_info_it);
+}
+
+// the caller should hold the mutex
 void CUDACachingMemoryPool::WatchEvents() {
-  for (auto& kv : _free_events) {
-    // auto packed_stream_id = kv.first;
+  // 处理single stream上的free
+  for (auto& kv : _single_stream_free_events) {
+    auto& stream_free_events = kv.second->table;
+    while (!stream_free_events.empty()) {
+      auto event_it = stream_free_events.begin();
+      cudaError_t status = event_it->event->Query();
+      if (status == cudaErrorNotReady) {
+        // ignore and clear the not-ready error
+        (void) cudaGetLastError();
+        break;
+      } else if (status != cudaSuccess) {
+        __HT_FATAL_SILENT(hetu::cuda::cuda_error)
+          << "cudaEventQuery failed: " << cudaGetErrorString(status);
+        __builtin_unreachable();
+      }
+      DataPtrId data_ptr_id = event_it->id;
+      auto info_it = _data_ptr_info.find(data_ptr_id);
+      HT_ASSERT(info_it != _data_ptr_info.end())
+        << "Cannot find data ptr with id " << data_ptr_id << " in the info"; 
+      auto info = info_it->second;
+      // 删除available event
+      stream_free_events.erase(event_it);
+      auto event_info_it = _available_event_info.find(data_ptr_id);
+      HT_ASSERT(event_info_it != _available_event_info.end())
+        << "Cannot find the info of single stream free event towards data ptr id " << data_ptr_id;
+      _available_event_info.erase(event_info_it);
+      // 移动cache entry到合适的table
+      MoveAvailable(info);
+    }
+  }
+  // 处理multi stream上的free
+  for (auto& kv : _multi_stream_free_events) {
     auto& stream_free_events = kv.second;
     while (!stream_free_events.empty()) {
       auto& tuple = stream_free_events.front();
@@ -685,27 +916,30 @@ void CUDACachingMemoryPool::WatchEvents() {
           << "cudaEventQuery failed: " << cudaGetErrorString(status);
         __builtin_unreachable();
       }
-
       // decrement the number of free events for that 
       DataPtrId data_ptr_id = std::get<1>(tuple);
       auto it = _data_ptr_info.find(data_ptr_id);
       HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
         << "Cannot find data " << data_ptr_id << " from info";
       auto info = it->second;
-      if ((--info->free_event_cnt) == 0) {
+      if ((--info->multi_stream_free_event_cnt) == 0) {
         // borrow data
-        // 直接删除即可
         if (info->deleter) {
+          // 直接删除即可
           info->deleter(DataPtr{info->ptr, info->num_bytes, device(), data_ptr_id});
           _data_ptr_info.erase(it);
         } 
         // alloc data
-        // 考虑放到all stream available table中cache住
         else {
+          HT_ASSERT(info->status == OccupationStatus::UNAVAILABLE_UNTIL_FREE) 
+            << "Info status should be " << OccupationStatus::UNAVAILABLE_UNTIL_FREE
+            << ", but found " << info->status;
+          // 优先考虑放到all stream available table中cache住
           DataPtrLookupTable* target_table = _available_for_all_streams.get();
           info->refresh();
           if (info->is_split())
             target_table = TryMerge(info, target_table);
+          // Meta information of data_ptr might have change in TryMerge
           auto data_ptr = DataPtr{info->ptr, info->num_bytes, device(), data_ptr_id};
           HT_ASSERT(data_ptr_id == info->id)
             << "The data ptr id and the info id are mismatched"; 

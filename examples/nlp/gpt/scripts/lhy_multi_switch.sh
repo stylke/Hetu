@@ -17,6 +17,7 @@ export NCCL_DEBUG=VERSION
 export HETU_SWITCH_ALGORITHM=NEW_GREEDY
 export HETU_SWITCH_PROFILE=INFO
 export HETU_INTERNAL_LOG_LEVEL=INFO
+export HETU_MAX_SPLIT_SIZE_MB=200
 mpirun --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python3 lhy_multi_switch.py \

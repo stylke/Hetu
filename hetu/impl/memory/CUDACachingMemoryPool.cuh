@@ -15,12 +15,37 @@ namespace impl {
 struct DataPtrLookupTable {
   std::set<DataPtr, bool (*)(const DataPtr& a, const DataPtr& b)> table;
 
-  DataPtrLookupTable(size_t capacity = 1024)
+  DataPtrLookupTable()
   : table([](const DataPtr& a, const DataPtr& b) -> bool { 
-      if(a.size != b.size)
+      if (a.size != b.size)
         return a.size < b.size; 
       else
         return a.ptr < b.ptr;
+    }) {}
+};
+
+struct AvailableEvent {
+  DataPtrId id;
+  mempool_clock_t free_at;
+  PackedStreamId stream;
+  std::shared_ptr<CUDAEvent> event;
+
+  // construct a search key
+  AvailableEvent(mempool_clock_t _free_at, DataPtrId _id): id(_id), free_at(_free_at) {}
+
+  AvailableEvent(DataPtrId _id, mempool_clock_t _free_at, PackedStreamId _stream, const std::shared_ptr<CUDAEvent>& _event)
+  : id(_id), free_at(_free_at), stream(_stream), event(_event) {}
+};
+
+struct AvailableEventLookupTable {
+  std::set<AvailableEvent, bool (*)(const AvailableEvent& a, const AvailableEvent& b)> table;
+
+  AvailableEventLookupTable()
+  : table([](const AvailableEvent& a, const AvailableEvent& b) -> bool { 
+      if (a.free_at != b.free_at)
+        return a.free_at < b.free_at; 
+      else
+        return a.id < b.id;
     }) {}
 };
 
@@ -63,6 +88,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   // (2) else (status == OCCUPIED_BY_MULTI_STREAMS), then status = UNAVAILABLE_UNTIL_FREE;
   // Status transition of WatchEvent (freed by system):
   // (1) if status == UNAVAILABLE_UNTIL_FREE, then status = AVAILABLE_FOR_ALL_STREAM;
+  // (2) else (status == AVAILABLE_FOR_ALLOC_STREAM), then status = AVAILABLE_FOR_ALL_STREAM;
   enum class OccupationStatus : int8_t {
     OCCUPIED_BY_ALLOC_STREAM = 0,
     OCCUPIED_BY_MULTI_STREAMS,
@@ -115,7 +141,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     OccupationStatus status;
     mempool_clock_t alloc_at;
     mempool_clock_t free_at; // free_at should be set only when inserting ptr table
-    uint32_t free_event_cnt;
+    uint32_t multi_stream_free_event_cnt;
 
     DataPtrLookupTable* cached_pool{nullptr}; // 只有当其是unallocated的时候才具有
     std::shared_ptr<CudaDataPtrInfo> prev{nullptr};
@@ -130,7 +156,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
       id(id_),
       deleter(deleter_),
       free_at(0), 
-      free_event_cnt(0) {
+      multi_stream_free_event_cnt(0) {
       if (!alloc_stream_.is_blocking())
         used_streams.insert(alloc_stream);
       status = OccupationStatus::OCCUPIED_BY_ALLOC_STREAM;
@@ -176,11 +202,12 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     }
   
     inline void refresh() {
+
       used_streams.clear();
       status = OccupationStatus::AVAILABLE_FOR_ALL_STREAM;
       alloc_at = 0;
       free_at = 0;
-      free_event_cnt = 0;
+      multi_stream_free_event_cnt = 0;
     }
   };
 
@@ -191,6 +218,8 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
 
   void InsertAvailable(const DataPtr& data_ptr,
                        DataPtrLookupTable& lookup_table);
+                      
+  void MoveAvailable(std::shared_ptr<CudaDataPtrInfo>& info);
 
   bool ReleaseOversized(DataPtrLookupTable& lookup_table, 
                         size_t request_size);
@@ -202,22 +231,32 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
 
   bool AllocNewPtr(void* &ptr, size_t size);
 
+  void AddAvailableEvent(DataPtrId data_ptr_id, std::shared_ptr<AvailableEvent>& available_event);
+
+  void DeleteAvailableEvent(DataPtrId data_ptr_id);
+
   void WatchEvents();
 
   bool ShouldSplit(size_t allocated_size, size_t request_size);
 
-  DataPtrLookupTable* TryMerge(std::shared_ptr<CudaDataPtrInfo>&, DataPtrLookupTable*);
+  DataPtrLookupTable* TryMerge(std::shared_ptr<CudaDataPtrInfo>& data_info, DataPtrLookupTable* table);
 
   // Info of all data pointers
   // If one pointer is cached in the lookup table of peculiar stream, it will also have record in here. 
   // NOTE: 所有allocated & unallocated指针都在这里保存记录
   emhash7::HashMap<DataPtrId, std::shared_ptr<CudaDataPtrInfo>> _data_ptr_info;
+  // Mapping of data ptr id to the single stream event
+  // NOTE: 服务于_single_stream_free_events
+  emhash7::HashMap<DataPtrId, std::shared_ptr<AvailableEvent>> _available_event_info;
   // Cached data pointers that are available for specific streams
   emhash7::HashMap<PackedStreamId, std::unique_ptr<DataPtrLookupTable>> _available_for_single_stream;
   // Cached data pointers that are available for all stream
   std::unique_ptr<DataPtrLookupTable> _available_for_all_streams;
   // Events to indicate whether marked usages have finished
-  emhash7::HashMap<PackedStreamId, std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>> _free_events;
+  emhash7::HashMap<PackedStreamId, std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>> _multi_stream_free_events;
+  // Events to indicate whether a data ptr is available to all streams
+  emhash7::HashMap<PackedStreamId, std::unique_ptr<AvailableEventLookupTable>> _single_stream_free_events;
+  
 
   size_t _allocated{0};
   size_t _reserved{0}; // allocated size + cached size
