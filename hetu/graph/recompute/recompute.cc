@@ -33,6 +33,7 @@ bool Recompute::IsNoRecomputedOp(Operator& op) {
 }
 
 void Recompute::GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool get_inputs, bool get_outputs) {
+  auto& local_device = hetu::impl::comm::GetLocalDevice();
   OpRefQueue to_visit;
   for (auto& op_opref : recompute_subgraph) {
     to_visit.push(op_opref.second);
@@ -52,6 +53,7 @@ void Recompute::GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool ge
       for (auto& input : op_inputs) {
         auto& op = input->producer();
         if (op->op_meta().is_recompute && !IsNoRecomputedOp(op) &&
+            op->placement_group().contains(local_device) &&
             recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
           to_visit.push(std::ref(op));
         }
@@ -65,6 +67,7 @@ void Recompute::GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool ge
         for (auto& op_ref : out_consumers) {
           auto& op = op_ref.get();
           if (op->op_meta().is_recompute && !IsNoRecomputedOp(op) &&
+              op->placement_group().contains(local_device) &&
               recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
             to_visit.push(op_ref);
           }
@@ -124,6 +127,7 @@ Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2O
   auto new_op_meta = OpMeta().set(origin_op->op_meta())
                              .set_is_recompute(false)
                              .set_name(origin_op->name() + "_recompute")
+                             .set_is_deduce_states(false)
                              .set_origin_op_id(origin_op->id());
   // add the execution dependency
   if (!has_recomputed_input) {
@@ -138,11 +142,15 @@ Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2O
     new_op->MapToParallelDevices(origin_op->placement_group());
   new_op->Instantiate(origin_op->instantiation_ctx().placement, 
                       origin_op->instantiation_ctx().stream_index);
+  for (auto i = 0; i < origin_op->num_outputs(); i++) {
+    new_op->output(i)->set_multi_distributed_states(origin_op->output(i)->multi_distributed_states());
+  }
   origin_to_recomputed_map.insert({origin_op->id(), new_op});
   return origin_to_recomputed_map[origin_op->id()];
 }
 
 void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
+  auto& local_device = hetu::impl::comm::GetLocalDevice();
   // Find candidate recomputed ops.
   auto has_grad_consumer = [](const Tensor& tensor) {
     return Tensor::any_consumer_of(tensor, [](const OpRef& op_ref) -> bool {
@@ -153,7 +161,8 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
   OpRefList candidate_recomputed_ops;
   for (auto& op_ref : topo_order) {
     auto& op = op_ref.get();
-    if (!op->op_meta().is_recompute || IsNoRecomputedOp(op)) {
+    if (!op->op_meta().is_recompute || IsNoRecomputedOp(op) ||
+        !op->placement_group().contains(local_device)) {
       continue;
     }
     // No recomputation if there is no grad op in the outputs

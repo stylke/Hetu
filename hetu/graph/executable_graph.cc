@@ -1355,16 +1355,27 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       Instantiate(fetches, local_device);
       HT_LOG_DEBUG << local_device << ": [Execution Plan] Instantiate end...";
 
+      // init topo contains comm_op
+      OpRefList topo_before_substitute_comm = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo_before_substitute_comm;
+
+      // substitute comm_op
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op begin...";
+      Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
+      SubstituteCommOp(topo_before_substitute_comm);
+      Graph::pop_graph_ctx();
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op end...";
+
       // init instantiated topo
       OpRefList topo_before_recompute = Graph::TopoSort(fetches, num_ops(), is_op_computed);
       HT_LOG_DEBUG << local_device << ": global topo before recompute pass: " << topo_before_recompute;
 
       // add recompute pass
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] recompute pass begin...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] recompute pass begin...";
       Graph::push_graph_ctx(id());
       Recompute::InsertRecomputedOps(topo_before_recompute);
       Graph::pop_graph_ctx();
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] recompute pass end...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] recompute pass end...";
 
       // init topo with recomputed ops
       OpRefList topo_before_activation_offload = Graph::TopoSort(fetches, num_ops(), is_op_computed);
@@ -1376,17 +1387,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       ActivationCPUOffload::OffloadToCPU(topo_before_activation_offload);
       Graph::pop_graph_ctx();
       HT_LOG_DEBUG << local_device << ": [Execution Plan] activation offload pass end...";
-
-      // init topo contains comm_op
-      OpRefList topo_before_substitute_comm = Graph::TopoSort(fetches, num_ops(), is_op_computed);
-      HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo_before_substitute_comm;
-
-      // substitute comm_op
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op begin...";
-      Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
-      SubstituteCommOp(topo_before_substitute_comm);
-      Graph::pop_graph_ctx();
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op end...";
 
       // update topo with substituted comm_ops
       OpRefList topo_before_contiguous = Graph::TopoSort(fetches, num_ops(), is_op_computed);

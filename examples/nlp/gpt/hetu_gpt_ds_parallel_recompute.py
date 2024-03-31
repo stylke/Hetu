@@ -12,7 +12,7 @@ class GPTAttention(ht.nn.Module):
 
         self.config = config
         self.use_flash_attn = config.use_flash_attn
-        self.add_bias = True
+        self.add_bias = False
 
         max_positions = config.max_position_embeddings
         self.bias = np.tril(np.ones((max_positions, max_positions), dtype=np.int64).reshape(
@@ -57,9 +57,9 @@ class GPTAttention(ht.nn.Module):
 
 
     def _attn(self, query, key_t, value, attention_mask=None):
-        # q*k^T, shape=[micro_batch_size, num_heads, seq_len, seq_len]
+        # q*k^T, shape=[mbs_times_dp, num_heads, seq_len, seq_len]
         attn_weights = ht.bmm(query, key_t)
-        micro_batch_size, num_heads, seq_len, seq_len = attn_weights.global_shape
+        mbs_times_dp, num_heads, seq_len, seq_len = attn_weights.global_shape
 
         # scale
         if self.scale_attn_weights:
@@ -70,7 +70,7 @@ class GPTAttention(ht.nn.Module):
         # mask
         device_index = get_device_index(self.qkv_dense.device_group)
         causal_mask = ht.from_numpy_parallel(parallel_data_provider(np.tile(self.bias[:, :, :seq_len, :seq_len], 
-                                                                            (micro_batch_size, num_heads, 1, 1)),
+                                                                            (mbs_times_dp, num_heads, 1, 1)),
                                                                     attn_weights.distributed_states, device_index),
                                              attn_weights.distributed_states, requires_grad=False,
                                              device_group=self.qkv_dense.device_group, name='causal_mask')
@@ -80,8 +80,8 @@ class GPTAttention(ht.nn.Module):
                                       device_group=self.qkv_dense.device_group, name='mask')
         attn_weights = ht.where(causal_mask, attn_weights, mask)
         if attention_mask is not None:
-            # attn_weights: shape=[micro_batch_size, num_heads, seq_len, seq_len]
-            # attention_mask: shape=[micro_batch_size, 1, 1, seq_len], 注意ds的设置
+            # attn_weights: shape=[mbs_times_dp, num_heads, seq_len, seq_len]
+            # attention_mask: shape=[mbs_times_dp, 1, 1, seq_len], 注意ds的设置
             # 被mask的<pad>位置上值为-1e4, 没有被mask的位置上值为0
             # todo: +-*/允许对应维度一个为n一个为1的情况下, n被切分
             # print(f'attn_weights global_shape={attn_weights.global_shape}, attention_mask.global_shape={attention_mask.global_shape}')
@@ -91,7 +91,7 @@ class GPTAttention(ht.nn.Module):
         attn_weights = ht.softmax(attn_weights, 3)
         # dropout
         # attn_weights = self.attn_dropout(attn_weights)
-        # weight sum, shape=[micro_batch_size, num_heads, seq_len, head_dim]
+        # weight sum, shape=[mbs_times_dp, num_heads, seq_len, head_dim]
         attn_output = ht.bmm(attn_weights, value)
 
         return attn_output, attn_weights
@@ -101,68 +101,44 @@ class GPTAttention(ht.nn.Module):
         hidden_states,
         attention_mask=None,
     ):
-        micro_batch_size, seq_len, embed_dim = hidden_states.global_shape
-        assert micro_batch_size == self.config.global_batch_size // self.config.num_micro_batches and embed_dim == self.embed_dim, \
-            f"GPTAttention input shape should be equal to ({micro_batch_size, seq_len, embed_dim})"
+        mbs_times_dp, seq_len, embed_dim = hidden_states.global_shape
         
-        # [micro_batch_size*seq_len, embed_dim]
-        # print(f"hidden_states is_contiguous = {hidden_states.is_contiguous()}")
+        # [mbs_times_dp*seq_len, embed_dim]
         hidden_states = hidden_states.reshape([-1, embed_dim])
-        # [8192, 2560], bf16
-        # print(f"hidden_states shape = {hidden_states.shape}, dtype = {hidden_states.dtype}")
         # print(f'hidden_states.global_shape={hidden_states.global_shape}, hidden_states.shape={hidden_states.shape}, hidden_states.distributed_states={hidden_states.distributed_states}')        
-        # column parallel, [micro_batch_size*seq_len, 3*embed_dim]
+        # column parallel, [mbs_times_dp*seq_len, 3*embed_dim]
         qkv = self.qkv_dense(hidden_states)
-        # print(f"qkv shape = {qkv.shape}, dtype = {qkv.dtype}")
         # print(f'qkv.global_shape={qkv.global_shape}, qkv.shape={qkv.shape}, qkv.distributed_states={qkv.distributed_states}')        
-        # [micro_batch_size, seq_len, num_heads, 3*head_dim]
-        # print(f"qkv is_contiguous = {qkv.is_contiguous()}")
-        qkv = qkv.reshape([micro_batch_size, -1, self.num_heads, 3 * self.head_dim])
-        # print(f"self.num_heads = {self.num_heads}")
-        # [2, 4096, 4, 240], bf16
-        # print(f"qkv_reshape shape = {qkv.shape}, dtype = {qkv.dtype}")
-        # q,k,v shape=[micro_batch_size, seq_len, num_heads, head_dim]
+        # [mbs_times_dp, seq_len, num_heads, 3*head_dim]
+        qkv = qkv.reshape([mbs_times_dp, -1, self.num_heads, 3 * self.head_dim])
+        # q,k,v shape=[mbs_times_dp, seq_len, num_heads, head_dim]
         query, key, value = ht.split(qkv, 3, qkv.ndim - 1)
 
         if self.use_flash_attn:
             attn_output = ht.attn(query, key, value, 0, -1, True)[0]
-            # [2, 4096, 4, 80], bf16
-            # print(f"output[0] shape = {outputs[0].shape}, dtype = {outputs[0].dtype}")
-            # [2, 4, 4096], fp32
-            # print(f"output[5] shape = {outputs[5].shape}, dtype = {outputs[5].dtype}")
-            # [2], int64
-            # print(f"output[7] shape = {outputs[7].shape}, dtype = {outputs[7].dtype}")
-            # print(f"attn_output shape = {attn_output.shape}, dtype = {attn_output.dtype}")
         else:
-            # [micro_batch_size, num_heads, seq_len, head_dim]
+            # [mbs_times_dp, num_heads, seq_len, head_dim]
             query = query.transpose([0, 2, 1, 3], name="AttentionOp_query")
             value = value.transpose([0, 2, 1, 3], name="AttentionOp_value")
+            # [mbs_times_dp, num_heads, head_dim, seq_len]
             key_t = key.transpose([0, 2, 3, 1], name="AttentionOp_key") # k^T
-            # [micro_batch_size, num_heads, head_dim, seq_len]
 
-            # self-attn, shape=[micro_batch_size, num_heads, seq_len, head_dim]
+            # self-attn, shape=[mbs_times_dp, num_heads, seq_len, head_dim]
             attn_output, attn_weights = self._attn(query, key_t, value, attention_mask)
 
-            # [micro_batch_size, seq_len, num_heads, head_dim]
+            # [mbs_times_dp, seq_len, num_heads, head_dim]
             attn_output = attn_output.transpose([0, 2, 1, 3])
         
-        # [micro_batch_size*seq_len, num_heads*head_dim]
-        # print(f"attn_output is_contiguous = {attn_output.is_contiguous()}")
-        # non-contiguous
+        # [mbs_times_dp*seq_len, num_heads*head_dim]
         attn_output = attn_output.reshape([-1, self.num_heads * self.head_dim])
-        # [8192, 320], bf16
-        # print(f"attn_output_reshape shape = {attn_output.shape}, dtype = {attn_output.dtype}")
-        # row parallel, shape=[micro_batch_size*seq_len, num_heads*head_dim]
+        # row parallel, shape=[mbs_times_dp*seq_len, num_heads*head_dim]
         attn_output = self.dense(attn_output)
-        # print(f"attn_output_dense shape = {attn_output.shape}, dtype = {attn_output.dtype}")
-        # [micro_batch_size, seq_len, num_heads*head_dim]
-        # print(f"attn_output is_contiguous = {attn_output.is_contiguous()}")
-        attn_output = attn_output.reshape([micro_batch_size, -1, self.num_heads * self.head_dim])
-        # print(f"attn_output_reshape shape = {attn_output.shape}, dtype = {attn_output.dtype}")
+        # [mbs_times_dp, seq_len, num_heads*head_dim]
+        attn_output = attn_output.reshape([mbs_times_dp, -1, self.num_heads * self.head_dim])
         # dropout
         # attn_output = self.resid_dropout(attn_output)
 
-        # [micro_batch_size, seq_len, num_heads*head_dim]
+        # [mbs_times_dp, seq_len, num_heads*head_dim]
         return attn_output
 
 
@@ -171,7 +147,7 @@ class ParallelMLP(ht.nn.Module):
     def __init__(self, config, ds_parallel_config, name='mlp'):
         super(ParallelMLP, self).__init__()
         self.config = config
-        self.add_bias = True
+        self.add_bias = False
 
         self.dense_h_to_4h = ht.nn.HtColumnParallelLinear(
             config.hidden_size,
@@ -184,7 +160,7 @@ class ParallelMLP(ht.nn.Module):
         )
 
         # self.bias_gelu_fusion = bias_gelu_fusion
-        self.activation_func = ht.nn.NewGeLU() # should be gelu
+        # self.activation_func = ht.nn.NewGeLU() # should be gelu
 
         self.dense_4h_to_h = ht.nn.HtRowParallelLinear(
             config.ffn_hidden_size,
@@ -200,7 +176,8 @@ class ParallelMLP(ht.nn.Module):
     def forward(self, hidden_states):
         # [b*seq_len, h] -> [b*seq_len, 4h]
         intermediate_parallel = self.dense_h_to_4h(hidden_states)
-        intermediate_parallel = self.activation_func(intermediate_parallel)
+        # intermediate_parallel = self.activation_func(intermediate_parallel)
+        intermediate_parallel = ht.relu(intermediate_parallel)
 
         # [b*seq_len, 4h] -> [b*seq_len, h]
         output = self.dense_4h_to_h(intermediate_parallel)
@@ -250,7 +227,6 @@ class GPTBlock(ht.nn.Module):
         residual = hidden_states
         hidden_states = self.ln_2(hidden_states)
         feed_forward_hidden_states = self.mlp(hidden_states)
-        
         # residual connection
         # hidden_states =  feed_forward_hidden_states + residual
         hidden_states =  residual + feed_forward_hidden_states
@@ -281,13 +257,12 @@ class GPTModel(ht.nn.Module):
     def forward(
         self,
         input_ids,
+        position_ids,
         attention_mask=None,
         token_type_ids=None,
     ):
         # input_ids: [b, seq_len]
-        micro_batch_size, seq_len = input_ids.global_shape
-        assert self.config.global_batch_size // self.config.num_micro_batches == micro_batch_size, \
-            'input_ids parallel batch_size should be equal to config'
+        mbs_times_dp, seq_len = input_ids.global_shape
         
         # token_type_ids: [b, seq_len]
         if token_type_ids is not None:
@@ -295,20 +270,12 @@ class GPTModel(ht.nn.Module):
                 and token_type_ids.distributed_states.check_equal(input_ids.distributed_states), \
                 'token_type_ids global_shape and distributed_states should be equal to input_ids'
 
-        # position_ids: [1, seq_len]
-        position_ids = np.arange(0, seq_len, dtype=np.int64) # pos: [0, 1, 2, ..., seq_len-1]
-        position_ids = np.tile(position_ids, [micro_batch_size, 1]) # shape: [b, seq_len]
-        # position_ids = ht.from_numpy(position_ids)
-        device_index = get_device_index(self.wpe.device_group)
-        position_ids = ht.from_numpy_parallel(parallel_data_provider(position_ids, input_ids.distributed_states, device_index), 
-                                              input_ids.distributed_states, device_group=self.wpe.device_group, name='position_ids')
-
         # attention_mask: [b, 1, 1, seq_len]
         if attention_mask is not None:
             assert attention_mask.global_shape == input_ids.global_shape \
                 and attention_mask.distributed_states.check_equal(attention_mask.distributed_states), \
                 'attention_mask global_shape and distributed_states should be equal to input_ids!'
-            attention_mask = attention_mask.reshape([micro_batch_size, 1, 1, -1])
+            attention_mask = attention_mask.reshape([mbs_times_dp, 1, 1, -1])
             # 原attention_mask: 1为使用的值, 0为mask的值
             # attention_mask = attention_mask.to(dtype=self.dtype)  # fp16 compatibility
             attention_mask = (1.0 - attention_mask) * -10000.0 # 0为使用的值, -10000为mask的值
@@ -353,6 +320,7 @@ class GPTLMHeadModel(ht.nn.Module):
     def forward(
         self,
         input_ids=None,
+        position_ids=None,
         attention_mask=None,
         token_type_ids=None,
         labels=None
@@ -360,6 +328,7 @@ class GPTLMHeadModel(ht.nn.Module):
         # [b, seq_len, n_embd]
         hidden_states = self.transformer(
             input_ids,
+            position_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
         )
@@ -390,6 +359,6 @@ class GPTLMHeadModel(ht.nn.Module):
                 # print('use commom cross entropy')
                 loss = ht.softmax_cross_entropy_sparse(shift_lm_logits,
                     shift_labels, ignored_index = -1, reduction = "mean")
-        output = (shift_lm_logits,)
-        output = ((loss,) + output) if loss is not None else output
-        return output # ((loss), (shift_lm_logits))
+        # output = (shift_lm_logits,)
+        # output = ((loss,) + output) if loss is not None else output
+        return loss # ((loss), (shift_lm_logits))

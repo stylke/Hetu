@@ -257,6 +257,7 @@ class GPTModel(ht.nn.Module):
     def forward(
         self,
         input_ids,
+        position_ids,
         attention_mask=None,
         token_type_ids=None,
     ):
@@ -268,14 +269,6 @@ class GPTModel(ht.nn.Module):
             assert token_type_ids.global_shape == input_ids.global_shape \
                 and token_type_ids.distributed_states.check_equal(input_ids.distributed_states), \
                 'token_type_ids global_shape and distributed_states should be equal to input_ids'
-
-        # position_ids: [1, seq_len]
-        position_ids = np.arange(0, seq_len, dtype=np.int64) # pos: [0, 1, 2, ..., seq_len-1]
-        position_ids = np.tile(position_ids, [mbs_times_dp, 1]) # shape: [b, seq_len]
-        # position_ids = ht.from_numpy(position_ids)
-        device_index = get_device_index(self.wpe.device_group)
-        position_ids = ht.from_numpy_parallel(parallel_data_provider(position_ids, input_ids.distributed_states, device_index), 
-                                              input_ids.distributed_states, device_group=self.wpe.device_group, name='position_ids')
 
         # attention_mask: [b, 1, 1, seq_len]
         if attention_mask is not None:
@@ -327,6 +320,7 @@ class GPTLMHeadModel(ht.nn.Module):
     def forward(
         self,
         input_ids=None,
+        position_ids=None,
         attention_mask=None,
         token_type_ids=None,
         labels=None
@@ -334,6 +328,7 @@ class GPTLMHeadModel(ht.nn.Module):
         # [b, seq_len, n_embd]
         hidden_states = self.transformer(
             input_ids,
+            position_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
         )

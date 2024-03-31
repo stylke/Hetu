@@ -566,7 +566,7 @@
 # Communication
 #######################################################
 
-- name: name
+- name: comm
   op: CommOp
   args: Tensor input, DistributedStatesList multi_dst_ds, std::string mode
 
@@ -577,6 +577,18 @@
 - name: comm
   op: CommOp
   args: Tensor input, DistributedStatesList multi_dst_ds  
+
+- name: comm
+  op: CommOp
+  args: Tensor input, DistributedStates dst_ds, std::string mode
+
+- name: comm
+  op: CommOp
+  args: Tensor input, DistributedStates dst_ds, DeviceGroup dst_group
+
+- name: comm
+  op: CommOp
+  args: Tensor input, DistributedStates dst_ds  
 
 #######################################################
 # Others

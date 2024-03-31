@@ -17,13 +17,12 @@ all_devices = None
 def distributed_init(use_multi_node: bool = False):
     if use_multi_node:
         hostname = socket.gethostname()
-        os.environ['HETU_LOCAL_HOSTNAME'] = hostname
-        #if hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-master-0':
-        #    os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-0'
-        #elif hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-worker-0':
-        #    os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-1'
-        #else:
-        #    raise ValueError(f"Unknown hostname: {hostname}")
+        if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
+           os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-0'
+        elif hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0':
+           os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-1'
+        else:
+           raise ValueError(f"Unknown hostname: {hostname}")
 
     global local_device, all_devices
     ht.init_comm_group(8)
@@ -64,6 +63,11 @@ def train_dataset_provider(args):
         vocab_file=args.vocab_file,
         merge_file=args.merge_file)
     return train_dataset
+
+def get_position_ids(gbs_per_dp, seq_len): 
+    position_ids = np.arange(0, seq_len, dtype=np.int64) # [1, seq_len]
+    position_ids = np.tile(position_ids, [gbs_per_dp, 1]) # [dp_size, seq_len]
+    return position_ids
 
 def train_data_iterator(dataset, consumed_samples, mbs, dp_rank, dp_size):
     # print(f'new dataloader: consumed_samples = {consumed_samples}')
@@ -112,12 +116,14 @@ def pretrain(args):
     mbs_times_dp = micro_batch_size * dp_size    
 
     input_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='input_ids')
+    position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='position_ids')
     # token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='token_type_ids')
     attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='attention_mask')
     masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=label_ds, device_group=label_device_group, name='masked_lm_labels')
 
     print(f'{local_device}: build model begin...')
     loss = model(input_ids=input_ids,
+                 position_ids=position_ids,
                  attention_mask=attention_mask,
                  # token_type_ids=token_type_ids,
                  labels=masked_lm_labels)
@@ -182,6 +188,7 @@ def pretrain(args):
 
                 feed_dict = {
                     input_ids: tokens.astype(np.int64),
+                    position_ids: _position_ids.astype(np.int64),
                     # token_type_ids: _token_type_ids.astype(np.int64),
                     attention_mask: _attention_mask.astype(np.int64),
                     masked_lm_labels: labels.astype(np.int64),
@@ -189,6 +196,7 @@ def pretrain(args):
             else: # fake data; feed_dict={} will cause segment fault?
                 feed_dict = {
                     input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64),
                     # token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
                     attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
                     masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),

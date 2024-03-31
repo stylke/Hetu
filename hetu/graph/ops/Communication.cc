@@ -581,6 +581,29 @@ Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, OpMeta op_me
                       {input}, std::move(op_meta))->output(0);
 }
 
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+                  ReductionType red_type, OpMeta op_meta) {
+  DistributedStatesList multi_dst_ds = {dst_ds};
+  return MakeCommOp(input, multi_dst_ds, red_type, op_meta);
+}
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
+                  const std::string& mode, OpMeta op_meta) {
+  DistributedStatesList multi_dst_ds = {dst_ds};
+  return MakeCommOp(input, multi_dst_ds, mode, op_meta);
+}
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
+                  DeviceGroup dst_group, OpMeta op_meta) {
+  DistributedStatesList multi_dst_ds = {dst_ds};
+  return MakeCommOp(input, multi_dst_ds, dst_group, op_meta);
+}
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, OpMeta op_meta) {
+  DistributedStatesList multi_dst_ds = {dst_ds};
+  return MakeCommOp(input, multi_dst_ds, op_meta);
+}
+
 // for comm ops created in exec_graph, the device_groups only contains one device_group!!!
 Tensor MakeAllReduceOp(Tensor input, DeviceGroup comm_group, bool inplace, OpMeta op_meta) {
   HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 

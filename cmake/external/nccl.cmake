@@ -1,7 +1,7 @@
 include(ExternalProject)
 
-set(NCCL_TAR ${CMAKE_SOURCE_DIR}/third_party/nccl/nccl_2.20.3-1+cuda11.0_x86_64.txz)
-set(NCCL_TAR_FILE ${CMAKE_CURRENT_BINARY_DIR}/third_party/nccl_2.20.3-1+cuda11.0_x86_64)
+set(NCCL_TAR ${CMAKE_SOURCE_DIR}/third_party/nccl/nccl_2.14.3-1+cuda11.7_x86_64.txz)
+set(NCCL_TAR_FILE ${CMAKE_CURRENT_BINARY_DIR}/third_party/nccl_2.14.3-1+cuda11.7_x86_64)
 set(NCCL_FILE ${CMAKE_CURRENT_BINARY_DIR}/third_party/nccl)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/third_party)

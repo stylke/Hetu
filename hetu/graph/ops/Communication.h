@@ -108,6 +108,7 @@ class CommOpImpl final: public OpInterface {
   ReductionType _red_type{kNONE}; // only used for AllReduce, ReduceScatter
 };
 
+// multiple strategies
 Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
                   ReductionType red_type, OpMeta op_meta = OpMeta());
 
@@ -119,6 +120,18 @@ Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds,
 
 Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
                   OpMeta op_meta = OpMeta());
+
+// single strategy
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+                  ReductionType red_type, OpMeta op_meta = OpMeta());
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
+                  const std::string& mode, OpMeta op_meta = OpMeta());
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, DeviceGroup dst_group,
+                  OpMeta op_meta = OpMeta());
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, OpMeta op_meta = OpMeta());
 
 class AllReduceOpImpl final : public OpInterface {
  public:

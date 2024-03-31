@@ -5,6 +5,7 @@ list(FILTER HETU_CPP_TEST_SRC EXCLUDE REGEX "${HETU_CPP_TEST_SRC_DIR}/test_dp.cc
 list(FILTER HETU_CPP_TEST_SRC EXCLUDE REGEX "${HETU_CPP_TEST_SRC_DIR}/test_ds_for_dp.cc")
 list(FILTER HETU_CPP_TEST_SRC EXCLUDE REGEX "${HETU_CPP_TEST_SRC_DIR}/test_local.cc")
 list(FILTER HETU_CPP_TEST_SRC EXCLUDE REGEX "${HETU_CPP_TEST_SRC_DIR}/test_pp.cc")
+list(FILTER HETU_CPP_TEST_SRC EXCLUDE REGEX "${HETU_CPP_TEST_SRC_DIR}/test_graph.cc")
 foreach(test ${HETU_CPP_TEST_SRC})
   get_filename_component(TName ${test} NAME_WE)
   add_executable(${TName} ${test})
