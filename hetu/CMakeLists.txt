@@ -31,7 +31,7 @@ endif()
 
 if(${HETU_COMPILE_NCCL})
   # include(${CMAKE_SOURCE_DIR}/cmake/external/nccl.cmake)
-  find_package(NCCL 2.18 REQUIRED)
+  find_package(NCCL 2.5 REQUIRED)
   target_link_libraries(hetu_C PUBLIC ${NCCL_LIBRARIES})
   target_include_directories(hetu_C PUBLIC ${NCCL_INCLUDE_DIRS})
 endif()
@@ -78,6 +78,12 @@ if(${USE_FLASH_ATTN})
     target_include_directories(hetu_C PUBLIC ${FLASH_INCLUDE_DIR})
   endif()
 endif()
+
+message("preparing bitsandbytes")
+include(${CMAKE_SOURCE_DIR}/cmake/external/bitsandbytes.cmake)
+target_link_libraries(hetu_C PUBLIC ${BNB_LIB_PATH})
+target_include_directories(hetu_C PUBLIC ${BNB_INCLUDE_DIR})
+add_dependencies(hetu_C project_bitsandbytes)
 
 target_compile_options(hetu_C PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
                        -O3;

@@ -110,6 +110,8 @@ DECLARE_KERNEL_CPU_AND_CUDA(Conv2dReduceSum, const NDArray&, NDArray&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(DataTransfer, const NDArray& from, NDArray& to,
                             const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(DeQuantization, const NDArray&, NDArray&, const NDArray&, NDArray&, 
+                            int64_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Diagonal, const NDArray&, NDArray&, int, int, int,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(DiagonalGradient, const NDArray&, NDArray&, int,
@@ -228,6 +230,9 @@ DECLARE_KERNEL_CPU_AND_CUDA(MatDot, const NDArray&, const NDArray&, NDArray&,
                             const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(MatMul, const NDArray& a, bool trans_a, const NDArray& b,
                             bool trans_b, NDArray& output, const Stream&);
+DECLARE_KERNEL_CUDA(MatMul4Bit, const NDArray&, bool, const NDArray&, bool,
+                    const NDArray&, const NDArray&, NDArray&,
+                    int blocksize, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(MatVecMul, const NDArray&, bool, const NDArray&,
                             NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(MaxPool, const NDArray&, const size_t, const size_t,
@@ -265,6 +270,8 @@ DECLARE_KERNEL_CPU_AND_CUDA(PadGradient, const NDArray&, NDArray&,
                             const HTShape&, const Stream&, std::string);
 DECLARE_KERNEL_CPU_AND_CUDA(Pow, const NDArray&, double, NDArray&,
                             const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(Quantization, const NDArray&, NDArray&, const NDArray&, NDArray&, 
+                            int64_t, bool, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(RangeMask, const NDArray&, int64_t, int64_t,
                             NDArray&, const Stream&);                            
 DECLARE_KERNEL_CPU_AND_CUDA(Reduce, const NDArray&, NDArray&, const HTAxes&,

@@ -116,6 +116,10 @@ class VariableOpImpl : public OpInterface {
     return _requires_grad;
   }
 
+  void set_requires_grad(bool requires_grad) {
+    _requires_grad = requires_grad;
+  }
+
  protected:
   std::shared_ptr<Initializer> _init;
   NDArray _provided_data;
@@ -249,6 +253,10 @@ class ParallelVariableOpImpl : public OpInterface {
 
   bool requires_grad() const {
     return _requires_grad;
+  }
+
+  void set_requires_grad(bool requires_grad) {
+    _requires_grad = requires_grad;
   }
 
   std::shared_ptr<Initializer> _init;

@@ -70,6 +70,8 @@ inline ncclDataType_t to_NCCL_Datatype(DataType dtype) {
     case kFloat32: return ncclFloat32;
     case kFloat64: return ncclFloat64;
     case kBFloat16: return ncclBfloat16;
+    case kFloat4: return ncclUint8;
+    case kNFloat4: return ncclUint8;
     default:
       HT_NOT_IMPLEMENTED << "Data type " << dtype
                          << " is not supported for NCCL.";
@@ -230,7 +232,9 @@ void NCCLCommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
         // D2D Copy
         for (size_t i = 0; i < inputs.size(); i++) {
           void* send_buf = inputs[i]->raw_data_ptr();
-          int num_bytes = inputs[i]->numel() * to_num_bytes(inputs[i]->dtype());
+          int num_bytes = (inputs[i]->dtype() == kNFloat4 || inputs[i]->dtype() == kFloat4)  
+                          ? (inputs[i]->numel() + 1) / 2
+                          : inputs[i]->numel() * to_num_bytes(inputs[i]->dtype());
           CUDA_CALL(cudaMemcpyAsync(buffer_ptr + offset, send_buf, num_bytes,
                                     cudaMemcpyDeviceToDevice, cuda_stream));
           offset += num_bytes;
@@ -242,8 +246,9 @@ void NCCLCommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
         offset = 0;
         for (size_t i = 0; i < outputs.size(); i++) {
           void* recv_buf = outputs[i]->raw_data_ptr();
-          int num_bytes =
-            outputs[i]->numel() * to_num_bytes(outputs[i]->dtype());
+          int num_bytes = (outputs[i]->dtype() == kNFloat4 || outputs[i]->dtype() == kFloat4)  
+                          ? (outputs[i]->numel() + 1) / 2
+                          : outputs[i]->numel() * to_num_bytes(outputs[i]->dtype());
           CUDA_CALL(cudaMemcpyAsync(recv_buf, buffer_ptr + offset, num_bytes,
                                     cudaMemcpyDeviceToDevice, cuda_stream));
           offset += num_bytes;
@@ -289,9 +294,15 @@ void NCCLCommunicationGroupDef::AlltoAll(const NDArray& input,
     {
       NCCLGroupGuard group_guard(true);
       for (int i = 0; i < _size; i++) {
-        NCCL_CALL(ncclSend(send_buf + i * numel * bytes_per_element, numel,
+        int ptr = (input->dtype() == kFloat4 || input->dtype() == kNFloat4)
+                  ? i * ((numel + 1) / 2)
+                  : i * numel * bytes_per_element;
+        int count = (input->dtype() == kFloat4 || input->dtype() == kNFloat4)
+                    ? (numel + 1) / 2
+                    : numel;
+        NCCL_CALL(ncclSend(send_buf + ptr, count,
                            nccl_dtype, i, _comm, cuda_stream));
-        NCCL_CALL(ncclRecv(recv_buf + i * numel * bytes_per_element, numel,
+        NCCL_CALL(ncclRecv(recv_buf + ptr, count,
                            nccl_dtype, i, _comm, cuda_stream));
       }
     }

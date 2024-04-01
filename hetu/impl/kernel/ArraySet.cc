@@ -17,6 +17,10 @@ void ArraySetCpu(NDArray& data, double value, const Stream& stream) {
   size_t size = data->numel();
   if (size == 0)
     return;
+  if (data->dtype() == kFloat4 || data->dtype() == kNFloat4) {
+    NDArray::MarkUsedBy({data}, stream);
+    return;
+  }
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
     data->dtype(), spec_t, "ArraySetCpu", [&]() {
       auto _arrayset_future = cpu_stream.EnqueueTask(

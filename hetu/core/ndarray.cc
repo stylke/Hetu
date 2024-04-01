@@ -16,7 +16,7 @@ void NDArrayDef::Serialize(std::ostream& os, size_t n_print) const {
   os << "NDArray([";
   size_t size = numel();
   n_print = MIN(n_print, size);
-  if (n_print > 0) {
+  if (n_print > 0 && dtype() != kFloat4 && dtype() != kNFloat4) {
     wait(); // ensure all async kernels on this array have completed
     HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
       dtype(), spec_t, __FUNCTION__, [&]() {
@@ -36,6 +36,23 @@ void NDArrayDef::Serialize(std::ostream& os, size_t n_print) const {
             os << ", " << host_vec[i];
         }
       });
+  }
+  else if(n_print > 0){
+    if (is_cpu()) {
+      const uint8_t* ptr = data_ptr<uint8_t>();
+      os << int(ptr[0] >> 4) << ", " << int(ptr[0] & 0xF);
+      for (size_t i = 1; i < n_print / 2; i++)
+        os << ", " << int(ptr[i] >> 4) << ", " << int(ptr[i] & 0xF);
+    } else {
+      hetu::cuda::CUDADeviceGuard guard(device().index());
+      const uint8_t* dev_ptr = data_ptr<uint8_t>();
+      std::vector<uint8_t> host_vec(n_print);
+      CudaMemcpy(host_vec.data(), dev_ptr, (n_print / 2) * sizeof(uint8_t),
+                  cudaMemcpyDeviceToHost);
+      os << int(host_vec[0] >> 4) << ", " << int(host_vec[0] & 0xF);
+      for (size_t i = 1; i < n_print / 2; i++)
+        os << ", " << int(host_vec[i] >> 4) << ", " << int(host_vec[i] & 0xF);
+    }
   }
   os << "], dtype=" << dtype() << ", shape=" << shape() << ", stride=" << stride()
      << ", dynamic_shape=" << dynamic_shape() << ", device=" << device() << ")";
@@ -612,6 +629,28 @@ NDArray NDArray::matmul(const NDArray& x, const NDArray& y, bool trans_left,
   return out;
 }
 
+NDArray NDArray::matmul4bit(const NDArray& x, const NDArray& y, 
+                            const NDArray& absmax,  const NDArray& datatype,
+                            bool trans_left, bool trans_right, 
+                            int blocksize,
+                            StreamIndex stream_id, NDArray& output) {
+  HT_ASSERT(x->shape(trans_left ? 0 : 1) == y->shape(trans_right ? 1 : 0))
+      << "Invalid shapes for matrix multiplication: " << x->shape(trans_left ? 0 : 1)
+      << " (transpose = " << trans_left << ") vs. " << y->shape(trans_right ? 1 : 0)
+      << " (transpose = " << trans_right << "). ";
+  NDArray out = output.is_defined()
+              ? output
+              : NDArray::empty(
+                  {x->shape(trans_left ? 1 : 0), y->shape(trans_right ? 0 : 1)},
+                  x->device(), x->dtype(), stream_id);
+  Stream stream(x->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(x->device().type(), __FUNCTION__,
+                                hetu::impl::MatMul4Bit, x, trans_left, y,
+                                trans_right, absmax, datatype, 
+                                out, blocksize, stream);
+  return out;
+}
+
 NDArray NDArray::bmm(const NDArray& x, const NDArray& y,
                      bool trans_left, bool trans_right,
                      StreamIndex stream_id, NDArray& output) {
@@ -1016,6 +1055,27 @@ NDArray NDArray::cos(const NDArray& input,
   return out;
 }
 
+NDArray NDArray::dequantization(const NDArray& input, 
+                                NDArray& absmax, 
+                                DataType dqtype,
+                                int64_t blocksize, 
+                                StreamIndex stream_id,
+                                const NDArray& code,
+                                NDArray& output) {
+  NDArray out;
+  if (input->dtype() == DataType::INT8)
+    HT_ASSERT(code.is_defined());
+  if (output.is_defined() && output->dtype() == dqtype) 
+    out = output;
+  else 
+    out = NDArray::empty(input->shape(), input->device(), dqtype, stream_id);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::DeQuantization, input, absmax, code,
+                               out, blocksize, stream);
+  return out;
+}
+
 // TODO: support dynamic if output is not defined
 NDArray NDArray::embedding(const NDArray& input, const NDArray& id,
                            StreamIndex stream_id,
@@ -1291,6 +1351,34 @@ NDArray NDArray::pad(const NDArray& input, const HTShape& paddings,
   return out;
 }
 
+NDArrayList NDArray::quantization(const NDArray& input,
+                                  DataType qtype, 
+                                  int64_t blocksize,
+                                  bool stochastic,
+                                  StreamIndex stream_id,
+                                  const NDArray& code,
+                                  NDArray& absmax,
+                                  NDArray& output) {
+  NDArray absmax_, out;
+  if (qtype == DataType::INT8)
+    HT_ASSERT(code.is_defined());
+  if (absmax.is_defined()) 
+    absmax_ = absmax;
+  else {
+    HTShape absmax_shape = {int64_t(input->numel() / blocksize)};
+    absmax_ = NDArray::empty(absmax_shape, input->device(), kFloat32, stream_id);
+  }
+  if (output.is_defined() && output->dtype() == qtype) 
+    out = output;
+  else 
+    out = NDArray::empty(input->shape(), input->device(), qtype, stream_id);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Quantization, input, absmax_, code,
+                               out, blocksize, stochastic, stream);
+  return {absmax_, out};
+}
+
 NDArray NDArray::repeat(const NDArray& input, HTShape repeats,
                         StreamIndex stream_id,
                         NDArray& output) {
@@ -1537,7 +1625,9 @@ NDArray NDArray::empty(const HTShape& shape, const Device& device,
                 .set_shape(shape)
                 .set_dynamic_shape(dynamic_shape);
   auto storage = std::make_shared<NDArrayStorage>(AllocFromMemoryPool(
-    device, meta.numel() * DataType2Size(dtype), Stream(device, stream_id)));
+    device, (dtype == kFloat4 || dtype == kNFloat4) ?  
+    ((meta.numel() + 1) / 2) * DataType2Size(dtype) : 
+    meta.numel() * DataType2Size(dtype), Stream(device, stream_id)));
   return NDArray(meta, storage);
 }
 

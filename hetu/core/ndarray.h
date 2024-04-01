@@ -245,6 +245,13 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                         StreamIndex stream_id = DEFAULT_STREAM,
                         NDArray& output = EMPTY);
 
+  static NDArray matmul4bit(const NDArray& x, const NDArray& y, 
+                            const NDArray& absmax, const NDArray& datatype,
+                            bool trans_left = false, bool trans_right = false,
+                            int blocksize = 4096,
+                            StreamIndex stream_id = DEFAULT_STREAM,
+                            NDArray& output = EMPTY);
+
   static NDArray bmm(const NDArray& x, const NDArray& y,
                      bool trans_left = false, bool trans_right = false,
                      StreamIndex stream_id = DEFAULT_STREAM,
@@ -339,6 +346,11 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                      StreamIndex stream_id = DEFAULT_STREAM,
                      NDArray& output = EMPTY);
 
+  static NDArray dequantization(const NDArray& input, NDArray& absmax, DataType dqtype,
+                                int64_t blocksize, StreamIndex stream_id = DEFAULT_STREAM,
+                                const NDArray& code = EMPTY,
+                                NDArray& output = EMPTY);
+
   static NDArray embedding(const NDArray& input, const NDArray& id,
                            StreamIndex stream_id = DEFAULT_STREAM,
                            NDArray& output = EMPTY);
@@ -410,6 +422,15 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                      std::string mode, double constant,
                      StreamIndex stream_id = DEFAULT_STREAM,
                      NDArray& output = EMPTY);
+
+  static NDArrayList quantization(const NDArray& input,
+                                  DataType qtype, 
+                                  int64_t blocksize,
+                                  bool stochastic = false,
+                                  StreamIndex stream_id = DEFAULT_STREAM,
+                                  const NDArray& code = EMPTY,
+                                  NDArray& absmax = EMPTY,
+                                  NDArray& output = EMPTY);
 
   static NDArray repeat(const NDArray& input, HTShape repeats,
                         StreamIndex stream_id = DEFAULT_STREAM,
@@ -618,7 +639,9 @@ class NDArrayDef : public shared_ptr_target {
   inline const void* raw_data_ptr() const {
     HT_ASSERT_NE(_storage, nullptr) << "Storage is not initialized";
     auto* ptr = static_cast<uint8_t*>(_storage->mutable_data());
-    ptr += _storage_offset * DataType2Size(dtype());
+    ptr += (dtype() == kFloat4 || dtype() == kNFloat4) 
+           ? ((_storage_offset + 1) / 2) * DataType2Size(dtype())
+           : _storage_offset * DataType2Size(dtype());
     return static_cast<void*>(ptr);
   }
 
@@ -669,6 +692,18 @@ class NDArrayDef : public shared_ptr_target {
 
   bool is_cuda() const {
     return _meta.device.is_cuda();
+  }
+
+  bool can_quantization() const {
+    return _meta.dtype == kFloat32 ||
+           _meta.dtype == kFloat16 ||
+           _meta.dtype == kBFloat16;
+  }
+
+  bool is_quantization() const {
+    return _meta.dtype == kInt8 ||
+           _meta.dtype == kFloat4 ||
+           _meta.dtype == kNFloat4;
   }
 
   const HTShape& shape() const {
@@ -734,17 +769,23 @@ class NDArrayDef : public shared_ptr_target {
   }
 
   size_t min_storage_size(int64_t storage_offset) const {
+    // Question: it's used for non-contiguous cases
+    // why not use the following code?
     /*
     int64_t storage_size = storage_offset + 1;
     int64_t dim = ndim();
     for (int64_t i = 0; i < dim; i++) {
       const auto& size_i = shape(i);
       if (size_i == 0) {
-        return storage_offset * DataType2Size(dtype());
+        return (dtype() == kFloat4 || dtype() == kNFloat4) ?  
+               ((storage_offset + 1) / 2) * DataType2Size(dtype()) : 
+               storage_offset * DataType2Size(dtype());
       }
       storage_size += (size_i - 1) * stride(i);
     }
-    return storage_size * DataType2Size(dtype());
+    return (dtype() == kFloat4 || dtype() == kNFloat4) ?  
+           ((storage_size + 1) / 2) * DataType2Size(dtype()) : 
+           storage_size * DataType2Size(dtype());
     */
     return (storage_offset + numel()) * DataType2Size(dtype());
   }

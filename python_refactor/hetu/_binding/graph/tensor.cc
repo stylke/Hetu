@@ -157,6 +157,24 @@ PyObject* PyTensor_shape(PyTensor* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_numel(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLong_FromInteger(self->tensor->numel());
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_global_numel(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLong_FromInteger(NumEl(self->tensor->global_shape()));
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_timecost(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLong_FromInteger(self->tensor->producer()->TimeCost());
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_global_shape(PyTensor* self) {
   HT_PY_FUNC_BEGIN
   return PyLongList_FromIntegerList(self->tensor->global_shape());
@@ -244,23 +262,6 @@ PyObject* PyTensor_requires_grad(PyTensor* self) {
   HT_PY_FUNC_BEGIN
   // TODO: rename ``requires_grad'' to ``requires_grad''
   Py_RETURN_BOOLEAN_COND(self->tensor->requires_grad());
-  HT_PY_FUNC_END
-}
-
-PyObject* PyTensor_set_requires_grad(PyTensor* self, PyObject* args, PyObject* kwargs) {
-  HT_PY_FUNC_BEGIN
-  static PyArgParser parser({
-    "set_requires_grad(bool requires_grad=false)"
-  });
-  auto parsed_args = parser.parse(args, kwargs);
-  if (parsed_args.signature_index() == 0) {
-    bool requires_grad = parsed_args.get_bool_or_default(0);
-    self->tensor->set_requires_grad(requires_grad);
-  } else {
-    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
-    __builtin_unreachable();
-  }
-  Py_RETURN_NONE;
   HT_PY_FUNC_END
 }
 
@@ -397,7 +398,7 @@ PyObject* PyTensor_get_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
   if (parsed_args.signature_index() == 0) {
     auto ret = GetDetachedVariableData(self->tensor);
     // HT_LOG_TRACE << "GetDetachedVariableData successfully.";
-    return NDArrayToNumpy(ret, false);
+    return NDArrayToNumpy(ret, false, true);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
@@ -467,16 +468,59 @@ PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwar
 PyObject* PyTensor_to_numpy(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "numpy(bool force=false)"
+    "numpy(bool force=false, bool save=false)"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     bool force = parsed_args.get_bool_or_default(0);
-    return NDArrayToNumpy(self->tensor->get_or_compute(), force);
+    bool save = parsed_args.get_bool_or_default(1);
+    return NDArrayToNumpy(self->tensor->get_or_compute(), force, save);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
   }
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_set_requires_grad(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "set_requires_grad(bool requires_grad=false)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    bool requires_grad = parsed_args.get_bool_or_default(0);
+    self->tensor->set_requires_grad(requires_grad);
+    auto producer_op = self->tensor->producer();
+    if (is_variable_op(producer_op)) {
+      if (producer_op->type() == "VariableOp")
+        reinterpret_cast<VariableOpImpl&>(producer_op->body()).set_requires_grad(requires_grad);
+      else
+        reinterpret_cast<ParallelVariableOpImpl&>(producer_op->body()).set_requires_grad(requires_grad);
+    }
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  Py_RETURN_NONE;
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_add_in_dep_linker(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "add_in_dep_linker(Tensor in_dep)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    Tensor in_dep = parsed_args.get_tensor(0);
+    auto producer_op = self->tensor->producer();
+    producer_op->add_in_dep_linker(in_dep);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  Py_RETURN_NONE;
   HT_PY_FUNC_END
 }
 
@@ -547,6 +591,9 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
   AddPyMethodDefs(ret, {
     {"dim", (PyCFunction) PyTensor_dim, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"size", (PyCFunction) PyTensor_shape, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"numel", (PyCFunction) PyTensor_numel, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"global_numel", (PyCFunction) PyTensor_global_numel, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"timecost", (PyCFunction) PyTensor_timecost, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"stride", (PyCFunction) PyTensor_stride, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"numpy", (PyCFunction) PyTensor_to_numpy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"to", (PyCFunction) PyTensor_data_transfer, METH_VARARGS | METH_KEYWORDS, nullptr },
@@ -556,8 +603,9 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"check_multi_ds_equal", (PyCFunction) PyTensor_check_multi_ds_equal, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
     {"symbolic", (PyCFunction) PyTensor_symbolic, METH_NOARGS, nullptr }, 
-    {"is_contiguous", (PyCFunction) PyTensor_is_contiguous, METH_NOARGS, nullptr },
     {"set_requires_grad", (PyCFunction) PyTensor_set_requires_grad, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"add_in_dep_linker", (PyCFunction) PyTensor_add_in_dep_linker, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"is_contiguous", (PyCFunction) PyTensor_is_contiguous, METH_NOARGS, nullptr },
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"_make_recompute", (PyCFunction) PyTensor_make_recompute, METH_VARARGS | METH_KEYWORDS, nullptr },
     {nullptr}

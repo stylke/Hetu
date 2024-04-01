@@ -688,6 +688,22 @@
         double p_dropout=0, double softmax_scale=-1, bool zero_tensors=False, bool is_causal=False, bool return_softmax=False
   self: qkv
 
+# quantization
+- name: quantization
+  op: QuantizationOp
+  args: Tensor input, DataType qtype, int64_t blocksize, bool stochastic=False
+  self: input
+
+- name: dequantization
+  op: DeQuantizationOp
+  args: Tensor input, Tensor absmax, DataType dqtype, int64_t blocksize
+  self: input
+
+- name: matmul4bit
+  op: MatMul4BitOp
+  args: Tensor a, Tensor b, Tensor absmax, Tensor datatype, bool trans_a=False, bool trans_b=False, int blocksize=4096
+  self: a
+
 - name: rms_norm
   op: RMSNormOp
   args: Tensor x0, Tensor residual_=None, Tensor gamma=None,

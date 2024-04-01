@@ -45,13 +45,15 @@ class LinearOpImpl final : public OpInterface {
         << "Got " << dim_a << " vs. " << dim_b << ". "
         << "Input shapes: " << a->shape() << " vs. " << b->shape() << ".";
     }
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     HTShape shape = {-1, -1};
     if (a->has_shape())
       shape[0] = a->shape(trans_a() ? 1 : 0);
     if (b->has_shape())
       shape[1] = b->shape(trans_b() ? 0 : 1);
-    return {NDArrayMeta().set_dtype(a->dtype()).set_shape(shape)};
+    auto dst_dtype = (a->dtype() == kFloat4 || a->dtype() == kNFloat4)
+                     ? b->dtype()
+                     : a->dtype();
+    return {NDArrayMeta().set_dtype(dst_dtype).set_shape(shape)};
   }
 
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 

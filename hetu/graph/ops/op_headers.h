@@ -48,6 +48,7 @@
 #include "hetu/graph/ops/placeholder.h"
 #include "hetu/graph/ops/Pad.h"
 #include "hetu/graph/ops/Pow.h"
+#include "hetu/graph/ops/Quantization.h"
 #include "hetu/graph/ops/RangeMask.h"
 #include "hetu/graph/ops/Reduce.h"
 #include "hetu/graph/ops/Relu.h"

@@ -143,7 +143,7 @@ DataType GetNumpyArrayDataType(PyObject* obj) {
   return FromNumpyDataType(PyArray_TYPE(numpy_array), element_size);
 }
 
-NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape) {
+NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape, DataType datatype) {
   auto* numpy_array = reinterpret_cast<PyArrayObject*>(obj);
   HT_VALUE_ERROR_IF(!PyArray_EquivByteorders(
       PyArray_DESCR(numpy_array)->byteorder, NPY_NATIVE))
@@ -159,9 +159,15 @@ NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape) {
   auto element_size = static_cast<size_t>(PyArray_ITEMSIZE(numpy_array));
   auto stride = FromNumpyStride(PyArray_STRIDES(numpy_array), ndim, element_size);
   HT_VALUE_ERROR_IF(stride != Shape2Stride(shape))
-    << "Strided arrays are not supported yet"
-    << ", stride is " << stride << " and shape is " << shape;
-  auto dtype = FromNumpyDataType(PyArray_TYPE(numpy_array), element_size);
+    << "Strided arrays are not supported yet.";
+  if (datatype == kFloat4 || datatype == kNFloat4) {
+    shape[ndim - 1] *= 2;
+    for (int i = 0; i < ndim - 1; ++i) {
+      stride[i] *= 2;
+    }
+  }
+  auto dtype = datatype == kUndeterminedDataType ? FromNumpyDataType(PyArray_TYPE(numpy_array), element_size)
+                                                 : datatype;
   auto meta = NDArrayMeta().set_dtype(dtype).set_shape(shape).set_device(kCPU);
 
   if (!dynamic_shape.empty())
@@ -170,8 +176,11 @@ NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape) {
   void* ptr = PyArray_DATA(numpy_array);
   Py_INCREF(obj);
   // TODO: mark non-writable and lazy copy on writing
+  int64_t borrow_size = (datatype == kFloat4 || datatype == kNFloat4) 
+                        ? ((meta.numel() + 1) / 2) * element_size 
+                        : meta.numel() * element_size;
   auto storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
-    Device(kCPU), ptr, meta.numel() * element_size, [obj](DataPtr ptr) {
+    Device(kCPU), ptr, borrow_size, [obj](DataPtr ptr) {
       py::call_guard<py::gil_scoped_acquire>();
       // py::gil_scoped_acquire gil;
       Py_DECREF(obj);
@@ -191,13 +200,57 @@ NDArrayList NDArrayListFromNumpyList(PyObject* obj) {
   return ret;  
 }
 
-PyObject* NDArrayToNumpy(NDArray ndarray, bool force) {
+PyObject* NDArrayToNumpy(NDArray ndarray, bool force, bool save) {
   if (!ndarray->is_cpu()) {
     HT_VALUE_ERROR_IF(!force) 
       << "Cannot convert data on " << ndarray->device().type() << " "
       << "to numpy array. Please set force=True or "
       << "copy the data to host memory first";
     ndarray = NDArray::cpu(ndarray, kBlockingStream);
+  }
+  if (ndarray->dtype() == DataType::FLOAT4 || ndarray->dtype() == DataType::NFLOAT4) {
+    int element_size = 1;
+    HTStride numpy_stride = ndarray->stride();
+    numpy_stride[ndarray->ndim() - 1] *= 2;
+    for (auto& v : numpy_stride)
+      v = (v * element_size / 2);
+    auto numpy_shape = ndarray->shape();
+    numpy_shape[numpy_shape.size() - 1] /= 2;
+
+    PyObject* ret = nullptr;
+    auto* watcher = new StorageWathcer(ndarray->storage());
+    py::capsule deref(watcher, [](void* watcher) {
+      delete reinterpret_cast<StorageWathcer*>(watcher);
+    });
+    py::array_t<uint8_t, py::array::c_style> py_arr(
+      numpy_shape, 
+      numpy_stride, 
+      ndarray->data_ptr<uint8_t>(), 
+      deref);
+    ret = py_arr.release().ptr();
+    HT_RUNTIME_ERROR_IF(!ret) << "Failed to create numpy array";  
+    return ret;
+  }
+  if ((ndarray->dtype() == DataType::FLOAT16 || ndarray->dtype() == DataType::BFLOAT16) && save) {
+    int element_size = 2;
+    HTStride numpy_stride = ndarray->stride();
+    for (auto& v : numpy_stride)
+      v *= element_size;
+    auto numpy_shape = ndarray->shape();
+
+    PyObject* ret = nullptr;
+    auto* watcher = new StorageWathcer(ndarray->storage());
+    py::capsule deref(watcher, [](void* watcher) {
+      delete reinterpret_cast<StorageWathcer*>(watcher);
+    });
+    py::array_t<int16_t, py::array::c_style> py_arr(
+      numpy_shape, 
+      numpy_stride, 
+      ndarray->data_ptr<int16_t>(), 
+      deref);
+    ret = py_arr.release().ptr();
+    HT_RUNTIME_ERROR_IF(!ret) << "Failed to create numpy array";  
+    return ret;
   }
   if (ndarray->dtype() == DataType::FLOAT16 || ndarray->dtype() == DataType::BFLOAT16) {
     ndarray = NDArray::toFloat32(ndarray, kBlockingStream);
