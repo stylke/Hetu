@@ -720,7 +720,8 @@ void SetUpDeviceMappingWithAssignedLocalDevice(const Device& local_device) {
 }
 
 void SetUpDeviceMappingAndAssignLocalDevice(
-  const std::map<DeviceType, int>& resources) {
+  const std::map<DeviceType, int>& resources,
+  const std::vector<int64_t>& device_idxs) {
   auto& comm = MPICommunicationGroup::GetOrCreateWorldwide();
   auto hostnames = AllGatherHostnames(comm);
   auto local_hostname = Device::GetLocalHostname();
@@ -739,7 +740,8 @@ void SetUpDeviceMappingAndAssignLocalDevice(
     // Question: do we need to set the multiplex field for CPU?
     local_device = Device(kCPU);
   } else {
-    auto device_id = local_rank % resources.at(kCUDA);
+    auto device_id = device_idxs.empty() ? local_rank % resources.at(kCUDA)
+                                         : device_idxs[local_rank % resources.at(kCUDA)];
     auto multiplex = local_rank / resources.at(kCUDA);
     local_device = Device(kCUDA, device_id, local_hostname, multiplex);
   }
@@ -758,13 +760,14 @@ void SetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device) {
 }
 
 Device SetUpDeviceMappingAndAssignLocalDeviceOnce(
-  const std::map<DeviceType, int>& resources) {
+  const std::map<DeviceType, int>& resources,
+  const std::vector<int64_t>& device_idxs) {
   if (!device_to_rank_mapping.empty()) {
     HT_LOG_WARN << "Device mapping has been set up.";
     return rank_to_device_mapping[GetWorldRank()];
   }
   std::call_once(device_mapping_init_flag,
-                 SetUpDeviceMappingAndAssignLocalDevice, resources);
+                 SetUpDeviceMappingAndAssignLocalDevice, resources, device_idxs);
   return rank_to_device_mapping[GetWorldRank()];
 }
 

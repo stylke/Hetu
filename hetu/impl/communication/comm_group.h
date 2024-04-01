@@ -215,7 +215,8 @@ int GetWorldSize();
 int GetGroupRank(const std::vector<int>& world_ranks);
 void SetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device);
 Device SetUpDeviceMappingAndAssignLocalDeviceOnce(
-  const std::map<DeviceType, int>& resources = {{kCUDA, 8}});
+  const std::map<DeviceType, int>& resources = {{kCUDA, 8}},
+  const std::vector<int64_t>& device_idxs = {});
 bool IsGlobalDeviceGroupReady();
 const DeviceGroup& GetGlobalDeviceGroup();
 const Device& GetLocalDevice();

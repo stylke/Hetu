@@ -1880,9 +1880,9 @@ void SwitchExecGraph::ProfileMemory(const std::string& prefix) {
     return;
   }
         
-  HT_LOG_INFO << "[" << prefix << "] Device " << hetu::impl::comm::GetWorldRank() << ": ";
+  HT_LOG_DEBUG << "[" << prefix << "] Device " << hetu::impl::comm::GetWorldRank() << ": ";
   // HT_LOG_INFO << "Total Memory: " << memory.total / (1024 * 1024) << " MiB";
-  HT_LOG_INFO << "Used Memory: " << memory.used / (1024 * 1024) << " MiB";
+  HT_LOG_DEBUG << "Used Memory: " << memory.used / (1024 * 1024) << " MiB";
   // HT_LOG_INFO << "Free Memory: " << memory.free / (1024 * 1024) << " MiB";
 
   result = nvmlShutdown();
