@@ -21,6 +21,10 @@ TensorList LayerNormOpImpl::DoGradient(Operator& op, const TensorList& grad_outp
                                           op->input(1), op->output(1), op->output(2),
                                           normalized_shape(), get_eps(), g_op_meta)
                                         : empty;
+  if (!op->requires_grad(1))
+    grad_input[1] = Tensor();
+  if (!op->requires_grad(2))
+    grad_input[2] = Tensor();
   return grad_input;
 }
 
@@ -106,18 +110,14 @@ TensorList FusedLayerNormOpImpl::DoGradient(Operator& op, const TensorList& grad
   auto g_op_meta = op->grad_op_meta().set_name(op->grad_name(0));
   TensorList empty = {Tensor(), Tensor(), Tensor()};
   TensorList grad_input;
-  if (inplace()) {
-    grad_input = op->requires_grad(0) ? MakeFusedLayerNormGradientOp(grad_outputs.at(0), op->output(0),
-                                            op->input(1), op->input(2), op->output(1), op->output(2),
-                                            normalized_shape(), get_eps(), inplace(), g_op_meta)
-                                            : empty;
-  }
-  else {
-    grad_input = op->requires_grad(0) ? MakeFusedLayerNormGradientOp(grad_outputs.at(0), op->input(0),
-                                            op->input(1), op->input(2), op->output(1), op->output(2),
-                                            normalized_shape(), get_eps(), inplace(), g_op_meta)
-                                            : empty;
-  }
+  grad_input = op->requires_grad(0) ? MakeFusedLayerNormGradientOp(grad_outputs.at(0), op->input(0),
+                                          op->input(1), op->input(2), op->output(1), op->output(2),
+                                          normalized_shape(), get_eps(), inplace(), g_op_meta)
+                                          : empty;
+  if (!op->requires_grad(1))
+    grad_input[1] = Tensor();
+  if (!op->requires_grad(2))
+    grad_input[2] = Tensor();
   return grad_input;
 }
 

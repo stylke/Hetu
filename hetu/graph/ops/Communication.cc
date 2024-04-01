@@ -682,7 +682,7 @@ Tensor MakeBatchedISendIRecvOp(TensorList inputs,
                         std::move(src_devices), std::move(comm_devices), dtype), std::move(inputs), std::move(op_meta))->output(0);  
 }
 
-Tensor MakeAllGatherOp(Tensor input, DeviceGroup comm_group, int32_t gather_dim,
+Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group, int32_t gather_dim,
                        OpMeta op_meta) {
   HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
     && op_meta.device_groups[0].is_subset(comm_group))) << "comm_group must be subset of device_group!";
@@ -690,7 +690,7 @@ Tensor MakeAllGatherOp(Tensor input, DeviceGroup comm_group, int32_t gather_dim,
                       {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, int32_t scatter_dim,
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, int32_t scatter_dim,
                            bool inplace, OpMeta op_meta) {
   HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
     && op_meta.device_groups[0].is_subset(comm_group))) << "comm_group must be subset of device_group!";
@@ -698,7 +698,7 @@ Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, int32_t scatter
                       {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, ReductionType red_type,
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, ReductionType red_type,
                            int32_t scatter_dim, bool inplace, OpMeta op_meta) {
   HT_ASSERT(op_meta.device_groups.empty() || (op_meta.device_groups.size() == 1 
     && op_meta.device_groups[0].is_subset(comm_group))) << "comm_group must be subset of device_group!";

@@ -519,9 +519,9 @@ class Graph {
       return;
     }
     if (in_deps.size() == 1) {
-      op->_extra_in_dep_linkers.push_back(in_deps.front());
+      op->add_in_dep_linker(in_deps.front());
     } else {
-      op->_extra_in_dep_linkers.push_back(
+      op->add_in_dep_linker(
         MakeGroupOp(OpMeta()
                       .set_extra_deps(in_deps)
                       .set_name(op->name() + "_extra_in_dep")));

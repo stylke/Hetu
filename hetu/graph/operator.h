@@ -654,6 +654,10 @@ class OpDef : public shared_ptr_target {
     return _extra_in_dep_linkers.size();
   }
 
+  void add_in_dep_linker(Tensor in_dep) {
+    _extra_in_dep_linkers.push_back(in_dep);
+  }
+
   const Tensor& out_dep_linker() const noexcept {
     return _extra_out_dep_linkers.front();
   }

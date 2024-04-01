@@ -40,7 +40,7 @@ class CommunicationGroupDef : public shared_ptr_target {
   }
 
   inline static bool IsRanksValid(const std::vector<int>& ranks) {
-    if (ranks.size() < 2)
+    if (ranks.size() < 1)
       return false;
     for (size_t i = 1; i < ranks.size(); i++)
       if (ranks[i - 1] >= ranks[i])

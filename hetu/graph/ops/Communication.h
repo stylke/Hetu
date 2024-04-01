@@ -443,7 +443,7 @@ Tensor MakeBatchedISendIRecvOp(TensorList inputs,
 
 class AllGatherOpImpl final : public OpInterface {
  public:
-  AllGatherOpImpl(DeviceGroup comm_group, int32_t gather_dim = 0)
+  AllGatherOpImpl(const DeviceGroup& comm_group, int32_t gather_dim = 0)
   : OpInterface(quote(AllGatherOp)), _gather_dim(gather_dim), _comm_group(std::move(comm_group)) {
     HT_ASSERT(_comm_group.num_devices() >= 2)
       << "AllGather requires two or more devices. Got " << _comm_group;
@@ -478,17 +478,17 @@ class AllGatherOpImpl final : public OpInterface {
   int32_t _gather_dim;
 };
 
-Tensor MakeAllGatherOp(Tensor input, DeviceGroup comm_group, int32_t gather_dim = 0,
+Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group, int32_t gather_dim = 0,
                        OpMeta op_meta = OpMeta());
 
 class ReduceScatterOpImpl final : public OpInterface {
  public:
-  ReduceScatterOpImpl(DeviceGroup comm_group, int32_t scatter_dim = 0, ReductionType red_type = kSUM,
+  ReduceScatterOpImpl(const DeviceGroup& comm_group, int32_t scatter_dim = 0, ReductionType red_type = kSUM,
                       bool inplace = false)
   : OpInterface(quote(ReduceScatterOp)), _scatter_dim(scatter_dim),
     _comm_group(std::move(comm_group)), _red_type(red_type), _inplace(inplace) {
     HT_ASSERT(_comm_group.num_devices() >= 2)
-      << "ReduceScatter requires two or more devices. Got " << _comm_group;          
+      << "ReduceScatter requires two or more devices. Got " << _comm_group;            
   }
 
   inline bool inplace() const {
@@ -547,10 +547,10 @@ class ReduceScatterOpImpl final : public OpInterface {
   ReductionType _red_type{kNONE};
 };
 
-Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, int32_t scatter_dim = 0,
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, int32_t scatter_dim = 0,
                            bool inplace = false, OpMeta op_meta = OpMeta());
 
-Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, ReductionType red_type, 
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, ReductionType red_type, 
                            int32_t scatter_dim = 0, bool inplace = false, OpMeta op_meta = OpMeta());
 }
 }

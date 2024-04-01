@@ -38,7 +38,7 @@ class _OpContext(object):
     def __enter__(self):
         _hetu_core._internal_context.push_op_ctx(
             eager_device=self.eager_device,
-            device_group=self.devices, 
+            device_groups=self.devices, 
             stream_index=self.stream_index, 
             extra_deps=self.extra_deps)
         return self
@@ -46,7 +46,7 @@ class _OpContext(object):
     def __exit__(self, e_type, e_value, e_trace):
         _hetu_core._internal_context.pop_op_ctx(
             pop_eager_device=(self.eager_device is not None),
-            pop_device_group=(self.devices is not None), 
+            pop_device_groups=(self.devices is not None), 
             pop_stream_index=(self.stream_index is not None), 
             pop_extra_deps=(self.extra_deps is not None))
 
