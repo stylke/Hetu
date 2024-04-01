@@ -14,6 +14,7 @@
 #include "hetu/graph/offload/activation_cpu_offload.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
+#include "hetu/impl/profiler/profiler.h"
 #include "hetu/core/symbol.h"
 #include "nccl.h"
 #include <ctime>
@@ -1990,8 +1991,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   HT_LOG_DEBUG << local_device << ": 4. get results[begin]";
   NDArrayList results(fetches.size(), NDArray());
-  std::unordered_set<OpId> to_sync_op_ids;
-  to_sync_op_ids.reserve(fetches.size());
   for (auto& op_ref : _execute_plan.local_topo) {
     auto& op = op_ref.get();
     Operator::for_each_output_tensor(op, [&](const Tensor& output) {
@@ -2017,15 +2016,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             results[it->second] = NDArray::cat(result);
           }
         }
-        to_sync_op_ids.insert(op->id());
       }
     });
   }
-  // OpList sync_ops;
-  for (auto op_id : to_sync_op_ids) {
-    _op_indexing[op_id]->Sync(num_micro_batches - 1);
-    // sync_ops.push_back(_op_indexing[op_id]);
-  }
+  SynchronizeAllStreams(local_device);
+
   // HT_LOG_DEBUG << local_device << ": sync ops = " << sync_ops;
   for (size_t i = 0; i < results.size(); i++)
     HT_LOG_TRACE << "results[" << i << "]: " << results[i];
@@ -2059,19 +2054,17 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)
                << " ms";
   
-  // get op execute time, sort and analysis
-  bool is_analysis_perf = false;
-  if (is_analysis_perf) {
-    TIK(free);
+  auto profiler_optional = hetu::impl::Profile::get_cur_profile();
+  if (profiler_optional) {
     runtime_ctx_list.clear();
     tensor2data_list.clear();
     grad_accumulation.clear();
-    TOK(free);
-    HT_LOG_DEBUG << local_device
-                 << ": free temporary memory time = " << COST_MSEC(free)
-                 << " ms";
-
+    auto profiler = *profiler_optional;
+    profiler->set_device(local_device);
     std::vector<std::pair<int64_t, int64_t>> op_execute_time;
+    std::unordered_map<int64_t, int64_t> is_forward;
+    std::unordered_map<std::string, double> summarized_time;
+    bool current_forward = true;
     for (auto& op_ref : _execute_plan.local_topo) {
       auto& op = op_ref.get();
       if (is_placeholder_op(op) || is_variable_op(op)) {
@@ -2080,78 +2073,72 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       if (is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) {
         continue;
       }
+      if (op->id() == loss->producer_id()) {
+        HT_LOG_INFO << "Loss: " << op->name();
+        current_forward = false;
+      }
       // get time cost for all micro batches
       int64_t time_cost = 0;
       for (int i = 0; i < num_micro_batches; i++) {
         time_cost += op->TimeCost(i);
       }
       op_execute_time.push_back({op->id(), time_cost});
+      is_forward[op->id()] = current_forward;
     }
-    // p2p events
+     // p2p events
     for (int i = 0; i < _p2p_events.size() / 2; i++) {
       auto& start = _p2p_events[2 * i];
       auto& end = _p2p_events[2 * i + 1];
       // record the time of p2p for each pipeline micro-batch
       op_execute_time.push_back({-(i+1), end->TimeSince(*start)});
     }
-    std::sort(op_execute_time.begin(), op_execute_time.end(), [](
-      std::pair<int64_t, int64_t>& op_t1, std::pair<int64_t, int64_t>& op_t2) {
-        return op_t1.second > op_t2.second;
-      });
-    double compute_time = 0;
-    double tp_p2p_time = 0;
-    double pp_p2p_time = 0;
-    double tp_collective_time = 0;
-    double dp_grad_reduce_time = 0;
-    double blocking_time = 0;
-    double other_time = 0;
-    std::ostringstream out;
-    out << "Op Execute Time: ";
-    int print_num = 30;
-    for (auto& op_time : op_execute_time) {
-      if (op_time.first >= 0) {
-        auto op = _op_indexing[op_time.first];
-        // print top 10 op
-        if (print_num-- > 0) {
-          out << std::endl << local_device << ": " << op << "(type = " << op->type() << "), " << "time = " << op_time.second * 1.0 / 1e6 << " ms";
-          if (op->num_inputs() > 0) {
-            out << "; input shapes = ";
-            for (auto& input : op->inputs()) {
-              out << input->shape() << ", ";
-            }
-          }
-          out << "; inputs = " << op->inputs();
-        }
-        if (op->stream_index() == kComputingStream) {
-          compute_time += op_time.second * 1.0 / 1e6;
-        } else if (op->stream_index() == kP2PStream) {
-          tp_p2p_time += op_time.second * 1.0 / 1e6;
-        } else if (op->stream_index() == kCollectiveStream) {
-          if (is_optimizer_update_op(op->output(0)->consumer(0))) {
-            dp_grad_reduce_time += op_time.second * 1.0 / 1e6;
-          } else {
-            tp_collective_time += op_time.second * 1.0 / 1e6;
-          }
-        } else if (op->stream_index() == kBlockingStream) {
-          blocking_time += op_time.second * 1.0 / 1e6;
-        } else {
-          other_time += op_time.second * 1.0 / 1e6;
-        }        
-      } else {
-        out << std::endl << local_device << ": batch p2p " << -op_time.first << " : " << op_time.second * 1.0 / 1e6 << " ms";
-        pp_p2p_time += op_time.second * 1.0 / 1e6;
+    for (auto& [op_id, op_time] : op_execute_time) {
+      auto& op = _op_indexing[op_id];
+      double time_in_ms = op_time * 1.0 / 1e6;
+      if (op_id < 0) {
+        summarized_time["pp-p2p"] += time_in_ms;
+        continue;
       }
+      if (op->stream_index() == kComputingStream) {
+        if (is_optimizer_update_op(op)) {
+          summarized_time["optimizer-update"] += time_in_ms;
+          continue;
+        }
+        if (is_forward[op_id]) {
+          summarized_time["forward-compute"] += time_in_ms;
+        } else {
+          summarized_time["backward-compute"] += time_in_ms;
+        }
+        summarized_time["forward-backward-compute"] += time_in_ms;
+      } else if (op->stream_index() == kP2PStream) {
+        summarized_time["tp-p2p"] += time_in_ms;
+      } else if (op->stream_index() == kCollectiveStream) {
+        if (is_optimizer_update_op(op->output(0)->consumer(0))) {
+          summarized_time["grads-reduce"] += time_in_ms;
+        } else {
+          summarized_time["tp-collective"] += time_in_ms;
+        }
+      } else if (op->stream_index() == kBlockingStream) {
+        summarized_time["blocking"] += time_in_ms;
+      } else {
+        summarized_time["other"] += time_in_ms;
+      }
+      HTShapeList inputs_shape;
+      Operator::for_each_input_tensor(op, [&](const Tensor& input) {
+         inputs_shape.push_back(input->shape());
+      });
+      profiler->push(op->type(), op->name(), inputs_shape, op_time);
     }
-    HT_LOG_INFO << local_device << ": " 
-                << "\ntotal run time: " << COST_MSEC(run) << " ms, "
-                << "compute time: " << compute_time << " ms, "
-                << "tp p2p time: " << tp_p2p_time << " ms, "
-                << "tp collective time: " << tp_collective_time << " ms, "
-                << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
-                << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
-                << "blocking time: " << blocking_time << " ms, "
-                << "other time: " << other_time << " ms" << std::endl
-                << out.str();
+    profiler->push("total-run-time", COST_MSEC(run));
+    profiler->push("optimizer-update", summarized_time["optimizer-update"]);
+    profiler->push("forward-compute", summarized_time["forward-compute"]);
+    profiler->push("backward-compute", summarized_time["backward-compute"]);
+    profiler->push("forward-backward-compute", summarized_time["forward-backward-compute"]);
+    profiler->push("tp-p2p", summarized_time["tp-p2p"]);
+    profiler->push("grads-reduce", summarized_time["grads-reduce"]);
+    profiler->push("tp-collective", summarized_time["tp-collective"]);
+    profiler->push("blocking", summarized_time["blocking"]);
+    profiler->push("other", summarized_time["other"]);
   }
   _p2p_events.clear();
   return results;

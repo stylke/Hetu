@@ -1,5 +1,6 @@
 #include "hetu/graph/eager_graph.h"
 #include "hetu/graph/ops/variable.h"
+#include "hetu/impl/profiler/profiler.h"
 
 namespace hetu {
 namespace graph {
@@ -52,7 +53,11 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   }
   // HT_LOG_INFO << op << "\nInputs:" << input_arrays;
   auto output_arrays = op->Compute(input_arrays, _runtime_ctxs);
-  // HT_LOG_INFO << op << ", outputs are:" << output_arrays;
+  auto profiler_optional = hetu::impl::Profile::get_cur_profile();
+  if (profiler_optional) {
+    auto profiler = *profiler_optional;
+    profiler->push(op);
+  }
   // Note: The usage should be marked inside kernels, 
   // but we still mark here in case we forget to do so in some kernels. 
   NDArray::MarkUsedBy(input_arrays, op->instantiation_ctx().stream());

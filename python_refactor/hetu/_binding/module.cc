@@ -19,6 +19,7 @@
 #include "hetu/_binding/graph/dataloader.h"
 #include "hetu/_binding/graph/init/initializer.h"
 #include "hetu/_binding/distributed/comm_group.h"
+#include "hetu/_binding/graph/profiler.h"
 
 PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::AddPyDeviceTypeToModule(m);
@@ -44,4 +45,6 @@ PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::graph::AddAutoCastContextManagingFunctionsToModule(internal_sub_module);
   hetu::graph::AddRecomputeContextManagingFunctionsToModule(internal_sub_module);
   hetu::graph::AddCPUOffloadContextManagingFunctionsToModule(internal_sub_module);
+  hetu::impl::AddPyProfileTypeToModule(m);
+  hetu::impl::AddProfileContextManagingFunctionsToModule(internal_sub_module);
 }
