@@ -670,3 +670,36 @@
   op: AttentionOp
   args: Tensor q, Tensor k, Tensor v, double p_dropout=0, double softmax_scale=-1, bool is_causal=False, bool return_softmax=False
   self: q
+
+- name: attn_varlen
+  op: AttentionVarlenOp
+  args: Tensor q, Tensor k, Tensor v, Tensor cu_seqlens_q, Tensor cu_seqlens_k, int max_seqlen_q, int max_seqlen_k,
+        double p_dropout=0, double softmax_scale=-1, bool zero_tensors=False, bool is_causal=False, bool return_softmax=False
+  self: q
+
+- name: attn_qkvpacked
+  op: AttentionPackedOp
+  args: Tensor qkv, double p_dropout=0, double softmax_scale=-1, bool is_causal=False, bool return_softmax=False
+  self: qkv
+
+- name: attn_varlen_qkvpacked
+  op: AttentionVarlenPackedOp
+  args: Tensor qkv, Tensor cu_seqlens_q, Tensor cu_seqlens_k, int max_seqlen_q, int max_seqlen_k,
+        double p_dropout=0, double softmax_scale=-1, bool zero_tensors=False, bool is_causal=False, bool return_softmax=False
+  self: qkv
+
+- name: rms_norm
+  op: RMSNormOp
+  args: Tensor x0, Tensor residual_=None, Tensor gamma=None,
+        Tensor beta_=None, Tensor rowscale_=None, Tensor colscale_=None,
+        Tensor x0_subset_=None, Tensor z_subset_=None,
+        double dropout_p=0., double epsilon=1e-5,
+        double rowscale_const=1., int64_t z_numrows=0,
+        bool residual_in_fp32=False, bool prenorm=False, 
+        bool is_rms_norm=False, bool return_dmask=False
+  self: x0
+
+- name: rotary
+  op: RotaryOp
+  args: Tensor x, Tensor cos, Tensor sin, bool interleaved=False, bool inplace=False
+  self: x
