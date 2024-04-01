@@ -49,6 +49,8 @@ struct AvailableEventLookupTable {
     }) {}
 };
 
+bool AllocAfterFreeFromCache(const Device& device, void*& ptr, size_t size);
+
 class CUDACachingMemoryPool final : public CUDAMemoryPool {
  public:
   CUDACachingMemoryPool(DeviceIndex device_id, size_t _max_split_size);
@@ -64,8 +66,6 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
 
   void FreeDataSpace(DataPtr data_ptr) override;
 
-  bool EmptyCache() override;
-
   void MarkDataSpaceUsedByStream(DataPtr data_ptr,
                                  const Stream& stream) override;
 
@@ -75,6 +75,10 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   std::future<void> WaitDataSpace(DataPtr data_ptr, bool async = true) override;
 
   void PrintSummary() override;
+
+  bool EmptyCache() override;
+
+  friend bool AllocAfterFreeFromCache(const Device& device, void*& ptr, size_t size);
 
  private:
   
@@ -177,6 +181,8 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
       return prev != nullptr || next != nullptr;
     }
 
+    // deprecated
+    /*
     // Note: can_free() means all related entries are unallocated
     inline bool can_free() const noexcept {
       if (allocated()) {
@@ -200,6 +206,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
       }
       return true;
     }
+    */
   
     inline void refresh() {
 
@@ -221,15 +228,15 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
                       
   void MoveAvailable(std::shared_ptr<CudaDataPtrInfo>& info);
 
-  bool ReleaseOversized(DataPtrLookupTable& lookup_table, 
-                        size_t request_size);
-
-  bool ReleaseAll(DataPtrLookupTable& lookup_table,
-                  bool maybe_allocated = true);
-
   size_t GetAlignedMallocSize(size_t request_size);
 
-  bool AllocNewPtr(void* &ptr, size_t size);
+  bool AllocNewPtr(void*& ptr, size_t size);
+
+  bool ReleaseAndAlloc(void*& ptr, size_t request_size);
+
+  bool WaitUntilAlloc(void*& ptr, size_t request_size);
+
+  bool IsEmpty(DataPtrLookupTable* lookup_table, bool ignore_split = true);
 
   void AddAvailableEvent(DataPtrId data_ptr_id, std::shared_ptr<AvailableEvent>& available_event);
 
@@ -253,7 +260,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   // Cached data pointers that are available for all stream
   std::unique_ptr<DataPtrLookupTable> _available_for_all_streams;
   // Events to indicate whether marked usages have finished
-  emhash7::HashMap<PackedStreamId, std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>> _multi_stream_free_events;
+  emhash7::HashMap<PackedStreamId, std::unique_ptr<std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>>> _multi_stream_free_events;
   // Events to indicate whether a data ptr is available to all streams
   emhash7::HashMap<PackedStreamId, std::unique_ptr<AvailableEventLookupTable>> _single_stream_free_events;
   

@@ -12,6 +12,7 @@
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
+#include "hetu/impl/memory/CUDACachingMemoryPool.cuh"
 #include "hetu/core/device.h"
 #include "hetu/core/dtype.h"
 #include "hetu/core/ndarray_meta.h"
@@ -157,6 +158,7 @@ static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer) {
 void ParamBuffer::Alloc(const Stream& stream, 
                         bool use_nccl, 
                         ncclComm_t comm,
+                        bool use_caching_mempool,
                         bool use_async) {
   TIK(alloc_time);
   auto local_device = hetu::impl::comm::GetLocalDevice(); 
@@ -196,14 +198,21 @@ void ParamBuffer::Alloc(const Stream& stream,
         _free_time = COST_MSEC(free_time);
       }));
   } else {
-    cudaError_t status;
-    if (!use_async || stream.is_blocking()) {
-      status = cudaMalloc(&_raw_ptr, _buffer_size);
+    if (use_caching_mempool) {
+      if (!hetu::impl::AllocAfterFreeFromCache(local_device, _raw_ptr, _buffer_size)) {
+        HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) "
+          << "though releasing some data space from the caching mempool";
+      }
     } else {
-      status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
-    }
-    if (status != cudaSuccess) {
-      HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
+      cudaError_t status;
+      if (!use_async || stream.is_blocking()) {
+        status = cudaMalloc(&_raw_ptr, _buffer_size);
+      } else {
+        status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
+      }
+      if (status != cudaSuccess) {
+        HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
+      }
     }
     _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
       local_device, _raw_ptr, _buffer_size, [=](DataPtr data_ptr) {
@@ -233,14 +242,21 @@ void ParamBuffer::Alloc(const Stream& stream,
   _raw_ptr = _storage->mutable_data();
   */
   // Use BorrowDataSpace
-  cudaError_t status;
-  if (!use_async || stream.is_blocking()) {
-    status = cudaMalloc(&_raw_ptr, _buffer_size);
+  if (use_caching_mempool) {
+    if (!hetu::impl::AllocAfterFreeFromCache(local_device, _raw_ptr, _buffer_size)) {
+      HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) "
+        << "though releasing some data space from the caching mempool";
+    }
   } else {
-    status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
-  }
-  if (status != cudaSuccess) {
-    HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
+    cudaError_t status;
+    if (!use_async || stream.is_blocking()) {
+      status = cudaMalloc(&_raw_ptr, _buffer_size);
+    } else {
+      status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
+    }
+    if (status != cudaSuccess) {
+      HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
+    }
   }
   _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
     local_device, _raw_ptr, _buffer_size, [=](DataPtr data_ptr) {
@@ -1168,6 +1184,7 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
     auto& recv_buffer = kv.second;
     HT_ASSERT(!recv_buffer->IsAllocated())
       << "recv buffer shouldn't be allocated yet";
+    // use_nccl=true will slow down
     recv_buffer->Alloc(op_stream, false, comm_nccl_group->GetComm());
   }
   op->instantiation_ctx().start[0]->Record(op_stream);
@@ -1392,6 +1409,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       }
     }
     if (!send_buffer->IsAllocated()) {
+      // use_nccl=true will slow down
       send_buffer->Alloc(Stream(local_device, kSwitchCollectiveStream), false, comm_nccl_group->GetComm());
     }
   }

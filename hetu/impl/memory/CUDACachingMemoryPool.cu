@@ -9,14 +9,15 @@
 namespace hetu {
 namespace impl {
 
-namespace {
-
-inline static std::string _make_name(DeviceIndex device_id) {
-  return "CUDACachingMemPool(" + std::to_string(static_cast<int>(device_id)) +
-    ")";
+bool AllocAfterFreeFromCache(const Device& device, void*& ptr, size_t size) {
+  auto caching_mempool = std::dynamic_pointer_cast<CUDACachingMemoryPool>(GetMemoryPool(device));
+  std::lock_guard<std::mutex> lock(caching_mempool->_mtx);
+  return caching_mempool->AllocNewPtr(ptr, size) || caching_mempool->WaitUntilAlloc(ptr, size);
 }
 
-} // namespace
+static std::string _make_name(DeviceIndex device_id) {
+  return "CUDACachingMemPool(" + std::to_string(static_cast<int>(device_id)) + ")";
+}
 
 CUDACachingMemoryPool::CUDACachingMemoryPool(DeviceIndex device_id, size_t _max_split_size)
 : CUDAMemoryPool(device_id, _make_name(device_id)),
@@ -113,7 +114,7 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
       HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
         << "Cannot find curr stream cached data " << curr_stream_data_ptr << " from info";
       HT_ASSERT(info_it->second->cached_pool == curr_stream_table)
-        << "Assumption error";
+        << "Cache pool error";
       HT_ASSERT(info_it->second->status == OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM)
         << "Info status should be " << OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM
         << ", but it is actually " << info_it->second->status;
@@ -127,7 +128,7 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
       HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
         << "Cannot find all stream cached data " << all_stream_data_ptr << " from info";
       HT_ASSERT(info_it->second->cached_pool == _available_for_all_streams.get())
-        << "Assumption error";
+        << "Cache pool error";
       HT_ASSERT(info_it->second->status == OccupationStatus::AVAILABLE_FOR_ALL_STREAM)
         << "Info status should be " << OccupationStatus::AVAILABLE_FOR_ALL_STREAM
         << ", but it is actually " << info_it->second->status;
@@ -156,16 +157,9 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
     size_t malloc_size = aligned_num_bytes;
     // Check whether the memory limitation has been reached. 
     // If yes, we shall free/re-use some cached memories on other streams.
-    if (AllocNewPtr(ptr, malloc_size))
-        /* 
-        // Release some oversized cached ptrs in the same stream, and retry.
-        || (ReleaseOversized(*(table_it->second), malloc_size) && AllocNewPtr(ptr, malloc_size))
-        // Release all cached ptrs in the same stream, and retry.
-        || (ReleaseAll(*(table_it->second)) && AllocNewPtr(ptr, malloc_size))
-        // Release all cached ptrs in the all stream available table, and retry.
-        || (ReleaseAll(*_available_for_all_streams) && AllocNewPtr(ptr, malloc_size))
-        // Synchronize all streams and free all cached ptrs in the system, and retry.
-        || (EmptyCache() && AllocNewPtr(ptr, malloc_size))) */ {
+    if (AllocNewPtr(ptr, malloc_size)
+        // Wait until we can release some cached ptrs (maybe all cached ptrs) and accomplish the allocation.
+        || WaitUntilAlloc(ptr, malloc_size)) {
       // ------ create new data ptr place 1 ------ 
       data_ptr = DataPtr{ptr, malloc_size, device(), next_id()};
       // mempool debug use    
@@ -188,11 +182,14 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
     // 清空cache后依然无法分配
     else {
       HT_RUNTIME_ERROR
-        << "CUDA out of memory. On GPU " << _device.index() << ", "
-        << "reserved: " << _reserved / (1024 * 1024 * 1024) << " GB, "
-        << "allocated: " << _allocated / (1024 * 1024 * 1024) << " GB. "
-        << "Please set environment variable HETU_MAX_SPLIT_SIZE_MB smaller, "
-        << "if you find reserved - allocated is too high";
+        << "Try to allocate " << malloc_size / (1024) << " KiB on GPU " << device() 
+        << ", but trigger cuda OOM error"
+        << ", mempool reserved: " << _reserved / (1024 * 1024 * 1024) << " GiB"
+        << ", mempool allocated: " << _allocated / (1024 * 1024 * 1024) << " GiB"
+        << ", please set environment variable HETU_MAX_SPLIT_SIZE_MB smaller"
+        << ", if you find reserved - allocated is too high"
+        << ", and if mempool reserved is far lower than the GPU memory"
+        << ", that means there are too many internal or external fragments!";
     }
   }
 
@@ -272,7 +269,7 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
 }
 
 // deprecated for now
-size_t CUDACachingMemoryPool::GetAlignedMallocSize(size_t request_size) {
+[[deprecated]] size_t CUDACachingMemoryPool::GetAlignedMallocSize(size_t request_size) {
   if (request_size < kMallocMinBuffer) {
     return kMallocMinBuffer;
   } else if (request_size < kMallocLargeBuffer) {
@@ -290,15 +287,17 @@ bool CUDACachingMemoryPool::AllocNewPtr(void* &ptr, size_t size) {
   if (ret == cudaSuccess) {
     return true;
   } else if (ret == cudaErrorMemoryAllocation) {
+    // ignore and clear the memory allocation error
+    (void) cudaGetLastError();
     return false;
   } else {
-    HT_RUNTIME_ERROR << "Cuda Malloc failed with rare reason";
+    HT_RUNTIME_ERROR << "cudaMalloc failed with rare reason";
   }
 }
 
 bool CUDACachingMemoryPool::ShouldSplit(size_t size, size_t request_size) {
   HT_ASSERT(size >= request_size)
-    << "Assumption error";
+    << "Size error";
   return size <= max_split_size && (size - request_size) >= kMinSplitRemaining;
 }
 
@@ -316,7 +315,7 @@ bool CUDACachingMemoryPool::FindAvailable(size_t num_bytes,
       << "Cannot find one ptr's info";
     // 目前available table中的应该全是unallocated的条目
     HT_ASSERT(!info_it->second->allocated())
-      << "Assumption error";
+      << "Allocated status error";
     /*
     // 已经alloc的条目无法再被占用
     if (info_it->second->allocated()) {
@@ -325,7 +324,7 @@ bool CUDACachingMemoryPool::FindAvailable(size_t num_bytes,
     }
     */
     HT_ASSERT(it->size >= num_bytes)
-      << "Assumption error";
+      << "Size error";
     if (it->size != num_bytes) {
       size_t remaining = it->size - num_bytes;
       // 只有两种情况允许使用cache的条目
@@ -395,68 +394,189 @@ void CUDACachingMemoryPool::MoveAvailable(std::shared_ptr<CudaDataPtrInfo>& info
   InsertAvailable(data_ptr, *target_table);
 }
 
-// Free some oversize pointer in the given lookup table to satisfy the request_size.
-// It will try to satisfy the request_size with minimum number of ptrs. 
-// Caller should hold the mutex.
-bool CUDACachingMemoryPool::ReleaseOversized(DataPtrLookupTable& lookup_table,
-                                             size_t request_size) {
-  // We only release oversize pointer. If max_split_size_mb is not specified,
-  // no pointers will be regraded as oversize.                                                 
-  DataPtr tmp_key = {request_size > max_split_size ? request_size : max_split_size, nullptr};
-  // Find if there are any ptr larger than request_size
-  auto it = lookup_table.table.lower_bound(tmp_key);
-  // 从lower bound的条目依次往上找
-  // 由于在FindAvailable会对条目进行删除因此都是unallocated的
-  // 且由于保证了max_split_size因此其实际上都是可以free的
-  while (it != lookup_table.table.end()) {
-    auto info_it = _data_ptr_info.find(it->id);
+bool CUDACachingMemoryPool::IsEmpty(DataPtrLookupTable* lookup_table, bool ignore_split) {
+  for (auto& entry : lookup_table->table) {
+    auto info_it = _data_ptr_info.find(entry.id);
     HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
       << "Cannot find CudaDataPtrInfo for stream's cached ptr";
     HT_ASSERT(!info_it->second->allocated())
-      << "Assumption error";
-    HT_ASSERT(info_it->second->can_free())
-      << "Assumption error";
-    if (!info_it->second->allocated()) {
-      CudaFree(it->ptr);
-      _reserved += it->size;
-      lookup_table.table.erase(it);
-      _data_ptr_info.erase(info_it); 
-      return true;
+      << "Allocate status error";
+    if (info_it->second->is_split()) {
+      HT_ASSERT(entry.size <= max_split_size)
+        << "The splitted size of " << entry.size << " is out-of-range";
+      if (ignore_split) {
+        continue;
+      }
+      return false;
     }
-    it++;
-  }
-  // 没有任何能直接满足的条目
-  HT_ASSERT (it == lookup_table.table.end())
-    << "Assumption error";
-  // Request size is larger than all free cached ptrs.
-  size_t released_size = 0;
-  it--;
-  // 只会释放大于max_split_size的
-  // 那些小于max_split_size的可能因为进行了split而无法cudaFree
-  while (released_size < request_size && it->size > max_split_size) {
-    auto info_it = _data_ptr_info.find(it->id);
-    HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
-      << "Cannot find CudaDataPtrInfo for stream's cached ptr";
-    HT_ASSERT(!info_it->second->allocated())
-      << "Assumption error";
-    if (!info_it->second->allocated()) {
-      CudaFree(it->ptr);
-      released_size += it->size;
-      _reserved += it->size;
-      it = lookup_table.table.erase(it);
-      _data_ptr_info.erase(info_it);  
-    }
-    if (it != lookup_table.table.begin())
-      it--;
-    else
-      break;
-  }
-  if (released_size < request_size) {
     return false;
   }
   return true;
 }
 
+// Free some pointer in the all stream available lookup table to satisfy the request_size.
+// It will try to satisfy the request_size with minimum number of ptrs. 
+// Caller should hold the mutex.
+bool CUDACachingMemoryPool::ReleaseAndAlloc(void*& ptr, size_t request_size) {
+  // We only release oversize pointer. If max_split_size_mb is not specified,
+  // no pointers will be regarded as oversize.   
+  auto& lookup_table = _available_for_all_streams->table;                                          
+  DataPtr tmp_key = {request_size > max_split_size ? request_size : max_split_size, nullptr};
+  // Find if there are any ptr larger than request_size
+  auto it = lookup_table.lower_bound(tmp_key);
+  // 从lower bound的条目往上找最小的可以满足要求的
+  // 由于在FindAvailable会对条目进行删除因此都是unallocated的
+  // 且由于保证了max_split_size因此其实际上都是可以free的
+  if (it != lookup_table.end()) {
+    auto info_it = _data_ptr_info.find(it->id);
+    HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
+      << "Cannot find CudaDataPtrInfo for stream's cached ptr";
+    HT_ASSERT(!info_it->second->allocated())
+      << "Allocate status error";
+    CudaFree(it->ptr);
+    HT_ASSERT(AllocNewPtr(ptr, request_size))
+      << "Can't alloc request_size";
+    _reserved -= it->size;
+    lookup_table.erase(it);
+    _data_ptr_info.erase(info_it); 
+    return true;
+  }
+  // 没有任何能直接满足的条目
+  // 那么从大到小释放显存
+  it--;
+  while (1) {
+    auto info_it = _data_ptr_info.find(it->id);
+    HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
+      << "Cannot find CudaDataPtrInfo for stream's cached ptr";
+    HT_ASSERT(!info_it->second->allocated())
+      << "Allocate status error";
+    // all stream available table中的碎片
+    // 要么就是处于占用状态
+    // 要么就是在别的single stream available table中且available event还没结束
+    // 因为WatchEvent会在其之前被调用
+    // 能够保证当前时钟下可以放到all stream available中的一定都放进去了
+    if (info_it->second->is_split()) {
+      HT_ASSERT(it->size <= max_split_size)
+        << "The splitted size of " << *it << " is out-of-range";
+      if (it != lookup_table.begin()) {
+        it--;
+        continue;
+      }
+      return false;
+    }
+    CudaFree(it->ptr);
+    _reserved -= it->size;
+    it = lookup_table.erase(it);
+    _data_ptr_info.erase(info_it); 
+    if (AllocNewPtr(ptr, request_size)) {
+      return true;
+    }
+    if (it != lookup_table.begin()) {
+      it--;
+    }
+    // mempool debug use
+    // HT_LOG_INFO << "[cudaFree] Erase " << it->size << " bytes from all stream available table";
+    // 清空all stream available table中所有可以直接cudaFree的
+    // 仍然无法cudaMalloc
+    // 那么只能返回false放弃分配
+    else {
+      return false;
+    }
+  }
+}
+
+// *It will hang the whole system!
+// Wait and free some pointer in the all stream available lookup table
+// until we satisfy the request_size.
+// Caller should hold the mutex.
+bool CUDACachingMemoryPool::WaitUntilAlloc(void*& ptr, size_t request_size) {
+  // Use a thread per stream to async wait is not a good idea.
+  // Different stream may have interference because of cache-cache movement.
+  /*
+  std::mutex release_mutex;
+  size_t released_size = 0;
+  // 处理single stream上的free
+  auto wait_and_release_on_single_stream = [&](AvailableEventLookupTable* ptr) -> void {
+    auto& stream_free_events = ptr->table; 
+    while (!stream_free_events.empty()) {
+      auto event_it = stream_free_events.begin();
+      event_it->event->Sync();
+      {
+        std::lock_guard<std::mutex> lock(release_mutex);
+        DataPtrId data_ptr_id = event_it->id;
+        auto info_it = _data_ptr_info.find(data_ptr_id);
+        HT_ASSERT(info_it != _data_ptr_info.end())
+          << "Cannot find data ptr with id " << data_ptr_id << " in the info"; 
+        auto info = info_it->second;
+        // 删除available event
+        stream_free_events.erase(event_it);
+        auto event_info_it = _available_event_info.find(data_ptr_id);
+        HT_ASSERT(event_info_it != _available_event_info.end())
+          << "Cannot find the info of single stream free event towards data ptr id " << data_ptr_id;
+        _available_event_info.erase(event_info_it);
+        // 移动cache entry到合适的table
+        MoveAvailable(info);
+        if (info->status == OccupationStatus::AVAILABLE_FOR_ALL_STREAM) {
+          released_size += info->num_bytes;
+        }
+      }
+    }
+  };
+  */
+  while (1) {
+    WatchEvents();
+    bool successfully_release = ReleaseAndAlloc(ptr, request_size);
+    if (successfully_release) {
+      return true;
+    }
+    // mempool debug use
+    // HT_LOG_INFO << "Need to wait and free until we can allocate";
+    // 停等5毫秒
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    bool all_free = true;
+    for (auto& kv : _multi_stream_free_events) {
+      if (!kv.second->empty()) {
+        all_free = false;
+        break;
+      }
+    }
+    if (all_free) {
+      for (auto& kv : _single_stream_free_events) {
+        if (!kv.second->table.empty()) {
+          all_free = false;
+          break;
+        }
+      }
+    }
+    // 全部清空了都还不满足request size
+    // 那么不得不OOM了
+    if (all_free) {
+      // 理论上此时应该所有cache的table都被清空了
+      // 除了那些split出来无法free的显存碎片
+      if (max_split_size > 0) {
+        HT_ASSERT(IsEmpty(_available_for_all_streams.get()))
+          << "The all stream available table shouldn't have any unsplitted entry now";
+        for (auto& kv : _available_for_single_stream) {
+          HT_ASSERT(IsEmpty(kv.second.get()))
+            << "The single stream available table shouldn't have any unsplitted entry now";
+        }
+      } 
+      // 无split情形
+      else {
+        HT_ASSERT(IsEmpty(_available_for_all_streams.get(), false))
+          << "The all stream available table shouldn't have any entry now";
+        for (auto& kv : _available_for_single_stream) {
+          HT_ASSERT(IsEmpty(kv.second.get(), false))
+            << "The single stream available table shouldn't have any entry now";
+        }
+      }
+      return false;
+    }
+  }
+}
+
+// deprecated
+/*
 // Try to empty a ptr look up table: delete all the records and free corresponding pointer. 
 // If maybe_allocated is set to true, it only delete records whose pointer is not in use. 
 // Caller should hold the mutex.
@@ -470,10 +590,8 @@ bool CUDACachingMemoryPool::ReleaseAll(DataPtrLookupTable& lookup_table,
     // 目前available table中的应该全是unallocated的条目
     HT_ASSERT(!info_it->second->allocated())
       << "Assumption error";
-    /*
     if (maybe_allocated && info_it->second->allocated())
       continue;
-    */
     if (info_it->second->can_free()) {
       CudaFree(it->ptr);
       auto info = info_it->second;
@@ -488,13 +606,17 @@ bool CUDACachingMemoryPool::ReleaseAll(DataPtrLookupTable& lookup_table,
   }
   return true;
 }
+*/
 
 bool CUDACachingMemoryPool::EmptyCache() {
+  // TODO
+  /*
   for (auto& kv : _available_for_single_stream) {
     ReleaseAll(*(kv.second));
   }
   ReleaseAll(*_available_for_all_streams);
   return true;
+  */
 }
 
 // 直接bind外部的内存
@@ -521,6 +643,8 @@ DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
   HT_RUNTIME_ERROR_IF(!insertion.second)
     << "Failed to insert data " << data_ptr << " to info";
 
+  _reserved += num_bytes;
+  _allocated += num_bytes;
   return data_ptr;
 }
 
@@ -585,6 +709,8 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     }
     info->deleter(data_ptr);
     _data_ptr_info.erase(info_it);
+    _reserved -= info->num_bytes;
+    _allocated -= info->num_bytes;
     return;
   }
   */
@@ -596,14 +722,17 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     if (used_streams.empty()) {
       info->deleter(data_ptr);
       _data_ptr_info.erase(info_it);
+      _reserved -= info->num_bytes;
+      _allocated -= info->num_bytes;      
       return;
     }
     info->status = OccupationStatus::UNAVAILABLE_UNTIL_FREE;
     for (auto s_id : used_streams) {
       auto event = std::make_unique<CUDAEvent>(data_ptr.device, false);
       event->Record(Stream::unpack(s_id));
-      _multi_stream_free_events[s_id].emplace_back(
-        std::make_tuple(std::move(event), data_ptr.id));
+      if (_multi_stream_free_events.find(s_id) == _multi_stream_free_events.end())
+        _multi_stream_free_events.emplace(s_id, std::make_unique<std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>>());
+      _multi_stream_free_events[s_id]->emplace_back(std::make_tuple(std::move(event), data_ptr.id));
     }
     info->multi_stream_free_event_cnt += used_streams.size();
     _free_cnt++;
@@ -615,6 +744,7 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     DataPtrLookupTable* target_table = nullptr;
     auto stream = Stream::unpack(info->alloc_stream);
     info->free_at = free_at;
+    _allocated -= info->num_bytes;
     // blocking stream上释放的东西所有stream之后都能用
     if (stream.is_blocking()) {
       info->status = OccupationStatus::AVAILABLE_FOR_ALL_STREAM;
@@ -642,7 +772,6 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     data_ptr.ptr = info->ptr; 
     info->cached_pool = target_table;
     InsertAvailable(data_ptr, *target_table); 
-    _allocated -= info->num_bytes;
     // mempool debug use
     // HT_LOG_INFO << "[Insert] free occupy then insert to table: " << data_ptr;
     HT_ASSERT(data_ptr.id == info->id)
@@ -656,7 +785,9 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     for (auto s_id : used_streams) {
       auto event = std::make_unique<CUDAEvent>(data_ptr.device, false);
       event->Record(Stream::unpack(s_id)); 
-      _multi_stream_free_events[s_id].emplace_back(std::make_tuple(std::move(event), data_ptr.id));
+      if (_multi_stream_free_events.find(s_id) == _multi_stream_free_events.end())
+        _multi_stream_free_events.emplace(s_id, std::make_unique<std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>>());
+      _multi_stream_free_events[s_id]->emplace_back(std::make_tuple(std::move(event), data_ptr.id));
     }
     info->multi_stream_free_event_cnt += used_streams.size();
   } 
@@ -901,7 +1032,7 @@ void CUDACachingMemoryPool::WatchEvents() {
   }
   // 处理multi stream上的free
   for (auto& kv : _multi_stream_free_events) {
-    auto& stream_free_events = kv.second;
+    auto& stream_free_events = *(kv.second);
     while (!stream_free_events.empty()) {
       auto& tuple = stream_free_events.front();
       std::unique_ptr<CUDAEvent>& event = std::get<0>(tuple);
@@ -928,12 +1059,15 @@ void CUDACachingMemoryPool::WatchEvents() {
           // 直接删除即可
           info->deleter(DataPtr{info->ptr, info->num_bytes, device(), data_ptr_id});
           _data_ptr_info.erase(it);
+          _reserved -= info->num_bytes;
+          _allocated -= info->num_bytes;
         } 
         // alloc data
         else {
           HT_ASSERT(info->status == OccupationStatus::UNAVAILABLE_UNTIL_FREE) 
             << "Info status should be " << OccupationStatus::UNAVAILABLE_UNTIL_FREE
             << ", but found " << info->status;
+          _allocated -= info->num_bytes;
           // 优先考虑放到all stream available table中cache住
           DataPtrLookupTable* target_table = _available_for_all_streams.get();
           info->refresh();
@@ -947,7 +1081,6 @@ void CUDACachingMemoryPool::WatchEvents() {
           // mempool debug use
           // HT_LOG_INFO << "[Insert] sync free event then insert to table: " << data_ptr;
           InsertAvailable(data_ptr, *target_table); 
-          _allocated -= info->num_bytes;
         }
       }
       stream_free_events.pop_front();

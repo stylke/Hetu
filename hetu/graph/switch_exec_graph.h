@@ -216,6 +216,7 @@ class ParamBuffer {
     void Alloc(const Stream& stream, 
                bool use_nccl = false, 
                ncclComm_t comm = nullptr,
+               bool use_caching_mempool = true,
                bool use_async = false); // stream is unused actually (cudaMallocAsync is tooooo slow!)
 
     void Free();

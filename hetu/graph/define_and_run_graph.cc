@@ -391,6 +391,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     if (plan_it != shape_plan.end()) {
       // *only feed dict will set_shape
       exec_tensor->set_shape(plan_it->second);
+      // HT_LOG_INFO << "set shape " << plan_it->second << " to " << exec_tensor;
     } else {
       // other shapes will be fixed and just recorded
       shape_plan[tensor->id()] = exec_tensor->shape();
@@ -436,13 +437,23 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   HT_LOG_DEBUG << "Instantiating a " << type() << " graph with global topo " << global_topo;
   for (auto& op_ref : global_topo) {
     auto& op = op_ref.get();
-    HT_LOG_TRACE << "Creating an executable version of op " << op << " begin...";;
+    HT_LOG_TRACE << "Creating an executable version of op " << op << " begin...";
 
     // 前处理
     // 1、获取exec op的inputs
     // 2、进行autocast
     TensorList exec_inputs, exec_in_deps;
     std::tie(exec_inputs, exec_in_deps) = Operator::transform_each_input_tensor(op, get_exec_input);
+
+    // symbolic shape debug use
+    /*
+    HTShapeList exec_input_shapes;
+    for (auto& exec_input : exec_inputs) {
+      exec_input_shapes.push_back(exec_input->shape());
+    }
+    HT_LOG_INFO << "Exec op " << op << " with inputs " << exec_inputs << " and shapes " << exec_input_shapes;
+    */
+
     auto autocast_id = AutoCast::cur_autocast_ctx();
     if (autocast_id != UINT64_MAX) {
       auto autocast = AutoCast::GetAutoCast(autocast_id);
