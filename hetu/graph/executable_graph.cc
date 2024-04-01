@@ -220,6 +220,140 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
   }
 }
 
+void ExecutableGraph::AllocMemory(size_t& memory_size, MemoryPlan& memory_plan,
+                                  MemoryBlockList& free_memory, MicroBatchTensorId tensor_id,
+                                  size_t alloc_memory_size) {
+  // Best Fit strategy
+  sort(free_memory.begin(), free_memory.end(),
+       [&](MemoryBlock a, MemoryBlock b) { return a.second < b.second; });
+  for (auto block_iter = free_memory.begin(); block_iter != free_memory.end(); block_iter++) {
+    auto block_size = block_iter->second;
+    if (block_size >= alloc_memory_size) {
+      auto block_ptr = block_iter->first;
+      free_memory.erase(block_iter);
+      memory_plan[tensor_id] = {block_ptr, alloc_memory_size};
+      auto remain_size = block_size - alloc_memory_size;
+      if (remain_size > 0) {
+        free_memory.push_back({block_ptr + alloc_memory_size, remain_size});
+      }
+      return;
+    }
+  }
+  memory_plan[tensor_id] = {memory_size, alloc_memory_size};
+  memory_size += alloc_memory_size;
+}
+
+void ExecutableGraph::FreeMemory(MemoryPlan& memory_plan, MemoryBlockList& free_memory,
+                                 MicroBatchTensorId tensor_id) {
+  // free memory space and merge with adjacent free blocks
+  auto free_block_ptr = memory_plan[tensor_id].first;
+  auto free_block_size = memory_plan[tensor_id].second;
+  for (auto i = 0; i < free_memory.size(); i++) {
+    auto block_head = free_memory[i].first;
+    auto block_tail = block_head + free_memory[i].second;
+    if (block_tail == free_block_ptr) {
+      free_memory.erase(free_memory.begin() + i);
+      i--;
+      free_block_ptr = block_head;
+      free_block_size += free_memory[i].second;
+    } else if (free_block_ptr + free_block_size == block_head) {
+      free_memory.erase(free_memory.begin() + i);
+      i--;
+      free_block_size += free_memory[i].second;
+    }
+  }
+  free_memory.push_back({free_block_ptr, free_block_size});
+}
+
+MemoryPlan ExecutableGraph::GenerateMemoryPlan(size_t& memory_size, std::vector<std::pair<bool, size_t>> tasks,
+                                               std::vector<Tensor2IntMap>& tensor2degrees_list,
+                                               const std::unordered_map<TensorId, size_t>& fetch_indices,
+                                               const FeedDict& feed_dict) {
+  memory_size = 0;
+  MemoryPlan memory_plan;
+  MemoryBlockList free_memory;
+  std::map<MemoryBlock, int> storage_use_count;
+  for (size_t i = 0; i < tasks.size(); i++) {
+    auto& task = tasks[i];
+    bool is_forward = task.first;
+    size_t& micro_batch_id = task.second;
+    auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
+    bool grad_accumulation_finished = ((i == tasks.size() - 1) && is_forward == false);
+    OpRefList &topo = is_forward ? _execute_plan.local_fw_topo : _execute_plan.local_bw_topo;
+    const TensorIdSet& shared_weight_tensor = _execute_plan.shared_weight_tensor;
+    const OpIdSet& shared_weight_p2p = _execute_plan.shared_weight_p2p;
+    const OpIdSet& shared_weight_grad_p2p = _execute_plan.shared_weight_grad_p2p;
+    const OpIdSet& accumulated_ops = _execute_plan.accumulated_ops;
+    for (auto& op_ref : topo) {
+      auto& op = op_ref.get();
+      bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
+        return feed_dict.find(tensor->id()) != feed_dict.end();
+      });
+      if (computed)
+        continue;
+
+      // in pipeline(shared_weight_p2p not empty), shared weight p2p ops only execute in micro batch 0
+      if (!shared_weight_p2p.empty() &&
+          shared_weight_p2p.find(op->id()) != shared_weight_p2p.end() &&
+          micro_batch_id > 0) {
+        continue;
+      }
+      // shared weight grad p2p ops are included in accumulated_ops, only execute in last micro batch
+      if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
+        continue;
+      }
+
+      if(is_data_transfer_op(op)){
+        continue;
+      }
+
+      if(is_optimizer_update_op(op)){
+        auto id = op->input(0)->id();
+        if ((storage_use_count.count(memory_plan[{micro_batch_id, id}]) > 0 &&
+            --storage_use_count[memory_plan[{micro_batch_id, id}]] == 0) &&
+            fetch_indices.find(id) == fetch_indices.end() &&
+            shared_weight_tensor.find(id) == shared_weight_tensor.end() &&
+            feed_dict.find(id) == feed_dict.end() ) {
+          FreeMemory(memory_plan, free_memory, {micro_batch_id, id});
+        }
+        continue;
+      }
+
+      if (is_inplace_op(op) ||
+          (op->type() == "ArrayReshapeOp" && op->input(0)->is_contiguous()) ||
+          is_all_reduce_op(op) || is_reduce_scatter_op(op)) {
+        auto inputId = op->inputs().at(0)->id();
+        auto outputId = op->outputs().at(0)->id();
+        if (memory_plan.count({micro_batch_id, inputId})) {
+          memory_plan[{micro_batch_id, outputId}] = memory_plan[{micro_batch_id, inputId}];
+          storage_use_count[memory_plan[{micro_batch_id, inputId}]] += tensor2degrees[outputId];
+          storage_use_count[memory_plan[{micro_batch_id, inputId}]]--;
+        }
+        continue;          
+      }
+
+      for (auto& output : op->outputs()) {
+        auto tensor_id = output->id();
+        size_t numElem = output->numel();
+        numElem = DIVUP(numElem * DataType2Size(output->dtype()), 256) * 256 / DataType2Size(kInt64);
+        AllocMemory(memory_size, memory_plan, free_memory, {micro_batch_id, tensor_id}, numElem);
+        storage_use_count[memory_plan[{micro_batch_id, tensor_id}]] = tensor2degrees[output->id()];
+      }
+      for (const auto& input : op->inputs()) {
+        auto tensor_id = input->id();
+        if ((storage_use_count.count(memory_plan[{micro_batch_id, input->id()}]) > 0 &&
+            --storage_use_count[memory_plan[{micro_batch_id, input->id()}]] == 0) &&
+            fetch_indices.find(input->id()) == fetch_indices.end() &&
+            shared_weight_tensor.find(input->id()) == shared_weight_tensor.end() &&
+            feed_dict.find(input->id()) == feed_dict.end()) {
+          FreeMemory(memory_plan, free_memory, {micro_batch_id, tensor_id});
+        }
+      }
+    }
+  }
+  return memory_plan;
+}
+
 bool ExecutableGraph::Instantiate(const TensorList& fetches,
                                   const Device& preferred_device) {
   auto is_op_instantiated = [&](const Operator& op) -> bool {
@@ -1087,7 +1221,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
                                   Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
                                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                                   const FeedDict& feed_dict, const TensorList& fetches,
-                                  const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p) {
+                                  const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p,
+                                  const NDArray& memory_space, MemoryPlan& memory_plan) {
   const TensorIdSet& dtype_transfer_tensor = _execute_plan.dtype_transfer_tensor;
   const TensorIdSet& shared_weight_tensor = _execute_plan.shared_weight_tensor;
   const OpIdSet& shared_weight_p2p = _execute_plan.shared_weight_p2p;
@@ -1296,7 +1431,33 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group start";
       ncclGroupStart();
     }
-    NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
+    NDArrayList output_vals;
+    auto not_need_out_memory = [&](const Operator& op) -> bool {
+      // TODO: AllReduce and ReduceScatter are in-place by now
+      // and we should make it optional
+      return is_optimizer_update_op(op) || is_data_transfer_op(op) || is_inplace_op(op) ||
+             (op->type() == "ArrayReshapeOp" && op->input(0)->is_contiguous()) ||
+             is_all_reduce_op(op) || is_reduce_scatter_op(op);
+    };
+    if (not_need_out_memory(op)) {
+      output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
+    } else {
+      for (auto& output : op->outputs()) {
+        auto tensor_id = output->id();
+        HT_ASSERT(memory_plan.count({micro_batch_id, tensor_id}) > 0)
+         << "Cannot find memory plan for tensor " << tensor_id << " in micro batch " << micro_batch_id;
+        const auto& shape = GetTensorShape(output);
+        auto& memory_block = memory_plan[{micro_batch_id, tensor_id}];
+        auto output_memory = NDArray::slice(memory_space, {memory_block.first}, {memory_block.second});
+        auto output_val = NDArray(
+          NDArrayMeta().set_shape(shape)
+                       .set_dtype(output->dtype())
+                       .set_device(op->instantiation_ctx().placement), 
+          output_memory->storage(), output_memory->storage_offset() * DataType2Size(kInt64) / DataType2Size(output->dtype()));
+        output_vals.push_back(output_val);
+      }
+      op->Compute(input_vals, output_vals, runtime_ctx, micro_batch_id);
+    }
     if (is_shared_weight_or_grad_p2p(op)) {
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group end";
       ncclGroupEnd();
@@ -1845,6 +2006,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   }
   // HT_LOG_DEBUG << local_device << ": stages = " << _stages << "; stage id = " << stage_id;
   auto& tasks = schedule[stage_id];
+  size_t memory_size = 0;
+  auto memory_plan = GenerateMemoryPlan(memory_size, tasks, tensor2degrees_list, fetch_indices, feed_dict);
+  auto memory_space = NDArray::empty({memory_size}, local_device, kInt64, kBlockingStream);
   HT_LOG_DEBUG << local_device << ": stage id = " << stage_id;
   bool is_continuous_p2p = false;
   for (size_t i = 0; i < tasks.size(); i++) {
@@ -1880,12 +2044,14 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (is_forward) {
       ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx,
                   tensor2data, tensor2degrees, grad_accumulation, false, 
-                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p, 
+                  memory_space, memory_plan);
     } else {
       bool grad_accumulation_finished = (i == tasks.size() - 1);
       ComputeFunc(micro_batch_id, _execute_plan.local_bw_topo, runtime_ctx, 
                   tensor2data, tensor2degrees, grad_accumulation, grad_accumulation_finished, 
-                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p, 
+                  memory_space, memory_plan);
     }
     if (is_forward) {
       HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward end]";

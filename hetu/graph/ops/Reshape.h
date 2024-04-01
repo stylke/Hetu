@@ -182,7 +182,7 @@ class ArrayReshapeOpImpl final : public OpInterface {
                       const OpMeta& op_meta) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const {};
+                 RuntimeContext& ctx) const override;
 
   NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
                         RuntimeContext& runtime_ctx) const override;

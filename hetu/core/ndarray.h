@@ -267,7 +267,7 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                            NDArray& output = EMPTY);
 
   static NDArray reshape(const NDArray& input, const HTShape& new_shape,
-                         StreamIndex stream_id = DEFAULT_STREAM);
+                         StreamIndex stream_id = DEFAULT_STREAM, NDArray& output = EMPTY);
 
   static NDArray view(const NDArray& input, const HTShape& view_shape);
 

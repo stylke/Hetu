@@ -259,13 +259,13 @@ NDArrayList AllReduceOpImpl::DoCompute(Operator& op,
   return outputs;
 }
 
-// void AllReduceOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
-//                                 NDArrayList& outputs, RuntimeContext& runtime_ctx) const {
-//   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-//                                   hetu::impl::AllReduce, inputs.at(0),
-//                                   outputs.at(0), _comm_group, // _comm_group is a subset of placement_group
-//                                   op->instantiation_ctx().stream());                              
-// }
+void AllReduceOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                                NDArrayList& outputs, RuntimeContext& runtime_ctx) const {
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
+                                  hetu::impl::AllReduce, inputs.at(0),
+                                  outputs.at(0), reduction_type(), _comm_group, // _comm_group is a subset of placement_group
+                                  op->instantiation_ctx().stream());                          
+}
 
 bool P2PSendOpImpl::DoMapToParallelDevices(Operator& op,
                                            const DeviceGroup& pg) const {
@@ -546,18 +546,18 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
   return outputs;
 }
 
-// void ReduceScatterOpImpl::DoCompute(Operator& op, 
-//                                     const NDArrayList& inputs,
-//                                     NDArrayList& outputs,
-//                                     RuntimeContext& runtime_ctx) const {
-//   HT_ASSERT(inputs.at(0)->dtype() == op->input(0)->dtype())
-//     << "Data type mismatched for ReduceScatter communication: " << inputs.at(0)->dtype()
-//     << " vs. " << op->input(0)->dtype();
+void ReduceScatterOpImpl::DoCompute(Operator& op, 
+                                    const NDArrayList& inputs,
+                                    NDArrayList& outputs,
+                                    RuntimeContext& runtime_ctx) const {
+  HT_ASSERT(inputs.at(0)->dtype() == op->input(0)->dtype())
+    << "Data type mismatched for ReduceScatter communication: " << inputs.at(0)->dtype()
+    << " vs. " << op->input(0)->dtype();
 
-//   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-//                                   hetu::impl::ReduceScatter, inputs.at(0), outputs.at(0), 
-//                                   _comm_group, op->instantiation_ctx().stream());
-// }
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
+                                  hetu::impl::ReduceScatter, inputs.at(0), outputs.at(0), 
+                                  reduction_type(), _comm_group, get_scatter_dim(), op->instantiation_ctx().stream());
+}
 
 Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
                   ReductionType red_type, OpMeta op_meta) {

@@ -14,6 +14,11 @@ NDArrayList LogOpImpl::DoCompute(Operator& op,
   return outputs;
 }
 
+void LogOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                          NDArrayList& outputs, RuntimeContext& ctx) const {
+  NDArray::log(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
+}
+
 TensorList LogOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   HT_ASSERT(!inplace())
     << "This op doesn't support gradient for inplace.";

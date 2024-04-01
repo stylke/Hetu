@@ -188,10 +188,6 @@ class RuntimeContext {
     _ctxs.clear();
   }
 
-  const Tensor2ShapeMap& shape_plan() const {
-    return _shape_plan;
-  }
-
   const HTShape& get_runtime_shape(const TensorId& tensor_id) const {
     HT_ASSERT(!_shape_plan.empty())
       << "The shape plan is empty, ensure that you've used a define graph to instantiate a exec graph";
@@ -199,6 +195,10 @@ class RuntimeContext {
     HT_ASSERT(it != _shape_plan.end())
       << "Tensor " << tensor_id << " is not existed in runtime shape plan";
     return it->second;
+  }
+  
+  const Tensor2ShapeMap& shape_plan() const {
+    return _shape_plan;
   }
 
   const Tensor2NDArrayMap& allocation_plan() const {
@@ -436,6 +436,36 @@ class OpDef : public shared_ptr_target {
   HTShapeList InferShape(const HTShapeList& input_shapes,
                          RuntimeContext& runtime_ctx) {
     return _body->InferShape(get_self(), input_shapes, runtime_ctx);
+  }
+
+  void Compute(const NDArrayList& inputs, NDArrayList& outputs, RuntimeContext& runtime_ctx, size_t micro_batch_id = 0) {
+    HT_ASSERT(micro_batch_id < HT_MAX_NUM_MICRO_BATCHES)
+      << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
+      << ", got micro batch id: " << micro_batch_id;
+    BlockOrSyncAllInputs(runtime_ctx, micro_batch_id);
+    // precision debug
+    /*
+    NDArrayList input_sums;
+    for (auto& input : inputs) {
+      input_sums.push_back(NDArray::sum(input));
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
+      << ", the input vals are (may not sync) " << input_sums;
+    */
+    // if(instantiation_ctx().placement.index() == 0) std::cout << "start_operator_compute" << std::endl;
+    instantiation_ctx().start[micro_batch_id]->Record(stream());
+    _body->Compute(get_self(), inputs, outputs, runtime_ctx);
+    instantiation_ctx().stop[micro_batch_id]->Record(stream());
+    // precision debug
+    /*
+    // stream().Sync();
+    NDArrayList ret_sums;
+    for (auto& ret : rets) {
+      ret_sums.push_back(NDArray::sum(ret));
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": compute op: " << name()
+      << ", the result is (may not sync) " << ret_sums;
+    */
   }
 
   NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx, size_t micro_batch_id = 0) {

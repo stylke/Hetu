@@ -171,7 +171,7 @@ class AllReduceOpImpl final : public OpInterface {
                         RuntimeContext& ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const {};
+                 RuntimeContext& ctx) const override;
   
   bool _inplace{false};
 
@@ -537,7 +537,7 @@ class ReduceScatterOpImpl final : public OpInterface {
                         RuntimeContext& ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const {};
+                 RuntimeContext& ctx) const override;
 
   bool _inplace;
 

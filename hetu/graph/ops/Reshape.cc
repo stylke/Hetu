@@ -13,6 +13,12 @@ NDArrayList ArrayReshapeOpImpl::DoCompute(Operator& op,
   return {output};
 }
 
+void ArrayReshapeOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                                   NDArrayList& outputs, RuntimeContext& ctx) const {
+  auto output_shape = DoInferShape(op, {inputs.at(0)->shape()}, ctx).at(0);
+  outputs.at(0) = NDArray::reshape(inputs.at(0), output_shape, op->instantiation_ctx().stream_index, outputs.at(0));
+}
+
 TensorList ArrayReshapeOpImpl::DoGradient(Operator& op, 
                                           const TensorList& grad_outputs) const {
   if (symbolic()) {

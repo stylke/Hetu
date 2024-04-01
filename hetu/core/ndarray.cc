@@ -717,9 +717,16 @@ NDArray NDArray::index_add(const NDArray& x, const NDArray& ids,
 }
 
 NDArray NDArray::reshape(const NDArray& input, const HTShape& new_shape,
-                         StreamIndex stream_id) {
-  NDArray out = NDArray::contiguous(input, stream_id);
-  return NDArray::view(out, new_shape);
+                         StreamIndex stream_id, NDArray& output) {
+  if (output.is_defined()) {
+    output = NDArray::view(output, input->shape());
+    NDArray::contiguous(input, stream_id, output);
+    return NDArray::view(output, new_shape);
+  }
+  else {
+    NDArray out = NDArray::contiguous(input, stream_id);
+    return NDArray::view(out, new_shape);
+  }
 }
 
 NDArray NDArray::view(const NDArray& input, const HTShape& view_shape) {

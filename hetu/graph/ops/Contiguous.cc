@@ -16,6 +16,13 @@ NDArrayList ContiguousOpImpl::DoCompute(Operator& op,
   return outputs;
 }
 
+void ContiguousOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                                 NDArrayList& outputs, RuntimeContext& ctx) const {
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
+                                  hetu::impl::DataTransfer, inputs.at(0),
+                                  outputs.at(0), op->instantiation_ctx().stream());                  
+}
+
 TensorList ContiguousOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   return {op->requires_grad(0) ? MakeContiguousGradientOp(grad_outputs.at(0), op->input(0)->stride(),
                                  op->grad_op_meta().set_name(op->grad_name()))

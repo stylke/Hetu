@@ -35,7 +35,7 @@ class SliceOpImpl final : public ViewsOpImpl {
   }
   
   inline uint64_t op_indicator() const noexcept override {
-    return SLICE_OP;
+    return SLICE_OP | INPLACE_OP;
   }
 
   HTShape get_begin_pos() const {
