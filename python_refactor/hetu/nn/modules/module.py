@@ -18,6 +18,9 @@ def parallel_data_provider(global_data, ds, device_index):
     order, states = ds.order, ds.states
     local_map = hetu.map_to_local_data(ds, device_index)
     local_data = global_data.copy()
+    dims = len(local_data.shape)
+    begin_pos = [0] * dims
+    out_shape = local_data.shape
     for dim in order:
         if dim < 0:
             continue
@@ -25,7 +28,13 @@ def parallel_data_provider(global_data, ds, device_index):
         split_index = local_map[dim]
         start = int(split_index * (global_data.shape[dim] / splits))
         stop = min(int((split_index + 1) * (global_data.shape[dim] / splits)), global_data.shape[dim])
-        local_data = local_data.take(range(start, stop), axis=dim)
+        if isinstance(local_data, hetu.NDArray): 
+            begin_pos[dim] = start
+            out_shape[dim] = stop - start
+        else:
+            local_data = local_data.take(range(start, stop), axis=dim)
+    if isinstance(local_data, hetu.NDArray):
+        local_data = local_data.slice(begin_pos, out_shape)
     return local_data
 
 
@@ -245,6 +254,19 @@ class Module(object):
                     for m in module.named_modules(memo, sub_prefix, remove_duplicate):
                         yield m
     
+    def find_module(self, key: str = '') -> Optional['Module']:
+        if key == '':
+            return self
+        if '.' not in key:
+            for name, module in self._modules.items():
+                if name == key:
+                    return module
+        key_list = key.split(".")
+        for name, module in self._modules.items():
+            if name == key_list[0]:
+                sub_prefix = ".".join(key_list[1:])
+                return module.find_module(sub_prefix)
+    
     def modules(self) -> Iterator['Module']:
         for _, module in self.named_modules():
             yield module
@@ -443,7 +465,8 @@ class Module(object):
                         # 3D parallel: for pipeline situation, a device don't need to load all the checkpoint
                         if device_group.contains(local_device):
                             device_index = device_group.get_index(local_device)
-                            param.reset_data(parallel_data_provider(param_data, param.distributed_states, device_index))
+                            data = parallel_data_provider(param_data, param.distributed_states, device_index)
+                            param.reset_data(data)
                             '''
                             if 'lm_head' in key:
                                 print('lm_head', parallel_data_provider(param_data, param.distributed_states, device_index), 
