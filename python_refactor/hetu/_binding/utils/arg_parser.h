@@ -463,18 +463,25 @@ class PyArgParser {
 
 #define OP_META_ARGS                                                           \
   "int stream_index=None, "                                                    \
+  "DeviceGroup device_group=None, "                                            \
   "List[DeviceGroup] device_groups=None, "                                     \
   "List[Tensor] extra_deps=None, "                                             \
   "OpName name=None"
 
 inline OpMeta parse_op_meta(const ParsedPyArgs& parsed_args, size_t offset) {
   OpMeta ret = CurrentOpMetaCtx();
-  if (parsed_args.has(offset + 1))
-    ret.set_device_groups(parsed_args.get_device_groups(offset + 1));
+  HT_ASSERT(!(parsed_args.has(offset + 1) && parsed_args.has(offset + 2)))
+    << "device_group and device_groups in OpMeta are both provided, which is not allowed.";
+  if (parsed_args.has(offset + 1)) {
+    DeviceGroupList device_groups = {parsed_args.get_device_group(offset + 1)};
+    ret.set_device_groups(device_groups);
+  }
   if (parsed_args.has(offset + 2))
-    ret.set_extra_deps(parsed_args.get_tensor_list(offset + 2));
+    ret.set_device_groups(parsed_args.get_device_groups(offset + 2));
   if (parsed_args.has(offset + 3))
-    ret.set_name(parsed_args.get_string(offset + 3));
+    ret.set_extra_deps(parsed_args.get_tensor_list(offset + 3));
+  if (parsed_args.has(offset + 4))
+    ret.set_name(parsed_args.get_string(offset + 4));
   return ret;
 }
 
