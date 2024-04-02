@@ -319,7 +319,7 @@ MemoryPlan ExecutableGraph::GenerateMemoryPlan(size_t& memory_size, std::vector<
         continue;
       }
 
-      if (is_inplace_op(op) ||
+      if (is_inplace_op(op) || is_slice_op(op) ||
           (op->type() == "ArrayReshapeOp" && op->input(0)->is_contiguous()) ||
           is_all_reduce_op(op) || is_reduce_scatter_op(op)) {
         auto inputId = op->inputs().at(0)->id();
@@ -1221,8 +1221,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
                                   Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
                                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                                   const FeedDict& feed_dict, const TensorList& fetches,
-                                  const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p,
-                                  const NDArray& memory_space, MemoryPlan& memory_plan) {
+                                  const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p) {
   const TensorIdSet& dtype_transfer_tensor = _execute_plan.dtype_transfer_tensor;
   const TensorIdSet& shared_weight_tensor = _execute_plan.shared_weight_tensor;
   const OpIdSet& shared_weight_p2p = _execute_plan.shared_weight_p2p;
@@ -1431,11 +1430,14 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group start";
       ncclGroupStart();
     }
-    NDArrayList output_vals;
+    NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
+    // NOTE: revert memory plan for now and may be used in the future
+    /*
     auto not_need_out_memory = [&](const Operator& op) -> bool {
       // TODO: AllReduce and ReduceScatter are in-place by now
       // and we should make it optional
-      return is_optimizer_update_op(op) || is_data_transfer_op(op) || is_inplace_op(op) ||
+      return is_optimizer_update_op(op) || is_data_transfer_op(op) ||
+             is_inplace_op(op) || is_slice_op(op) ||
              (op->type() == "ArrayReshapeOp" && op->input(0)->is_contiguous()) ||
              is_all_reduce_op(op) || is_reduce_scatter_op(op);
     };
@@ -1458,6 +1460,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       }
       op->Compute(input_vals, output_vals, runtime_ctx, micro_batch_id);
     }
+    */
     if (is_shared_weight_or_grad_p2p(op)) {
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group end";
       ncclGroupEnd();
@@ -2006,9 +2009,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   }
   // HT_LOG_DEBUG << local_device << ": stages = " << _stages << "; stage id = " << stage_id;
   auto& tasks = schedule[stage_id];
+  // NOTE: revert memory plan for now and may be used in the future
+  /*
   size_t memory_size = 0;
   auto memory_plan = GenerateMemoryPlan(memory_size, tasks, tensor2degrees_list, fetch_indices, feed_dict);
   auto memory_space = NDArray::empty({memory_size}, local_device, kInt64, kBlockingStream);
+  */
   HT_LOG_DEBUG << local_device << ": stage id = " << stage_id;
   bool is_continuous_p2p = false;
   for (size_t i = 0; i < tasks.size(); i++) {
@@ -2044,14 +2050,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (is_forward) {
       ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx,
                   tensor2data, tensor2degrees, grad_accumulation, false, 
-                  feed_dict, fetches, fetch_indices, is_continuous_p2p, 
-                  memory_space, memory_plan);
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
     } else {
       bool grad_accumulation_finished = (i == tasks.size() - 1);
       ComputeFunc(micro_batch_id, _execute_plan.local_bw_topo, runtime_ctx, 
                   tensor2data, tensor2degrees, grad_accumulation, grad_accumulation_finished, 
-                  feed_dict, fetches, fetch_indices, is_continuous_p2p, 
-                  memory_space, memory_plan);
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
     }
     if (is_forward) {
       HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward end]";
