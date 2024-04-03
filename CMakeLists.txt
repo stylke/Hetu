@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.17)
 add_compile_options(-w)
 
-project(Hetu LANGUAGES CXX CUDA)
+project(Hetu CXX)
 
 include(cmake/config_refactor.cmake)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)

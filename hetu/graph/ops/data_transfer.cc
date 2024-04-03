@@ -88,31 +88,7 @@ NDArrayList DataTransferOpImpl::DoCompute(Operator& op,
   bool same_dtype = datatype() == kUndeterminedDataType || datatype() == inputs.front()->dtype();
   if (same_device && same_dtype)
     return inputs;
-  // Question: Why not use DoAllocOutputs?
-  NDArrayList outputs;
-  auto output_size = op->num_outputs();
-  if (output_size > 0) {
-    HTShapeList input_shapes;
-    input_shapes.reserve(op->num_inputs());
-    for (auto& input : inputs) {
-      input_shapes.push_back(input->shape());
-    }
-    auto output_shapes = DoInferShape(op, input_shapes, ctx);
-    outputs.reserve(output_size);
-    for (size_t i = 0; i < output_size; i++) {
-      const auto& output_shape = output_shapes[i];
-      outputs.push_back(NDArray::empty(output_shape,
-                                       dev().is_undetermined() ? op->instantiation_ctx().placement : dev(),
-                                       op->output(i)->dtype(),
-                                       op->instantiation_ctx().stream_index));
-      // for some ops that rely on symbolic shape
-      if (op->output(i)->symbolic()) {
-        if (is_SyShape_leaf(op->output(i)->symbolic_shape())) {
-          op->output(i)->set_symbolic_shape(output_shape);
-        }
-      }
-    }
-  }
+  NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
   NDArray::to(inputs.front(), outputs.front()->device(),
               outputs.front()->dtype(), op->instantiation_ctx().stream_index,
               outputs.front());
