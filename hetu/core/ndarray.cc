@@ -1424,6 +1424,7 @@ NDArray NDArray::sceloss(const NDArray& preds, const NDArray& labels, const int6
                          ReductionType reduction,
                          StreamIndex stream_id,
                          NDArray& output) {
+  // HT_LOG_INFO << "sceloss preds shape = " << preds->shape() << ", labels shape = " << labels->shape();
   NDArray out;
   HTShape output_shape = HTShape(preds->shape().begin(), preds->shape().end() - 1);
   if (output.is_defined()) 
@@ -1536,6 +1537,8 @@ NDArray NDArray::empty(const HTShape& shape, const Device& device,
                 .set_dtype(dtype)
                 .set_shape(shape)
                 .set_dynamic_shape(dynamic_shape);
+  // mempool debug use
+  // HT_LOG_INFO << "NDArray empty with " << meta;
   auto storage = std::make_shared<NDArrayStorage>(AllocFromMemoryPool(
     device, meta.numel() * DataType2Size(dtype), Stream(device, stream_id)));
   return NDArray(meta, storage);

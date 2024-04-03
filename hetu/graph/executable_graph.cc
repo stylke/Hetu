@@ -85,6 +85,9 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
   } else {
     // 另外一些是variable但不是parameter的正常走mempool
     // 分配的是碎片化的显存
+    // mempool debug use
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": on-the-fly alloc variable " << tensor
+      << " shape = " << tensor->shape();
     _preserved_data[tensor->id()] = NDArray::empty(tensor->shape(), 
                                                    tensor->placement(), 
                                                    tensor->dtype(), 
@@ -2155,7 +2158,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (is_analysis_straggler) {
       HT_LOG_WARN << local_device << ": " 
                   << "\ntotal run time: " << COST_MSEC(run) << " ms, "
-                  << "compute time: " << compute_time << " ms"
+                  << "compute time: " << compute_time << " ms, "
                   << "tp p2p time: " << tp_p2p_time << " ms, "
                   << "tp collective time: " << tp_collective_time << " ms, "
                   << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "

@@ -165,6 +165,15 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
         // alloc on-the-fly
         // 后续要改成memory plan
         else {
+          // mempool debug use
+          /*
+          HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
+            << " on-the-fly alloc output " << i << " shape = " << output_shape << " stream = " << op->instantiation_ctx().stream();
+          if (op->name() == "OnesLikeOp" || op->name() == "VocabParallelCrossEntropyOp") {
+            HT_LOG_INFO << "--- sync point ---";
+            op->instantiation_ctx().stream().Sync();
+          }
+          */
           outputs.push_back(NDArray::empty(output_shape,
                             op->instantiation_ctx().placement,
                             op->output(i)->dtype(),

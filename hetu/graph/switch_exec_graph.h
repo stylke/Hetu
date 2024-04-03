@@ -97,6 +97,21 @@ class ParamBuffer {
       }
     }
 
+    Tensor GetTensor(const TensorId tensor_id) {
+      HT_ASSERT(HasTensor(tensor_id))
+        << "tensor is not in the ParamBuffer " << _name;
+      for (auto& tensor : _tensor_list) {
+        if (tensor->id() == tensor_id) {
+          return tensor;
+        }
+      }
+      __builtin_unreachable();
+    }
+
+    bool HasTensor(const TensorId tensor_id) {
+      return _tensor_offset_mapping.find(tensor_id) != _tensor_offset_mapping.end();
+    }
+
     bool HasTensor(const Tensor& tensor) {
       return _tensor_offset_mapping.find(tensor->id()) != _tensor_offset_mapping.end();
     }
@@ -216,6 +231,7 @@ class ParamBuffer {
     void Alloc(const Stream& stream, 
                bool use_nccl = false, 
                ncclComm_t comm = nullptr,
+               bool use_caching_mempool = true,
                bool use_async = false); // stream is unused actually (cudaMallocAsync is tooooo slow!)
 
     void Free();
