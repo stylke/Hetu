@@ -1,4 +1,5 @@
 import os
+import math
 import hetu as ht
 from hetu_gpt_multi_ds_parallel_symbolic import GPTLMHeadModel
 from hetu.nn.modules.parallel_multi_ds import config2ds, get_device_index
@@ -18,10 +19,10 @@ all_devices = None
 def distributed_init(use_two_node: bool = False):
     if use_two_node:
         hostname = socket.gethostname()
-        if hostname == 'n214-178-016':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-0'
-        elif hostname == 'n214-178-130':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-1'
+        if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
+        elif hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0':
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-2'
         else:
             raise ValueError(f"Unknown hostname: {hostname}")
 
@@ -192,7 +193,7 @@ def pretrain(args):
     # return
 
     def run_plan(epoch = 0,
-                 step = 0,
+                 steps = args.steps,
                  consumed_samples = 0,
                  global_batch_size = args.global_batch_size,
                  micro_batch_size = args.micro_batch_size,
@@ -202,7 +203,6 @@ def pretrain(args):
         if global_batch_size != args.global_batch_size or seq_len != args.seq_length:
             assert config.use_flash_attn == True, "symbolic shape can only used when flash attn is on for now"
         
-        # prepare_start_time = time.time()
         input_ds = input_multi_ds[strategy_id]
         input_device_group = input_device_groups[strategy_id]
         label_ds = label_multi_ds[strategy_id]
@@ -219,8 +219,8 @@ def pretrain(args):
             dup_group_idx = label_ds.get_dup_group_index(local_device_idx)
             dup_group_num = label_ds.get_dim(0)
         else:
-            # raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
             dup_group_num = input_ds.get_dim(0)
+            # raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
 
         dp_rank = dup_group_idx
         dp_size = dup_group_num
@@ -229,9 +229,32 @@ def pretrain(args):
         assert global_batch_size % mbs_times_dp == 0, \
             f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
         num_micro_batches = global_batch_size // mbs_times_dp
+        
+        # heterogenous pipeline test case
+        if args.hetero_data:
+            hetero_pipeline_num = all_devices.get_index(local_device) % (dup_group_num * args.hetero_stage_gpus) // args.hetero_stage_gpus
+            # adjust micro_batch_size
+            '''
+            batch_ratio = 8
+            if hetero_pipeline_num == 0:
+                micro_batch_size = int(global_batch_size // num_micro_batches / batch_ratio)
+            else:
+                micro_batch_size = global_batch_size // num_micro_batches - int(global_batch_size // num_micro_batches / batch_ratio)
+            '''
+            # adjust num_micro_batches
+            normal_micro_batches = 36
+            if hetero_pipeline_num == 0:
+                num_micro_batches = global_batch_size // micro_batch_size - normal_micro_batches * (dp_size - 1)
+                assert num_micro_batches > 0, f"straggler num_micro_batches should > 0, but find it is {num_micro_batches}"
+            else:
+                num_micro_batches = normal_micro_batches
+            # re-assign
+            gbs_per_dp = micro_batch_size * num_micro_batches
+            mbs_times_dp = micro_batch_size * dp_size
+                
         config.mbs_times_dp_symbol.set_data(mbs_times_dp)
         config.seq_len_symbol.set_data(seq_len)
-        # print(f'{local_device}: strategy={strategy_id}, dp_rank={dp_rank}, dp_size={dp_size}, gbs={global_batch_size}, mbs={micro_batch_size}, num_micro_batches={num_micro_batches}')
+        print(f'{local_device}: dp_rank={dp_rank}, dp_size={dp_size}, gbs={global_batch_size}, mbs={micro_batch_size}, num_micro_batches={num_micro_batches}')
 
         # if dp_size * mbs changes, then should use the new dataloader
         # start_time = time.time()
@@ -243,127 +266,103 @@ def pretrain(args):
         # print(f'{local_device}: create dataloader cost {end_time - start_time} s')
 
         # profile_memory()
-        
-        if train_iter:
+
+        for step in range(steps):
             # load data for each dp
-            micro_batches = []
-            for _ in range(num_micro_batches):
-                micro_batch = next(train_iter)
-                micro_batches.append(micro_batch)
-            micro_batches = np.concatenate(micro_batches, axis=0) # [num_micro_batches, micro_batch_size, max_seq_len + 1]
-            # padding sequence
-            micro_batches = micro_batches.reshape(gbs_per_dp, -1) # [gbs_per_dp, seq_len + 1]
-            labels = micro_batches[:, 1:] # [gbs_per_dp, seq_len]
-            tokens = micro_batches[:, :-1] # [gbs_per_dp, seq_len]
-            _attention_mask, _position_ids = get_mask_and_position_ids(tokens, train_dataset.encoder.pad_id())
-            _token_type_ids = np.zeros([gbs_per_dp, seq_len])
+            if train_iter:
+                micro_batches = []
+                for _ in range(num_micro_batches):
+                    micro_batch = next(train_iter)
+                    micro_batches.append(micro_batch)
+                micro_batches = np.concatenate(micro_batches, axis=0) # [num_micro_batches, micro_batch_size, max_seq_len + 1]
+                # padding sequence
+                micro_batches = micro_batches.reshape(gbs_per_dp, -1) # [gbs_per_dp, seq_len + 1]
+                labels = micro_batches[:, 1:] # [gbs_per_dp, seq_len]
+                tokens = micro_batches[:, :-1] # [gbs_per_dp, seq_len]
+                _attention_mask, _position_ids = get_mask_and_position_ids(tokens, train_dataset.encoder.pad_id())
+                _token_type_ids = np.zeros([gbs_per_dp, seq_len])
 
-            feed_dict = {
-                input_ids: tokens.astype(np.int64),
-                position_ids: _position_ids.astype(np.int64), 
-                token_type_ids: _token_type_ids.astype(np.int64),
-                attention_mask: _attention_mask.astype(np.int64),
-                masked_lm_labels: labels.astype(np.int64),
-            }
-        else: # fake data
-            feed_dict = {
-                input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
-                position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64), 
-                token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
-                attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
-                masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
-            }
-        # prepare_end_time = time.time()
-        # print(f'{local_device}: prepare time = {prepare_end_time - prepare_start_time} s')
-        # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
-        start_time = time.time()
-        results = train_op.graph.run(loss_mean, 
-                                        [loss_mean, train_op], 
-                                        feed_dict = feed_dict, 
-                                        num_micro_batches = num_micro_batches, 
-                                        cur_strategy_id = strategy_id,
-                                        run_level = run_level,
-                                        grad_scale = 1.0) 
-        end_time = time.time()
-        # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run end, consumed_samples = {consumed_samples}")
-        # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
-        # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
-
-        if run_level == ht.run_level("topo"):
-            print(f"{local_device}: [Epoch {epoch}] [strategy {strategy_id}] (step {step}): cache topo, time = {end_time - start_time:.4f} s")
-        elif run_level == ht.run_level("alloc"):
-            print(f"{local_device}: [Epoch {epoch}] [strategy {strategy_id}] (step {step}): alloc parameters, time = {end_time - start_time:.4f} s")
-        elif run_level == ht.run_level("grad"):
+                feed_dict = {
+                    input_ids: tokens.astype(np.int64),
+                    position_ids: _position_ids.astype(np.int64), 
+                    token_type_ids: _token_type_ids.astype(np.int64),
+                    attention_mask: _attention_mask.astype(np.int64),
+                    masked_lm_labels: labels.astype(np.int64),
+                }
+            else: # fake data; feed_dict={} will cause segment fault?
+                feed_dict = {
+                    input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64), 
+                    token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
+                    masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                }
+            # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
+            start_time = time.time()
+            results = train_op.graph.run(loss_mean, 
+                                            [loss_mean, train_op], 
+                                            feed_dict = feed_dict, 
+                                            num_micro_batches = num_micro_batches, 
+                                            cur_strategy_id = strategy_id,
+                                            run_level = run_level,
+                                            grad_scale = 1.0) 
+            end_time = time.time()
             consumed_samples += global_batch_size
-            print(f"{local_device}: [Epoch {epoch}] [strategy {strategy_id}] (step {step}, consumed_samples = {consumed_samples}): calculate grad, time = {end_time - start_time:.4f} s")
-        elif run_level == ht.run_level("update"):
-            consumed_samples += global_batch_size
-            if label_device_group.contains(local_device):
-                loss_out = results[0].numpy(force=True).mean()
-                print(f"{local_device}: [Epoch {epoch}] [strategy {strategy_id}] (step {step}, consumed_samples = {consumed_samples}): update parameters, loss = {loss_out:.3f}, time = {end_time - start_time:.4f} s")
-            else:
-                print(f"{local_device}: [Epoch {epoch}] [strategy {strategy_id}] (step {step}, consumed_samples = {consumed_samples}): update parameters, time = {end_time - start_time:.4f} s")
-
+            # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run end, consumed_samples = {consumed_samples}")
+            # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
+            # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
+            if run_level == ht.run_level("update"):
+                if label_device_group.contains(local_device):
+                    loss_out = results[0].numpy(force=True).mean()
+                    print(f"{local_device}: [Epoch {epoch}] (step {step}, consumed_samples = {consumed_samples}): loss = {loss_out:.3f}, time = {end_time - start_time:.4f}")
         return consumed_samples
+    
+    # 单轮样例 
+    def test_single_round(): 
+        strategy_id = 0
+        if args.hetero_pipeline:
+            strategy_id = 1
+        consumed_samples = 0 # should be reset when run next epoch
+        consumed_samples = run_plan(epoch = 0,
+                                    steps = args.steps,
+                                    consumed_samples = consumed_samples, 
+                                    global_batch_size = args.global_batch_size, 
+                                    micro_batch_size = args.micro_batch_size, 
+                                    seq_len = args.seq_length, 
+                                    strategy_id = strategy_id, 
+                                    run_level = ht.run_level("update"))
     
     # 多轮样例
     def test_multi_round():
+        strategy_id = 0
+        if args.hetero_pipeline:
+            strategy_id = 1
         for epoch in range(args.epochs):
             consumed_samples = 0 # should be reset when run next epoch
-            for step in range(args.steps):
-                start_time = time.time()
-                # 0. only alloc parameters
-                consumed_samples = run_plan(epoch = epoch,
-                                            step = step,
-                                            consumed_samples = consumed_samples, 
-                                            global_batch_size = args.global_batch_size, 
-                                            micro_batch_size = args.micro_batch_size, 
-                                            seq_len = args.seq_length, 
-                                            strategy_id = 4, # tp16
-                                            run_level = ht.run_level("alloc"))
-                # 1. consume samples and calculate grad
-                consumed_samples = run_plan(epoch = epoch,
-                                            step = step,
-                                            consumed_samples = consumed_samples, 
-                                            global_batch_size = args.global_batch_size, 
-                                            micro_batch_size = args.micro_batch_size, 
-                                            seq_len = args.seq_length, 
-                                            strategy_id = 1, # dp16
-                                            run_level = ht.run_level("grad"))
-                consumed_samples = run_plan(epoch = epoch,
-                                            step = step,
-                                            consumed_samples = consumed_samples, 
-                                            global_batch_size = args.global_batch_size, 
-                                            micro_batch_size = args.micro_batch_size, 
-                                            seq_len = args.seq_length, 
-                                            strategy_id = 2, # dp4, tp4
-                                            run_level = ht.run_level("grad"))
-                consumed_samples = run_plan(epoch = epoch,
-                                            step = step,
-                                            consumed_samples = consumed_samples, 
-                                            global_batch_size = args.global_batch_size, 
-                                            micro_batch_size = args.micro_batch_size, 
-                                            seq_len = args.seq_length, 
-                                            strategy_id = 3, # dp2, tp8
-                                            run_level = ht.run_level("grad"))
-                # 2. consume samples and calculate grad and update parameters
-                consumed_samples = run_plan(epoch = epoch,
-                                            step = step,
-                                            consumed_samples = consumed_samples, 
-                                            global_batch_size = args.global_batch_size, 
-                                            micro_batch_size = args.micro_batch_size, 
-                                            seq_len = args.seq_length, 
-                                            strategy_id = 4, # tp16
-                                            run_level = ht.run_level("update"))
-                end_time = time.time()
-                print(f"{local_device}: [Epoch {epoch}] [strategy all] (step {step}, consumed_samples = {consumed_samples}): step time = {end_time - start_time:.4f} s")
+            consumed_samples = run_plan(epoch = epoch,
+                                        steps = args.steps,
+                                        consumed_samples = consumed_samples, 
+                                        global_batch_size = args.global_batch_size, 
+                                        micro_batch_size = args.micro_batch_size, 
+                                        seq_len = args.seq_length, 
+                                        strategy_id = strategy_id, 
+                                        run_level = ht.run_level("update"))
             print(f"epoch {epoch} finished, consumed_samples = {consumed_samples}")
     
-    # test_single_round()
-    test_multi_round()
+    test_single_round()
+    # test_multi_round()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
+    )
+    parser.add_argument(
+        "--hetero_pipeline", action="store_true", help="use heterogenous pipeline."
+    )
+    parser.add_argument(
+        "--hetero_data", action="store_true", help="use heterogenous data for each heterogenous pipeline."
+    )
     parser.add_argument(
         "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
     )

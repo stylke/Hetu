@@ -72,6 +72,7 @@ using MemoryBlock = std::pair<size_t, size_t>;
 using MemoryBlockList = std::vector<MemoryBlock>;
 using MicroBatchTensorId = std::pair<size_t, TensorId>;
 using MemoryPlan = std::map<MicroBatchTensorId, MemoryBlock>;
+using Device2PipelineMap = std::unordered_map<Device, DeviceGroupList>;
 class Graph;
 class EagerGraph;
 class DefineByRunGraph;

@@ -69,8 +69,8 @@ class ExecutableGraph : public Graph {
     return GraphType::EXECUTABLE;
   }
 
-  void SetStages(const std::vector<DeviceGroup>& device_groups) {
-    _stages = device_groups;
+  void SetPipeline(const Device2PipelineMap& pipeline_map) {
+    _pipeline_map = pipeline_map;
   }
 
   void SetShapePlan(size_t num) {
@@ -201,7 +201,7 @@ class ExecutableGraph : public Graph {
 
   // run相关
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
-  std::vector<DeviceGroup> _stages;
+  Device2PipelineMap _pipeline_map;
   int _num_micro_batches;
   std::vector<std::unique_ptr<Event>> _p2p_events;
 

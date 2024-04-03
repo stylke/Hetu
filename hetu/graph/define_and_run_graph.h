@@ -108,6 +108,8 @@ class DefineAndRunGraph : public Graph {
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);
 
+  void DeducePipeline(size_t cur_strategy_id);
+
   void DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
                        const FeedDict& feed_dict,
                        Tensor2ShapeMap& feed_dict_shape);
@@ -134,7 +136,10 @@ class DefineAndRunGraph : public Graph {
 
   void Clear() override {
     _add_on_inits.clear();
-    _multi_device_groups.clear();
+    _ops_with_device_groups.clear();
+    _multi_pipeline_maps.clear();
+    _param_switcher_pool.clear();
+    _grad_switcher_pool.clear();
     _exec_graph_plan_pool.clear();
     Graph::Clear();
   }
@@ -148,7 +153,14 @@ class DefineAndRunGraph : public Graph {
 
   size_t _init_capacity;
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
-  std::vector<DeviceGroupList> _multi_device_groups; // all the device groups of ops, in the order of MakeOp calls
+  // deprecated: now support heterogenous pipeline parallel
+  // std::vector<DeviceGroupList> _multi_device_groups; // all the device groups of ops, in the order of MakeOp calls
+  std::vector<Operator> _ops_with_device_groups; // all ops with device groups, in the order of MakeOp calls
+  // Note: here Device2PipelineMap record the mapping from device to the pipeline that it belongs to
+  // and each strategy has a specified mapping
+  // To be specific, for each pipeline, each stage is a tp group 
+  // therefore each pipeline could be regard as a DeviceGroupList
+  std::unordered_map<size_t, Device2PipelineMap> _multi_pipeline_maps;
 
   std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _param_switcher_pool;
   std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _grad_switcher_pool;

@@ -1,7 +1,8 @@
 import os
+import signal
 import hetu as ht
-from hetu_gpt_multi_ds_parallel import GPTLMHeadModel
-from hetu.nn.modules.parallel_multi_ds import config2ds
+from hetu_gpt_multi_ds_parallel_symbolic import GPTLMHeadModel
+from hetu.nn.modules.parallel_multi_ds import config2ds, get_device_index
 from gpt_config import GPTConfig
 from load_data import DataLoaderForGPT
 import numpy as np
@@ -9,6 +10,7 @@ import time
 import argparse
 import json
 import socket
+import pynvml
 from queue import Queue
 
 local_device = None
@@ -18,9 +20,9 @@ def distributed_init(use_two_node: bool = False):
     if use_two_node:
         hostname = socket.gethostname()
         if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-0'
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
         elif hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-1'
+            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-2'
         else:
             raise ValueError(f"Unknown hostname: {hostname}")
 
@@ -29,11 +31,12 @@ def distributed_init(use_two_node: bool = False):
     local_device = ht.local_device()
     all_devices = ht.global_device_group()
     if local_device.index == 0:
-        print(f'local_device: {local_device}, all_devices: {all_devices}')
+        pass
+        # print(f'local_device: {local_device}, all_devices: {all_devices}')
 
 def read_ds_parallel_config(args):
     # read ds_parallel_config from json file
-    print(f'{local_device}: load ds_parallel_config from: {args.ds_parallel_config}')
+    # print(f'{local_device}: load ds_parallel_config from: {args.ds_parallel_config}')
     config_paths = args.ds_parallel_config.split(',')
     assert len(config_paths) == args.num_strategy, \
       f'ds_parallel_config num should equal to num_strategy {args.num_strategy}'
@@ -88,6 +91,31 @@ def parse_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
         device_groups.append(device_group)
     return multi_ds, device_groups
 
+def get_position_ids(dp_size, seq_len): 
+    position_ids = np.arange(0, seq_len, dtype=np.int64) # [1, seq_len]
+    position_ids = np.tile(position_ids, [dp_size, 1]) # [dp_size, seq_len]
+    return position_ids
+
+def get_causal_mask(seq_len, global_batch_size, num_heads, distributed_states, device_group):
+    raise NotImplementedError
+
+def get_mask(seq_len, global_batch_size, num_heads, distributed_states, device_group):
+    raise NotImplementedError
+
+def profile_memory(device_index = 0):
+    handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+    # 查询设备名称
+    device_name = pynvml.nvmlDeviceGetName(handle).decode("utf-8")
+    print("Device", device_index, ":", device_name)
+    # 查询显存信息
+    memory_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+    total_memory = memory_info.total / 1024 / 1024  # 总显存大小（MB）
+    used_memory = memory_info.used / 1024 / 1024   # 已使用的显存大小（MB）
+    free_memory = memory_info.free / 1024 / 1024   # 剩余的显存大小（MB）
+    print("Total Memory:", total_memory, "MiB")
+    print("Used Memory:", used_memory, "MiB")
+    print("Free Memory:", free_memory, "MiB")
+
 def pretrain(args):
     ds_parallel_configs = read_ds_parallel_config(args)
     num_epochs = args.epochs
@@ -100,7 +128,6 @@ def pretrain(args):
                        n_layer=args.num_hidden_layers, 
                        n_head=args.num_attention_heads, 
                        seq_len=args.seq_length,
-                       # n_inner=4*args.hidden_size,
                        resid_pdrop=args.dropout_prob,
                        embd_pdrop=args.dropout_prob,
                        attn_pdrop=args.dropout_prob,
@@ -109,20 +136,7 @@ def pretrain(args):
                        num_micro_batches=args.num_micro_batches,
                        use_flash_attn=args.use_flash_attn,
                        )
-    # Input data file names definition
-    # dict_seqlen2predlen = {128:20, 512:80}
-    # assert config.seq_len == 128 or config.seq_len == 512, "seq_len must be 128 or 512, got " + config.seq_len
-    # pred_len = dict_seqlen2predlen[config.max_position_embeddings]
-    pred_len = config.seq_len
-    dataset = args.dataset
-    if dataset not in ['wikicorpus_en', 'wiki_books']:
-        raise(NotImplementedError)
-    # file_dir = '../bert/data/hdf5_lower_case_1_seq_len_128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/%s/'%dataset
-    file_dir = './data/'    
-    file_name_format = dataset + '_training_%d.hdf5'
-    train_file_num = 1
-    train_files = [file_dir + file_name_format%file_id for file_id in range(train_file_num)]
-
+    
     # simple check for gpt blocks range
     ranges = []
     for _, block_config in ds_parallel_configs[0]['gpt']['blocks'].items():
@@ -138,87 +152,123 @@ def pretrain(args):
     # print(f'input_ds: {input_ds}, label_ds: {label_ds}')
     
     micro_batch_size = config.global_batch_size // config.num_micro_batches
-    dp_size = config.global_batch_size // input_multi_ds[0].get_dim(0)
-    # print(f'''{local_device}: 3d parallel config: 
-    #       global_batch_size={config.global_batch_size}, num_micro_batches={config.num_micro_batches}, micro_batch_size={micro_batch_size}, dp_size={dp_size},
-    #       num_layers={config.num_hidden_layers}, hidden_size={config.hidden_size}, num_heads={config.num_attention_heads}, seq_length={config.n_positions}''')
         
     # todo: assign multi device_groups, and instantiate only one placement_group
     input_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='input_ids')
+    position_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='position_ids')
     token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='token_type_ids')
     attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[micro_batch_size, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='attention_mask')
     masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], multi_ds=label_multi_ds, device_groups=label_device_groups, name='masked_lm_labels')
 
+    config.mbs_times_dp_symbol = ht.IntSymbol(micro_batch_size)
+    config.seq_len_symbol = input_ids.symbolic_shape[1]
+
     # print(f'{local_device}: build model begin...')
-    loss, lm_logits = model(input_ids=input_ids,
-                            attention_mask=attention_mask,
-                            token_type_ids=token_type_ids,
-                            labels=masked_lm_labels)
+    loss = model(input_ids=input_ids,
+                 position_ids=position_ids,
+                 attention_mask=attention_mask,
+                 token_type_ids=token_type_ids,
+                 labels=masked_lm_labels)
     # print(f'{local_device}: build model end...')
 
     loss_mean = loss
 
-    print(f'{local_device}: optimizer minimize begin...')
+    # print(f'{local_device}: optimizer minimize begin...')
     # opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
     opt = ht.AdamOptimizer(lr=args.lr)
     train_op = opt.minimize(loss_mean)
-    print(f'{local_device}: optimizer minimize end...')
+    # print(f'{local_device}: optimizer minimize end...')
     
     # return
 
-    # use the first ds, just adapt for run, will changed for dynamic shape & distributed states in future...
-    input_ds = input_multi_ds[0]
-    input_device_group = input_device_groups[0]
-    label_ds = label_multi_ds[0]
-    label_device_group = label_device_groups[0]
-    # return
-    # device in same dp_group will read the same batch data
-    if input_device_group.contains(local_device):
-        local_device_idx = input_device_group.get_index(local_device)
-        dup_group_idx = input_ds.get_dup_group_index(local_device_idx)
-        dup_group_num = input_ds.get_dim(0)
-    elif label_device_group.contains(local_device):
-        local_device_idx = label_device_group.get_index(local_device)
-        dup_group_idx = label_ds.get_dup_group_index(local_device_idx)
-        dup_group_num = label_ds.get_dim(0)
-    else:
-        raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
-    # print(f'local deivce: {local_device}, local_device_idx: {local_device_idx}, dup_group_idx: {dup_group_idx}, dup_group_num: {dup_group_num}')
+    def run_plan(global_batch_size = config.global_batch_size,
+                 seq_len = config.seq_len,
+                 strategy_id = 0, 
+                 run_level = 0):       
+        if global_batch_size != config.global_batch_size or seq_len != config.seq_len:
+            assert config.use_flash_attn == True, "symbolic shape can only used when flash attn is on for now"
+        # todo: may also have multiple config.num_micro_batches
+        config.mbs_times_dp_symbol.set_data(global_batch_size // config.num_micro_batches)
+        config.seq_len_symbol.set_data(seq_len)
+        
+        dp_size = global_batch_size // input_multi_ds[strategy_id].get_dim(0)
+        input_ds = input_multi_ds[strategy_id]
+        input_device_group = input_device_groups[strategy_id]
+        label_ds = label_multi_ds[strategy_id]
+        label_device_group = label_device_groups[strategy_id]
+        # device in same dp_group will read the same batch data
+        if input_device_group.contains(local_device):
+            local_device_idx = input_device_group.get_index(local_device)
+            dup_group_idx = input_ds.get_dup_group_index(local_device_idx)
+            dup_group_num = input_ds.get_dim(0)
+        elif label_device_group.contains(local_device):
+            local_device_idx = label_device_group.get_index(local_device)
+            dup_group_idx = label_ds.get_dup_group_index(local_device_idx)
+            dup_group_num = label_ds.get_dim(0)
+        else:
+            raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
+        # print(f'local deivce: {local_device}, local_device_idx: {local_device_idx}, dup_group_idx: {dup_group_idx}, dup_group_num: {dup_group_num}')
 
-    global_step_num = 0
-    for ep in range(num_epochs):
-        step_num = 0
-        for train_file in train_files:
-            # walkaround: dataloader读取来的seq_len必定是128的, 这里暂时手动处理下
-            # dataloader = DataLoaderForGPT(train_file, dp_size, pred_len)
-            required_batch_size = dp_size * config.seq_len // 128
-            dataloader = DataLoaderForGPT(train_file, required_batch_size, pred_len)
-            # todo: 保证dataloader.batch_num是dp的倍数
-            for i in range(dataloader.batch_num):
-                if i % dup_group_num != dup_group_idx:
-                    continue
-                start_time = time.time()
-                batch_data = dataloader.get_batch(i)
-                feed_dict = {
-                    input_ids: batch_data['input_ids'].astype(np.int64).reshape([dp_size, config.seq_len]),
-                    token_type_ids: batch_data['token_type_ids'].astype(np.int64).reshape([dp_size, config.seq_len]),
-                    attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([dp_size, config.seq_len]),
-                    masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([dp_size, config.seq_len]),
-                    # loss_position_sum: np.array([np.where(batch_data['masked_lm_labels'].reshape(-1, 1)!=-1)[0].shape[0]]).astype(np.float32), # shape=[1,]
-                }
-                results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict, num_micro_batches = config.num_micro_batches)
-                end_time = time.time()
+        # profile_memory()
+
+        for i in range(1000):
+            if i % dup_group_num != dup_group_idx:
+                continue
+            start_time = time.time()
+            feed_dict = {
+                input_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
+                position_ids: get_position_ids(dp_size, seq_len).astype(np.int64), 
+                token_type_ids: np.zeros([dp_size, seq_len]).astype(np.int64),
+                attention_mask: np.zeros([dp_size, seq_len]).astype(np.float32),
+                masked_lm_labels: np.zeros([dp_size, seq_len]).astype(np.int64),
+            }
+            # print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run begin")
+            results = train_op.graph.run(loss_mean, 
+                                         [loss_mean, train_op], 
+                                         feed_dict = feed_dict, 
+                                         num_micro_batches = config.num_micro_batches, 
+                                         cur_strategy_id = strategy_id,
+                                         run_level = run_level,
+                                         grad_scale = 1.0) 
+            # print(f"{local_device}: strategy_id = {strategy_id}, dp_size = {dp_size}, seq_len = {seq_len} run end")
+            # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
+            # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
+            end_time = time.time()
+            if run_level == ht.run_level("update"):
                 if label_device_group.contains(local_device):
                     loss_out = results[0].numpy(force=True).mean()
-                    print('%s: [Epoch %d] (Iteration %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step_num, loss_out, end_time-start_time))
-                step_num += 1
-                global_step_num += 1
-                # return
-                # if global_step_num == 20:
-                #     return
-
+                    print(f"{local_device}: loss = {loss_out} and time = {end_time - start_time}")
+            else:
+                print(f"{local_device}: time = {end_time - start_time}")
+            return
+    
+    def test_homo():
+        for _ in range(10):
+            run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 0, run_level = ht.run_level("update"))   
+            
+    def test_hetero():
+        for _ in range(10):
+            run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 1, run_level = ht.run_level("update"))
+            
+    def test_homo_hetero_switch():
+        run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 0, run_level = ht.run_level("alloc")) 
+        run_plan(global_batch_size = 32, seq_len = 32, strategy_id = 1, run_level = ht.run_level("grad"))    
+    
+    # test_homo()
+    test_hetero()
+    # test_homo_hetero_switch()
+    
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--from_strategy", type=int, default=0
+    )
+    parser.add_argument(
+        "--to_strategy", type=int, default=0
+    )
+    parser.add_argument(
+        "--switch_file", type=str, default="experiments/result.txt"
+    )
     parser.add_argument(
         "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
     )
@@ -279,13 +329,14 @@ if __name__ == '__main__':
         "--bf16", action="store_true", help="Use bfloat16."
     )
     args = parser.parse_args()
+    pynvml.nvmlInit()
     distributed_init(args.use_two_node)
     with ht.graph("define_and_run", num_strategy=args.num_strategy):
         if args.bf16:
             precision = "ht.bfloat16"
         else:
             precision = "ht.float32"
-        print(f'{local_device}: use precision {precision}')
+        # print(f'{local_device}: use precision {precision}')
         with ht.autocast(eval(precision)):            
             pretrain(args)
-            print(f'{local_device}: train hetu ds parallel end...')
+            # print(f'{local_device}: train hetu ds parallel end...')

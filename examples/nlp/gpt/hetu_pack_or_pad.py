@@ -73,7 +73,7 @@ def get_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
             else:
                 for value in config.values():
                     if type(value) == dict:
-                        if "range" in value and (_range < value["range"][0] or _range > value["range"][1]):
+                        if "range" in value and (_range < value["range"][0] or _range > value["range"][-1]):
                             continue
                         config_queue.put(value)
     assert len(multi_ds_parallel_config) == len(ds_parallel_configs), 'ds_parallel_configs parse error!'
@@ -146,7 +146,7 @@ def pretrain(args):
     ranges = []
     for _, block_config in ds_parallel_configs[0]['gpt']['blocks'].items():
         ranges.append(block_config['range'])
-    assert ranges[0][0] == 0 and ranges[-1][1] == config.num_hidden_layers-1, \
+    assert ranges[0][0] == 0 and ranges[-1][-1] == config.num_hidden_layers-1, \
         f"gpt blocks range: {ranges} is conflict with num_hidden_layers: {config.num_hidden_layers}!"
 
     # Hetu model definition
@@ -228,6 +228,7 @@ def pretrain(args):
         assert global_batch_size % mbs_times_dp == 0, \
             f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
         num_micro_batches = global_batch_size // mbs_times_dp
+
         config.mbs_times_dp_symbol.set_data(mbs_times_dp)
         config.seq_len_symbol.set_data(seq_len)
         print(f'{local_device}: dp_rank={dp_rank}, dp_size={dp_size}, gbs={global_batch_size}, mbs={micro_batch_size}, num_micro_batches={num_micro_batches}')

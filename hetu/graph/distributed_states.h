@@ -58,7 +58,7 @@ class DistributedStates {
   }
 
   int32_t order(int32_t i) const {
-    return _order[i];
+    return _order.at(i);
   }
 
   bool has_placement_group() const {

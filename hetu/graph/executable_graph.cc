@@ -88,6 +88,9 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
   } else {
     // 另外一些是variable但不是parameter的正常走mempool
     // 分配的是碎片化的显存
+    // mempool debug use
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": on-the-fly alloc variable " << tensor
+      << " shape = " << tensor->shape();
     _preserved_data[tensor->id()] = NDArray::empty(tensor->shape(), 
                                                    tensor->placement(), 
                                                    tensor->dtype(), 
@@ -424,7 +427,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
           << "for operators with zero in-degree. : " << op;
         if (op->fw_op_id() != -1) {
           auto& fw_op = _op_indexing[op->fw_op_id()]; 
-          // fw_op may be unused comm_op for multi ds, will be removed be map placement group
+          // fw_op may be unused comm_op for multi ds, will be removed before map placement group
           inferred = fw_op->placement_group().empty() ? fw_op->input(0)->placement_group() : fw_op->placement_group();
         } else {
           // is it a proper assumption?
@@ -675,13 +678,13 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
       if (!input->symbolic()) {
         input->init_symbolic_shape();
       }
-      Tensor result;
+      Tensor result = input;
 
       if (comm_op_impl.is_intra_group(comm_op) || comm_op_impl.is_inter_group(comm_op) && 
           src_group.contains(local_device)) {
         // tp
         if (comm_type == P2P_OP) {
-          result = input;
+          // pass
         } else if (comm_type == COMM_SPLIT_OP) {
           auto local_device_index = src_group.get_index(local_device);
           const auto& dst_ds = comm_op_impl.get_dst_distributed_states(comm_op);
@@ -848,36 +851,46 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         }
         // add p2p send after tp
         if (comm_op_impl.is_inter_group(comm_op)) {
-          HT_LOG_DEBUG << local_device << ": send to stage " << dst_group;
-          Tensor send_out_dep_linker = MakeP2PSendOp(result, dst_group, 
-            src_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
-          // since send_out_dep_linker has an empty shape and is useless, recording its shape is unnecessary
-          // but here we still do it to make the code looks more consistent
-          RecordExecTensor(send_out_dep_linker);
-          auto& send_op = send_out_dep_linker->producer();
-          send_op->MapToParallelDevices(src_group);
-          send_op->Instantiate(local_device, kP2PStream);
-          // add dummy link for topo sort
-          for (int i = 0; i < comm_op->output(0)->num_consumers(); i++) {
-            Graph::AddInDeps(comm_op->output(0)->consumer(i), {send_out_dep_linker});
+          if (dst_group.get(src_group.get_index(local_device)) == local_device) {
+            HT_LOG_DEBUG << local_device << ": redundant p2p send from " 
+              << src_group << " to " << dst_group;
+          } else {
+            HT_LOG_DEBUG << local_device << ": send from stage " << src_group << " to " << dst_group;
+            Tensor send_out_dep_linker = MakeP2PSendOp(result, dst_group, 
+              src_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
+            // since send_out_dep_linker has an empty shape and is useless, recording its shape is unnecessary
+            // but here we still do it to make the code looks more consistent
+            RecordExecTensor(send_out_dep_linker);
+            auto& send_op = send_out_dep_linker->producer();
+            send_op->MapToParallelDevices(src_group);
+            send_op->Instantiate(local_device, kP2PStream);
+            // add dummy link for topo sort
+            for (int i = 0; i < comm_op->output(0)->num_consumers(); i++) {
+              Graph::AddInDeps(comm_op->output(0)->consumer(i), {send_out_dep_linker});
+            }
           }
         }
       } else {
         // p2p recv
-        HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group;
-        Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
-        if (!output->symbolic()) {
-          output->init_symbolic_shape();
+        if (src_group.get(dst_group.get_index(local_device)) == local_device) {
+          HT_LOG_DEBUG << local_device << ": redundant p2p recv from " 
+            << src_group << " to " << dst_group;
+        } else {
+          HT_LOG_DEBUG << local_device << ": just recv from stage " << src_group << " to " << dst_group;
+          Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
+          if (!output->symbolic()) {
+            output->init_symbolic_shape();
+          }
+          Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->symbolic_shape(),
+            dst_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
+          RecordExecTensor(recv_output);
+          auto& recv_op = recv_output->producer();
+          recv_op->MapToParallelDevices(dst_group);
+          recv_op->Instantiate(local_device, kP2PStream);
+          // add dummy link for topo sort
+          Graph::AddInDeps(recv_op, {input});
+          result = recv_output;
         }
-        Tensor recv_output = MakeP2PRecvOp(src_group, output->dtype(), output->symbolic_shape(),
-          dst_group.get_index(local_device), OpMeta().set_is_deduce_states(false));
-        RecordExecTensor(recv_output);
-        auto& recv_op = recv_output->producer();
-        recv_op->MapToParallelDevices(dst_group);
-        recv_op->Instantiate(local_device, kP2PStream);
-        // add dummy link for topo sort
-        Graph::AddInDeps(recv_op, {input});
-        result = recv_output;
       }
       result->set_distributed_states(comm_op_impl.get_dst_distributed_states(comm_op)); // assign distributed states for result tensor
 
@@ -1178,7 +1191,9 @@ std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
 ExecutableGraph::GeneratePipedreamFlushSchedule(
   size_t num_stages, size_t num_micro_batches, bool is_inference) {
   HT_ASSERT(num_micro_batches >= num_stages)
-    << "num_micro_batches must bigger than num_stages in pipedream-flush!";
+    << "num_micro_batches must bigger than num_stages in pipedream-flush"
+    << ", but find num_micro_batches = " << num_micro_batches
+    << " and num_stages = " << num_stages;
   std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>> schedule;
   // inference time: for only forward
   if (is_inference) {
@@ -1493,6 +1508,14 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
                                  const FeedDict& feed_dict, const int num_micro_batches,
                                  const int cur_strategy_id, RunLevel run_level, const double grad_scale) {
+  
+  bool is_analysis_straggler = false;
+  char* env = std::getenv("HETU_STRAGGLER");
+  if (env != nullptr) {
+    if (std::string(env) == "ANALYSIS") {
+      is_analysis_straggler = true;
+    }
+  }
   TIK(run);
   _run_level = run_level;
   _grad_scale = grad_scale;
@@ -1900,7 +1923,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                          shared_weight_tensor, shared_weight_p2p, shared_weight_grad_p2p, accumulated_tensor, accumulated_ops);
     // sync partially
     std::vector<int> ranks;
-    for (const auto& stage : _stages) {
+    for (const auto& stage : _pipeline_map[hetu::impl::comm::GetLocalDevice()]) {
       for (const auto& device : stage.devices()) {
         auto rank = hetu::impl::comm::DeviceToWorldRank(device);
         if (std::find(ranks.begin(), ranks.end(), rank) == ranks.end()) {
@@ -1908,9 +1931,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         }
       }
     }
-    std::sort(ranks.begin(), ranks.end());
-    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
-    comm_group->Barrier(true);
+    if (ranks.size() >= 2) {
+      std::sort(ranks.begin(), ranks.end());
+      auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
+      comm_group->Barrier(true);
+    }
   }
   TOK(run);
   HT_LOG_DEBUG << local_device << ": prepare execution plan cost time = " << COST_MSEC(run) << " ms."; 
@@ -1989,11 +2014,13 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // ********************** Run Level Check Point **********************
 
   HT_LOG_DEBUG << local_device << ": 3. compute[begin]";
-  int num_stages = _stages.size();
+  HT_ASSERT(_pipeline_map.find(local_device) != _pipeline_map.end())
+    << "something wrong, can't figure out which pipeline the local device belongs to";
+  auto& pipeline = _pipeline_map[local_device];
+  int num_stages = pipeline.size();
   bool is_inference = (_execute_plan.local_bw_topo.size() == 0);
-  HT_LOG_DEBUG << local_device << ": num_stages = " << num_stages 
-    << ", num_micro_batches = " << num_micro_batches << ", is_inference = " 
-    << is_inference;
+  HT_LOG_DEBUG << local_device << ": num_stages = " << num_stages << ", stages = " << pipeline 
+    << ", num_micro_batches = " << num_micro_batches << ", is_inference = " << is_inference;
   // get task schedule table for pipedream-flush, also suitable for non-pipeline cases
   auto schedule = GeneratePipedreamFlushSchedule(
     num_stages, num_micro_batches, is_inference);
@@ -2002,8 +2029,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // get tasks for current stage
   // int stage_id = local_device.index() / _stages.at(0).num_devices();
   int stage_id = -1;
-  for (int i = 0; i < _stages.size(); i++) {
-    if (_stages[i].contains(local_device)) {
+  for (int i = 0; i < pipeline.size(); i++) {
+    if (pipeline[i].contains(local_device)) {
       stage_id = i;
     }
   }
@@ -2220,12 +2247,18 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   }
   // ********************** Run Level Check Point **********************
 
+  bool is_analysis_perf = false;
+  if (is_analysis_perf || is_analysis_straggler) {
+    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+    comm_group->Barrier(true);
+  }
   TOK(run);
   HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)
                << " ms";
   
-  auto profiler_optional = hetu::impl::Profile::get_cur_profile();
-  if (profiler_optional) {
+  // get op execute time, sort and analysis
+  if (is_analysis_perf || is_analysis_straggler) {
+    TIK(free);
     runtime_ctx_list.clear();
     tensor2data_list.clear();
     grad_accumulation.clear();
@@ -2299,16 +2332,29 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       });
       profiler->push(op->type(), op->name(), inputs_shape, op_time);
     }
-    profiler->push("total-run-time", COST_MSEC(run));
-    profiler->push("optimizer-update", summarized_time["optimizer-update"]);
-    profiler->push("forward-compute", summarized_time["forward-compute"]);
-    profiler->push("backward-compute", summarized_time["backward-compute"]);
-    profiler->push("forward-backward-compute", summarized_time["forward-backward-compute"]);
-    profiler->push("tp-p2p", summarized_time["tp-p2p"]);
-    profiler->push("grads-reduce", summarized_time["grads-reduce"]);
-    profiler->push("tp-collective", summarized_time["tp-collective"]);
-    profiler->push("blocking", summarized_time["blocking"]);
-    profiler->push("other", summarized_time["other"]);
+    if (is_analysis_perf) {
+      HT_LOG_INFO << local_device << ": " 
+                  << "\ntotal run time: " << COST_MSEC(run) << " ms, "
+                  << "compute time: " << compute_time << " ms, "
+                  << "tp p2p time: " << tp_p2p_time << " ms, "
+                  << "tp collective time: " << tp_collective_time << " ms, "
+                  << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
+                  << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                  << "blocking time: " << blocking_time << " ms, "
+                  << "other time: " << other_time << " ms" << std::endl
+                  << out.str();
+    }
+    if (is_analysis_straggler) {
+      HT_LOG_WARN << local_device << ": " 
+                  << "\ntotal run time: " << COST_MSEC(run) << " ms, "
+                  << "compute time: " << compute_time << " ms, "
+                  << "tp p2p time: " << tp_p2p_time << " ms, "
+                  << "tp collective time: " << tp_collective_time << " ms, "
+                  << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
+                  << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                  << "blocking time: " << blocking_time << " ms, "
+                  << "other time: " << other_time << " ms" << std::endl;
+    }
   }
   _p2p_events.clear();
   return results;

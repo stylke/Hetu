@@ -12,6 +12,7 @@
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
+#include "hetu/impl/memory/CUDACachingMemoryPool.cuh"
 #include "hetu/core/device.h"
 #include "hetu/core/dtype.h"
 #include "hetu/core/ndarray_meta.h"
@@ -157,6 +158,7 @@ static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer) {
 void ParamBuffer::Alloc(const Stream& stream, 
                         bool use_nccl, 
                         ncclComm_t comm,
+                        bool use_caching_mempool,
                         bool use_async) {
   TIK(alloc_time);
   auto local_device = hetu::impl::comm::GetLocalDevice(); 
@@ -196,14 +198,21 @@ void ParamBuffer::Alloc(const Stream& stream,
         _free_time = COST_MSEC(free_time);
       }));
   } else {
-    cudaError_t status;
-    if (!use_async || stream.is_blocking()) {
-      status = cudaMalloc(&_raw_ptr, _buffer_size);
+    if (use_caching_mempool) {
+      if (!hetu::impl::AllocAfterFreeFromCUDACache(local_device, _raw_ptr, _buffer_size)) {
+        HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) "
+          << "though releasing some data space from the caching mempool";
+      }
     } else {
-      status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
-    }
-    if (status != cudaSuccess) {
-      HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
+      cudaError_t status;
+      if (!use_async || stream.is_blocking()) {
+        status = cudaMalloc(&_raw_ptr, _buffer_size);
+      } else {
+        status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
+      }
+      if (status != cudaSuccess) {
+        HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
+      }
     }
     _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
       local_device, _raw_ptr, _buffer_size, [=](DataPtr data_ptr) {
@@ -233,14 +242,21 @@ void ParamBuffer::Alloc(const Stream& stream,
   _raw_ptr = _storage->mutable_data();
   */
   // Use BorrowDataSpace
-  cudaError_t status;
-  if (!use_async || stream.is_blocking()) {
-    status = cudaMalloc(&_raw_ptr, _buffer_size);
+  if (use_caching_mempool) {
+    if (!hetu::impl::AllocAfterFreeFromCUDACache(local_device, _raw_ptr, _buffer_size)) {
+      HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) "
+        << "though releasing some data space from the caching mempool";
+    }
   } else {
-    status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
-  }
-  if (status != cudaSuccess) {
-    HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
+    cudaError_t status;
+    if (!use_async || stream.is_blocking()) {
+      status = cudaMalloc(&_raw_ptr, _buffer_size);
+    } else {
+      status = cudaMallocAsync(&_raw_ptr, _buffer_size, hetu::impl::CUDAStream(stream).cuda_stream());
+    }
+    if (status != cudaSuccess) {
+      HT_RUNTIME_ERROR << "cudaMalloc failed: " << cudaGetErrorString(status);
+    }
   }
   _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
     local_device, _raw_ptr, _buffer_size, [=](DataPtr data_ptr) {
@@ -1168,6 +1184,7 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
     auto& recv_buffer = kv.second;
     HT_ASSERT(!recv_buffer->IsAllocated())
       << "recv buffer shouldn't be allocated yet";
+    // use_nccl=true will slow down
     recv_buffer->Alloc(op_stream, false, comm_nccl_group->GetComm());
   }
   op->instantiation_ctx().start[0]->Record(op_stream);
@@ -1360,12 +1377,30 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   TIK(switch_params_running); // 开始计时
   Tensor2NDArrayMap tensor2data;
   Tensor2IntMap tensor2degrees;
+  std::set<TensorId> useful_tensors;
   RuntimeContext runtime_ctx(_comm_topo.size(), _comm_shape_plan);
-  // 计算各个tensor的度
+  // TODO: 这一部分也可以和topo一样cache下来
+  // 计算各个tensor的度以及topo中涉及的tensor
   for (auto& op_ref : _comm_topo) {
     for (auto& input : op_ref.get()->inputs()) {
       tensor2degrees[input->id()]++;
     }
+    for (auto& output : op_ref.get()->outputs()) {
+      useful_tensors.insert(output->id());
+    }
+  }
+  // 释放没有用的_comm_feed_dict和_preserved_data
+  auto feed_dict_it = _comm_feed_dict.begin();
+  while (feed_dict_it != _comm_feed_dict.end()) {
+    auto tensor_id = feed_dict_it->first;
+    if (useful_tensors.find(tensor_id) == useful_tensors.end()) {
+      // 清feed_dict
+      feed_dict_it = _comm_feed_dict.erase(feed_dict_it);
+      // 清before_graph的_preserved_data
+      _switch_graph_pair.first->_preserved_data.erase(_comm_feed_dict_mapping[tensor_id]->id());
+      continue;
+    }
+    feed_dict_it++;
   }
   // 释放before param buffer
   // 此时并不会真正free，因为还有_preserved_data
@@ -1392,6 +1427,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       }
     }
     if (!send_buffer->IsAllocated()) {
+      // use_nccl=true will slow down
       send_buffer->Alloc(Stream(local_device, kSwitchCollectiveStream), false, comm_nccl_group->GetComm());
     }
   }
@@ -1510,6 +1546,14 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       HT_ASSERT(_concat_buffer->AsStorage() == it->second->storage())
         << local_device << ": after param " << kv.second << " is not allocated in the concat buffer";
     }
+  }
+  HT_ASSERT(_comm_feed_dict.empty())
+    << "comm feed dict should be empty now"
+    << ", but it turns out to be " << _comm_feed_dict;
+  for (auto& kv : _switch_graph_pair.first->_preserved_data) {
+    HT_ASSERT(!before_param_buffer->HasTensor(kv.first))
+      << "before graph preserved data is not cleaned up, still remains " << before_param_buffer->GetTensor(kv.first)
+      << ", which will cause the failure of releasing the before graph buffer";
   }
   // 清空tensor2data
   tensor2data.clear();

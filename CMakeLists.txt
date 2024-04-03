@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.17)
 add_compile_options(-w)
 
-project(Hetu CXX)
+project(Hetu LANGUAGES CXX CUDA)
 
 include(cmake/config_refactor.cmake)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
@@ -54,3 +54,4 @@ endif()
 add_subdirectory(${CMAKE_SOURCE_DIR}/hetu)
 add_subdirectory(${CMAKE_SOURCE_DIR}/python_refactor)
 add_subdirectory(${CMAKE_SOURCE_DIR}/tests/refactor/cpp)
+add_subdirectory(${CMAKE_SOURCE_DIR}/workloads/cuda)

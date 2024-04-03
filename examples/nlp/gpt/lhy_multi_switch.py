@@ -73,7 +73,7 @@ def get_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
             else:
                 for value in config.values():
                     if type(value) == dict:
-                        if "range" in value and (_range < value["range"][0] or _range > value["range"][1]):
+                        if "range" in value and (_range < value["range"][0] or _range > value["range"][-1]):
                             continue
                         config_queue.put(value)
     assert len(multi_ds_parallel_config) == len(ds_parallel_configs), 'ds_parallel_configs parse error!'
@@ -144,7 +144,7 @@ def pretrain(args):
     ranges = []
     for _, block_config in ds_parallel_configs[0]['gpt']['blocks'].items():
         ranges.append(block_config['range'])
-    assert ranges[0][0] == 0 and ranges[-1][1] == config.num_hidden_layers-1, \
+    assert ranges[0][0] == 0 and ranges[-1][-1] == config.num_hidden_layers-1, \
         f"gpt blocks range: {ranges} is conflict with num_hidden_layers: {config.num_hidden_layers}!"
 
     # Hetu model definition
@@ -292,8 +292,9 @@ def pretrain(args):
     # 单次切换
     def test_single_switch():
         consumed_samples = 0
-        consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 32, strategy_id = 1, run_level = ht.run_level("grad"))
-        consumed_samples = run_plan(consumed_samples, global_batch_size = 32, micro_batch_size = 2, seq_len = 32, strategy_id = 2, run_level = ht.run_level("grad"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 32, strategy_id = 0, run_level = ht.run_level("update"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 32, strategy_id = 0, run_level = ht.run_level("update"))
+        consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 32, strategy_id = 0, run_level = ht.run_level("update"))
     
     # 单轮样例 
     def test_single_round(): 
@@ -312,17 +313,17 @@ def pretrain(args):
         # 第一个循环会很慢是因为要算topo & 算切换方案 & 进行很多cudaMalloc
         consumed_samples = 0 # should be reset when run next epoch
         for round in range(10):
-            consumed_samples = run_plan(consumed_samples, global_batch_size = 2, micro_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("alloc"))
-            # consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 2, seq_len = 128, strategy_id = 0, run_level = ht.run_level("grad"))
-            consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 8, strategy_id = 1, run_level = ht.run_level("grad"))
-            consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 2, seq_len = 64, strategy_id = 2, run_level = ht.run_level("grad"))
-            consumed_samples = run_plan(consumed_samples, global_batch_size = 4, micro_batch_size = 2, seq_len = 16, strategy_id = 3, run_level = ht.run_level("grad"))
-            consumed_samples = run_plan(consumed_samples, global_batch_size = 2, micro_batch_size = 2, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 4, seq_len = 256, strategy_id = 4, run_level = ht.run_level("alloc"))
+            # consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 2, seq_len = 1024, strategy_id = 0, run_level = ht.run_level("grad"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 64, micro_batch_size = 4, seq_len = 512, strategy_id = 2, run_level = ht.run_level("grad"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 4, micro_batch_size = 2, seq_len = 128, strategy_id = 3, run_level = ht.run_level("grad"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 16, micro_batch_size = 2, seq_len = 256, strategy_id = 2, run_level = ht.run_level("grad"))
+            consumed_samples = run_plan(consumed_samples, global_batch_size = 8, micro_batch_size = 4, seq_len = 32, strategy_id = 4, run_level = ht.run_level("update"))
             print(f"round {round} finished, consumed_samples = {consumed_samples}")
     
-    test_single_switch()
+    # test_single_switch()
     # test_single_round()
-    # test_multi_round()
+    test_multi_round()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
