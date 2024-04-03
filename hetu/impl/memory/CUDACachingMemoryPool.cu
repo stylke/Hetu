@@ -9,19 +9,44 @@
 namespace hetu {
 namespace impl {
 
-bool AllocAfterFreeFromCache(const Device& device, void*& ptr, size_t size) {
+bool AllocAfterFreeFromCUDACache(const Device& device, void*& ptr, size_t size) {
   auto caching_mempool = std::dynamic_pointer_cast<CUDACachingMemoryPool>(GetMemoryPool(device));
   std::lock_guard<std::mutex> lock(caching_mempool->_mtx);
   return caching_mempool->AllocNewPtr(ptr, size) || caching_mempool->WaitUntilAlloc(ptr, size);
+}
+
+void ProfileAfterEmptyAllCUDACache(const Device& device) {
+  auto caching_mempool = std::dynamic_pointer_cast<CUDACachingMemoryPool>(GetMemoryPool(device));
+  std::lock_guard<std::mutex> lock(caching_mempool->_mtx);
+  HT_LOG_INFO << device << "******* [Before Empty] Cuda Caching Mempool ******* ";
+  caching_mempool->PrintSummary();
+  caching_mempool->EmptyCache();
+  // 彻底清空cache后
+  // single stream available table一定已经全部清空
+  // all stream available table只可能剩下split出来的
+  if (caching_mempool->max_split_size > 0) {
+    HT_ASSERT(caching_mempool->IsEmpty(caching_mempool->_available_for_all_streams.get()))
+      << "The all stream available table shouldn't have any unsplitted entry now";
+  } else {
+    HT_ASSERT(caching_mempool->IsEmpty(caching_mempool->_available_for_all_streams.get()))
+      << "The all stream available table shouldn't have any entry now";
+  }
+  for (auto& kv : caching_mempool->_available_for_single_stream) {
+    HT_ASSERT(caching_mempool->IsEmpty(kv.second.get(), false))
+      << "The single stream available table shouldn't have any entry now";
+  }
+  HT_LOG_INFO << device << "******* [After Empty] Cuda Caching Mempool ******* ";
+  caching_mempool->PrintSummary();
 }
 
 static std::string _make_name(DeviceIndex device_id) {
   return "CUDACachingMemPool(" + std::to_string(static_cast<int>(device_id)) + ")";
 }
 
-CUDACachingMemoryPool::CUDACachingMemoryPool(DeviceIndex device_id, size_t _max_split_size)
+CUDACachingMemoryPool::CUDACachingMemoryPool(DeviceIndex device_id, size_t _max_split_size, size_t _max_internal_fragment_size)
 : CUDAMemoryPool(device_id, _make_name(device_id)),
-  max_split_size(_max_split_size){
+  max_split_size(_max_split_size) ,
+  max_internal_fragment_size(_max_internal_fragment_size) {
   _data_ptr_info.reserve(8192);
   _available_for_single_stream.reserve(HT_NUM_STREAMS_PER_DEVICE); 
   _available_for_all_streams.reset(new DataPtrLookupTable());
@@ -166,7 +191,6 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
       // HT_LOG_INFO << "[Create] cudaMalloc new " << data_ptr;
       _reserved += malloc_size;
       _peak_reserved = MAX(_peak_reserved, _reserved);
-      _cuda_malloc_cnt++;
       auto new_info = std::make_shared<CudaDataPtrInfo>(data_ptr.ptr, 
                                                         malloc_size, 
                                                         stream, 
@@ -182,14 +206,14 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
     // 清空cache后依然无法分配
     else {
       HT_RUNTIME_ERROR
-        << "Try to allocate " << malloc_size / (1024) << " KiB on GPU " << device() 
+        << "Try to allocate " << static_cast<double>(malloc_size) / 1024 << " KiB on GPU " << device() 
         << ", but trigger cuda OOM error"
-        << ", mempool reserved: " << _reserved / (1024 * 1024 * 1024) << " GiB"
-        << ", mempool allocated: " << _allocated / (1024 * 1024 * 1024) << " GiB"
+        << ", mempool reserved: " << static_cast<double>(_reserved) / (1024 * 1024 * 1024) << " GiB"
+        << ", mempool allocated: " << static_cast<double>(_allocated) / (1024 * 1024 * 1024) << " GiB"
         << ", please set environment variable HETU_MAX_SPLIT_SIZE_MB smaller"
         << ", if you find reserved - allocated is too high"
-        << ", and if mempool reserved is far lower than the GPU memory"
-        << ", that means there are too many internal or external fragments!";
+        << ", and if mempool reserved is much lower than the actual GPU memory"
+        << ", that means there are too many external fragments or some other memory consumptions like cuda/nccl context!";
     }
   }
 
@@ -333,7 +357,7 @@ bool CUDACachingMemoryPool::FindAvailable(size_t num_bytes,
       // 一部分用于新分配的而空余的那部分重新插入
       // 2、想分配的size要比max_split_size还大且剩余的内部碎片较少
       // 后续会直接占用整个条目且不进行split
-      if (it->size > max_split_size && remaining > kMaxInternalFragment) {
+      if (it->size > max_split_size && remaining > max_internal_fragment_size) {
         // num_bytes > max_split_size, so we will directly allocate this large
         // ptr to request without splitting. But we need to limit the remaining 
         // size to avoid large internal fragment.
@@ -414,6 +438,29 @@ bool CUDACachingMemoryPool::IsEmpty(DataPtrLookupTable* lookup_table, bool ignor
   return true;
 }
 
+// Free all pointers in the all stream available lookup table currently.
+// Caller should hold the mutex.
+void CUDACachingMemoryPool::ReleaseAll() {
+  auto& lookup_table = _available_for_all_streams->table;                                          
+  auto it = lookup_table.begin();
+  while (it != lookup_table.end()) {
+    auto info_it = _data_ptr_info.find(it->id);
+    HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
+      << "Cannot find CudaDataPtrInfo for stream's cached ptr";
+    HT_ASSERT(!info_it->second->allocated())
+      << "Allocate status error";
+    // split的无法被释放
+    if (info_it->second->is_split()) {
+      it++;
+      continue;
+    }
+    CudaFree(it->ptr);
+    _reserved -= it->size;
+    it = lookup_table.erase(it);
+    _data_ptr_info.erase(info_it); 
+  }
+}
+
 // Free some pointer in the all stream available lookup table to satisfy the request_size.
 // It will try to satisfy the request_size with minimum number of ptrs. 
 // Caller should hold the mutex.
@@ -434,11 +481,11 @@ bool CUDACachingMemoryPool::ReleaseAndAlloc(void*& ptr, size_t request_size) {
     HT_ASSERT(!info_it->second->allocated())
       << "Allocate status error";
     CudaFree(it->ptr);
-    HT_ASSERT(AllocNewPtr(ptr, request_size))
-      << "Can't alloc request_size";
     _reserved -= it->size;
     lookup_table.erase(it);
     _data_ptr_info.erase(info_it); 
+    HT_ASSERT(AllocNewPtr(ptr, request_size))
+      << "Can't alloc request_size";
     return true;
   }
   // 没有任何能直接满足的条目
@@ -608,15 +655,12 @@ bool CUDACachingMemoryPool::ReleaseAll(DataPtrLookupTable& lookup_table,
 }
 */
 
-bool CUDACachingMemoryPool::EmptyCache() {
-  // TODO
-  /*
-  for (auto& kv : _available_for_single_stream) {
-    ReleaseAll(*(kv.second));
-  }
-  ReleaseAll(*_available_for_all_streams);
-  return true;
-  */
+// *Note this will hang the whole system!
+// Caller should hold the mutex.
+void CUDACachingMemoryPool::EmptyCache() {
+  CudaDeviceSynchronize();
+  WatchEvents();
+  ReleaseAll();
 }
 
 // 直接bind外部的内存
@@ -645,6 +689,7 @@ DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
 
   _reserved += num_bytes;
   _allocated += num_bytes;
+  _alloc_cnt++;
   return data_ptr;
 }
 
@@ -672,9 +717,9 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   // 允许info要比实际的data ptr要大
   if (info->num_bytes > data_ptr.size) {
     // data ptr过大时
-    // 空余的不能超过kMaxInternalFragment
+    // 空余的不能超过max internal fragment size
     if (data_ptr.size > max_split_size) {
-      HT_ASSERT(info->num_bytes - data_ptr.size <= kMaxInternalFragment)
+      HT_ASSERT(info->num_bytes - data_ptr.size <= max_internal_fragment_size)
         << "Find info: size = " << info->num_bytes 
         << ", but data ptr: size = " << data_ptr.size;
     }
@@ -723,7 +768,8 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
       info->deleter(data_ptr);
       _data_ptr_info.erase(info_it);
       _reserved -= info->num_bytes;
-      _allocated -= info->num_bytes;      
+      _allocated -= info->num_bytes;  
+      _free_cnt++;    
       return;
     }
     info->status = OccupationStatus::UNAVAILABLE_UNTIL_FREE;
@@ -735,7 +781,6 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
       _multi_stream_free_events[s_id]->emplace_back(std::make_tuple(std::move(event), data_ptr.id));
     }
     info->multi_stream_free_event_cnt += used_streams.size();
-    _free_cnt++;
     return;
   }
 
@@ -744,6 +789,7 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     DataPtrLookupTable* target_table = nullptr;
     auto stream = Stream::unpack(info->alloc_stream);
     info->free_at = free_at;
+    _free_cnt++;
     _allocated -= info->num_bytes;
     // blocking stream上释放的东西所有stream之后都能用
     if (stream.is_blocking()) {
@@ -797,8 +843,6 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
                      << ") during call to 'FreeDataSpace' for " << data_ptr;
     __builtin_unreachable();
   }
-
-  _free_cnt++;
 }
 
 // Try to merge blocks. It assume that data_ptr has not been inserted into any lookup table. 
@@ -1061,6 +1105,7 @@ void CUDACachingMemoryPool::WatchEvents() {
           _data_ptr_info.erase(it);
           _reserved -= info->num_bytes;
           _allocated -= info->num_bytes;
+          _free_cnt++;
         } 
         // alloc data
         else {
@@ -1068,6 +1113,7 @@ void CUDACachingMemoryPool::WatchEvents() {
             << "Info status should be " << OccupationStatus::UNAVAILABLE_UNTIL_FREE
             << ", but found " << info->status;
           _allocated -= info->num_bytes;
+          _free_cnt++;
           // 优先考虑放到all stream available table中cache住
           DataPtrLookupTable* target_table = _available_for_all_streams.get();
           info->refresh();
@@ -1167,19 +1213,19 @@ std::future<void> CUDACachingMemoryPool::WaitDataSpace(DataPtr data_ptr,
 }
 
 void CUDACachingMemoryPool::PrintSummary() {
-  HT_LOG_INFO << name() << ": alloc = " << _allocated << " bytes, "
-    << "reserved = " << _reserved << " bytes, "
-    << "peak_reserved = " << _peak_reserved << " bytes, "
-    << "alloc_cnt = " << _alloc_cnt << ", "
-    << "cuda_malloc_cnt = " << _cuda_malloc_cnt << ", "
-    << "free_cnt = " << _free_cnt << ", "
-    << "mark_cnt = " << _mark_cnt;
+  HT_LOG_INFO << name() << ": alloc = " << static_cast<double>(_allocated) / (1024 * 1024) << " MiB"
+    << ", reserved = " << static_cast<double>(_reserved) / (1024 * 1024) << " MiB"
+    << ", peak_reserved = " << static_cast<double>(_peak_reserved) / (1024 * 1024) << " MiB"
+    << ", alloc_cnt = " << _alloc_cnt
+    << ", free_cnt = " << _free_cnt
+    << ", mark_cnt = " << _mark_cnt;
 }
 
 namespace {
+
 static std::once_flag cuda_caching_memory_pool_register_flag;
 
-size_t ParseMaxSplitSize() {
+static size_t ParseMaxSplitSize() {
   const char* max_split_str = std::getenv("HETU_MAX_SPLIT_SIZE_MB");
   size_t max_split_size_mb;
   if (max_split_str != NULL) {
@@ -1189,28 +1235,49 @@ size_t ParseMaxSplitSize() {
       } catch (const std::exception& e) {
         HT_LOG_WARN
           << "Invalid HETU_MAX_SPLIT_SIZE_MB: " << max_split_str << " is set" 
-          << ", please provide an integer whose value > 20"
-          << ", default value will be used in this process";
+          << ", please provide an integer"
+          << ", default value will be used in this process.";
       }
   } 
-  // 默认设置为最大值
+  // 默认设置为200MiB
   else {
-    max_split_size_mb = std::numeric_limits<size_t>::max() / 1024 / 1024;
+    max_split_size_mb = 200;
   }
-  
   return max_split_size_mb * 1024 * 1024;
+}
+
+static size_t ParseMaxInternalFragmentSize() {
+  const char* max_internal_fragment_str = std::getenv("HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB");
+  size_t max_internal_fragment_size_mb;
+  if (max_internal_fragment_str != NULL) {
+      try {
+        max_internal_fragment_size_mb = std::stoi(max_internal_fragment_str);
+        // TODO: 敲定一个最小值....
+      } catch (const std::exception& e) {
+        HT_LOG_WARN
+          << "Invalid HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB: " << max_internal_fragment_str << " is set" 
+          << ", please provide an integer"
+          << ", default value will be used in this process.";
+      }
+  } 
+  // 默认设置为20MiB
+  else {
+    max_internal_fragment_size_mb = 20;
+  }
+  return max_internal_fragment_size_mb * 1024 * 1024;
 }
 
 struct CUDACachingMemoryPoolRegister {
   CUDACachingMemoryPoolRegister() { 
     std::call_once(cuda_caching_memory_pool_register_flag, []() {
       size_t _max_split_size = ParseMaxSplitSize();
+      size_t _max_internal_fragment_size = ParseMaxInternalFragmentSize();
       // Memory pools are lazily constructed, so we do not need to
       // get device count here.
       for (int32_t i = 0; i < HT_MAX_DEVICE_INDEX; i++) {
         RegisterMemoryPoolCtor(
-          Device(kCUDA, i), [i, _max_split_size]() -> std::shared_ptr<MemoryPool> {
-            return std::make_shared<CUDACachingMemoryPool>(i, _max_split_size);
+          Device(kCUDA, i), [i, _max_split_size, _max_internal_fragment_size]() -> std::shared_ptr<MemoryPool> {
+            return std::make_shared<CUDACachingMemoryPool>(i, _max_split_size, _max_internal_fragment_size);
           });
       }
     });

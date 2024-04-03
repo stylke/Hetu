@@ -48,7 +48,7 @@ class MemoryPool {
 
   virtual void FreeDataSpace(DataPtr data_ptr) = 0;
 
-  virtual bool EmptyCache() {}
+  virtual void EmptyCache() {}
 
   virtual void MarkDataSpaceUsedByStream(DataPtr data_ptr,
                                          const Stream& stream) = 0;

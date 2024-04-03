@@ -7,6 +7,7 @@
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
+#include "hetu/impl/memory/CUDACachingMemoryPool.cuh"
 
 namespace hetu {
 namespace graph {
@@ -786,7 +787,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         if (!old_exec_graph->_transfer_param_buffer->IsEmpty()) {
           HT_ASSERT(old_exec_graph->_transfer_param_buffer->IsAllocated())
             << "old exec graph with RunLevel::UPDATE should have allocated the transfer param buffer";
-          old_exec_graph->_current_grad_buffer->Free();
+          old_exec_graph->_transfer_param_buffer->Free();
         }
         if (old_exec_graph->_use_current_grad_buffer) {
           if (!old_exec_graph->_current_grad_buffer->IsEmpty()) {
@@ -862,6 +863,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   // 释放graph切换相关的event
   exec_graph->_switch_param_events.clear();
   exec_graph->_switch_grad_events.clear();
+  // 验证mempool是否能释放干净
+  // hetu::impl::ProfileAfterEmptyAllCUDACache(local_device);
   return ret;
 }
 

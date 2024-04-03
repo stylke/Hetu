@@ -38,6 +38,7 @@ DECLARE_HT_EXCEPTION(cuda_error);
   CUDA_CALL(cudaDeviceGetAttribute(ptr, attr, stream))
 #define CudaGetDeviceProperties(ptr, device)                                   \
   CUDA_CALL(cudaGetDeviceProperties(ptr, device))
+#define CudaDeviceSynchronize() CUDA_CALL(cudaDeviceSynchronize())
 // memory
 #define CudaMalloc(ptr, size) CUDA_CALL(cudaMalloc(ptr, size))
 #define CudaMallocTry(ptr, size) cudaMalloc(ptr, size)

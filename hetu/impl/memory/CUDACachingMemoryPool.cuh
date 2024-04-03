@@ -49,11 +49,13 @@ struct AvailableEventLookupTable {
     }) {}
 };
 
-bool AllocAfterFreeFromCache(const Device& device, void*& ptr, size_t size);
+bool AllocAfterFreeFromCUDACache(const Device& device, void*& ptr, size_t size);
+
+void ProfileAfterEmptyAllCUDACache(const Device& device);
 
 class CUDACachingMemoryPool final : public CUDAMemoryPool {
  public:
-  CUDACachingMemoryPool(DeviceIndex device_id, size_t _max_split_size);
+  CUDACachingMemoryPool(DeviceIndex device_id, size_t _max_split_size, size_t _max_internal_fragment_size);
 
   ~CUDACachingMemoryPool();
 
@@ -76,9 +78,11 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
 
   void PrintSummary() override;
 
-  bool EmptyCache() override;
+  void EmptyCache() override;
 
-  friend bool AllocAfterFreeFromCache(const Device& device, void*& ptr, size_t size);
+  friend bool AllocAfterFreeFromCUDACache(const Device& device, void*& ptr, size_t size);
+
+  friend void ProfileAfterEmptyAllCUDACache(const Device& device);
 
  private:
   
@@ -122,8 +126,6 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     return os;
   }
 
-  // NOTE: 从PyTorch借鉴的20MB"剩余量"限额
-  const size_t kMaxInternalFragment = 20971520;
   const size_t kMinSplitRemaining = 1048576; // 1MB
 
   // Pack malloc requests in buffer, which aims at using "split ptr" feature
@@ -132,6 +134,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   const size_t kMallocRoundUp = 2097152; 
   const size_t kMallocLargeBuffer = 10485760;
   size_t max_split_size{209715200}; // in bytes
+  size_t max_internal_fragment_size{20971520}; // NOTE: 从PyTorch借鉴的20MiB剩余量限额
 
   // Record stream info of an allocated pointer.
   struct CudaDataPtrInfo {
@@ -209,7 +212,6 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     */
   
     inline void refresh() {
-
       used_streams.clear();
       status = OccupationStatus::AVAILABLE_FOR_ALL_STREAM;
       alloc_at = 0;
@@ -231,6 +233,8 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   size_t GetAlignedMallocSize(size_t request_size);
 
   bool AllocNewPtr(void*& ptr, size_t size);
+
+  void ReleaseAll();
 
   bool ReleaseAndAlloc(void*& ptr, size_t request_size);
 
@@ -269,7 +273,6 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   size_t _reserved{0}; // allocated size + cached size
   size_t _peak_reserved{0};
   uint64_t _alloc_cnt{0};
-  uint64_t _cuda_malloc_cnt{0};
   uint64_t _free_cnt{0};
   uint64_t _mark_cnt{0};
 };
