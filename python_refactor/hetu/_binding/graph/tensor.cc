@@ -374,12 +374,18 @@ PyObject* PyTensor_data_transfer(PyTensor* self, PyObject* args, PyObject* kwarg
 PyObject* PyTensor_reset_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "reset_data(numpy.array provided_data)"
+    "reset_data(numpy.array provided_data)",
+    "reset_data(NDArray provided_data)",
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     auto* array_obj = parsed_args.get_numpy_array(0);
     ResetVariableData(self->tensor, NDArrayFromNumpy(array_obj));
+    // HT_LOG_TRACE << "ResetVariableData successfully.";
+  }
+  else if (parsed_args.signature_index() == 1) {
+    auto array_obj = parsed_args.get_ndarray(0);
+    ResetVariableData(self->tensor, array_obj);
     // HT_LOG_TRACE << "ResetVariableData successfully.";
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -433,6 +439,7 @@ PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwar
   static PyArgParser parser({
     "from_numpy_parallel(numpy.array data, DistributedStates ds, bool requires_grad=false, " OP_META_ARGS ")", 
     "from_numpy_parallel(numpy.array data, List[DistributedStates] multi_ds, bool requires_grad=false, " OP_META_ARGS ")", 
+    "from_numpy_parallel(numpy.array data, DataType dtype, List[DistributedStates] multi_ds, bool requires_grad=false, " OP_META_ARGS ")", 
     "from_numpy_parallel(List[numpy.array] multi_data, List[DistributedStates] multi_ds, bool requires_grad=false, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
@@ -442,7 +449,7 @@ PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwar
     DistributedStatesList multi_ds = {parsed_args.get_distributed_states(1)};
     bool requires_grad = parsed_args.get_bool_or_default(2);
     new(&self->tensor) Tensor();
-    self->tensor = MakeParallelParameterOp(NDArrayFromNumpy(array_obj), multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
+    self->tensor = MakeParallelVariableOp(NDArrayFromNumpy(array_obj), multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
   } else if (parsed_args.signature_index() == 1) {
     auto* array_obj = parsed_args.get_numpy_array(0);
     DistributedStatesList multi_ds = parsed_args.get_distributed_states_list(1);
@@ -450,11 +457,20 @@ PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwar
     new(&self->tensor) Tensor();
     self->tensor = MakeParallelVariableOp(NDArrayFromNumpy(array_obj), multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
   } else if (parsed_args.signature_index() == 2) {
+    auto* array_obj = parsed_args.get_numpy_array(0);
+    DataType dtype = parsed_args.get_dtype(1);
+    DistributedStatesList multi_ds = parsed_args.get_distributed_states_list(2);
+    bool requires_grad = parsed_args.get_bool_or_default(3);  
+    new(&self->tensor) Tensor();
+    self->tensor = MakeParallelVariableOp(NDArrayFromNumpy(array_obj, {}, dtype), multi_ds, false, kUndeterminedDataType, 
+                                          requires_grad, parse_op_meta(parsed_args, 4));
+  } else if (parsed_args.signature_index() == 3) {
     NDArrayList multi_data = parsed_args.get_numpy_array_list(0);
     DistributedStatesList multi_ds = parsed_args.get_distributed_states_list(1);
     bool requires_grad = parsed_args.get_bool_or_default(2);
     new(&self->tensor) Tensor();
-    self->tensor = MakeParallelVariableOp(multi_data, multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
+    self->tensor = MakeParallelVariableOp(multi_data, multi_ds, false, kUndeterminedDataType, 
+                                          requires_grad, parse_op_meta(parsed_args, 3));
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);

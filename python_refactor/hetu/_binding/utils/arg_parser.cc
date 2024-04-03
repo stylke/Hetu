@@ -110,7 +110,8 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::DEVICE;
   if (type == "hetu.DeviceGroup" || type == "DeviceGroup")
     return ArgType::DEVICE_GROUP;
-  if (type == "List[hetu.DeviceGroup]" || type == "List[DeviceGroup]")
+  if (type == "List[hetu.DeviceGroup]" || type == "List[DeviceGroup]" ||
+      type == "hetu.DeviceGroupList" || type == "DeviceGroupList")
     return ArgType::DEVICE_GROUP_LIST;
   if (type == "hetu.stream" || type == "stream" || type == "Stream") 
     return ArgType::STREAM;

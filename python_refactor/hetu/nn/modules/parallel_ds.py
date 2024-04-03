@@ -82,6 +82,8 @@ class HtParallelEmbedding(Module):
         super(HtParallelEmbedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
+        self.ds_parallel_config = ds_parallel_config
+        self.dtype = dtype
         ds, self.device_group = config2ds(ds_parallel_config)
         self.name = name
         device_index = get_device_index(self.device_group)
@@ -100,7 +102,8 @@ class HtVocabParallelEmbedding(Module):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.name = name
-
+        self.ds_parallel_config = ds_parallel_config
+        self.dtype = dtype
         ds_dup_split0, self.device_group = config2ds(ds_parallel_config) # for embedding table
         dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get('0', 1), len(ds_parallel_config['device_group'])
         assert dp * tp == num_devices, f'VocabParallelEmbedding get wrong ds_parallel_config: {ds_parallel_config}!'
@@ -147,6 +150,8 @@ class HtColumnParallelLinear(Module):
         self.out_features = out_features
         self.gather_output = gather_output
         self.name = name
+        self.ds_parallel_config = ds_parallel_config
+        self.dtype = dtype
 
         ds_dup_split1, self.device_group = config2ds(ds_parallel_config)
         dp, tp, num_devices, zero = ds_parallel_config['dup'], \
@@ -215,6 +220,8 @@ class HtRowParallelLinear(Module):
         self.in_features = in_features
         self.out_features = out_features
         self.name = name
+        self.ds_parallel_config = ds_parallel_config
+        self.dtype = dtype
 
         ds_dup_split0, self.device_group = config2ds(ds_parallel_config)
         dp, tp, num_devices, zero = ds_parallel_config['dup'], \
