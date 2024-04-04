@@ -7,7 +7,7 @@ SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-16}
 NUM_MICRO_BATCHES=${6:-2}
 
-ROOT_FOLDER=./data
+ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
 JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json

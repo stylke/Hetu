@@ -6,7 +6,7 @@ SEQ_LEN=${4:-256}
 GLOBAL_BATCH_SIZE=${5:-16}
 MICRO_BATCH_SIZE=${6:-2}
 
-ROOT_FOLDER=/data/nolan/develop/bak/ht/hot_switch/gh/Megatron-LM/data
+ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
 JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json

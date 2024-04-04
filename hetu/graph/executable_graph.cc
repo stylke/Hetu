@@ -1559,11 +1559,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       HT_LOG_DEBUG << local_device << ": global topo before recompute pass: " << topo_before_recompute;
 
       // add recompute pass
-      HT_LOG_INFO << local_device << ": [Execution Plan] recompute pass begin...";
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] recompute pass begin...";
       Graph::push_graph_ctx(id());
       Recompute::InsertRecomputedOps(topo_before_recompute);
       Graph::pop_graph_ctx();
-      HT_LOG_INFO << local_device << ": [Execution Plan] recompute pass end...";
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] recompute pass end...";
 
       // init topo with recomputed ops
       OpRefList topo_before_activation_offload = Graph::TopoSort(fetches, num_ops(), is_op_computed);
