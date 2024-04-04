@@ -2188,6 +2188,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   HT_LOG_DEBUG << local_device << ": 4. get results[begin]";
   NDArrayList results(fetches.size(), NDArray());
+  std::unordered_set<OpId> to_sync_op_ids;
+  to_sync_op_ids.reserve(fetches.size());
   for (auto& op_ref : _execute_plan.local_topo) {
     auto& op = op_ref.get();
     Operator::for_each_output_tensor(op, [&](const Tensor& output) {
@@ -2213,10 +2215,16 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             results[it->second] = NDArray::cat(result);
           }
         }
+        to_sync_op_ids.insert(op->id());
       }
     });
   }
-  SynchronizeAllStreams(local_device);
+  // SynchronizeAllStreams(local_device);
+  // OpList sync_ops;
+  for (auto op_id : to_sync_op_ids) {
+    _op_indexing[op_id]->Sync(num_micro_batches - 1);
+    // sync_ops.push_back(_op_indexing[op_id]);
+  }
 
   // HT_LOG_DEBUG << local_device << ": sync ops = " << sync_ops;
   for (size_t i = 0; i < results.size(); i++)
