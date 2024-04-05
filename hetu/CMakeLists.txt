@@ -31,7 +31,7 @@ endif()
 
 if(${HETU_COMPILE_NCCL})
   include(${CMAKE_SOURCE_DIR}/cmake/external/nccl.cmake)
-  find_package(NCCL 2.5 REQUIRED)
+  find_package(NCCL 2.19 REQUIRED)
   target_link_libraries(hetu_C PUBLIC ${NCCL_LIBRARIES})
   target_include_directories(hetu_C PUBLIC ${NCCL_INCLUDE_DIRS})
 endif()
