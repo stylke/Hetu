@@ -10,33 +10,15 @@ namespace graph {
 
 PyObject* PyPushCPUOffloadCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
-  static PyArgParser parser({
-    "push_cpu_offload_ctx()"
-  });
-  auto parsed_args = parser.parse(args, kwargs);
-  if (parsed_args.signature_index() == 0) {
-    ActivationCPUOffload::set_cpu_offload_enabled();
-    Py_RETURN_NONE;
-  } else {
-    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
-    __builtin_unreachable();
-  }
+  ActivationCPUOffload::set_cpu_offload_enabled();
+  Py_RETURN_NONE;
   HT_PY_FUNC_END
 }
 
 PyObject* PyPopCPUOffloadCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
-  static PyArgParser parser({
-    "pop_cpu_offload_ctx()"
-  });
-  auto parsed_args = parser.parse(args, kwargs);
-  if (parsed_args.signature_index() == 0) {
-    ActivationCPUOffload::reset_cpu_offload_enabled();
-    Py_RETURN_NONE;
-  } else {
-    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
-    __builtin_unreachable();
-  }
+  ActivationCPUOffload::reset_cpu_offload_enabled();
+  Py_RETURN_NONE;
   HT_PY_FUNC_END
 }
 
