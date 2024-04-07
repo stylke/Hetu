@@ -166,33 +166,20 @@ void ParamBuffer::Alloc(const Stream& stream,
   HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
     << " will alloc " << (double)_buffer_size / (1024 * 1024) << " MiB";  
 #if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19) 
-  // HT_RUNTIME_ERROR << "NotImplementedError";
   if (use_nccl) {
     HT_ASSERT(comm != nullptr)
       << "nccl buffer registration must have a communicator";
     void* reg_handle;                                     
-    ncclResult_t status = ncclMemAlloc(&_raw_ptr, _buffer_size);
-    if (status != ncclSuccess) {
-      HT_RUNTIME_ERROR << "ncclMemAlloc failed: " << ncclGetErrorString(status);
-    }
-    status = ncclCommRegister(comm, _raw_ptr, _buffer_size, &reg_handle);
-    if (status != ncclSuccess) {
-      HT_RUNTIME_ERROR << "ncclCommRegister failed: " << ncclGetErrorString(status);
-    }         
+    NCCL_CALL(ncclMemAlloc(&_raw_ptr, _buffer_size));  
+    NCCL_CALL(ncclCommRegister(comm, _raw_ptr, _buffer_size, &reg_handle));  
     _storage = std::make_shared<NDArrayStorage>(BorrowToMemoryPool(
       local_device, _raw_ptr, _buffer_size, [=](DataPtr data_ptr) {
         TIK(free_time);
         hetu::cuda::CUDADeviceGuard guard(data_ptr.device.index());
         HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
           << " will free " << (double)_buffer_size / (1024 * 1024) << " MiB";  
-        ncclResult_t status = ncclCommDeregister(comm, reg_handle);
-        if (status != ncclSuccess) {
-          HT_RUNTIME_ERROR << "ncclCommDeregister failed: " << ncclGetErrorString(status);
-        }   
-        status = ncclMemFree(data_ptr.ptr);
-        if (status != ncclSuccess) {
-          HT_RUNTIME_ERROR << "ncclMemFree failed: " << ncclGetErrorString(status);
-        } 
+        NCCL_CALL(ncclCommDeregister(comm, reg_handle));
+        NCCL_CALL(ncclMemFree(data_ptr.ptr));
         HT_LOG_DEBUG << local_device << ": " << _name << " param buffer free end";  
         TOK(free_time);
         _free_time = COST_MSEC(free_time);

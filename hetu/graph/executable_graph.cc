@@ -15,6 +15,7 @@
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/profiler/profiler.h"
+#include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/core/symbol.h"
 #include "nccl.h"
 #include <ctime>
@@ -1384,12 +1385,12 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         event->Record(Stream(op->placement(), kComputingStream));
         event->Block(Stream(op->placement(), kP2PStream));
         _p2p_events.emplace_back(std::move(event));
-        ncclGroupStart();
+        NCCL_CALL(ncclGroupStart());
         // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group start";
       }
     } else if (is_continuous_p2p) {
       is_continuous_p2p = false;
-      ncclGroupEnd();
+      NCCL_CALL(ncclGroupEnd());
       auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
       event->Record(Stream(op->placement(), kP2PStream));
       event->Block(Stream(op->placement(), kComputingStream));
@@ -1443,7 +1444,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       event->Record(Stream(op->placement(), kComputingStream));
       event->Block(Stream(op->placement(), kP2PStream));
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group start";
-      ncclGroupStart();
+      NCCL_CALL(ncclGroupStart());
     }
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
     // NOTE: revert memory plan for now and may be used in the future
@@ -1478,7 +1479,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     */
     if (is_shared_weight_or_grad_p2p(op)) {
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group end";
-      ncclGroupEnd();
+      NCCL_CALL(ncclGroupEnd());
     }
     // Note: The usage should be marked inside kernels, 
     // but we still mark here in case we forget to do so in some kernels. 
@@ -2091,7 +2092,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
   }
   if (is_continuous_p2p) {
-    ncclGroupEnd();
+    NCCL_CALL(ncclGroupEnd());
     auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
     event->Record(Stream(local_device, kP2PStream));
     event->Block(Stream(local_device, kComputingStream));

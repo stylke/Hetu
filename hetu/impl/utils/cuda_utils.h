@@ -3,6 +3,7 @@
 #include "hetu/common/macros.h"
 #include "hetu/core/device.h"
 #include "hetu/core/ndarray.h"
+#include <nccl.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <curand.h>
@@ -14,6 +15,7 @@ namespace hetu {
 namespace cuda {
 
 DECLARE_HT_EXCEPTION(cuda_error);
+DECLARE_HT_EXCEPTION(nccl_error);
 
 } // namespace cuda
 } // namespace hetu
@@ -27,6 +29,10 @@ DECLARE_HT_EXCEPTION(cuda_error);
   for (cudaError_t status = (f); status != cudaSuccess; status = cudaSuccess)  \
   __HT_FATAL_SILENT(hetu::cuda::cuda_error)                                    \
     << "Cuda call " << #f << " failed: " << cudaGetErrorString(status)
+#define NCCL_CALL(f)                                                           \
+  for (auto result = (f); result != ncclSuccess; result = ncclSuccess)         \
+  __HT_FATAL_SILENT(hetu::cuda::nccl_error)                              \
+    << "NCCL call " << #f << " failed: " << ncclGetErrorString(result)
 
 /******************************************************
  * Some useful wrappers for CUDA functions

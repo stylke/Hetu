@@ -12,13 +12,6 @@ namespace comm {
 
 using hetu::operator<<;
 
-DECLARE_HT_EXCEPTION(nccl_error);
-
-#define NCCL_CALL(f)                                                           \
-  for (auto result = (f); result != ncclSuccess; result = ncclSuccess)         \
-  __HT_FATAL_SILENT(hetu::impl::comm::nccl_error)                              \
-    << "NCCL call " << #f << " failed: " << ncclGetErrorString(result)
-
 namespace {
 
 static std::once_flag nccl_init_flag;
