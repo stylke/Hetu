@@ -1,5 +1,6 @@
 #include "hetu/impl/memory/CUDACachingMemoryPool.cuh"
 #include "hetu/impl/stream/CUDAStream.h"
+#include "hetu/impl/communication/nccl_comm_group.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include <mutex>
 #include <cstdlib>
@@ -578,8 +579,8 @@ bool CUDACachingMemoryPool::WaitUntilAlloc(void*& ptr, size_t request_size) {
     }
     // mempool debug use
     // HT_LOG_INFO << "Need to wait and free until we can allocate";
-    // 停等5毫秒
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    // 停等3毫秒
+    std::this_thread::sleep_for(std::chrono::milliseconds(3));
     bool all_free = true;
     for (auto& kv : _multi_stream_free_events) {
       if (!kv.second->empty()) {
@@ -688,6 +689,7 @@ DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
     << "Failed to insert data " << data_ptr << " to info";
 
   _reserved += num_bytes;
+  _peak_reserved = MAX(_peak_reserved, _reserved);
   _allocated += num_bytes;
   _alloc_cnt++;
   return data_ptr;
@@ -756,6 +758,7 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     _data_ptr_info.erase(info_it);
     _reserved -= info->num_bytes;
     _allocated -= info->num_bytes;
+    _free_cnt++;
     return;
   }
   */

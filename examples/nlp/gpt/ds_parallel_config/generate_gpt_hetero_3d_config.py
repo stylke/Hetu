@@ -158,7 +158,8 @@ if __name__ == '__main__':
     assert args.dp * args.tp * args.pp == args.num_gpus, \
             f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
     ds_parallel_config = generate_gpt_3d_config(hetero_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
-    save_folder = f'./hetero'
+    # save_folder = f'./hetero'
+    save_folder = '/home/pkuhetu/lhy/multi_switch/examples/nlp/gpt/ds_parallel_config/hetero'
     file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)

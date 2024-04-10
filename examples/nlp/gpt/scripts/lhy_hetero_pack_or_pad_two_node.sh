@@ -33,7 +33,7 @@ mpirun --allow-run-as-root -np 16 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python lhy_hetero_pack_or_pad.py \
 --num_strategy=2 \
---ds_parallel_config ds_parallel_config/two_node/dp2_tp2_pp4.json,ds_parallel_config/hetero/dp2_tp2_pp4.json \
+--ds_parallel_config ds_parallel_config/two_node/dp4_tp2_pp2.json,ds_parallel_config/hetero/dp4_tp2_pp2.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --micro_batch_size $MICRO_BATCH_SIZE \
 --json_file $JSON_FILE \
@@ -55,6 +55,5 @@ python lhy_hetero_pack_or_pad.py \
 --use_flash_attn \
 --use_two_node \
 --hetero_stage_gpus 2 \
---hetero_pipeline \
---hetero_data
+
 

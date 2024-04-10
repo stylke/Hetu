@@ -110,6 +110,20 @@ static void NCCL_Init_Once() {
 
 } // namespace
 
+void EmptyNCCLCache() {
+  std::lock_guard<std::mutex> lock(nccl_create_group_mutex);
+  for (auto& all_gpus_nccl_comm_group_mapping : nccl_comm_groups) {
+    for (auto& nccl_comm_group_mapping : all_gpus_nccl_comm_group_mapping) {
+      nccl_comm_group_mapping.clear();
+    }
+  }
+  for (auto& all_gpus_worldwide_nccl_comm_group : worldwide_nccl_comm_groups) {
+    for (auto& worldwide_nccl_comm_group : all_gpus_worldwide_nccl_comm_group) {
+      worldwide_nccl_comm_group = NCCLCommunicationGroup();
+    }
+  }
+}
+
 struct NCCLGroupGuard {
   NCCLGroupGuard(bool group = false) : is_group_call(group) {
     if (is_group_call)
@@ -165,6 +179,7 @@ NCCLCommunicationGroupDef::NCCLCommunicationGroupDef(
 
 NCCLCommunicationGroupDef::~NCCLCommunicationGroupDef() {
   Sync();
+  NCCL_CALL(ncclCommFinalize(_comm));
   NCCL_CALL(ncclCommDestroy(_comm));
 }
 
@@ -654,9 +669,6 @@ NCCLCommunicationGroup::GetOrCreate(const std::vector<int>& world_ranks,
         std::iota(all_world_ranks.begin(), all_world_ranks.end(), 0);
         worldwide_nccl_comm_groups[stream_id + 1][device_id] =
           NCCLCommunicationGroup(all_world_ranks, stream);
-        nccl_comm_groups[stream_id + 1][device_id].insert(
-          {all_world_ranks,
-           worldwide_nccl_comm_groups[stream_id + 1][device_id]});
       }
     }
     return worldwide_nccl_comm_groups[stream_id + 1][device_id];

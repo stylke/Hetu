@@ -15,6 +15,8 @@
 #include "hetu/core/symbol.h"
 #include "nccl.h"
 #include <ctime>
+#include <iostream>
+#include <fstream>
 
 namespace hetu {
 namespace graph {
@@ -173,6 +175,18 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
       // 其余情况正常按variable去compute即可
       // AllocVariableDataInner已经自动处理了_preserved_data已存在的情况
       else {
+        // alloc阶段只分配param
+        if (_run_level == RunLevel::ALLOC) {
+          continue;
+        }
+        // grad阶段optimizer相关的variable不用跑
+        // 例如Adam的step、mean、variance
+        if (_run_level == RunLevel::GRAD) {
+          if (op->output(0)->num_consumers() == 1 
+              && is_optimizer_update_op(op->output(0)->consumer(0))) {
+            continue;
+          }
+        }
         op->Compute({}, runtime_ctx_list[0]);
         // 添加runtime skipped
         for (auto& runtime_ctx : runtime_ctx_list) {
@@ -1813,6 +1827,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // ********************** Run Level Check Point **********************
   if (_run_level == RunLevel::ALLOC) {
     SynchronizeAllStreams();
+    // memory debug use
+    // hetu::impl::comm::EmptyNCCLCache();
     SwitchExecGraph::ProfileMemory(name() + " run ALLOC end");
     return {};
   }
@@ -2165,6 +2181,18 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms" << std::endl;
+      char* straggler_log_file = std::getenv("HETU_STRAGGLER_LOG_FILE");
+      if (straggler_log_file != nullptr && hetu::impl::comm::GetWorldRank() == 0) {
+        std::ofstream file;
+        file.open(straggler_log_file, std::ios_base::app);
+        if (file.is_open()) {
+          file << "total run time: " << COST_MSEC(run) << " ms" << std::endl;
+          file << "compute time: " << compute_time << " ms" << std::endl;
+          file.close();
+        } else {
+          HT_RUNTIME_ERROR << "Error opening the file";
+        }
+      }
     }
   }
   _p2p_events.clear();

@@ -1626,6 +1626,8 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     ProfileRunningDetails();
   }
   
+  // memory debug use
+  // hetu::impl::comm::EmptyNCCLCache();
   std::string log_prefix = (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM ||switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) ?
                            "param" : "grad";
   HT_LOG_INFO << local_device << ": " << log_prefix << " switch from " << _switch_graph_pair.first->name()

@@ -8,6 +8,8 @@ namespace hetu {
 namespace impl {
 namespace comm {
 
+void EmptyNCCLCache();
+
 class NCCLCommunicationGroupDef;
 class NCCLCommunicationGroup;
 
