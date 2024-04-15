@@ -654,7 +654,7 @@ NDArray NDArray::matmul4bit(const NDArray& x, const NDArray& y,
 NDArray NDArray::bmm(const NDArray& x, const NDArray& y,
                      bool trans_left, bool trans_right,
                      StreamIndex stream_id, NDArray& output) {
-  const HTShape& a = x->shape();
+const HTShape& a = x->shape();
   const HTShape& b = y->shape();
   int ndims = a.size() - 2;
   HT_ASSERT(a.size() >= 2 && b.size() >= 2 && a.size() == b.size() &&
@@ -669,7 +669,8 @@ NDArray NDArray::bmm(const NDArray& x, const NDArray& y,
     HT_ASSERT(a[i] == b[i]);
     batch_size *= a[i];
   }
-  output = NDArray::contiguous(output, stream_id);
+  if (output.is_defined())
+    output = NDArray::contiguous(output, stream_id);
   shape.emplace_back(batch_size);
   shape.emplace_back(a.at(trans_left ? ndims + 1 : ndims));
   shape.emplace_back(b.at(trans_right ? ndims : ndims + 1));

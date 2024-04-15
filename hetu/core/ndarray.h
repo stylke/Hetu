@@ -787,7 +787,10 @@ class NDArrayDef : public shared_ptr_target {
            ((storage_size + 1) / 2) * DataType2Size(dtype()) : 
            storage_size * DataType2Size(dtype());
     */
-    return (storage_offset + numel()) * DataType2Size(dtype());
+    // return (storage_offset + numel()) * DataType2Size(dtype());
+    return (dtype() == kFloat4 || dtype() == kNFloat4) ?  
+           ((storage_offset + numel() + 1) / 2) * DataType2Size(dtype()) : 
+           (storage_offset + numel()) * DataType2Size(dtype());
   }
 
   int64_t storage_offset() const {

@@ -166,7 +166,9 @@ NCCLCommunicationGroupDef::~NCCLCommunicationGroupDef() {
 void NCCLCommunicationGroupDef::Broadcast(NDArray& data, int broadcaster) {
   HT_ASSERT_CUDA_DEVICE(data);
   void* buf = data->raw_data_ptr();
-  auto numel = data->numel();
+  auto numel = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+             ? (data->numel() + 1) / 2
+             : data->numel();
   auto nccl_dtype = to_NCCL_Datatype(data->dtype());
   int root = world_to_group_rank(broadcaster);
   {
@@ -187,7 +189,9 @@ void NCCLCommunicationGroupDef::AllReduce(const NDArray& input, NDArray& output,
   HT_ASSERT_EXCHANGABLE(input, output);
   void* send_buf = input->raw_data_ptr();
   void* recv_buf = output->raw_data_ptr();
-  auto numel = input->numel();
+  auto numel = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+             ? (input->numel() + 1) / 2
+             : input->numel();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
   auto nccl_red_op = to_NCCL_Op(red_type);
   {
@@ -257,7 +261,9 @@ void NCCLCommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
         for (size_t i = 0; i < inputs.size(); i++) {
           void* send_buf = inputs[i]->raw_data_ptr();
           void* recv_buf = outputs[i]->raw_data_ptr();
-          auto numel = inputs[i]->numel();
+          auto numel = (inputs[i]->dtype() == kNFloat4 || inputs[i]->dtype() == kFloat4)  
+                          ? (inputs[i]->numel() + 1) / 2
+                          : inputs[i]->numel();
           NCCL_CALL(ncclAllReduce(send_buf, recv_buf, numel, nccl_dtype,
                                   nccl_red_op, _comm, cuda_stream));
         }
@@ -317,7 +323,9 @@ void NCCLCommunicationGroupDef::Reduce(const NDArray& input, NDArray& output,
     HT_ASSERT_EXCHANGABLE(input, output);
     recv_buf = output->raw_data_ptr();
   }
-  auto numel = input->numel();
+  auto numel = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+             ? (input->numel() + 1) / 2
+             : input->numel();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
   auto nccl_red_op = to_NCCL_Op(red_type);
   {
@@ -344,6 +352,12 @@ void NCCLCommunicationGroupDef::AllGather(const NDArray& input,
     << "Invalid shapes for AllGather: "
     << "(send) " << input->shape() << " vs. "
     << "(recv) " << output->shape() << ".";
+  input_size = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+             ? (input_size + 1) / 2
+             : input_size;
+  output_size = (output->dtype() == kNFloat4 || output->dtype() == kFloat4)  
+              ? (output_size + 1) / 2
+              : output_size;
   void* send_buf = input->raw_data_ptr();
   void* recv_buf = output->raw_data_ptr();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
@@ -372,6 +386,12 @@ void NCCLCommunicationGroupDef::ReduceScatter(const NDArray& input,
     << "Invalid shapes for ReduceScatter: "
     << "(send) " << input->shape() << " vs. "
     << "(recv) " << output->shape() << ".";
+  input_size = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+             ? (input_size + 1) / 2
+             : input_size;
+  output_size = (output->dtype() == kNFloat4 || output->dtype() == kFloat4)  
+              ? (output_size + 1) / 2
+              : output_size;
   void* send_buf = input->raw_data_ptr();
   void* recv_buf = output->raw_data_ptr();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
@@ -405,6 +425,9 @@ void NCCLCommunicationGroupDef::Gather(const NDArray& input, NDArray& output,
       << "(send) " << input->shape() << " vs. "
       << "(recv) " << output->shape() << ".";
   }
+  input_size = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+              ? (input_size + 1) / 2
+              : input_size;
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
   {
     CUDAStream cuda_stream(_stream);
@@ -450,6 +473,9 @@ void NCCLCommunicationGroupDef::Scatter(const NDArray& input, NDArray& output,
       << "(send) " << input->shape() << " vs. "
       << "(recv) " << output->shape() << ".";
   }
+  output_size = (output->dtype() == kNFloat4 || output->dtype() == kFloat4)  
+              ? (output_size + 1) / 2
+              : output_size;
   auto nccl_dtype = to_NCCL_Datatype(output->dtype());
   {
     CUDAStream cuda_stream(_stream);
@@ -484,7 +510,9 @@ void NCCLCommunicationGroupDef::Send(const NDArray& data, int receiver) {
    (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
   int dst = world_to_group_rank(receiver);
   HT_ASSERT(dst != _rank) << "Cannot send to self.";
-  size_t size = data->numel();
+  size_t size = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+              ? (data->numel() + 1) / 2
+              : data->numel();
   if (size == 0)
     return;
   void* send_buf = data->raw_data_ptr();
@@ -509,7 +537,9 @@ void NCCLCommunicationGroupDef::Recv(NDArray& data, int sender) {
    (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
   int src = world_to_group_rank(sender);
   HT_ASSERT(src != _rank) << "Cannot receive from self.";
-  size_t size = data->numel();
+  size_t size = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+              ? (data->numel() + 1) / 2
+              : data->numel();
   if (size == 0)
     return;
   void* recv_buf = data->raw_data_ptr();
@@ -534,7 +564,9 @@ CommTask NCCLCommunicationGroupDef::ISend(const NDArray& data, int receiver) {
    (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
   int dst = world_to_group_rank(receiver);
   HT_ASSERT(dst != _rank) << "Cannot send to self.";
-  size_t size = data->numel();
+  size_t size = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+              ? (data->numel() + 1) / 2
+              : data->numel();
   if (size == 0)
     return CommTask();
   void* send_buf = data->raw_data_ptr();
@@ -562,7 +594,9 @@ CommTask NCCLCommunicationGroupDef::IRecv(NDArray& data, int sender) {
    (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
   int src = world_to_group_rank(sender);
   HT_ASSERT(src != _rank) << "Cannot receive from self.";
-  size_t size = data->numel();
+  size_t size = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+              ? (data->numel() + 1) / 2
+              : data->numel();
   if (size == 0)
     return CommTask();
   void* recv_buf = data->raw_data_ptr();
