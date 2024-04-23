@@ -17,6 +17,7 @@ struct DataPtr {
   size_t size;
   Device device;
   DataPtrId id; // id provided by the memory pool
+  bool is_new_malloc; // debug use
 
   DataPtr() = default;
   DataPtr(const DataPtr &a) = default;
@@ -24,8 +25,8 @@ struct DataPtr {
   // construct a search key
   DataPtr(size_t s, void* _ptr): size(s), ptr(_ptr) {}
 
-  DataPtr(void* _ptr, size_t _size, const Device& _device, DataPtrId _id)
-  : ptr(_ptr), size(_size), device(_device), id(_id) {}
+  DataPtr(void* _ptr, size_t _size, const Device& _device, DataPtrId _id, bool _is_new_malloc=false)
+  : ptr(_ptr), size(_size), device(_device), id(_id), is_new_malloc(_is_new_malloc) {}
 };
 
 using DataPtrList = std::vector<DataPtr>;

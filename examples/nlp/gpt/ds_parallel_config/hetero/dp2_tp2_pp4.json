@@ -314,8 +314,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -328,8 +328,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -341,8 +341,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -353,8 +353,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -367,8 +367,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -380,8 +380,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -397,8 +397,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -411,8 +411,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -424,8 +424,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -436,8 +436,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -450,8 +450,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -463,8 +463,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -480,8 +480,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -494,8 +494,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -507,8 +507,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -519,8 +519,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -533,8 +533,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -546,8 +546,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -563,8 +563,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -577,8 +577,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -590,8 +590,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -602,8 +602,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -616,8 +616,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -629,8 +629,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -646,8 +646,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -660,8 +660,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -673,8 +673,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -685,8 +685,8 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        4,
-                        5,
+                        0,
+                        1,
                         2,
                         3
                     ],
@@ -699,8 +699,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -712,8 +712,8 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            4,
-                            5,
+                            0,
+                            1,
                             2,
                             3
                         ],
@@ -731,8 +731,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -745,8 +745,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -758,8 +758,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -770,8 +770,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -784,8 +784,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -797,8 +797,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -814,8 +814,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -828,8 +828,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -841,8 +841,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -853,8 +853,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -867,8 +867,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -880,8 +880,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -897,8 +897,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -911,8 +911,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -924,8 +924,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -936,8 +936,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -950,8 +950,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -963,8 +963,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -980,8 +980,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -994,8 +994,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1007,8 +1007,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1019,8 +1019,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -1033,8 +1033,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1046,8 +1046,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1063,8 +1063,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -1077,8 +1077,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1090,8 +1090,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1102,8 +1102,8 @@
                     "device_group": [
                         4,
                         5,
-                        6,
-                        7
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -1116,8 +1116,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1129,8 +1129,8 @@
                         "device_group": [
                             4,
                             5,
-                            6,
-                            7
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1144,10 +1144,10 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                        4,
+                        5,
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -1158,10 +1158,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1171,10 +1171,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1183,10 +1183,10 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                        4,
+                        5,
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -1197,10 +1197,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1210,10 +1210,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1227,10 +1227,10 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                        4,
+                        5,
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -1241,10 +1241,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1254,10 +1254,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1266,10 +1266,10 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                        4,
+                        5,
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -1280,10 +1280,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1293,10 +1293,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1310,10 +1310,10 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                        4,
+                        5,
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -1324,10 +1324,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1337,10 +1337,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1349,10 +1349,10 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                        4,
+                        5,
+                        10,
+                        11
                     ],
                     "type": "variable"
                 },
@@ -1363,10 +1363,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     },
@@ -1376,10 +1376,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                            4,
+                            5,
+                            10,
+                            11
                         ],
                         "type": "variable"
                     }
@@ -1395,8 +1395,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1409,8 +1409,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1422,8 +1422,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1434,8 +1434,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1448,8 +1448,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1461,8 +1461,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1478,8 +1478,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1492,8 +1492,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1505,8 +1505,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1517,8 +1517,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1531,8 +1531,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1544,8 +1544,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1561,8 +1561,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1575,8 +1575,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1588,8 +1588,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1600,8 +1600,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1614,8 +1614,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1627,8 +1627,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1644,8 +1644,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1658,8 +1658,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1671,8 +1671,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1683,8 +1683,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1697,8 +1697,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1710,8 +1710,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1727,8 +1727,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1741,8 +1741,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1754,8 +1754,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1766,8 +1766,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1780,8 +1780,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1793,8 +1793,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1810,8 +1810,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1824,8 +1824,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1837,8 +1837,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1849,8 +1849,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1863,8 +1863,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1876,8 +1876,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1893,8 +1893,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1907,8 +1907,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1920,8 +1920,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1932,8 +1932,8 @@
                     "device_group": [
                         8,
                         9,
-                        10,
-                        11
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1946,8 +1946,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -1959,8 +1959,8 @@
                         "device_group": [
                             8,
                             9,
-                            10,
-                            11
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -1974,10 +1974,10 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        12,
-                        13,
-                        10,
-                        11
+                        8,
+                        9,
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -1988,10 +1988,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            12,
-                            13,
-                            10,
-                            11
+                            8,
+                            9,
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -2001,10 +2001,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            12,
-                            13,
-                            10,
-                            11
+                            8,
+                            9,
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }
@@ -2013,10 +2013,10 @@
                     "split": {},
                     "dup": 4,
                     "device_group": [
-                        12,
-                        13,
-                        10,
-                        11
+                        8,
+                        9,
+                        6,
+                        7
                     ],
                     "type": "variable"
                 },
@@ -2027,10 +2027,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            12,
-                            13,
-                            10,
-                            11
+                            8,
+                            9,
+                            6,
+                            7
                         ],
                         "type": "variable"
                     },
@@ -2040,10 +2040,10 @@
                         },
                         "dup": 2,
                         "device_group": [
-                            12,
-                            13,
-                            10,
-                            11
+                            8,
+                            9,
+                            6,
+                            7
                         ],
                         "type": "variable"
                     }

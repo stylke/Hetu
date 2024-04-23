@@ -18,6 +18,7 @@ class NDArrayStorage {
     if (_in_mempool) {
       FreeToMemoryPool(_ptr);
     } else {
+      // deprecated: 这一部分使用mempool的borrow data
       // 内存由外界维护
       // 例如ncclMemAlloc和ncclMemFree
       return;
@@ -46,6 +47,10 @@ class NDArrayStorage {
 
   inline DataPtr data_ptr() const {
     return _ptr;
+  }
+
+  inline bool is_new_malloc() const {
+    return _ptr.is_new_malloc;
   }
 
  protected:

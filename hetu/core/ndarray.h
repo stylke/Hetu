@@ -671,6 +671,10 @@ class NDArrayDef : public shared_ptr_target {
     return _meta.device.is_cuda();
   }
 
+  bool is_new_malloc() const {
+    return _storage->is_new_malloc();
+  }
+
   const HTShape& shape() const {
     return _meta.shape;
   }

@@ -1,5 +1,6 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/switch_exec_graph.h"
+#include "hetu/graph/profiler.h"
 #include "hetu/graph/ops/data_transfer.h"
 #include "hetu/graph/ops/group.h"
 #include "hetu/graph/ops/Split.h"
@@ -13,7 +14,7 @@
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/core/symbol.h"
-#include "nccl.h"
+#include <nccl.h>
 #include <ctime>
 #include <iostream>
 #include <fstream>
@@ -1347,23 +1348,65 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
   }
 }
 
+void ExecutableGraph::GetExecEnvs() {
+  char* env = std::getenv("HETU_STRAGGLER");
+  if (env != nullptr) {
+    if (std::string(env) == "ANALYSIS") {
+      _is_analysis_straggler = true;
+    } else {
+      HT_RUNTIME_ERROR << "Unknown hetu straggler level: " + std::string(env);
+    }
+  } else {
+    // 默认不分析straggler
+    _is_analysis_straggler = false;
+  }
+
+  env = std::getenv("HETU_STRAGGLER_LOG_FILE");
+  if (env != nullptr) {
+    _straggler_log_file_path = std::string(env);
+  } else {
+    // 默认不对straggler打log
+    _straggler_log_file_path = "";
+  }
+
+  env = std::getenv("HETU_MEMORY_PROFILE");
+  if (env != nullptr) {
+    if (std::string(env) == "MICRO_BATCH") {
+      _memory_profile_level = MEMORY_PROFILE_LEVEL::MICRO_BATCH;
+      _all_micro_batches_memory_info.clear();
+    } else if (std::string(env) == "INFO") {
+      _memory_profile_level = MEMORY_PROFILE_LEVEL::INFO;
+    } else if (std::string(env) == "WARN") {
+      _memory_profile_level = MEMORY_PROFILE_LEVEL::WARN;
+    } else {
+      HT_RUNTIME_ERROR << "Unknown hetu memory profile level: " + std::string(env);
+    }
+  } else {
+    // 默认不profile
+    _memory_profile_level = MEMORY_PROFILE_LEVEL::WARN;
+  }
+
+  env = std::getenv("HETU_MEMORY_LOG_FILE");
+  if (env != nullptr) {
+    _memory_log_file_path = std::string(env);
+  } else {
+    // 默认不对memory打log
+    _memory_log_file_path = "";
+  }
+}
+
 NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
                                  const FeedDict& feed_dict, const int num_micro_batches,
                                  const int cur_strategy_id, RunLevel run_level, const double grad_scale) {
   
-  bool is_analysis_straggler = false;
-  char* env = std::getenv("HETU_STRAGGLER");
-  if (env != nullptr) {
-    if (std::string(env) == "ANALYSIS") {
-      is_analysis_straggler = true;
-    }
-  }
+  GetExecEnvs();
   TIK(run);
   _run_level = run_level;
   _grad_scale = grad_scale;
-  SwitchExecGraph::ProfileMemory(name() + " run begin");
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
+  if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+    GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run begin");
 
   // TODO: For each pair of `fetches` and `feed_dict`,
   // deduce the optimal execution plan, and cache it.
@@ -1819,9 +1862,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[begin]";
   // alloc origin/transfer params and pre-compute, alloc grads
-  // SwitchExecGraph::ProfileMemory("exec graph before alloc buffers");
   AllocRuntimeBuffer(runtime_ctx_list);
-  // SwitchExecGraph::ProfileMemory("exec graph after alloc buffers");
   HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[end]";
 
   // ********************** Run Level Check Point **********************
@@ -1829,7 +1870,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     SynchronizeAllStreams();
     // memory debug use
     // hetu::impl::comm::EmptyNCCLCache();
-    SwitchExecGraph::ProfileMemory(name() + " run ALLOC end");
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run ALLOC end");
     return {};
   }
   // ********************** Run Level Check Point **********************
@@ -1888,6 +1930,15 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     } else {
       HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward begin]";
     }
+    // micro batch i: profile memory begin
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::MICRO_BATCH) {
+      auto micro_batch_memory_info = std::make_shared<MicroBatchMemoryInfo>();
+      micro_batch_memory_info->is_forward = is_forward;
+      micro_batch_memory_info->stage_id = stage_id;
+      micro_batch_memory_info->micro_batch_id = micro_batch_id;
+      micro_batch_memory_info->begin_memory_info = GetCUDAProfiler(local_device)->GetCurrMemoryInfo();
+      _all_micro_batches_memory_info.emplace_back(micro_batch_memory_info);
+    }
     // micro batch i: execute fw/bw
     if (is_forward) {
       ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx,
@@ -1898,6 +1949,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       ComputeFunc(micro_batch_id, _execute_plan.local_bw_topo, runtime_ctx, 
                   tensor2data, tensor2degrees, grad_accumulation, grad_accumulation_finished, 
                   feed_dict, fetches, fetch_indices, is_continuous_p2p);
+    }
+    // micro batch i: profile memory end
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::MICRO_BATCH) {
+      _all_micro_batches_memory_info.back()->end_memory_info = GetCUDAProfiler(local_device)->GetCurrMemoryInfo();
+      // HT_LOG_INFO << *_all_micro_batches_memory_info.back();
     }
     if (is_forward) {
       HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward end]";
@@ -1974,7 +2030,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // 已经在ComputeFunc中将grad加到了accumulate_grad_buffer中
     }
     _p2p_events.clear();
-    SwitchExecGraph::ProfileMemory(name() + " run GRAD end");
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run GRAD end");
     return {};
   }
   // 说明是RunLevel::UPDATE了
@@ -2064,12 +2121,13 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         << "current grad buffer should be allocated in RunLevel::UPDATE";
       // _current_grad_buffer->Free();
     }
-    SwitchExecGraph::ProfileMemory(name() + " run UPDATE end");
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run UPDATE end");
   }
   // ********************** Run Level Check Point **********************
 
   bool is_analysis_perf = false;
-  if (is_analysis_perf || is_analysis_straggler) {
+  if (is_analysis_perf || _is_analysis_straggler) {
     auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
     comm_group->Barrier(true);
   }
@@ -2077,8 +2135,30 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)
                << " ms";
   
+  // get all micro batches memory consumption
+  if (_memory_profile_level == MEMORY_PROFILE_LEVEL::MICRO_BATCH && _memory_log_file_path != "") {
+    std::ofstream file;
+    std::string suffix = "_" + std::to_string(hetu::impl::comm::GetWorldRank()) + ".txt";
+    file.open(_memory_log_file_path + suffix, std::ios_base::app);
+    if (file.is_open()) {
+      file << "[" << std::endl;
+    } else {
+      HT_RUNTIME_ERROR << "Error opening the file";
+    }
+    auto size = _all_micro_batches_memory_info.size();
+    for (size_t i = 0; i < size; i++) {
+      if (i != size - 1) {
+        file << *_all_micro_batches_memory_info[i] << "," << std::endl;
+      } else {
+        file << *_all_micro_batches_memory_info[i] << std::endl;
+      }
+    }
+    file << "]";
+    file.close();
+  }
+
   // get op execute time, sort and analysis
-  if (is_analysis_perf || is_analysis_straggler) {
+  if (is_analysis_perf || _is_analysis_straggler) {
     TIK(free);
     runtime_ctx_list.clear();
     tensor2data_list.clear();
@@ -2120,6 +2200,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     double pp_p2p_time = 0;
     double tp_collective_time = 0;
     double dp_grad_reduce_time = 0;
+    double optimizer_time = 0;
     double blocking_time = 0;
     double other_time = 0;
     std::ostringstream out;
@@ -2151,6 +2232,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           }
         } else if (op->stream_index() == kBlockingStream) {
           blocking_time += op_time.second * 1.0 / 1e6;
+        } else if (op->stream_index() == kOptimizerStream) {
+          optimizer_time += op_time.second * 1.0 / 1e6;
         } else {
           other_time += op_time.second * 1.0 / 1e6;
         }        
@@ -2167,11 +2250,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "tp collective time: " << tp_collective_time << " ms, "
                   << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
                   << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                  << "optimizer time: " << optimizer_time << " ms, "
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms" << std::endl
                   << out.str();
     }
-    if (is_analysis_straggler) {
+    if (_is_analysis_straggler) {
       HT_LOG_WARN << local_device << ": " 
                   << "\ntotal run time: " << COST_MSEC(run) << " ms, "
                   << "compute time: " << compute_time << " ms, "
@@ -2179,12 +2263,13 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "tp collective time: " << tp_collective_time << " ms, "
                   << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
                   << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                  << "optimizer time: " << optimizer_time << " ms, "
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms" << std::endl;
-      char* straggler_log_file = std::getenv("HETU_STRAGGLER_LOG_FILE");
-      if (straggler_log_file != nullptr && hetu::impl::comm::GetWorldRank() == 0) {
+      if (_straggler_log_file_path != "") {
         std::ofstream file;
-        file.open(straggler_log_file, std::ios_base::app);
+        std::string suffix = "_" + std::to_string(hetu::impl::comm::GetWorldRank()) + ".txt";
+        file.open(_straggler_log_file_path + suffix, std::ios_base::app);
         if (file.is_open()) {
           file << "total run time: " << COST_MSEC(run) << " ms" << std::endl;
           file << "compute time: " << compute_time << " ms" << std::endl;

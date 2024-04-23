@@ -12,6 +12,7 @@ import argparse
 import json
 import socket
 import pynvml
+import ast
 from queue import Queue
 
 local_device = None
@@ -231,9 +232,17 @@ def pretrain(args):
             f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
         num_micro_batches = global_batch_size // mbs_times_dp
         
-        # heterogenous pipeline test case
+        # heterogenous pipeline 
         if args.hetero_data:
-            hetero_pipeline_num = all_devices.get_index(local_device) % (dup_group_num * args.hetero_stage_gpus) // args.hetero_stage_gpus
+            rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
+            curr_rank_id = -1
+            for rank_id, device_id in rank_to_device_mapping.items():
+                if device_id == all_devices.get_index(local_device):
+                    if curr_rank_id != -1:
+                        assert False, "rank_to_device_mapping has duplicate keys"
+                    curr_rank_id = rank_id
+            assert curr_rank_id != -1, f"can't find device {all_devices.get_index(local_device)} in rank_to_device_mapping"
+            hetero_pipeline_num = curr_rank_id % (dup_group_num * args.hetero_stage_gpus) // args.hetero_stage_gpus
             # adjust micro_batch_size
             '''
             batch_ratio = 8
@@ -243,12 +252,15 @@ def pretrain(args):
                 micro_batch_size = global_batch_size // num_micro_batches - int(global_batch_size // num_micro_batches / batch_ratio)
             '''
             # adjust num_micro_batches
+            '''
             normal_micro_batches = args.normal_micro_batches
             if hetero_pipeline_num == 0:
                 num_micro_batches = global_batch_size // micro_batch_size - normal_micro_batches * (dp_size - 1)
                 assert num_micro_batches > 0, f"straggler num_micro_batches should > 0, but find it is {num_micro_batches}"
             else:
                 num_micro_batches = normal_micro_batches
+            '''
+            num_micro_batches = ast.literal_eval(args.micro_batch_num_list)[hetero_pipeline_num]
             # re-assign
             gbs_per_dp = micro_batch_size * num_micro_batches
             mbs_times_dp = micro_batch_size * dp_size
@@ -300,8 +312,10 @@ def pretrain(args):
                 }
             # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
             start_time = time.time()
-            if args.run_straggler_experiment and step == 10:
+            if args.run_straggler_experiment and step == 5:
                 os.environ['HETU_STRAGGLER_LOG_FILE'] = args.straggler_file
+            if args.run_memory_experiment and step == 0:
+                os.environ['HETU_MEMORY_LOG_FILE'] = args.memory_file
             try:
                 results = train_op.graph.run(loss_mean, 
                                                 [loss_mean, train_op], 
@@ -313,8 +327,11 @@ def pretrain(args):
             except RuntimeError as e:
                 print(e)
                 os.killpg(0, signal.SIGTERM)
-            if 'HETU_STRAGGLER_LOG_FILE' in os.environ:
-                del os.environ['HETU_STRAGGLER_LOG_FILE'] 
+            if (args.run_straggler_experiment and step == 5) or (args.run_memory_experiment and step == 0):
+                if 'HETU_MEMORY_LOG_FILE' in os.environ:
+                    del os.environ['HETU_MEMORY_LOG_FILE'] 
+                if 'HETU_STRAGGLER_LOG_FILE' in os.environ:
+                    del os.environ['HETU_STRAGGLER_LOG_FILE'] 
                 return consumed_samples
             end_time = time.time()
             consumed_samples += global_batch_size
@@ -374,10 +391,16 @@ if __name__ == '__main__':
         "--hetero_data", action="store_true", help="use heterogenous data for each heterogenous pipeline."
     )
     parser.add_argument(
-        "--normal_micro_batches", type=int, default=2, help='num of micro batches for a normal pipeline.'
+        "--micro_batch_num_list", type=str, help='micro batch num list.'
+    )
+    parser.add_argument(
+        "--rank_to_device_mapping", type=str, help='rank to device mapping.'
     )
     parser.add_argument(
         "--run_straggler_experiment", action="store_true", help="run heterogenous pipeline experiment."
+    )
+    parser.add_argument(
+        "--run_memory_experiment", action="store_true", help="run memory experiment."
     )
     parser.add_argument(
         "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
@@ -389,7 +412,10 @@ if __name__ == '__main__':
         "--ds_parallel_config", default="ds_parallel_config/dp2_tp2_pp2.json", type=str, help="ds parallel config json file"
     )
     parser.add_argument(
-        "--straggler_file", default="experiments/straggler/result.txt", type=str, help="straggler experiment result file"
+        "--straggler_file", default="", type=str, help="straggler experiment result file"
+    )
+    parser.add_argument(
+        "--memory_file", default="", type=str, help="memory experiment result file"
     )
     parser.add_argument(
         "--num_strategy", type=int, default=1, help="multi ds num"

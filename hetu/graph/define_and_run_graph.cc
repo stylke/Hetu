@@ -856,7 +856,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     exec_feed_dict[tensor_to_exec_tensor_mapping[kv.first]->id()] = kv.second;
   }
   // 验证mempool是否能释放干净
-  // SwitchExecGraph::ProfileMemory(name() + " before empty cache");
+  // GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " before empty cache");
   // hetu::impl::ProfileAfterEmptyAllCUDACache(local_device);
   HT_LOG_DEBUG << exec_graph->name() << " start running..." ;
   Graph::push_graph_ctx(exec_graph->id()); // 防止exec graph run内部MakeOp时忘记加
@@ -868,7 +868,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   exec_graph->_switch_grad_events.clear();
   // 验证mempool是否能释放干净
   // hetu::impl::ProfileAfterEmptyAllCUDACache(local_device);
-  // SwitchExecGraph::ProfileMemory(name() + " after empty cache");
+  // GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " after empty cache");
   return ret;
 }
 

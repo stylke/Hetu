@@ -83,6 +83,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
     auto& reduce_scatter_impl = reinterpret_cast<ReduceScatterOpImpl&>(reduce_scatter_op->body());
     auto& partial_grad = reduce_scatter_op->input(0);
     DeviceGroup comm_group = reduce_scatter_impl.comm_group();
+    // HT_LOG_WARN << op << " comm group: " << comm_group;
 
     auto local_device_index = op->placement_group().get_index(op->placement());
     auto scatter_num = comm_group.num_devices();

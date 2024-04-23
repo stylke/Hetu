@@ -1,13 +1,14 @@
 import argparse
 import json
 import os
+import ast
 
-def generate_gpt_3d_config(hetero_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+def generate_gpt_3d_config(rank_to_device_mapping, hetero_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
     if dp == 1:
         zero = False
     num_devices_per_stage = num_gpus // pp
-    input_device_group = list(range(0, num_devices_per_stage))
-    output_device_group = list(range(num_gpus - num_devices_per_stage, num_gpus))
+    input_device_group = [rank_to_device_mapping[device] for device in range(0, num_devices_per_stage)]
+    output_device_group = [rank_to_device_mapping[device] for device in range(num_gpus - num_devices_per_stage, num_gpus)]
 
     ds_parallel_config = {
         'zero': zero,
@@ -65,9 +66,9 @@ def generate_gpt_3d_config(hetero_layers, num_layers=32, num_gpus=8, dp=2, tp=2,
                 if block_id < cnt:
                     break
                 device_group_num += 1
-            devices = list(range(device_group_num * num_devices_per_stage + tp * pipeline_id, 
-                                 device_group_num * num_devices_per_stage + tp * (pipeline_id + 1)))
-            hybrid_device_group += devices
+            devices = range(device_group_num * num_devices_per_stage + tp * pipeline_id, 
+                            device_group_num * num_devices_per_stage + tp * (pipeline_id + 1))
+            hybrid_device_group += [rank_to_device_mapping[device] for device in devices]
         blocks_json = ds_parallel_config['gpt']['blocks']
         blocks_json[f'blocks{block_id}'] = {
             'range': [block_id,],
@@ -118,7 +119,7 @@ def generate_gpt_3d_config(hetero_layers, num_layers=32, num_gpus=8, dp=2, tp=2,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--model_size', type=str, default='7b', help='size of gpt, 7b or 13b.'
+        '--num_layers', type=int, default=32, help='size of gpt, 7b is 32 and 13b is 40.'
     )
     parser.add_argument(
         '--num_gpus', type=int, default=8, help='num of gpus.'
@@ -136,18 +137,16 @@ if __name__ == '__main__':
         '--hetero_layers', type=str, help='heterogenous layers list.'
     )
     parser.add_argument(
+        '--rank_to_device_mapping', type=str, default="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}", help='device to rank mapping.'
+    )
+    parser.add_argument(
         '--zero', action='store_true', help='use zero or not.'
     )
     # parser.add_argument(
     #     '--save_folder', type=str, default='./'
     # )
     args = parser.parse_args()
-    if args.model_size == '7b':
-        num_layers = 32
-    elif args.model_size == '13b':
-        num_layers = 40
-    else:
-        assert 'now only support 7b or 13b!'
+    num_layers = args.num_layers
         
     hetero_layers = args.hetero_layers.split(",")
     assert len(hetero_layers) == args.dp * args.pp, "size of heterogenous layers list should be equal to dp * pp"
@@ -157,9 +156,8 @@ if __name__ == '__main__':
         
     assert args.dp * args.tp * args.pp == args.num_gpus, \
             f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
-    ds_parallel_config = generate_gpt_3d_config(hetero_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
-    # save_folder = f'./hetero'
-    save_folder = '/home/pkuhetu/lhy/multi_switch/examples/nlp/gpt/ds_parallel_config/hetero'
+    ds_parallel_config = generate_gpt_3d_config(ast.literal_eval(args.rank_to_device_mapping), hetero_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    save_folder = './ds_parallel_config/hetero'
     file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)

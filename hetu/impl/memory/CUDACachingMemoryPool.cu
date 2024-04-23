@@ -187,7 +187,7 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
         // Wait until we can release some cached ptrs (maybe all cached ptrs) and accomplish the allocation.
         || WaitUntilAlloc(ptr, malloc_size)) {
       // ------ create new data ptr place 1 ------ 
-      data_ptr = DataPtr{ptr, malloc_size, device(), next_id()};
+      data_ptr = DataPtr{ptr, malloc_size, device(), next_id(), true};
       // mempool debug use    
       // HT_LOG_INFO << "[Create] cudaMalloc new " << data_ptr;
       _reserved += malloc_size;
@@ -468,7 +468,9 @@ void CUDACachingMemoryPool::ReleaseAll() {
 bool CUDACachingMemoryPool::ReleaseAndAlloc(void*& ptr, size_t request_size) {
   // We only release oversize pointer. If max_split_size_mb is not specified,
   // no pointers will be regarded as oversize.   
-  auto& lookup_table = _available_for_all_streams->table;                                          
+  auto& lookup_table = _available_for_all_streams->table;               
+  if (lookup_table.empty())
+    return false;                           
   DataPtr tmp_key = {request_size > max_split_size ? request_size : max_split_size, nullptr};
   // Find if there are any ptr larger than request_size
   auto it = lookup_table.lower_bound(tmp_key);

@@ -1,17 +1,20 @@
 #!/bin/bash
 
-file="experiments/straggler/hetero_layer.txt"
-dir=$(dirname "$file")
-if [ ! -d "$dir" ]; then
-    mkdir -p "$dir"
-fi
-if [ ! -f "$file" ]; then
-    touch "$file"
-fi
-echo -n > "$file"
+file="experiments/straggler/dp4tp2pp2_bigger/hetero_layer"
+
+for i in {0..15}; do
+    dir=$(dirname "${file}_${i}.txt")
+    if [ ! -d "$dir" ]; then
+        mkdir -p "$dir"
+    fi
+    if [ ! -f "${file}_${i}.txt" ]; then
+        touch "${file}_${i}.txt"
+    fi
+    echo -n > "${file}_${i}.txt"
+done
 
 NUM_LAYERS=${1:-32}
-HIDDEN_SIZE=${2:-2048}
+HIDDEN_SIZE=${2:-4096}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-256}
@@ -51,7 +54,9 @@ for i in $(seq 1 $((NUM_LAYERS - 1))); do
         --hetero_layers $i,$((NUM_LAYERS - i)),16,16,16,16,16,16
     # 运行
     echo "split straggler layer $i begin..."
-    echo -e "\nsplit straggler layer $i:" >> "$file"
+    for j in {0..15}; do
+        echo -e "\nsplit straggler layer $i:" >> "${file}_${j}.txt"
+    done
     mpirun --allow-run-as-root -np 16 \
         -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
         -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
@@ -82,7 +87,7 @@ for i in $(seq 1 $((NUM_LAYERS - 1))); do
             --use_flash_attn \
             --use_two_node \
             --run_straggler_experiment \
-            --hetero_stage_gpus 2 \
+            --hetero_stage_gpus $TP \
             --hetero_pipeline \
             --straggler_file $file
 done

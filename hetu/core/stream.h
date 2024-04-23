@@ -15,6 +15,7 @@ constexpr StreamIndex kD2HStream = 4;
 constexpr StreamIndex kP2PStream = 5;
 constexpr StreamIndex kCollectiveStream = 6;
 constexpr StreamIndex kSwitchCollectiveStream = 7;
+constexpr StreamIndex kOptimizerStream = 8;
 constexpr StreamIndex kJoinStream = HT_NUM_STREAMS_PER_DEVICE - 1;
 
 using PackedStreamId = uint16_t;

@@ -174,10 +174,19 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
             op->instantiation_ctx().stream().Sync();
           }
           */
-          outputs.push_back(NDArray::empty(output_shape,
-                            op->instantiation_ctx().placement,
-                            op->output(i)->dtype(),
-                            op->instantiation_ctx().stream_index));
+          auto output = NDArray::empty(output_shape,
+                                       op->instantiation_ctx().placement,
+                                       op->output(i)->dtype(),
+                                       op->instantiation_ctx().stream_index);
+          outputs.push_back(output);
+          // mempool debug use
+          // see whether it can reuse
+          /*
+          if (output->is_new_malloc()) {
+            HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
+              << " malloc new output " << i << " shape = " << output_shape;
+          }
+          */
         }
       }
     }

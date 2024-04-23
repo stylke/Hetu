@@ -493,9 +493,6 @@ class SwitchExecGraph {
                      const Tensor& comm_input, const Tensor& after_param);
 
     void ProfileRunningDetails();
-    void ProfileNvlinkStart();
-    void ProfileNvlinkEnd();
-    static void ProfileMemory(const std::string& prefix);
 
   protected:
     // basic attributes
@@ -535,10 +532,6 @@ class SwitchExecGraph {
     // profile related
     SWITCH_PROFILE_LEVEL _profile_level = SWITCH_PROFILE_LEVEL::INFO; // profile的粒度（开启后会进行同步，因此端到端速度可能会变慢）
     Tensor2StringMap _info_mapping; // 记录tensor到相应param slice名称的映射（只针对BatchedISendIRecvOp的send部分的tensor）
-    unsigned int _device_count = 0; // 有多少个GPU
-    std::vector<unsigned int> _nvlink_counts; // 每个GPU有多少条NVLink
-    std::vector<std::vector<unsigned long long>> _nvlink_txs; // 记录执行通信代码片段前每个GPU每条NVLink的Raw Tx
-    std::vector<std::vector<unsigned long long>> _nvlink_rxs; // 记录执行通信代码片段前每个GPU每条NVLink的Raw Rx
 };
 
 } // namespace graph

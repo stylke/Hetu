@@ -446,8 +446,8 @@ class OpDef : public shared_ptr_target {
     instantiation_ctx().start[micro_batch_id]->Record(stream());
     auto rets = _body->Compute(get_self(), inputs, runtime_ctx);
     instantiation_ctx().stop[micro_batch_id]->Record(stream());
-    // precision debug
     // stream().Sync();
+    // precision debug
     /*
     NDArrayList ret_sums;
     for (auto& ret : rets) {
@@ -455,6 +455,15 @@ class OpDef : public shared_ptr_target {
     }
     HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
       << ", the result is " << ret_sums;
+    */
+    // correctness debug
+    /*
+    HTShapeList ret_shapes;
+    for (auto& ret : rets) {
+      ret_shapes.push_back(ret->shape());
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
+      << ", the return shapes are " << ret_shapes;
     */
     // for some ops that rely on symbolic shape
     auto output_size = num_outputs();
@@ -960,6 +969,8 @@ inline StreamIndex get_suggested_stream_index(const Operator& op) {
     return kP2PStream;
   } else if (is_all_to_all_op(op)) {
     return kCollectiveStream;
+  } else if (is_optimizer_update_op(op)) {
+    return kOptimizerStream;
   } else {
     return kComputingStream;
   }

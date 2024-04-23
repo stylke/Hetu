@@ -2,6 +2,7 @@
 #include "hetu/graph/graph.h"
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/switch_exec_graph.h"
+#include "hetu/graph/profiler.h"
 #include "hetu/graph/distributed_states.h"
 #include "hetu/graph/operator.h"
 #include "hetu/graph/ops/Split.h"
@@ -18,7 +19,6 @@
 #include "hetu/core/ndarray_meta.h"
 #include "hetu/core/stream.h"
 #include "hetu/common/timing.h"
-#include <nvml.h>
 #include <nccl.h>
 #include <iostream>
 #include <fstream>
@@ -1328,7 +1328,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   }
 
   if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
-    ProfileMemory("switch exec graph before warm up");
+    GetCUDAProfiler(local_device)->PrintCurrMemoryInfo("switch exec graph before warm up");
   }
   // 热启动nccl的all-to-all通信
   // warm up the comm group
@@ -1365,10 +1365,10 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
     mpi_group->Barrier(true);
     if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
-      ProfileMemory("switch exec graph begin");
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo("switch exec graph begin");
     }
     if (_profile_level <= SWITCH_PROFILE_LEVEL::NVLINK) {
-      ProfileNvlinkStart();
+      GetCUDAProfiler(local_device)->PrintNvlinkStart();
     }
     mpi_group->Barrier(true);
   }
@@ -1432,7 +1432,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     }
   }
   if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
-    ProfileMemory("switch exec graph after alloc send buffers");
+    GetCUDAProfiler(local_device)->PrintCurrMemoryInfo("switch exec graph after alloc send buffers");
   }
   // 运行topo
   for (auto& op_ref : _comm_topo) {
@@ -1618,10 +1618,10 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       }
     }
     if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
-      ProfileMemory("switch exec graph end");
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo("switch exec graph end");
     }
     if (_profile_level <= SWITCH_PROFILE_LEVEL::NVLINK) {
-      ProfileNvlinkEnd();
+      GetCUDAProfiler(local_device)->PrintNvlinkEnd();
     }
     ProfileRunningDetails();
   }
@@ -1769,173 +1769,6 @@ void SwitchExecGraph::ProfileRunningDetails() {
     << "---------------------------------------------" << std::endl
     << recv_info_output.str()
     << "*********************************************";
-}
-
-void SwitchExecGraph::ProfileNvlinkStart() {
-
-  // 只需要一个机器profile即可
-  if (hetu::impl::comm::GetWorldRank() != 0) {
-    return;
-  }
-  HT_LOG_INFO << "********* Profile NVLink Start *********";
-
-  // 初始化NVML库
-  nvmlReturn_t result = nvmlInit();
-  if (result != NVML_SUCCESS) {
-    HT_RUNTIME_ERROR << "Failed to initialize NVML: " << nvmlErrorString(result);
-    return;
-  }
-
-  // 获取GPU数量
-  result = nvmlDeviceGetCount(&_device_count);
-  if (result != NVML_SUCCESS) {
-    HT_RUNTIME_ERROR << "Failed to query device count: " << nvmlErrorString(result);
-    return;
-  }
-  _nvlink_counts.reserve(_device_count);
-  _nvlink_txs.reserve(_device_count);
-  _nvlink_rxs.reserve(_device_count);
-
-  for (unsigned int i = 0; i < _device_count; ++i) {
-    // Initialization
-    _nvlink_counts.emplace_back(0);
-    _nvlink_txs.emplace_back();
-    _nvlink_rxs.emplace_back();
-
-    // Get current device
-    nvmlDevice_t device;
-    result = nvmlDeviceGetHandleByIndex(i, &device);
-    if (result != NVML_SUCCESS) {
-      HT_RUNTIME_ERROR << "Failed to get handle for device " << i << ": " << nvmlErrorString(result);
-      return;
-    }
-
-    // Check the NVLink status for each possible link
-    for (unsigned int link = 0; link < NVML_NVLINK_MAX_LINKS; ++link) {
-      nvmlEnableState_t is_active;
-      result = nvmlDeviceGetNvLinkState(device, link, &is_active);
-      if (NVML_SUCCESS == result && is_active == NVML_FEATURE_ENABLED) {
-        _nvlink_counts[i]++;
-      }
-    }
-    HT_LOG_INFO << "GPU " << i << " has " << _nvlink_counts[i] << " NVLink connections active";
-    if (_nvlink_counts[i] == 0) {
-      continue;
-    }
-    _nvlink_txs.reserve(_nvlink_counts[i]);
-    _nvlink_rxs.reserve(_nvlink_counts[i]);
-
-    // 创建NVML字段值数组
-    std::vector<nvmlFieldValue_t> field_values(2 * _nvlink_counts[i]);
-    for (unsigned int link = 0; link < _nvlink_counts[i]; ++link) {
-      field_values[2 * link].fieldId = NVML_FI_DEV_NVLINK_THROUGHPUT_DATA_TX;
-      field_values[2 * link].scopeId = link; // 设置scopeId为linkId
-      field_values[2 * link + 1].fieldId = NVML_FI_DEV_NVLINK_THROUGHPUT_DATA_RX;
-      field_values[2 * link + 1].scopeId = link; // 设置scopeId为linkId
-    }
-
-    // 记录执行nccl通信代码片段前的NVLink Raw Tx和Raw Rx
-    result = nvmlDeviceGetFieldValues(device, field_values.size(), field_values.data());
-    if (result != NVML_SUCCESS) {
-      HT_RUNTIME_ERROR << "Failed to get utilization control: " << nvmlErrorString(result);
-      return;
-    }
-    for (unsigned int link = 0; link < _nvlink_counts[i]; ++link) {
-      _nvlink_txs[i].emplace_back(field_values[2 * link].value.ullVal);
-      _nvlink_rxs[i].emplace_back(field_values[2 * link + 1].value.ullVal);
-    }
-  }
-}
-
-
-void SwitchExecGraph::ProfileNvlinkEnd() {
-
-  // 只需要一个机器profile即可
-  // 如果没有NVLink则不再profile
-  if (hetu::impl::comm::GetWorldRank() != 0) {
-    return;
-  }
-
-  nvmlReturn_t result;
-  for (unsigned int i = 0; i < _device_count; ++i) {
-    if (_nvlink_counts[i] == 0) {
-      continue;
-    }
-    // Get current device
-    nvmlDevice_t device;
-    result = nvmlDeviceGetHandleByIndex(i, &device);
-    if (result != NVML_SUCCESS) {
-      HT_RUNTIME_ERROR << "Failed to get handle for device " << i << ": " << nvmlErrorString(result);
-      return;
-    }
-
-    // 创建NVML字段值数组
-    std::vector<nvmlFieldValue_t> field_values(2 * _nvlink_counts[i]);
-    for (unsigned int link = 0; link < _nvlink_counts[i]; ++link) {
-      field_values[2 * link].fieldId = NVML_FI_DEV_NVLINK_THROUGHPUT_DATA_TX;
-      field_values[2 * link].scopeId = link; // 设置scopeId为linkId
-      field_values[2 * link + 1].fieldId = NVML_FI_DEV_NVLINK_THROUGHPUT_DATA_RX;
-      field_values[2 * link + 1].scopeId = link; // 设置scopeId为linkId
-    }
-
-    // 获取执行nccl通信代码片段后的NVLink Raw Tx和Raw Rx
-    result = nvmlDeviceGetFieldValues(device, field_values.size(), field_values.data());
-    if (result != NVML_SUCCESS) {
-      HT_RUNTIME_ERROR << "Failed to get utilization control: " << nvmlErrorString(result);
-      return;
-    }
-    for (unsigned int link = 0; link < _nvlink_counts[i]; ++link) {
-      _nvlink_txs[i][link] = field_values[2 * link].value.ullVal - _nvlink_txs[i][link];
-      _nvlink_rxs[i][link] = field_values[2 * link + 1].value.ullVal - _nvlink_rxs[i][link];
-      // 打印NVLink Raw Tx和Raw Rx的变化量
-      HT_LOG_INFO << "GPU " << i << " NVLink " << link << " Data Tx Delta: " << _nvlink_txs[i][link] << " KiB";
-      HT_LOG_INFO << "GPU " << i << " NVLink " << link << " Data Rx Delta: " << _nvlink_rxs[i][link] << " KiB";
-    }
-  }
-
-  // 清理NVML资源
-  result = nvmlShutdown();
-  if (result != NVML_SUCCESS) {
-    HT_RUNTIME_ERROR << "Failed to shutdown NVML: " << nvmlErrorString(result);
-    return;
-  }
-   
-  HT_LOG_INFO << "********* Profile NVLink End *********";
-}
-
-void SwitchExecGraph::ProfileMemory(const std::string& prefix) {
-  // 初始化NVML库
-  nvmlReturn_t result = nvmlInit();
-  if (result != NVML_SUCCESS) {
-    HT_RUNTIME_ERROR << "Failed to initialize NVML: " << nvmlErrorString(result);
-    return;
-  }
-
-  nvmlDevice_t device;
-  auto device_index = hetu::impl::comm::GetLocalDevice().index();
-  result = nvmlDeviceGetHandleByIndex(device_index, &device);
-  if (result != NVML_SUCCESS) {
-    HT_RUNTIME_ERROR << "Failed to get device handle: " << nvmlErrorString(result);
-    return;
-  }
-
-  nvmlMemory_t memory;
-  result = nvmlDeviceGetMemoryInfo(device, &memory);
-  if (result != NVML_SUCCESS) {
-    HT_RUNTIME_ERROR << "Failed to get memory info: " << nvmlErrorString(result);
-    return;
-  }
-        
-  HT_LOG_INFO << "[" << prefix << "] Device " << hetu::impl::comm::GetWorldRank() << ": ";
-  // HT_LOG_INFO << "Total Memory: " << memory.total / (1024 * 1024) << " MiB";
-  HT_LOG_INFO << "Used Memory: " << memory.used / (1024 * 1024) << " MiB";
-  // HT_LOG_INFO << "Free Memory: " << memory.free / (1024 * 1024) << " MiB";
-
-  result = nvmlShutdown();
-  if (result != NVML_SUCCESS) {
-    HT_RUNTIME_ERROR << "Failed to shutdown NVML: " << nvmlErrorString(result);
-    return;
-  }
 }
 
 } // namespace graph

@@ -312,6 +312,7 @@ void P2PSendOpImpl::DoCompute(Operator& op,
   size_t dst_device_index = _dst_device_index == -1 ? 
          op->placement_group().get_index(op->placement()) : _dst_device_index;
 
+  // HT_LOG_INFO << "send to " << _dst_group.get(dst_device_index);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), 
                                   type(), hetu::impl::P2PSend, input,
                                   _dst_group.get(dst_device_index), 
@@ -358,6 +359,7 @@ void P2PRecvOpImpl::DoCompute(Operator& op,
   size_t src_device_index = _src_device_index == -1 ?
          op->placement_group().get_index(op->placement()) : _src_device_index;
 
+  // HT_LOG_INFO << "recv from " << _src_group.get(src_device_index);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
                                   type(), hetu::impl::P2PRecv, outputs.at(0),
                                   _src_group.get(src_device_index),
@@ -536,6 +538,7 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
   //   outputs = DoAllocOutputs(op, inputs, ctx);
   // }
   
+  // HT_LOG_INFO << "comm group " << _comm_group
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                   hetu::impl::ReduceScatter, inputs.at(0), outputs.at(0), 
                                   reduction_type(), _comm_group, op->instantiation_ctx().stream());

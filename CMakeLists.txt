@@ -35,7 +35,7 @@ if(${HETU_COMPILE_OMP})
 endif()
 
 if(${HETU_COMPILE_CUDA})
-  set(CMAKE_CUDA_COMPILER ${CUDAToolkit_ROOT}/bin/nvcc)
+  # set(CMAKE_CUDA_COMPILER ${CUDAToolkit_ROOT}/bin/nvcc)
   find_package(CUDAToolkit REQUIRED)
   enable_language(CUDA)
   if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_LESS "10.1")

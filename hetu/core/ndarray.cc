@@ -1537,10 +1537,12 @@ NDArray NDArray::empty(const HTShape& shape, const Device& device,
                 .set_dtype(dtype)
                 .set_shape(shape)
                 .set_dynamic_shape(dynamic_shape);
-  // mempool debug use
-  // HT_LOG_INFO << "NDArray empty with " << meta;
   auto storage = std::make_shared<NDArrayStorage>(AllocFromMemoryPool(
     device, meta.numel() * DataType2Size(dtype), Stream(device, stream_id)));
+  // mempool debug use
+  // HT_LOG_INFO << "NDArray empty with " << meta;
+  // if (storage->is_new_malloc())
+  //   HT_LOG_INFO << "malloc new empty NDArray with " << meta;
   return NDArray(meta, storage);
 }
 

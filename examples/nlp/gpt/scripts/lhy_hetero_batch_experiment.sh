@@ -1,14 +1,17 @@
 #!/bin/bash
 
-file="experiments/straggler/hetero_batch.txt"
-dir=$(dirname "$file")
-if [ ! -d "$dir" ]; then
-    mkdir -p "$dir"
-fi
-if [ ! -f "$file" ]; then
-    touch "$file"
-fi
-echo -n > "$file"
+file="experiments/straggler/dp4tp2pp2/hetero_batch"
+
+for i in {0..15}; do
+    dir=$(dirname "${file}_${i}.txt")
+    if [ ! -d "$dir" ]; then
+        mkdir -p "$dir"
+    fi
+    if [ ! -f "${file}_${i}.txt" ]; then
+        touch "${file}_${i}.txt"
+    fi
+    echo -n > "${file}_${i}.txt"
+done
 
 NUM_LAYERS=${1:-32}
 HIDDEN_SIZE=${2:-2048}
@@ -58,7 +61,9 @@ for i in $(seq 16 $NUM_MICRO_BATCH); do
     fi
     # 运行
     echo "split num micro batch $hetero_num_micro_batch begin..."
-    echo -e "\nsplit straggler num micro batch $hetero_num_micro_batch:" >> "$file"
+    for j in {0..15}; do
+        echo -e "\nsplit straggler num micro batch $hetero_num_micro_batch:" >> "${file}_${j}.txt"
+    done
     mpirun --allow-run-as-root -np 16 \
         -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
         -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \

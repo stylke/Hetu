@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hetu/graph/graph.h"
+#include "hetu/graph/profiler.h"
 #include "hetu/graph/init/initializer.h"
 #include "hetu/graph/ops/Communication.h"
 #include "hetu/graph/ops/group.h"
@@ -181,6 +182,8 @@ class ExecutableGraph : public Graph {
 
   void AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ctx_list);
 
+  void GetExecEnvs();
+
   // plan相关
   ExecutePlan _execute_plan;
   std::vector<Tensor2ShapeMap> _shape_plan_pool;
@@ -215,6 +218,13 @@ class ExecutableGraph : public Graph {
   // 记录当前图的grad计算完的event
   // 即意味着可以开始切换grad了
   std::unordered_map<TensorId, std::unique_ptr<Event>> _run_grad_events; // 注意这里的TensorId是未substitue comm op后的grad
+
+  // profile相关
+  bool _is_analysis_straggler;
+  std::string _straggler_log_file_path;
+  MEMORY_PROFILE_LEVEL _memory_profile_level;
+  std::string _memory_log_file_path;
+  std::vector<std::shared_ptr<MicroBatchMemoryInfo>> _all_micro_batches_memory_info;
 };
 
 } // namespace graph

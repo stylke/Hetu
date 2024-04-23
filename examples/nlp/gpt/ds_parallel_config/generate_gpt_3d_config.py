@@ -107,7 +107,7 @@ def generate_gpt_3d_config(num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=Tru
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--model_size', type=str, default='7b', help='size of gpt, 7b or 13b.'
+        '--num_layers', type=int, default=32, help='size of gpt, 7b is 32 and 13b is 40.'
     )
     parser.add_argument(
         '--num_gpus', type=int, default=8, help='num of gpus.'
@@ -128,17 +128,12 @@ if __name__ == '__main__':
     #     '--save_folder', type=str, default='./'
     # )
     args = parser.parse_args()
-    if args.model_size == '7b':
-        num_layers = 32
-    elif args.model_size == '13b':
-        num_layers = 40
-    else:
-        assert 'now only support 7b or 13b!'
+    num_layers = args.num_layers
         
     assert args.dp * args.tp * args.pp == args.num_gpus, \
             f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
     ds_parallel_config = generate_gpt_3d_config(num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
-    save_folder = f'./ds_parallel_config/gpus{args.num_gpus}/{args.model_size}'
+    save_folder = './ds_parallel_config/homo'
     file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
