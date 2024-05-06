@@ -20,14 +20,16 @@ RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:4,5:5,6:6,7:7,8:0,9:1,10:10,11:11,12:
 DP=2
 TP=2
 PP=4
-HETERO=false
+HETERO=true
 LAYERS_NUM_LIST="8,8,8,8,8,8,8,8"
 MICRO_BATCH_NUM_LIST="[32,32]"
+UNUSED_RANK="[4]"
 RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:14,7:15,8:8,9:9,10:10,11:11,12:12,13:13,14:6,15:7}"
 RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:10,7:11,8:8,9:9,10:6,11:7,12:12,13:13,14:14,15:15}"
 # RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:10,3:11,4:4,5:5,6:6,7:7,8:8,9:9,10:2,11:3,12:12,13:13,14:14,15:15}"
 # RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:14,3:15,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:2,15:3}"
 # RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:10,3:11,4:4,5:5,6:14,7:15,8:8,9:9,10:2,11:3,12:12,13:13,14:6,15:7}"
+RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
 
 ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
@@ -59,8 +61,7 @@ if [ "${HETERO}" = false ]; then
         --num_gpus 16 \
         --dp $DP \
         --tp $TP \
-        --pp $PP \
-        --zero 
+        --pp $PP 
     mpirun --allow-run-as-root -np 16 \
         -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
         -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
@@ -69,8 +70,8 @@ if [ "${HETERO}" = false ]; then
         -x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL -x HETU_STRAGGLER -x HETU_MEMORY_PROFILE \
         --output-filename logs/ds_parallel --merge-stderr-to-stdout \
         python lhy_hetero_pack_or_pad.py \
-        --num_strategy=2 \
-        --ds_parallel_config ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json,ds_parallel_config/hetero/dp${DP}_tp${TP}_pp${PP}.json \
+        --num_strategy=1 \
+        --ds_parallel_config ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json \
         --global_batch_size $GLOBAL_BATCH_SIZE \
         --micro_batch_size $MICRO_BATCH_SIZE \
         --json_file $JSON_FILE \
@@ -98,9 +99,9 @@ else
         --dp $DP \
         --tp $TP \
         --pp $PP \
-        --zero \
         --hetero_layers $LAYERS_NUM_LIST \
-        --rank_to_device_mapping $RANK_TO_DEVICE_MAPPING
+        --rank_to_device_mapping $RANK_TO_DEVICE_MAPPING \
+        --unused_rank $UNUSED_RANK
     mpirun --allow-run-as-root -np 16 \
         -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
         -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
@@ -135,5 +136,6 @@ else
         --hetero_pipeline \
         --hetero_data \
         --micro_batch_num_list $MICRO_BATCH_NUM_LIST \
-        --rank_to_device_mapping $RANK_TO_DEVICE_MAPPING
+        --rank_to_device_mapping $RANK_TO_DEVICE_MAPPING \
+        --unused_rank $UNUSED_RANK
 fi

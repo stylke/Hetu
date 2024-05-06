@@ -30,7 +30,7 @@ TensorList MatMulOpImpl::DoGradient(Operator& op,
     grad_b = op->requires_grad(1) ? MakeMatMulGradientOp(a, grad_c, b, 1, false, false, std::move(grad_b_op_meta))
                                  : Tensor();
   } else if (!trans_a() && trans_b()) {
-    // case 3: c = MatMul(a, b^T)
+    // caseNULL_HETERO_DIM: c = MatMul(a, b^T)
     // grad_a = MatMul(grad_c, b), grad_b = MatMul(grad_c^T, a)
     grad_a = op->requires_grad(0) ? MakeMatMulGradientOp(grad_c, b, a, 0, false, false, std::move(grad_a_op_meta))
                                  : Tensor();
@@ -48,7 +48,7 @@ TensorList MatMulOpImpl::DoGradient(Operator& op,
 }
 
 // TODO: support states deduce for different input shape
-DistributedStates MatMulDeduceStates(Tensor a, Tensor b, bool trans_a, bool trans_b) {
+static DistributedStates MatMulDeduceStates(Tensor a, Tensor b, bool trans_a, bool trans_b) {
   HT_ASSERT(a->ndim() == 2 && b->ndim() == 2)
     << "Now only support 2-dimensional distributed matmul! "
     << "got a.ndim = " << a->ndim() << ", b.ndim = " << b->ndim();
@@ -118,12 +118,55 @@ DistributedStates MatMulDeduceStates(Tensor a, Tensor b, bool trans_a, bool tran
   return ds_c;
 }
 
+static int32_t MatMulDeduceHeteroDim(int32_t hetero_a, int32_t hetero_b, bool trans_a, bool trans_b) {
+  if (trans_a && (hetero_a == 0 || hetero_a == 1)) {
+    hetero_a = 1 - hetero_a;
+  }
+  if (trans_b && (hetero_b == 0 || hetero_b == 1)) {
+    hetero_b = 1 - hetero_b;
+  }
+  int32_t hetero_res;
+  if (hetero_a == NULL_HETERO_DIM) {
+    HT_ASSERT(hetero_b == NULL_HETERO_DIM)
+      << "Currently not support different union hetero type";
+    hetero_res = NULL_HETERO_DIM;
+  } else {
+    if (hetero_a == -1 || hetero_b == -1) {
+      if (hetero_a == -1) {
+        HT_RUNTIME_ERROR << "not supported yet";
+      }
+      if (hetero_b == -1) {
+        HT_ASSERT(hetero_a >= 0)
+          << "hetero a and hetero b can't simutaneously be -1";
+        hetero_res = hetero_a;
+      }
+    } else {
+      HT_ASSERT(hetero_a == 1 - hetero_b)
+        << "hetero a and hetero b should be opposite in this situation";
+      hetero_res = -2;
+    }
+  }   
+  return hetero_res; 
+}
+
 void MatMulOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                   const OpMeta& op_meta) const {
   const Tensor& a = inputs.at(0);
   const Tensor& b = inputs.at(1);
   DistributedStates ds_c = MatMulDeduceStates(a, b, trans_a(), trans_b());
   outputs.at(0)->set_distributed_states(ds_c);
+}
+
+void MatMulOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                     TensorList& outputs, const OpMeta& op_meta) const {
+  int32_t hetero_a = inputs_hetero_dim.at(0);
+  int32_t hetero_b = inputs_hetero_dim.at(1);  
+  int32_t hetero_res = MatMulDeduceHeteroDim(hetero_a, hetero_b, trans_a(), trans_b()); 
+  /* 
+  HT_LOG_WARN << outputs.at(0) << " inputs hetero dim is " << hetero_a << " and " << hetero_b
+    << ", and the output hetero dim is " << hetero_res;           
+  */
+  outputs.at(0)->cur_ds_union().set_hetero_dim(hetero_res);
 }
 
 void MatMulGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
@@ -174,6 +217,14 @@ void MatMulGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& 
   const Tensor& b = inputs.at(1);
   DistributedStates ds_c = MatMulDeduceStates(a, b, trans_a(), trans_b());
   outputs.at(0)->set_distributed_states(ds_c);
+}
+
+void MatMulGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                             TensorList& outputs, const OpMeta& op_meta) const {
+  int32_t hetero_a = inputs_hetero_dim.at(0);
+  int32_t hetero_b = inputs_hetero_dim.at(1);  
+  int32_t hetero_res = MatMulDeduceHeteroDim(hetero_a, hetero_b, trans_a(), trans_b());              
+  outputs.at(0)->cur_ds_union().set_hetero_dim(hetero_res);
 }
 
 Tensor MakeMatMulOp(Tensor a, Tensor b, bool trans_a, bool trans_b,

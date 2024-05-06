@@ -119,12 +119,12 @@ Tensor Dataloader::get_arr() {
   NDArray res = _get_arr(_batch_idx);
   _last_batch_size = res->shape(0); 
   _batch_idx = (_batch_idx + 1) ;
-  return MakeVariableOp(res, false, res->meta().dtype, false, DistributedStates(), OpMeta().set_eager_device(res->meta().device));
+  return MakeVariableOp(res, false, res->meta().dtype, false, DistributedStatesHierarchy(), OpMeta().set_eager_device(res->meta().device));
 }
 
 Tensor Dataloader::get_next_arr() {
   NDArray res = _get_arr(_batch_idx);
-  return MakeVariableOp(res, false, res->meta().dtype, false, DistributedStates(), OpMeta().set_eager_device(res->meta().device));
+  return MakeVariableOp(res, false, res->meta().dtype, false, DistributedStatesHierarchy(), OpMeta().set_eager_device(res->meta().device));
 }
 
 void Dataloader::set_dp_rank(int dp_rank, int dp_nrank) {

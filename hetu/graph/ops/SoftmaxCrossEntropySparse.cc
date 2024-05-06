@@ -56,6 +56,11 @@ void SCESOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   outputs.at(0)->set_distributed_states(ds_preds);
 }
 
+void SCESOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                   TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
+}
+
 void SCESGradOpImpl::DoCompute(Operator& op, 
                                const NDArrayList& inputs, NDArrayList& outputs,
                                RuntimeContext& ctx) const {
@@ -90,6 +95,11 @@ HTShapeList SCESGradOpImpl::DoInferShape(Operator& op,
 void SCESGradOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                     const OpMeta& op_meta) const {
   outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
+}
+
+void SCESGradOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                       TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }
 
 Tensor MakeSoftmaxCrossEntropySparseOp(Tensor preds, Tensor labels, const int64_t ignored_index, 

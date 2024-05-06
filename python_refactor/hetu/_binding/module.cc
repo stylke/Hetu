@@ -29,6 +29,7 @@ PYBIND11_MODULE(HT_CORE_PY_MODULE, m) {
   hetu::graph::AddPyOperatorTypeToModule(m);
   hetu::graph::AddPyTensorTypeToModule(m);
   hetu::graph::AddPyDistributedStatesTypeToModule(m);
+  hetu::graph::AddPyDistributedStatesUnionTypeToModule(m);
   hetu::graph::AddPyGraphTypeToModule(m);
   hetu::graph::AddPyAutoCastTypeToModule(m);
   hetu::graph::AddPyGradScalerTypeToModule(m);

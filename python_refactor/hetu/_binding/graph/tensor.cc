@@ -230,9 +230,24 @@ PyObject* PyTensor_distributed_states(PyTensor* self) {
   HT_PY_FUNC_END
 }
 
-PyObject* PyTensor_multi_distributed_states(PyTensor* self) {
+PyObject* PyTensor_ds_hierarchy(PyTensor* self) {
   HT_PY_FUNC_BEGIN
-  return PyDistributedStatesList_New(self->tensor->multi_distributed_states());   
+  return PyDistributedStatesHierarchy_New(self->tensor->ds_hierarchy());   
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_has_placement_group(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  Py_RETURN_BOOLEAN_COND(self->tensor->has_placement_group());   
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_placement_group_union(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  if (self->tensor->has_placement_group())
+    return PyDeviceGroupList_New(self->tensor->placement_group_union().raw_data());
+  else
+    return PyDeviceGroupList_New({}); 
   HT_PY_FUNC_END
 }
 
@@ -261,15 +276,14 @@ PyObject* PyTensor_symbolic(PyTensor* self) {
   HT_PY_FUNC_END
 }
 
-PyObject* PyTensor_check_multi_ds_equal(PyTensor* self, PyObject* args, PyObject* kwargs) {
+PyObject* PyTensor_check_ds_hierarchy_equal(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "check_multi_ds_equal(List[DistributedStates] multi_ds)"
+    "check_ds_hierarchy_equal(List[DistributedStatesUnion] ds_hierarchy)"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
-    // DistributedStatesList multi_ds = parsed_args.get_distributed_states_list(0);
-    Py_RETURN_BOOLEAN_COND(self->tensor->check_multi_ds_equal(parsed_args.get_distributed_states_list(0)));
+    Py_RETURN_BOOLEAN_COND(self->tensor->check_ds_hierarchy_equal(parsed_args.get_ds_hierarchy(0)));
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
@@ -284,16 +298,16 @@ PyObject* PyTensor_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   
   static PyArgParser parser({
-    "from_numpy(numpy.array data, bool requires_grad=false, DistributedStates ds=None, " OP_META_ARGS ")", 
+    "from_numpy(numpy.array data, bool requires_grad=false, DistributedStatesHierarchy ds_hierarchy=None, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
 
   if (parsed_args.signature_index() == 0) {
     auto* array_obj = parsed_args.get_numpy_array(0);
     bool requires_grad = parsed_args.get_bool_or_default(1);
-    DistributedStates ds = parsed_args.get_distributed_states_or_empty(2);
+    DistributedStatesHierarchy ds_hierarchy = parsed_args.get_ds_hierarchy_or_empty(2);
     new(&self->tensor) Tensor();
-    self->tensor = MakeParameterOp(NDArrayFromNumpy(array_obj), false, kUndeterminedDataType, requires_grad, ds, parse_op_meta(parsed_args, 3));
+    self->tensor = MakeParameterOp(NDArrayFromNumpy(array_obj), false, kUndeterminedDataType, requires_grad, ds_hierarchy, parse_op_meta(parsed_args, 3));
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -365,16 +379,16 @@ PyObject* PyTensor_get_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_END
 }
 
-PyObject* PyTensor_get_device_group(PyTensor* self, PyObject* args, PyObject* kwargs) {
+PyObject* PyTensor_get_device_group_union(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "get_device_group()"
+    "get_device_group_union()"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
-    auto ret = GetVariableDeviceGroup(self->tensor);
-    // HT_LOG_TRACE << "GetVariableDeviceGroup successfully.";
-    return PyDeviceGroup_New(ret);
+    auto ret = GetVariableDeviceGroupUnion(self->tensor);
+    // HT_LOG_TRACE << "GetVariableDeviceGroupUnion successfully.";
+    return PyDeviceGroupList_New(ret.raw_data());
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
@@ -390,23 +404,23 @@ PyObject* PyTensor_from_numpy_parallel(PyObject*, PyObject* args, PyObject* kwar
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   
   static PyArgParser parser({
-    "from_numpy_parallel(numpy.array data, List[DistributedStates] multi_ds, bool requires_grad=false, " OP_META_ARGS ")", 
-    "from_numpy_parallel(List[numpy.array] multi_data, List[DistributedStates] multi_ds, bool requires_grad=false, " OP_META_ARGS ")", 
+    "from_numpy_parallel(numpy.array data, List[DistributedStatesUnion] ds_hierarchy, bool requires_grad=false, " OP_META_ARGS ")", 
+    "from_numpy_parallel(List[numpy.array] multi_data, List[DistributedStatesUnion] ds_hierarchy, bool requires_grad=false, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
 
   if (parsed_args.signature_index() == 0) {
     auto* array_obj = parsed_args.get_numpy_array(0);
-    DistributedStatesList multi_ds = parsed_args.get_distributed_states_list(1);
+    DistributedStatesHierarchy ds_hierarchy = parsed_args.get_ds_hierarchy(1);
     bool requires_grad = parsed_args.get_bool_or_default(2);
     new(&self->tensor) Tensor();
-    self->tensor = MakeParallelVariableOp(NDArrayFromNumpy(array_obj), multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
+    self->tensor = MakeParallelVariableOp(NDArrayFromNumpy(array_obj), ds_hierarchy, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
   } else if (parsed_args.signature_index() == 1) {
     NDArrayList multi_data = parsed_args.get_numpy_array_list(0);
-    DistributedStatesList multi_ds = parsed_args.get_distributed_states_list(1);
+    DistributedStatesHierarchy ds_hierarchy = parsed_args.get_ds_hierarchy(1);
     bool requires_grad = parsed_args.get_bool_or_default(2);
     new(&self->tensor) Tensor();
-    self->tensor = MakeParallelVariableOp(multi_data, multi_ds, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
+    self->tensor = MakeParallelVariableOp(multi_data, ds_hierarchy, false, kUndeterminedDataType, requires_grad, parse_op_meta(parsed_args, 3));
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -447,7 +461,9 @@ PyGetSetDef PyTensor_properties[] = {
   {PY_GET_SET_DEF_NAME("is_parameter"), (getter) PyTensor_is_parameter, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("requires_grad"), (getter) PyTensor_requires_grad, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("distributed_states"), (getter) PyTensor_distributed_states, nullptr, nullptr, nullptr},
-  {PY_GET_SET_DEF_NAME("multi_distributed_states"), (getter) PyTensor_multi_distributed_states, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("ds_hierarchy"), (getter) PyTensor_ds_hierarchy, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("has_placement_group"), (getter) PyTensor_has_placement_group, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("placement_group_union"), (getter) PyTensor_placement_group_union, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("data"), (getter) PyTensor_data, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("graph"), (getter) PyTensor_graph, nullptr, nullptr, nullptr}, 
   {nullptr}
@@ -505,8 +521,8 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"to", (PyCFunction) PyTensor_data_transfer, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"reset_data", (PyCFunction) PyTensor_reset_data, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_data", (PyCFunction) PyTensor_get_data, METH_VARARGS | METH_KEYWORDS, nullptr },
-    {"get_device_group", (PyCFunction) PyTensor_get_device_group, METH_VARARGS | METH_KEYWORDS, nullptr },
-    {"check_multi_ds_equal", (PyCFunction) PyTensor_check_multi_ds_equal, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"get_device_group_union", (PyCFunction) PyTensor_get_device_group_union, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"check_ds_hierarchy_equal", (PyCFunction) PyTensor_check_ds_hierarchy_equal, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
     {"symbolic", (PyCFunction) PyTensor_symbolic, METH_NOARGS, nullptr }, 
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 

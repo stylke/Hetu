@@ -236,6 +236,18 @@ PyObject* PyDeviceGroup_New(const DeviceGroup& device_group) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyDeviceGroupList_New(const DeviceGroupList& dg_list) {
+  HT_PY_FUNC_BEGIN
+  PyObject* ret = PyList_New(dg_list.size());
+  HT_RUNTIME_ERROR_IF(!ret) << "Failed to alloc list";
+  for (size_t i = 0; i < dg_list.size(); i++) {
+    auto* dg_obj = PyDeviceGroup_New(dg_list[i]);
+    PyList_SET_ITEM(ret, i, dg_obj);
+  }
+  return ret;
+  HT_PY_FUNC_END
+}
+
 PyObject* PyDeviceGroup_pynew(PyTypeObject* type, PyObject* args, 
                               PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
@@ -452,9 +464,9 @@ ContextManager<Device>& get_eager_device_ctx() {
   return eager_device_ctx;
 }
 
-ContextManager<DeviceGroupList>& get_device_groups_ctx() {
-  static ContextManager<DeviceGroupList> device_groups_ctx;
-  return device_groups_ctx;
+ContextManager<hetu::graph::DeviceGroupHierarchy>& get_dg_hierarchy_ctx() {
+  static ContextManager<hetu::graph::DeviceGroupHierarchy> dg_hierarchy_ctx;
+  return dg_hierarchy_ctx;
 }
 
 } // namespace hetu

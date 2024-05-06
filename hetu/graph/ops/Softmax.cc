@@ -38,6 +38,11 @@ void SoftmaxOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs
   outputs.at(0)->set_distributed_states(ds_input);        
 }
 
+void SoftmaxOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                      TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
+}
+
 void SoftmaxGradientOpImpl::DoCompute(Operator& op,
                                       const NDArrayList& inputs,
                                       NDArrayList& outputs,
@@ -58,6 +63,11 @@ SoftmaxGradientOpImpl::DoInferShape(Operator& op,
 void SoftmaxGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                            const OpMeta& op_meta) const {  
   outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());    
+}
+
+void SoftmaxGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                              TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }
 
 Tensor MakeSoftmaxOp(Tensor input, int64_t dim, OpMeta op_meta) {

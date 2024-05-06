@@ -38,6 +38,8 @@ std::string ArgType2Str(ArgType type) {
       return "hetu.DeviceGroup";
     case ArgType::DEVICE_GROUP_LIST:
       return "List[hetu.DeviceGroup]";
+    case ArgType::DG_HIERARCHY:
+      return "List[List[hetu.DeviceGroup]]";
     case ArgType::STREAM:
       return "hetu.stream";
     case ArgType::ND_ARRAY:
@@ -62,6 +64,12 @@ std::string ArgType2Str(ArgType type) {
       return "hetu.DistributedStates";
     case ArgType::DISTRIBUTED_STATES_LIST:
       return "List[hetu.DistributedStates]";
+    case ArgType::DS_HIERARCHY:
+      return "List[hetu.DistributedStatesUnion]";
+    case ArgType::INT_SYMBOL:
+      return "hetu.IntSymbol";
+    case ArgType::SYMBOLIC_SHAPE:
+      return "List[hetu.IntSymbol]";
     case ArgType::INITIALIZER:
       return "hetu.Initializer";
     default:
@@ -112,6 +120,9 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::DEVICE_GROUP;
   if (type == "List[hetu.DeviceGroup]" || type == "List[DeviceGroup]")
     return ArgType::DEVICE_GROUP_LIST;
+  if (type == "List[List[hetu.DeviceGroup]]" || type == "List[List[DeviceGroup]]" || 
+      type == "DeviceGroupHierarchy")
+    return ArgType::DG_HIERARCHY;
   if (type == "hetu.stream" || type == "stream" || type == "Stream") 
     return ArgType::STREAM;
   if (type == "hetu.NDArray" || type == "NDArray" || 
@@ -145,7 +156,10 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::DISTRIBUTED_STATES;
   if (type == "List[hetu.DistributedStates]" || type == "DistributedStatesList" ||
       type == "List[DistributedStates]")
-    return ArgType::DISTRIBUTED_STATES_LIST;   
+    return ArgType::DISTRIBUTED_STATES_LIST; 
+  if (type == "List[hetu.DistributedStatesUnion]" || type == "List[DistributedStatesUnion]" ||
+      type == "DistributedStatesHierarchy")
+    return ArgType::DS_HIERARCHY;
   if (type == "hetu.IntSymbol" || type == "IntSymbol")
     return ArgType::INT_SYMBOL;
   if (type == "List[hetu.IntSymbol]" || type == "List[IntSymbol]" || type == "SyShape")
@@ -266,6 +280,7 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
       case ArgType::DEVICE:
       case ArgType::DEVICE_GROUP:
       case ArgType::DEVICE_GROUP_LIST:
+      case ArgType::DG_HIERARCHY:
       case ArgType::STREAM:
       case ArgType::ND_ARRAY:
       case ArgType::ND_ARRAY_LIST:
@@ -276,6 +291,7 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
       case ArgType::FEED_DICT:
       case ArgType::DISTRIBUTED_STATES:
       case ArgType::DISTRIBUTED_STATES_LIST:
+      case ArgType::DS_HIERARCHY:
       case ArgType::INITIALIZER:
         if (!_default_as_none) {
           HT_VALUE_ERROR << "Default " << _arg_type << " can only be None";
@@ -324,6 +340,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyDeviceGroup(obj);
     case ArgType::DEVICE_GROUP_LIST:
       return CheckPyDeviceGroupList(obj);
+    case ArgType::DG_HIERARCHY:
+      return CheckPyDeviceGroupHierarchy(obj);
     case ArgType::STREAM:
       return CheckPyStream(obj);
     case ArgType::ND_ARRAY:
@@ -348,6 +366,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyDistributedStates(obj);
     case ArgType::DISTRIBUTED_STATES_LIST:
       return CheckPyDistributedStatesList(obj);
+    case ArgType::DS_HIERARCHY:
+      return CheckPyDistributedStatesHierarchy(obj);
     case ArgType::INT_SYMBOL:
       return CheckPyIntSymbol(obj);
     case ArgType::SYMBOLIC_SHAPE:

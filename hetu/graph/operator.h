@@ -47,13 +47,13 @@ class OpMeta {
     return *this;
   }
 
-  inline OpMeta& set_device_groups(const DeviceGroupList& groups) {
-    device_groups = groups;
+  inline OpMeta& set_device_group_hierarchy(const DeviceGroupHierarchy& hierarchy) {
+    device_group_hierarchy = hierarchy;
     return *this;
   }
 
-  inline OpMeta& set_device_groups(DeviceGroupList&& groups) {
-    device_groups = std::move(groups);
+  inline OpMeta& set_device_group_hierarchy(DeviceGroupHierarchy&& hierarchy) {
+    device_group_hierarchy = std::move(hierarchy);
     return *this;
   }
 
@@ -95,8 +95,8 @@ class OpMeta {
       ret.set_stream_index(new_meta.stream_index);
     if (!new_meta.eager_device.is_undetermined())
       ret.set_eager_device(new_meta.eager_device);
-    if (!new_meta.device_groups.empty())
-      ret.set_device_groups(new_meta.device_groups);
+    if (new_meta.device_group_hierarchy.size() != 0)
+      ret.set_device_group_hierarchy(new_meta.device_group_hierarchy);
     if (!new_meta.extra_deps.empty())
       ret.set_extra_deps(new_meta.extra_deps);
     return ret;
@@ -105,7 +105,8 @@ class OpMeta {
   OpName name;
   StreamIndex stream_index{kUndeterminedStream};
   Device eager_device{kUndeterminedDevice};
-  DeviceGroupList device_groups; // for multi ds deduce
+  // deprecated: DeviceGroupList device_groups; // for multi ds deduce
+  DeviceGroupHierarchy device_group_hierarchy{}; // for multi ds multi hetero-dp deduce
   TensorList extra_deps;
   bool is_deduce_states{true};  
   bool is_step{false};
@@ -214,8 +215,9 @@ class RuntimeContext {
 };
 
 struct OpInstantiationContext {
-  DeviceGroup placement_group;
-  Device placement;
+  bool has_placement_group{false};
+  DeviceGroupUnion placement_group_union{};
+  Device placement{};
   StreamIndex stream_index;
   std::unique_ptr<Event> start[HT_MAX_NUM_MICRO_BATCHES];
   std::unique_ptr<Event> stop[HT_MAX_NUM_MICRO_BATCHES];
@@ -279,14 +281,37 @@ class OpInterface : public shared_ptr_target {
     return DoDeduceStates(inputs, outputs, op_meta);
   }
 
+  inline void DeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                              TensorList& outputs, const OpMeta& op_meta) const {
+    bool is_all_homo = true;
+    for (const auto& input_hetero_dim : inputs_hetero_dim) {
+      if (input_hetero_dim != NULL_HETERO_DIM) {
+        is_all_homo = false;
+        break;
+      }
+    }
+    if (is_all_homo) {
+      for (auto& output : outputs) {
+        output->cur_ds_union().set_hetero_dim(NULL_HETERO_DIM);
+      }
+      return;
+    }
+    return DoDeduceHeteroDim(inputs_hetero_dim, outputs, op_meta);
+  }
+
+  inline void DeduceStatesHierarchy(const TensorList& inputs, TensorList& outputs, 
+                                    const OpMeta& op_meta, Graph& graph) const {
+    DoDeduceStatesHierarchy(inputs, outputs, op_meta, graph);
+  }
+
   inline TensorList Gradient(Operator& op,
                              const TensorList& grad_outputs) const {
     return DoGradient(op, grad_outputs);
   }
 
   inline bool MapToParallelDevices(Operator& op,
-                                   const DeviceGroup& placement_group) const {
-    return DoMapToParallelDevices(op, placement_group);
+                                   const DeviceGroupUnion& placement_group_union) const {
+    return DoMapToParallelDevices(op, placement_group_union);
   }
 
   inline bool Instantiate(Operator& op, const Device& placement,
@@ -321,13 +346,19 @@ class OpInterface : public shared_ptr_target {
   virtual void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                               const OpMeta& op_meta) const;
 
+  virtual void DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim, 
+                                 TensorList& outputs, const OpMeta& op_meta) const;
+
+  virtual void DoDeduceStatesHierarchy(const TensorList& inputs, TensorList& outputs, 
+                                       const OpMeta& op_meta, Graph& graph) const;
+
   virtual TensorList DoGradient(Operator&, const TensorList&) const {
     HT_RUNTIME_ERROR << "Op with type " << type() << "is not differentiable";
     __builtin_unreachable();
   }
 
   virtual bool DoMapToParallelDevices(Operator& op,
-                                      const DeviceGroup& placement_group) const;
+                                      const DeviceGroupUnion& placement_group_union) const;
 
   virtual bool DoInstantiate(Operator& op, const Device& placement,
                              StreamIndex stream_id) const;
@@ -389,8 +420,8 @@ class OpDef : public shared_ptr_target {
     return _body->Gradient(get_self(), grad_outputs);
   }
 
-  inline bool MapToParallelDevices(const DeviceGroup& placement_group) {
-    return _body->MapToParallelDevices(get_self(), placement_group);
+  inline bool MapToParallelDevices(const DeviceGroupUnion& placement_group_union) {
+    return _body->MapToParallelDevices(get_self(), placement_group_union);
   }
 
   inline void DeduceStates() {
@@ -527,19 +558,21 @@ class OpDef : public shared_ptr_target {
     return _op_meta.eager_device;
   }
 
-  const DeviceGroupList& device_groups() const noexcept {
-    return _op_meta.device_groups;
+  const DeviceGroupHierarchy& device_group_hierarchy() const noexcept {
+    return _op_meta.device_group_hierarchy;
   }
 
-  void set_device_groups(const DeviceGroupList& groups) {
-    _op_meta.device_groups = groups;
+  void set_device_group_hierarchy(const DeviceGroupHierarchy& hierarchy) {
+    _op_meta.device_group_hierarchy = hierarchy;
   }
 
   bool is_deduce_states() const noexcept {
     return _op_meta.is_deduce_states;
   }
 
-  const DeviceGroup& device_group();
+  DeviceGroupUnion& device_group_union();
+
+  DeviceGroup& device_group();
 
   const OpMeta& op_meta() const noexcept {
     return _op_meta;
@@ -548,7 +581,7 @@ class OpDef : public shared_ptr_target {
   OpMeta grad_op_meta() const {
     return OpMeta()
       .set_stream_index(stream_index())
-      .set_device_groups(device_groups());
+      .set_device_group_hierarchy(device_group_hierarchy());
   }
 
   void set_fw_op_id(OpId id) {
@@ -643,9 +676,33 @@ class OpDef : public shared_ptr_target {
     return _body->op_indicator();
   }
 
-  const DeviceGroup& placement_group() const noexcept {
-    return _inst_ctx.placement_group;
+  bool has_placement_group() const {
+    return _inst_ctx.has_placement_group;
   }
+
+  const DeviceGroupUnion& placement_group_union() const   {
+    return _inst_ctx.placement_group_union;
+  }
+
+  const DeviceGroup placement_group() const   {
+    return _inst_ctx.placement_group_union.all();
+  }
+
+  const DeviceGroup local_placement_group() const {
+    HT_ASSERT(!placement().is_undetermined())
+      << "local_placement_group should be called only after instantiated the placement";
+    return _inst_ctx.placement_group_union.get(placement());
+  }
+
+  size_t local_placement_group_idx() const {
+    HT_ASSERT(!placement().is_undetermined())
+      << "local_placement_group_idx should be called only after instantiated the placement";
+    return _inst_ctx.placement_group_union.get_index(placement());
+  }
+
+  // 支持placement还未instantiate时候进行推导
+  // 主要用在未instantiate的variable和comm中
+  size_t inferred_local_placement_group_idx() const;
 
   const Device& placement() const noexcept {
     return _inst_ctx.placement;
@@ -894,8 +951,12 @@ static const uint64_t GATHER_OP = 1ul << 15;
 static const uint64_t SCATTER_OP = 1ul << 16;
 static const uint64_t INPLACE_OP = 1ul << 17;
 static const uint64_t COMM_SPLIT_OP = 1ul << 19;
-static const uint64_t COMM_OP = 1ul << 20;
-static const uint64_t UNKNOWN_OP = 1ul << 21;
+static const uint64_t SPLIT_ALL_REDUCE_OP = 1ul << 20;
+static const uint64_t SPLIT_ALL_GATHER_OP = 1ul << 21;
+static const uint64_t SPLIT_REDUCE_SCATTER_OP = 1ul << 22;
+static const uint64_t COMM_OP = 1ul << 23;
+static const uint64_t UNKNOWN_OP = 1ul << 24;
+static const uint64_t UNUSED_OP = 1ul << 25;
 static const uint64_t CONCAT_OP = 1ul << 54;
 static const uint64_t CONTIGUOUS_OP = 1ul << 55;
 static const uint64_t DATA_TRANSFER_OP = 1ul << 56;
@@ -938,17 +999,19 @@ DECLARE_OP_INDICATOR_CHECKER(batched_isend_irecv, BATCHED_ISEND_IRECV_OP)
 DECLARE_OP_INDICATOR_CHECKER(gather, GATHER_OP)
 DECLARE_OP_INDICATOR_CHECKER(scatter, SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(inplace, INPLACE_OP)
-DECLARE_OP_INDICATOR_CHECKER(grad_reduce, ALL_REDUCE_OP | REDUCE_SCATTER_OP)
+DECLARE_OP_INDICATOR_CHECKER(grad_reduce, 
+                             ALL_REDUCE_OP | REDUCE_SCATTER_OP |
+                             SPLIT_ALL_REDUCE_OP | SPLIT_REDUCE_SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm_split, COMM_SPLIT_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm, COMM_OP)
 DECLARE_OP_INDICATOR_CHECKER(unknown, UNKNOWN_OP)
 DECLARE_OP_INDICATOR_CHECKER(communucation,
                              PEER_TO_PEER_SEND_OP | PEER_TO_PEER_RECV_OP |
-                               ALL_TO_ALL_OP | ALL_REDUCE_OP |
-                               ALL_GATHER_OP | REDUCE_SCATTER_OP |
-                               BROADCAST_OP | REDUCE_OP |
-                               P2P_OP | BATCHED_ISEND_IRECV_OP |
-                               GATHER_OP | SCATTER_OP)
+                             ALL_TO_ALL_OP | ALL_REDUCE_OP |
+                             ALL_GATHER_OP | REDUCE_SCATTER_OP |
+                             BROADCAST_OP | REDUCE_OP |
+                             P2P_OP | BATCHED_ISEND_IRECV_OP |
+                             GATHER_OP | SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(data_transfer, DATA_TRANSFER_OP)
 DECLARE_OP_INDICATOR_CHECKER(adam, ADAM_OP)
 DECLARE_OP_INDICATOR_CHECKER(sum, SUM_OP)                               

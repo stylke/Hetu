@@ -92,23 +92,25 @@ class ExecutableGraph : public Graph {
   // 1、记录exec graph相较define graph新插入的tensor
   // 2、记录新插入tensor的shape到当前的shape plan
   void RecordExecTensor(const Tensor& tensor) {
-    auto& shape_plan = _shape_plan_pool.at(_active_shape_plan);
     const auto& shape = tensor->shape();
     // need to record the shape for all shape plans in the shape plan pool
     // so we leverage _record_execute_tensor and do it lazily
     _record_exec_tensors.emplace_back(tensor);
-    auto it = shape_plan.find(tensor->id());
-    if (it != shape_plan.end()) {
-      // already existed, then must be equal
-      HT_ASSERT(it->second.size() == shape.size())
-        << "Tensor " << tensor << " is already existed in shape plan but is unequal";
-      for (size_t i = 0; i < shape.size(); i++) { 
-        HT_ASSERT(it->second[i] == shape[i])
+    if (!_shape_plan_pool.empty()) {
+      auto& shape_plan = _shape_plan_pool.at(_active_shape_plan);
+      auto it = shape_plan.find(tensor->id());
+      if (it != shape_plan.end()) {
+        // already existed, then must be equal
+        HT_ASSERT(it->second.size() == shape.size())
           << "Tensor " << tensor << " is already existed in shape plan but is unequal";
+        for (size_t i = 0; i < shape.size(); i++) { 
+          HT_ASSERT(it->second[i] == shape[i])
+            << "Tensor " << tensor << " is already existed in shape plan but is unequal";
+        }
+        return;
       }
-      return;
+      shape_plan.insert(std::make_pair(tensor->id(), shape));
     }
-    shape_plan.insert(std::make_pair(tensor->id(), shape));
   }
 
   // 与RecordExecTensor功能相反
@@ -134,6 +136,10 @@ class ExecutableGraph : public Graph {
   }
 
  protected:
+  DeviceGroup GetPrevStage();
+
+  DeviceGroup GetNextStage();
+
   std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
   GenerateGpipeSchedule(size_t num_stages, size_t num_micro_batches, bool is_inference);
 
@@ -151,6 +157,8 @@ class ExecutableGraph : public Graph {
 
   void InsertContiguousOp(const OpRefList& topo_order);
 
+  // deprecated
+  /*
   void CrossSend(std::unordered_map<int32_t, int32_t> split_cur_state, 
                  std::unordered_map<int32_t, int32_t> split_target_state,
                  int32_t depth, bool need_split, int32_t& device_index, 
@@ -160,6 +168,7 @@ class ExecutableGraph : public Graph {
   Tensor CrossReceive(int32_t depth, int32_t& device_index, Operator& comm_op, 
                       TensorList& recv_datas, std::vector<int32_t>& srcs,
                       Tensor& self_send_data, int32_t& used_device_index);
+  */
 
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);

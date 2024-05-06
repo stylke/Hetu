@@ -18,13 +18,75 @@ class AllGatherOpImpl;
 class ReduceScatterOpImpl;
 class ScatterOpImpl;
 
+class CommOpInfo {
+ public:
+  bool is_empty;
+  DeviceGroupUnion src_group_union;
+  DeviceGroupUnion dst_group_union;
+  DistributedStatesUnion src_ds_union;
+  DistributedStatesUnion dst_ds_union;
+  size_t union_idx;
+  int32_t placement_pos;
+  DeviceGroup src_group;
+  DeviceGroup dst_group;
+  DistributedStates src_ds;
+  DistributedStates dst_ds;
+  DistributedStates local_src_ds;
+  DistributedStates local_dst_ds;
+  
+  CommOpInfo()
+    : is_empty(true) {}
+
+  CommOpInfo(const DeviceGroupUnion& src_group_union_, const DeviceGroupUnion& dst_group_union_,
+             const DistributedStatesUnion& src_ds_union_, const DistributedStatesUnion& dst_ds_union_,
+             size_t union_idx_, int32_t placement_pos_)
+    : is_empty(false),
+      src_group_union(src_group_union_),
+      dst_group_union(dst_group_union_),
+      src_ds_union(src_ds_union_),
+      dst_ds_union(dst_ds_union_),
+      union_idx(union_idx_),
+      placement_pos(placement_pos_) {
+    src_group = src_group_union.get(union_idx);
+    dst_group = dst_group_union.get(union_idx);
+    src_ds = src_ds_union.get(union_idx);
+    dst_ds = dst_ds_union.get(union_idx);
+    local_src_ds = src_ds_union.get_local(union_idx);
+    local_dst_ds = dst_ds_union.get_local(union_idx);
+  }
+};
+
+std::ostream& operator<<(std::ostream& os, const CommOpInfo& info);
+
 class CommOpImpl final: public OpInterface {
  public:
   // dst_group is only for exec graph instantiate, at this time there will only exists one ds strategy
-  // also, multi_dst_ds should contains only one dst_ds for comm op which created in exec graph instantiate
-  CommOpImpl(DistributedStatesList multi_dst_ds, DeviceGroup dst_group = DeviceGroup(), 
+  // also, dst_ds_hierarchy should contains only one dst_ds_union for comm op which created in exec graph instantiate
+  CommOpImpl(DistributedStatesHierarchy dst_ds_hierarchy, DeviceGroupHierarchy dst_group_hierarchy = DeviceGroupHierarchy(), 
              ReductionType red_type = kSUM) : OpInterface(quote(CommOp)), 
-             _multi_dst_ds(std::move(multi_dst_ds)), _dst_group(std::move(dst_group)), _red_type(red_type) {}      
+             _dst_ds_hierarchy(std::move(dst_ds_hierarchy)), _dst_group_hierarchy(std::move(dst_group_hierarchy)), _red_type(red_type) {
+    auto& graph = Graph::GetGraph(Graph::cur_graph_ctx());
+    if (graph.type() == GraphType::DEFINE_AND_RUN) {
+      HT_ASSERT(_dst_ds_hierarchy.size() == graph.NUM_STRATEGY)
+        << "Size of dst ds hierarchy should be equal to the strategy num in define graph";
+    } else if (graph.type() == GraphType::EXECUTABLE) {
+      HT_ASSERT(_dst_ds_hierarchy.size() == 1)
+        << "Size of dst ds hierarchy should be equal to 1 in exec graph"; 
+    } else {
+      HT_NOT_IMPLEMENTED << "Currently not support";
+    }
+    if (_dst_group_hierarchy.size() != 0) {
+      if (graph.type() == GraphType::DEFINE_AND_RUN) {
+        HT_ASSERT(_dst_group_hierarchy.size() == graph.NUM_STRATEGY)
+          << "Size of dst group hierarchy should be equal to the strategy num in define graph";
+      } else if (graph.type() == GraphType::EXECUTABLE) {
+        HT_ASSERT(_dst_group_hierarchy.size() == 1)
+          << "Size of dst group hierarchy should be equal to 1 in exec graph"; 
+      } else {
+        HT_NOT_IMPLEMENTED << "Currently not support";
+      }
+    }
+  }      
 
   uint64_t op_indicator() const noexcept override {
     return COMM_OP;
@@ -32,7 +94,7 @@ class CommOpImpl final: public OpInterface {
 
  protected:
   bool DoMapToParallelDevices(Operator& op,
-                              const DeviceGroup& pg) const override;
+                              const DeviceGroupUnion& pg_union) const override;
 
   bool DoInstantiate(Operator& op, const Device& placement,
                      StreamIndex stream_index) const override;                              
@@ -42,6 +104,9 @@ class CommOpImpl final: public OpInterface {
 
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;
+
+  void DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                         TensorList& outputs, const OpMeta& op_meta) const override;  
 
   TensorList DoGradient(Operator& op,
                         const TensorList& grad_outputs) const override;
@@ -53,71 +118,95 @@ class CommOpImpl final: public OpInterface {
                  RuntimeContext& runtime_ctx) const {}
 
  public: 
-  const DistributedStates& get_dst_distributed_states(Operator& op) const {
+  const DistributedStatesUnion& get_dst_ds_union(Operator& op) const {
     auto& graph = op->graph();
-    HT_ASSERT(_multi_dst_ds.size() == 1 || _multi_dst_ds.size() == graph.NUM_STRATEGY)
+    HT_ASSERT(_dst_ds_hierarchy.size() == 1 || _dst_ds_hierarchy.size() == graph.NUM_STRATEGY)
       << "CommOp get dst ds error!";
-    if (_multi_dst_ds.size() == 1) { // for comm op created in exec_graph, without multi ds
-      return _multi_dst_ds[0];
+    if (_dst_ds_hierarchy.size() == 1) { // for comm op created in exec_graph, without multi ds
+      return _dst_ds_hierarchy.get(0);
     } else { // for comm op created in define_and_run_graph, with multi ds
-      return _multi_dst_ds[graph.CUR_STRATEGY_ID];
+      return _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID);
     }
   }
 
-  // Used for parallel plan changing test case
+  const DistributedStates& get_dst_distributed_states(Operator& op) const {
+    auto& graph = op->graph();
+    HT_ASSERT(_dst_ds_hierarchy.size() == 1 || _dst_ds_hierarchy.size() == graph.NUM_STRATEGY)
+      << "CommOp get dst ds error!";
+    if (graph.USE_HETERO_ID) {
+      if (_dst_ds_hierarchy.size() == 1) { // for comm op created in exec_graph, without multi ds
+        return _dst_ds_hierarchy.get(0).get(graph.CUR_HETERO_ID);
+      } else { // for comm op created in define_and_run_graph, with multi ds
+        // HT_LOG_WARN << "get " << graph.CUR_HETERO_ID << " from " << _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID).ds_union_info();
+        return _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID).get(graph.CUR_HETERO_ID);
+      }
+    } else {
+      // inferred_local_placement_group_idx sucks!
+      auto idx = op->inferred_local_placement_group_idx();
+      if (_dst_ds_hierarchy.size() == 1) { // for comm op created in exec_graph, without multi ds
+        return _dst_ds_hierarchy.get(0).get(idx);
+      } else { // for comm op created in define_and_run_graph, with multi ds
+        return _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID).get(idx);
+      }
+    }
+  }
+
+  // deprecated: used for parallel plan changing test case
   DistributedStates& set_dst_distributed_states(const DistributedStates& ds) {
-    HT_ASSERT(_multi_dst_ds.size() == 1)
+    HT_ASSERT(_dst_ds_hierarchy.size() == 1)
       << "CommOp set dst ds can only used in exec graph";
-    _multi_dst_ds[0] = ds;
+    _dst_ds_hierarchy.get(0).get(Graph::GetGraph(Graph::cur_graph_ctx()).CUR_HETERO_ID) = ds;
   }
 
   ReductionType reduction_type() const {
     return _red_type;
   }
   
-  // placement group only for exec_graph
-  const DeviceGroup& src_group(Operator& op) const {
-    return op->input(0)->placement_group();
+  const DeviceGroupHierarchy& dst_group_dierarchy() {
+    return _dst_group_hierarchy;
+  }
+  
+  // only used in exec graph
+  const DeviceGroupUnion& get_src_group_union(Operator& op) const {
+    HT_ASSERT(op->graph().type() == GraphType::EXECUTABLE && op->input(0)->has_placement_group())
+      << "get_src_group_union can only used in exec graph and op should have placement group";
+    return op->input(0)->placement_group_union();
   }
 
-  const DeviceGroup& dst_group(Operator& op) const {
-    if (_dst_group.empty()) {
-      return op->input(0)->placement_group();
-    } else {
-      return _dst_group;
-    }
+  // only used in exec graph
+  const DeviceGroupUnion& get_dst_group_union(Operator& op) const {
+    HT_ASSERT(op->graph().type() == GraphType::EXECUTABLE && op->output(0)->has_placement_group())
+      << "get_dst_group_union can only used in exec graph and op should have placement group";
+    return op->output(0)->placement_group_union();
   }
 
-  bool is_intra_group(Operator& op) const {
-    return !is_inter_group(op);
-  }
+  CommOpInfo get_comm_info(Operator& op, const Device& inferred) const;
 
-  bool is_inter_group(Operator& op) const {
-    return src_group(op) != dst_group(op);
-  }
-
-  uint64_t get_comm_type(Operator& op);
+  uint64_t get_comm_type(Operator& op, const Device& inferred, const CommOpInfo& comm_info = {});
 
   DeviceGroup get_devices_by_dim(Operator& op, int32_t dim) const; 
+
+  std::tuple<size_t, DeviceGroupList> get_split_comm_groups(Operator& op, const DeviceGroupUnion& dg_union,
+                                                            const DistributedStatesUnion& ds_union) const;
 
  protected:
   uint64_t _comm_type{UNKNOWN_OP};
   // DistributedStates _dst_ds;
-  DistributedStatesList _multi_dst_ds;
-  DeviceGroup _dst_group;
+  DistributedStatesHierarchy _dst_ds_hierarchy;
+  DeviceGroupHierarchy _dst_group_hierarchy;
   ReductionType _red_type{kNONE}; // only used for AllReduce, ReduceScatter
 };
 
-Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
+Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, 
                   ReductionType red_type, OpMeta op_meta = OpMeta());
 
-Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds,
+Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy,
                   const std::string& mode, OpMeta op_meta = OpMeta());
 
-Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
-                  DeviceGroup dst_group, OpMeta op_meta = OpMeta());
+Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, 
+                  DeviceGroupHierarchy dst_group_hierarchy, OpMeta op_meta = OpMeta());
 
-Tensor MakeCommOp(Tensor input, DistributedStatesList multi_dst_ds, 
+Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, 
                   OpMeta op_meta = OpMeta());
 
 class AllReduceOpImpl final : public OpInterface {
@@ -142,7 +231,7 @@ class AllReduceOpImpl final : public OpInterface {
 
  protected:
   bool DoMapToParallelDevices(Operator& op,
-                              const DeviceGroup& pg) const override;
+                              const DeviceGroupUnion& pg_union) const override;
 
   bool DoInstantiate(Operator& op, const Device& placement,
                      StreamIndex stream_index) const override;
@@ -194,7 +283,7 @@ class P2PSendOpImpl final : public OpInterface {
 
  protected:
   bool DoMapToParallelDevices(Operator& op,
-                              const DeviceGroup& pg) const override;
+                              const DeviceGroupUnion& pg_union) const override;
 
   bool DoInstantiate(Operator& op, const Device& placement,
                      StreamIndex stream_index) const override;
@@ -260,7 +349,7 @@ class P2PRecvOpImpl final : public OpInterface {
 
  protected:
   bool DoMapToParallelDevices(Operator& op,
-                              const DeviceGroup& pg) const override;
+                              const DeviceGroupUnion& pg_union) const override;
 
   bool DoInstantiate(Operator& op, const Device& placement,
                      StreamIndex stream_index) const override;
@@ -442,7 +531,7 @@ class AllGatherOpImpl final : public OpInterface {
 
  protected:
   bool DoMapToParallelDevices(Operator& op,
-                              const DeviceGroup& pg) const override;
+                              const DeviceGroupUnion& pg_union) const override;
 
   bool DoInstantiate(Operator& op, const Device& placement,
                      StreamIndex stream_index) const override;
@@ -498,7 +587,7 @@ class ReduceScatterOpImpl final : public OpInterface {
 
  protected:
   bool DoMapToParallelDevices(Operator& op,
-                              const DeviceGroup& pg) const override;
+                              const DeviceGroupUnion& pg_union) const override;
 
   bool DoInstantiate(Operator& op, const Device& placement,
                      StreamIndex stream_index) const override;
@@ -528,5 +617,72 @@ Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group,
 
 Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, ReductionType red_type, 
                            bool inplace = false, OpMeta op_meta = OpMeta());
+
+class SplitAllReduceOpImpl final : public OpInterface {
+ public:
+  SplitAllReduceOpImpl(DeviceGroupList comm_groups, size_t split_num, ReductionType red_type = kSUM, bool inplace = false)
+  : OpInterface(quote(SplitAllReduceOp)), _comm_groups(comm_groups), _split_num(split_num), _red_type(red_type), _inplace(inplace) {
+    for (auto& _comm_group : _comm_groups) {
+      HT_ASSERT(_comm_group.num_devices() >= 2)
+               << "SplitAllReduce requires two or more comm devices in each comm group. Got " << _comm_group;
+    }
+  }
+
+  inline uint64_t op_indicator() const noexcept override {
+    return _inplace ? SPLIT_ALL_REDUCE_OP | INPLACE_OP : SPLIT_ALL_REDUCE_OP;
+  }
+
+  inline size_t split_num() const {
+    return _split_num;
+  }
+
+  inline bool inplace() const {
+    return _inplace;
+  }
+
+  ReductionType reduction_type() const {
+    return _red_type;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(Operator& op,
+                              const DeviceGroupUnion& pg_union) const override;
+
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;
+
+  std::vector<NDArrayMeta> 
+  DoInferMeta(const TensorList& inputs) const override;
+
+  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
+                           RuntimeContext& runtime_ctx) const override;
+
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) const {};
+  
+  bool _inplace{false};
+
+ public:
+  const DeviceGroupList& comm_groups() const {
+    return _comm_groups;
+  }
+
+ protected:
+  DeviceGroupList _comm_groups;
+  size_t _split_num;
+  ReductionType _red_type{kNONE};
+};
+
+Tensor MakeSplitAllReduceOp(Tensor input, DeviceGroupList comm_groups, size_t split_num,
+                            bool inplace = false, OpMeta op_meta = OpMeta());
+
+Tensor MakeSplitAllReduceOp(Tensor input, DeviceGroupList comm_groups, size_t split_num, ReductionType red_type, 
+                            bool inplace = false, OpMeta op_meta = OpMeta());
+
+
 }
 }

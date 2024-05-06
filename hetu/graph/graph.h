@@ -52,8 +52,12 @@ class Graph {
 
  public:
   static constexpr size_t DEFAULT_GRAPH_INITIAL_CAPACITY = 4096;
+  bool CREATE_STRATEGY = false;
   size_t NUM_STRATEGY = 1;
   size_t CUR_STRATEGY_ID = 0;
+  bool CREATE_HETERO = false;
+  bool USE_HETERO_ID = false;
+  size_t CUR_HETERO_ID = 0;
 
   // disable copy constructor and move constructor
   Graph(const Graph&) = delete;
@@ -203,7 +207,7 @@ class Graph {
     __builtin_unreachable();
   }
 
-  virtual DeviceGroup GetVariableDeviceGroupInner(const Tensor& tensor) {
+  virtual DeviceGroupUnion GetVariableDeviceGroupUnionInner(const Tensor& tensor) {
     HT_RUNTIME_ERROR << "NotImplementedError: Cannot get variable device group from graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
@@ -453,10 +457,10 @@ class Graph {
     return Graph::GetGraph(tensor).GetDetachedVariableDataInner(tensor);
   }
 
-  static DeviceGroup GetVariableDeviceGroup(const Tensor& tensor) {
+  static DeviceGroupUnion GetVariableDeviceGroupUnion(const Tensor& tensor) {
     HT_VALUE_ERROR_IF(!tensor->is_variable())
       << "'GetDetachedVariableData' does not support non-variable tensor: " << tensor;
-    return Graph::GetGraph(tensor).GetVariableDeviceGroupInner(tensor);
+    return Graph::GetGraph(tensor).GetVariableDeviceGroupUnionInner(tensor);
   }
 
   static NDArray&
@@ -811,8 +815,8 @@ inline NDArray GetDetachedVariableData(const Tensor& tensor) {
   return Graph::GetDetachedVariableData(tensor);
 }
 
-inline DeviceGroup GetVariableDeviceGroup(const Tensor& tensor) {
-  return Graph::GetVariableDeviceGroup(tensor);
+inline DeviceGroupUnion GetVariableDeviceGroupUnion(const Tensor& tensor) {
+  return Graph::GetVariableDeviceGroupUnion(tensor);
 }
 
 } // namespace graph

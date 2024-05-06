@@ -84,6 +84,20 @@ void TransposeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outpu
   outputs.at(0)->set_distributed_states({device_num, new_states, new_order});     
 }
 
+void TransposeOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                        TensorList& outputs, const OpMeta& op_meta) const {
+  HTAxes perm = get_perms();
+  auto get_perm_index = [&](int32_t key) -> int32_t {
+    for (int i = 0; i < perm.size(); i++) {
+      if (perm[i] == key) {
+        return i;
+      }
+    }
+    return -1;
+  };
+  outputs.at(0)->cur_ds_union().set_hetero_dim(get_perm_index(inputs_hetero_dim.at(0)));
+}
+
 Tensor MakeTransposeOp(Tensor input, HTAxes perms, OpMeta op_meta) {
   return Graph::MakeOp(
     std::make_shared<TransposeOpImpl>(perms),

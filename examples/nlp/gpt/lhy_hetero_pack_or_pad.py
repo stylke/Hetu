@@ -3,7 +3,7 @@ import signal
 import math
 import hetu as ht
 from hetu_gpt_multi_ds_parallel_symbolic import GPTLMHeadModel
-from hetu.nn.modules.parallel_multi_ds import config2ds, get_device_index
+from hetu.nn.modules.parallel_multi_ds import config2ds
 from gpt_config import GPTConfig
 from data_utils import GPTJsonDataset, get_mask_and_position_ids, build_pretraining_data_loader
 import numpy as np
@@ -14,6 +14,7 @@ import socket
 import pynvml
 import ast
 from queue import Queue
+import ptvsd
 
 local_device = None
 all_devices = None
@@ -34,6 +35,9 @@ def distributed_init(use_two_node: bool = False):
     all_devices = ht.global_device_group()
     if local_device.index == 0:
         print(f'local_device: {local_device}, all_devices: {all_devices}')
+    # used for debug
+    # ptvsd.enable_attach(address =('127.0.0.1', 4000 + all_devices.get_index(local_device)))
+    # ptvsd.wait_for_attach()
 
 def read_ds_parallel_config(args):
     # read ds_parallel_config from json file
@@ -83,14 +87,14 @@ def get_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
     return multi_ds_parallel_config
 
 def parse_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
-    multi_ds = []
-    device_groups = []
+    ds_hierarchy = []
+    dg_hierarchy = []
     multi_ds_parallel_config = get_multi_ds_parallel_config(ds_parallel_configs, module_name, _range)
     for ds_parallel_config in multi_ds_parallel_config:
-        ds, device_group = config2ds(ds_parallel_config)
-        multi_ds.append(ds)
-        device_groups.append(device_group)
-    return multi_ds, device_groups
+        ds_union, dg_union = config2ds(ds_parallel_config)
+        ds_hierarchy.append(ds_union)
+        dg_hierarchy.append(dg_union)
+    return ds_hierarchy, dg_hierarchy
 
 def train_dataset_provider(args):
     """Build train dataset."""
@@ -126,6 +130,12 @@ def profile_memory(device_index = 0):
     print("Total Memory:", total_memory, "MiB")
     print("Used Memory:", used_memory, "MiB")
     print("Free Memory:", free_memory, "MiB")
+    
+def get_dg_from_union(device, dg_union):
+    for i, dg in enumerate(dg_union):
+        if dg.contains(device):
+            return i, dg
+    return None, None
 
 def pretrain(args):
     ds_parallel_configs = read_ds_parallel_config(args)
@@ -155,20 +165,20 @@ def pretrain(args):
     # Hetu model definition
     model = GPTLMHeadModel(config=config, ds_parallel_configs=ds_parallel_configs)
     
-    input_multi_ds, input_device_groups = parse_multi_ds_parallel_config(ds_parallel_configs, 'input')
-    label_multi_ds, label_device_groups = parse_multi_ds_parallel_config(ds_parallel_configs, 'label')
+    input_ds_hierarchy, input_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'input')
+    label_ds_hierarchy, label_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'label')
     # print(f'input_ds: {input_ds}, label_ds: {label_ds}')
     
     # mbs_times_dp = args.global_batch_size // config.num_micro_batches
-    dp_size = input_multi_ds[0].get_dim(0)
+    dp_size = input_ds_hierarchy[0].get(0).get_dim(0)
     mbs_times_dp = args.micro_batch_size * dp_size
         
-    # todo: assign multi device_groups, and instantiate only one placement_group
-    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='input_ids')
-    position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='position_ids')
-    token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='token_type_ids')
-    attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[mbs_times_dp, config.seq_len], multi_ds=input_multi_ds, device_groups=input_device_groups, name='attention_mask')
-    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], multi_ds=label_multi_ds, device_groups=label_device_groups, name='masked_lm_labels')
+    # todo: assign multi dg_hierarchy, and instantiate only one placement_group
+    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='input_ids')
+    position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='position_ids')
+    token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='token_type_ids')
+    # attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='attention_mask')
+    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=label_ds_hierarchy, device_group_hierarchy=label_dg_hierarchy, name='masked_lm_labels')
 
     config.mbs_times_dp_symbol = ht.IntSymbol(mbs_times_dp)
     config.seq_len_symbol = input_ids.symbolic_shape[1]
@@ -176,7 +186,7 @@ def pretrain(args):
     # print(f'{local_device}: build model begin...')
     loss = model(input_ids=input_ids,
                  position_ids=position_ids,
-                 attention_mask=attention_mask,
+                 # attention_mask=attention_mask,
                  token_type_ids=token_type_ids,
                  labels=masked_lm_labels)
     # print(f'{local_device}: build model end...')
@@ -205,23 +215,36 @@ def pretrain(args):
         if global_batch_size != args.global_batch_size or seq_len != args.seq_length:
             assert config.use_flash_attn == True, "symbolic shape can only used when flash attn is on for now"
         
-        input_ds = input_multi_ds[strategy_id]
-        input_device_group = input_device_groups[strategy_id]
-        label_ds = label_multi_ds[strategy_id]
-        label_device_group = label_device_groups[strategy_id]
+        input_ds_union = input_ds_hierarchy[strategy_id]
+        input_device_group_union = input_dg_hierarchy[strategy_id]
+        label_ds_union = label_ds_hierarchy[strategy_id]
+        label_device_group_union = label_dg_hierarchy[strategy_id]
+        assert input_ds_union.hetero_dim == 0 or input_ds_union.hetero_dim == -3, "input hetero dim unsupported"
+        assert label_ds_union.hetero_dim == 0 or label_ds_union.hetero_dim == -3, "label hetero dim unsupported"
 
         # device in same dp_group will read the same batch data, idx=-1 means no need to read data
         dup_group_idx, dup_group_num = -1, -1
-        if input_device_group.contains(local_device):
+        input_union_idx, input_device_group = get_dg_from_union(local_device, input_device_group_union)
+        label_union_idx, label_device_group = get_dg_from_union(local_device, label_device_group_union)
+        if input_device_group != None:
             local_device_idx = input_device_group.get_index(local_device)
-            dup_group_idx = input_ds.get_dup_group_index(local_device_idx)
-            dup_group_num = input_ds.get_dim(0)
-        elif label_device_group.contains(local_device):
+            dup_group_idx = input_union_idx
+            dup_group_num = len(input_device_group_union)
+            if input_ds_union.hetero_dim == -3:
+                dup_group_idx = input_ds_union.get(0).get_dup_group_index(local_device_idx)
+                dup_group_num = input_ds_union.get(0).get_dim(0)
+        elif label_device_group != None:
             local_device_idx = label_device_group.get_index(local_device)
-            dup_group_idx = label_ds.get_dup_group_index(local_device_idx)
-            dup_group_num = label_ds.get_dim(0)
+            dup_group_idx = label_union_idx
+            dup_group_num = len(label_device_group_union)
+            if label_ds_union.hetero_dim == -3:
+                dup_group_idx = label_ds_union.get(0).get_dup_group_index(local_device_idx)
+                dup_group_num = label_ds_union.get(0).get_dim(0)
         else:
-            dup_group_num = input_ds.get_dim(0)
+            # 其余local device都在中间stage上
+            dup_group_num = len(input_device_group_union)
+            if input_ds_union.hetero_dim == -3:
+                dup_group_num = input_ds_union.get(0).get_dim(0)
             # raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
 
         dp_rank = dup_group_idx
@@ -232,9 +255,16 @@ def pretrain(args):
             f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
         num_micro_batches = global_batch_size // mbs_times_dp
         
+        # heterogenous tp
+        rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
+        unused_rank_list = ast.literal_eval(args.unused_rank)
+        for unused_rank in unused_rank_list:
+            if rank_to_device_mapping[unused_rank] == all_devices.get_index(local_device):
+                pass
+                # TODO:不运行
+        
         # heterogenous pipeline 
         if args.hetero_data:
-            rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
             curr_rank_id = -1
             for rank_id, device_id in rank_to_device_mapping.items():
                 if device_id == all_devices.get_index(local_device):
@@ -242,7 +272,7 @@ def pretrain(args):
                         assert False, "rank_to_device_mapping has duplicate keys"
                     curr_rank_id = rank_id
             assert curr_rank_id != -1, f"can't find device {all_devices.get_index(local_device)} in rank_to_device_mapping"
-            hetero_pipeline_num = curr_rank_id % (dup_group_num * args.hetero_stage_gpus) // args.hetero_stage_gpus
+            hetero_pipeline_num = curr_rank_id % (dp_size * args.hetero_stage_gpus) // args.hetero_stage_gpus
             # adjust micro_batch_size
             '''
             batch_ratio = 8
@@ -299,7 +329,7 @@ def pretrain(args):
                     input_ids: tokens.astype(np.int64),
                     position_ids: _position_ids.astype(np.int64), 
                     token_type_ids: _token_type_ids.astype(np.int64),
-                    attention_mask: _attention_mask.astype(np.int64),
+                    # attention_mask: _attention_mask.astype(np.int64),
                     masked_lm_labels: labels.astype(np.int64),
                 }
             else: # fake data; feed_dict={} will cause segment fault?
@@ -307,7 +337,7 @@ def pretrain(args):
                     input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
                     position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64), 
                     token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
-                    attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
+                    # attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
                     masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
                 }
             # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
@@ -339,7 +369,7 @@ def pretrain(args):
             # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
             # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
             if run_level == ht.run_level("update"):
-                if label_device_group.contains(local_device):
+                if label_device_group != None:
                     loss_out = results[0].numpy(force=True).mean()
                     print(f"{local_device}: [Epoch {epoch}] (step {step}, consumed_samples = {consumed_samples}): loss = {loss_out:.3f}, time = {end_time - start_time:.4f}")
         return consumed_samples
@@ -395,6 +425,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--rank_to_device_mapping", type=str, help='rank to device mapping.'
+    )
+    parser.add_argument(
+        "--unused_rank", type=str, help='unused rank.'
     )
     parser.add_argument(
         "--run_straggler_experiment", action="store_true", help="run heterogenous pipeline experiment."

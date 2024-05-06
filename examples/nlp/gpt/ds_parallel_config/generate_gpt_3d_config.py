@@ -13,22 +13,22 @@ def generate_gpt_3d_config(num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=Tru
         'zero': zero,
         'devices': list(range(num_gpus)),
         'input': {
-            'split': {'0': dp},
-            'dup': tp,
-            'device_group': device_groups[0],
+            'split': {'0': [dp]},
+            'dup': [tp],
+            'device_group_union': [device_groups[0]],
             'type': 'placeholder'
         },
         'gpt': {
             'wte': {
-                'split': {'0': tp},
-                'dup': dp,
-                'device_group': device_groups[0],
+                'split': {'0': [tp]},
+                'dup': [dp],
+                'device_group_union': [device_groups[0]],
                 'type': 'variable'
             },
             'wpe': {
                 'split': {},
-                'dup': dp * tp,
-                'device_group': device_groups[0],
+                'dup': [dp * tp],
+                'device_group_union': [device_groups[0]],
                 'type': 'variable'
             },
             'blocks': {
@@ -36,21 +36,21 @@ def generate_gpt_3d_config(num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=Tru
             },
             'layernorm_final': {
                 'split': {},
-                'dup': dp * tp,
-                'device_group': device_groups[-1],
+                'dup': [dp * tp],
+                'device_group_union': [device_groups[-1]],
                 'type': 'variable'
             }
         },
         'lm_head': {
-            'split': {'1': tp},
-            'dup': dp,
-            'device_group': device_groups[-1],
+            'split': {'1': [tp]},
+            'dup': [dp],
+            'device_group_union': [device_groups[-1]],
             'type': 'variable'
         },
         'label': {
-            'split': {'0': dp},
-            'dup': tp,
-            'device_group': device_groups[-1],
+            'split': {'0': [dp]},
+            'dup': [tp],
+            'device_group_union': [device_groups[-1]],
             'type': 'placeholder'
         }
     }
@@ -63,41 +63,41 @@ def generate_gpt_3d_config(num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=Tru
             'range': [block_start_id, block_end_id],
             'layernorm1': {
                 'split': {},
-                'dup': dp * tp,
-                'device_group': device_groups[stage_id],
+                'dup': [dp * tp],
+                'device_group_union': [device_groups[stage_id]],
                 'type': 'variable'
             },
             'attn': {
                 'qkv': {
-                    'split': {'1': tp},
-                    'dup': dp,
-                    'device_group': device_groups[stage_id],
+                    'split': {'1': [tp]},
+                    'dup': [dp],
+                    'device_group_union': [device_groups[stage_id]],
                     'type': 'variable'
                 },
                 'dense': {
-                    'split': {'0': tp},
-                    'dup': dp,
-                    'device_group': device_groups[stage_id],
+                    'split': {'0': [tp]},
+                    'dup': [dp],
+                    'device_group_union': [device_groups[stage_id]],
                     'type': 'variable'
                 }
             },
             'layernorm2': {
                 'split': {},
-                'dup': dp * tp,
-                'device_group': device_groups[stage_id],
+                'dup': [dp * tp],
+                'device_group_union': [device_groups[stage_id]],
                 'type': 'variable'
             },
             'mlp': {
                 'dense_h_to_4h': {
-                    'split': {'1': tp},
-                    'dup': dp,
-                    'device_group': device_groups[stage_id],
+                    'split': {'1': [tp]},
+                    'dup': [dp],
+                    'device_group_union': [device_groups[stage_id]],
                     'type': 'variable'
                 },
                 'dense_4h_to_h': {
-                    'split': {'0': tp},
-                    'dup': dp,
-                    'device_group': device_groups[stage_id],
+                    'split': {'0': [tp]},
+                    'dup': [dp],
+                    'device_group_union': [device_groups[stage_id]],
                     'type': 'variable'
                 }
             }

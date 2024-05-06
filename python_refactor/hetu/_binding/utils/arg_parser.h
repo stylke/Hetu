@@ -48,6 +48,7 @@ enum class ArgType : uint8_t {
   DEVICE, 
   DEVICE_GROUP, 
   DEVICE_GROUP_LIST, 
+  DG_HIERARCHY,
   STREAM, 
   ND_ARRAY, 
   ND_ARRAY_LIST, 
@@ -58,6 +59,7 @@ enum class ArgType : uint8_t {
   FEED_DICT,
   DISTRIBUTED_STATES,
   DISTRIBUTED_STATES_LIST,
+  DS_HIERARCHY,
   INT_SYMBOL,
   SYMBOLIC_SHAPE,
   INITIALIZER,
@@ -310,13 +312,13 @@ class ParsedPyArgs {
     return DeviceGroup_FromPyObject(_args[i]);
   }
 
-  inline DeviceGroupList get_device_groups(size_t i) const {
-    return DeviceGroupList_FromPyObject(_args[i]);
+  inline DeviceGroupHierarchy get_dg_hierarchy(size_t i) const {
+    return DeviceGroupHierarchy_FromPyObject(_args[i]);
   }
 
-  inline optional<DeviceGroupList> get_device_groups_or_peek(size_t i) const {
-    return has(i) ? optional<DeviceGroupList>(get_device_groups(i)) \
-                  : get_device_groups_ctx().peek();
+  inline optional<DeviceGroupHierarchy> get_dg_hierarchy_or_peek(size_t i) const {
+    return has(i) ? optional<DeviceGroupHierarchy>(get_dg_hierarchy(i)) \
+                  : get_dg_hierarchy_ctx().peek();
   }
 
   inline StreamIndex get_stream_index(size_t i) const {
@@ -416,6 +418,14 @@ class ParsedPyArgs {
     return DistributedStatesList_FromPyObject(_args[i]);
   }
 
+  inline DistributedStatesHierarchy get_ds_hierarchy_or_empty(size_t i) {
+    return has(i) ? DistributedStatesHierarchy_FromPyObject(_args[i]) : DistributedStatesHierarchy();
+  }
+
+  inline DistributedStatesHierarchy get_ds_hierarchy(size_t i) {
+    return DistributedStatesHierarchy_FromPyObject(_args[i]);
+  }
+
   inline IntSymbol get_int_symbol_or_empty(size_t i) {
     return has(i) ? IntSymbol_FromPyObject(_args[i]) : IntSymbol();
   }
@@ -463,14 +473,14 @@ class PyArgParser {
 
 #define OP_META_ARGS                                                           \
   "int stream_index=None, "                                                    \
-  "List[DeviceGroup] device_groups=None, "                                     \
+  "List[List[DeviceGroup]] device_group_hierarchy=None, "                                     \
   "List[Tensor] extra_deps=None, "                                             \
   "OpName name=None"
 
 inline OpMeta parse_op_meta(const ParsedPyArgs& parsed_args, size_t offset) {
   OpMeta ret = CurrentOpMetaCtx();
   if (parsed_args.has(offset + 1))
-    ret.set_device_groups(parsed_args.get_device_groups(offset + 1));
+    ret.set_device_group_hierarchy(parsed_args.get_dg_hierarchy(offset + 1));
   if (parsed_args.has(offset + 2))
     ret.set_extra_deps(parsed_args.get_tensor_list(offset + 2));
   if (parsed_args.has(offset + 3))

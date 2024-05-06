@@ -3,60 +3,16 @@ import json
 import os
 import ast
 
-def generate_gpt_3d_config(rank_to_device_mapping, hetero_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
     if dp == 1:
         zero = False
     num_devices_per_stage = num_gpus // pp
-    input_device_group = [rank_to_device_mapping[device] for device in range(0, num_devices_per_stage)]
-    output_device_group = [rank_to_device_mapping[device] for device in range(num_gpus - num_devices_per_stage, num_gpus)]
-
-    ds_parallel_config = {
-        'zero': zero,
-        'devices': list(range(num_gpus)),
-        'input': {
-            'split': {'0': dp},
-            'dup': tp,
-            'device_group': input_device_group,
-            'type': 'placeholder'
-        },
-        'gpt': {
-            'wte': {
-                'split': {'0': tp},
-                'dup': dp,
-                'device_group': input_device_group,
-                'type': 'variable'
-            },
-            'wpe': {
-                'split': {},
-                'dup': dp * tp,
-                'device_group': input_device_group,
-                'type': 'variable'
-            },
-            'blocks': {
-
-            },
-            'layernorm_final': {
-                'split': {},
-                'dup': dp * tp,
-                'device_group': output_device_group,
-                'type': 'variable'
-            }
-        },
-        'lm_head': {
-            'split': {'1': tp},
-            'dup': dp,
-            'device_group': output_device_group,
-            'type': 'variable'
-        },
-        'label': {
-            'split': {'0': dp},
-            'dup': tp,
-            'device_group': output_device_group,
-            'type': 'placeholder'
-        }
-    }
     
+    dp_union = [dp for _ in range(dp)]
+    tp_union_list = []
+    dg_union_list = []
     for block_id in range(num_layers):
+        hybrid_tp_degree = []
         hybrid_device_group = []
         for pipeline_id in range(dp):
             device_group_num = 0
@@ -68,47 +24,98 @@ def generate_gpt_3d_config(rank_to_device_mapping, hetero_layers, num_layers=32,
                 device_group_num += 1
             devices = range(device_group_num * num_devices_per_stage + tp * pipeline_id, 
                             device_group_num * num_devices_per_stage + tp * (pipeline_id + 1))
-            hybrid_device_group += [rank_to_device_mapping[device] for device in devices]
+            hybrid_tp_degree.append(len([device for device in devices if device not in unused_rank]))
+            hybrid_device_group.append([rank_to_device_mapping[device] for device in devices if device not in unused_rank])
+        tp_union_list.append(hybrid_tp_degree)
+        dg_union_list.append(hybrid_device_group)
+
+    ds_parallel_config = {
+        'zero': zero,
+        'devices': list(range(num_gpus)),
+        'input': {
+            'split': {'0': dp_union},
+            'dup': tp_union_list[0],
+            'device_group_union': dg_union_list[0],
+            'type': 'placeholder'
+        },
+        'gpt': {
+            'wte': {
+                'split': {'0': tp_union_list[0]},
+                'dup': dp_union,
+                'device_group_union': dg_union_list[0],
+                'type': 'variable'
+            },
+            'wpe': {
+                'split': {},
+                'dup': [tp_union_list[0][i] * dp for i in range(dp)],
+                'device_group_union': dg_union_list[0],
+                'type': 'variable'
+            },
+            'blocks': {
+
+            },
+            'layernorm_final': {
+                'split': {},
+                'dup': [tp_union_list[-1][i] * dp for i in range(dp)],
+                'device_group_union': dg_union_list[-1],
+                'type': 'variable'
+            }
+        },
+        'lm_head': {
+            'split': {'1': tp_union_list[-1]},
+            'dup': dp_union,
+            'device_group_union': dg_union_list[-1],
+            'type': 'variable'
+        },
+        'label': {
+            'split': {'0': dp_union},
+            'dup': tp_union_list[-1],
+            'device_group_union': dg_union_list[-1],
+            'type': 'placeholder'
+        }
+    }
+    
+    for block_id in range(num_layers):
         blocks_json = ds_parallel_config['gpt']['blocks']
         blocks_json[f'blocks{block_id}'] = {
             'range': [block_id,],
             'layernorm1': {
                 'split': {},
-                'dup': dp * tp,
-                'device_group': hybrid_device_group,
+                'dup': [tp_union_list[block_id][i] * dp for i in range(dp)],
+                'device_group_union': dg_union_list[block_id],
                 'type': 'variable'
             },
             'attn': {
                 'qkv': {
-                    'split': {'1': tp},
-                    'dup': dp,
-                    'device_group': hybrid_device_group,
+                    'split': {'1': tp_union_list[block_id]},
+                    'dup': dp_union,
+                    'device_group_union': dg_union_list[block_id],
                     'type': 'variable'
                 },
                 'dense': {
-                    'split': {'0': tp},
-                    'dup': dp,
-                    'device_group': hybrid_device_group,
+                    'split': {'0': tp_union_list[block_id]},
+                    'dup': dp_union,
+                    'device_group_union': dg_union_list[block_id],
                     'type': 'variable'
                 }
             },
             'layernorm2': {
                 'split': {},
-                'dup': dp * tp,
-                'device_group': hybrid_device_group,
+                'dup': [tp_union_list[block_id][i] * dp for i in range(dp)],
+                'device_group_union': dg_union_list[block_id],
                 'type': 'variable'
             },
             'mlp': {
                 'dense_h_to_4h': {
-                    'split': {'1': tp},
-                    'dup': dp,
-                    'device_group': hybrid_device_group,
+                    'split': {'1': tp_union_list[block_id]},
+                    'dup': dp_union,
+                    'device_group_union': dg_union_list[block_id],
                     'type': 'variable'
                 },
                 'dense_4h_to_h': {
-                    'split': {'0': tp},
-                    'dup': dp,
-                    'device_group': hybrid_device_group,
+                    'split': {'0': tp_union_list[block_id]},
+                    'dup': dp_union,
+                    'device_group_union': dg_union_list[block_id],
                     'type': 'variable'
                 }
             }
@@ -140,6 +147,9 @@ if __name__ == '__main__':
         '--rank_to_device_mapping', type=str, default="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}", help='device to rank mapping.'
     )
     parser.add_argument(
+        '--unused_rank', type=str, default="[]", help='unused rank list.'
+    )
+    parser.add_argument(
         '--zero', action='store_true', help='use zero or not.'
     )
     # parser.add_argument(
@@ -156,7 +166,7 @@ if __name__ == '__main__':
         
     assert args.dp * args.tp * args.pp == args.num_gpus, \
             f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
-    ds_parallel_config = generate_gpt_3d_config(ast.literal_eval(args.rank_to_device_mapping), hetero_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    ds_parallel_config = generate_gpt_3d_config(ast.literal_eval(args.rank_to_device_mapping), ast.literal_eval(args.unused_rank), hetero_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
     save_folder = './ds_parallel_config/hetero'
     file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
     if not os.path.exists(save_folder):

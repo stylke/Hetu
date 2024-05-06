@@ -18,12 +18,34 @@ PyObject* PyDistributedStates_New(const DistributedStates& ds) {
   HT_PY_FUNC_END  
 }
 
-PyObject* PyDistributedStatesList_New(const DistributedStatesList& multi_ds) {
+PyObject* PyDistributedStatesList_New(const DistributedStatesList& ds_list) {
   HT_PY_FUNC_BEGIN
-  PyObject* ret = PyList_New(multi_ds.size());
+  PyObject* ret = PyList_New(ds_list.size());
   HT_RUNTIME_ERROR_IF(!ret) << "Failed to alloc list";
-  for (size_t i = 0; i < multi_ds.size(); i++) {
-    auto* distributed_states_obj = PyDistributedStates_New(multi_ds[i]);
+  for (size_t i = 0; i < ds_list.size(); i++) {
+    auto* distributed_states_obj = PyDistributedStates_New(ds_list[i]);
+    PyList_SET_ITEM(ret, i, distributed_states_obj);
+  }
+  return ret;
+  HT_PY_FUNC_END
+}
+
+PyObject* PyDistributedStatesUnion_New(const DistributedStatesUnion& ds_union) {
+  HT_PY_FUNC_BEGIN
+  auto* unsafe_self = PyDistributedStatesUnion_Type->tp_alloc(PyDistributedStatesUnion_Type, 0);
+  HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyDistributedStates";
+  auto* self = reinterpret_cast<PyDistributedStatesUnion*>(unsafe_self);
+  new (&self->ds_union) DistributedStatesUnion(ds_union);
+  return reinterpret_cast<PyObject*>(self);
+  HT_PY_FUNC_END  
+}
+
+PyObject* PyDistributedStatesHierarchy_New(const DistributedStatesHierarchy& ds_hierarchy) {
+  HT_PY_FUNC_BEGIN
+  PyObject* ret = PyList_New(ds_hierarchy.size());
+  HT_RUNTIME_ERROR_IF(!ret) << "Failed to alloc list";
+  for (size_t i = 0; i < ds_hierarchy.size(); i++) {
+    auto* distributed_states_obj = PyDistributedStatesUnion_New(ds_hierarchy.get(i));
     PyList_SET_ITEM(ret, i, distributed_states_obj);
   }
   return ret;
@@ -61,8 +83,36 @@ PyObject* PyDistributedStates_pynew(PyTypeObject* type, PyObject* args,
   HT_PY_FUNC_END
 }
 
+PyObject* PyDistributedStatesUnion_pynew(PyTypeObject* type, PyObject* args, 
+                                         PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  auto* unsafe_self = PyDistributedStatesUnion_Type->tp_alloc(PyDistributedStatesUnion_Type, 0);
+  HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PyDistributedStatesUnion";  
+  auto* self = reinterpret_cast<PyDistributedStatesUnion*>(unsafe_self);
+  static PyArgParser parser({
+    "DistributedStatesUnion(List[DistributedStates] ds_list, int hetero_dim)",
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    std::vector<DistributedStates> ds_list = parsed_args.get_distributed_states_list(0);
+    int32_t hetero_dim = parsed_args.get_int64(1);
+    new (&self->ds_union) DistributedStatesUnion(ds_list, hetero_dim);
+  } else {
+    Py_TYPE(self)->tp_free(self);
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  return reinterpret_cast<PyObject*>(self);
+  HT_PY_FUNC_END
+}
+
 void PyDistributedStates_dealloc(PyDistributedStates* self) {
   (&self->distributed_states)->~DistributedStates();
+  Py_TYPE(self)->tp_free(self);
+}
+
+void PyDistributedStatesUnion_dealloc(PyDistributedStatesUnion* self) {
+  (&self->ds_union)->~DistributedStatesUnion();
   Py_TYPE(self)->tp_free(self);
 }
 
@@ -72,8 +122,18 @@ PyObject* PyDistributedStates_str(PyDistributedStates* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyDistributedStatesUnion_str(PyDistributedStatesUnion* self) {
+  HT_PY_FUNC_BEGIN
+  return PyUnicode_FromString(self->ds_union.ds_union_info());
+  HT_PY_FUNC_END
+}
+
 PyObject* PyDistributedStates_repr(PyDistributedStates* self) {
   return PyDistributedStates_str(self);
+}
+
+PyObject* PyDistributedStatesUnion_repr(PyDistributedStatesUnion* self) {
+  return PyDistributedStatesUnion_str(self);
 }
 
 PyObject* PyDistributedStates_device_num(PyDistributedStates* self) {
@@ -232,6 +292,101 @@ PyTypeObject PyDistributedStates_Type_obj = {
 };
 PyTypeObject* PyDistributedStates_Type = &PyDistributedStates_Type_obj;
 
+PyObject* PyDistributedStatesUnion_ds_list(PyDistributedStatesUnion* self) {
+  HT_PY_FUNC_BEGIN
+  return PyDistributedStatesList_New(self->ds_union.raw_data()); 
+  HT_PY_FUNC_END
+}
+
+PyObject* PyDistributedStatesUnion_hetero_dim(PyDistributedStatesUnion* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLong_FromInteger(self->ds_union.hetero_dim()); 
+  HT_PY_FUNC_END
+}
+
+PyObject* PyDistributedStatesUnion_get(PyDistributedStatesUnion* self, PyObject* args) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({"get(int dim)"});
+  auto parsed_args = parser.parse(args, nullptr);
+  if (parsed_args.signature_index() == 0) {
+    return PyDistributedStates_New(self->ds_union.get(parsed_args.get_int64(0)));
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }  
+  HT_PY_FUNC_END
+}
+
+PyObject* PyDistributedStatesUnion_get_local(PyDistributedStatesUnion* self, PyObject* args) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({"get_local(int dim)"});
+  auto parsed_args = parser.parse(args, nullptr);
+  if (parsed_args.signature_index() == 0) {
+    return PyDistributedStates_New(self->ds_union.get_local(parsed_args.get_int64(0)));
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }  
+  HT_PY_FUNC_END
+}
+
+// NOLINTNEXTLINE
+PyGetSetDef PyDistributedStatesUnion_properties[] = {
+  {PY_GET_SET_DEF_NAME("ds_list"), (getter) PyDistributedStatesUnion_ds_list, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("hetero_dim"), (getter) PyDistributedStatesUnion_hetero_dim, nullptr, nullptr, nullptr},
+  {nullptr}
+};
+
+// NOLINTNEXTLINE
+PyMethodDef PyDistributedStatesUnion_methods[] = {
+  {"get", (PyCFunction) PyDistributedStatesUnion_get, METH_VARARGS, nullptr },
+  {"get_local", (PyCFunction) PyDistributedStatesUnion_get_local, METH_VARARGS, nullptr },
+  {nullptr}
+};
+
+// NOLINTNEXTLINE
+PyTypeObject PyDistributedStatesUnion_Type_obj = {
+  PyVarObject_HEAD_INIT(nullptr, 0) 
+  "hetu.DistributedStatesUnion", /* tp_name */
+  sizeof(PyDistributedStatesUnion), /* tp_basicsize */
+  0, /* tp_itemsize */
+  (destructor) PyDistributedStatesUnion_dealloc, /* tp_dealloc */
+  0, /* tp_vectorcall_offset */
+  nullptr, /* tp_getattr */
+  nullptr, /* tp_setattr */
+  nullptr, /* tp_reserved */
+  (reprfunc) PyDistributedStatesUnion_repr, /* tp_repr */
+  nullptr, /* tp_as_number */
+  nullptr, /* tp_as_sequence */
+  nullptr, /* tp_as_mapping */
+  nullptr, /* tp_hash  */
+  nullptr, /* tp_call */
+  (reprfunc) PyDistributedStatesUnion_str, /* tp_str */
+  nullptr, /* tp_getattro */
+  nullptr, /* tp_setattro */
+  nullptr, /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT, /* tp_flags */
+  nullptr, /* tp_doc */
+  nullptr, /* tp_traverse */
+  nullptr, /* tp_clear */
+  nullptr, /* tp_richcompare */
+  0, /* tp_weaklistoffset */
+  nullptr, /* tp_iter */
+  nullptr, /* tp_iternext */
+  PyDistributedStatesUnion_methods, /* tp_methods */
+  nullptr, /* tp_members */
+  PyDistributedStatesUnion_properties, /* tp_getset */
+  nullptr, /* tp_base */
+  nullptr, /* tp_dict */
+  nullptr, /* tp_descr_get */
+  nullptr, /* tp_descr_set */
+  0, /* tp_dictoffset */
+  nullptr, /* tp_init */
+  nullptr, /* tp_alloc */
+  PyDistributedStatesUnion_pynew, /* tp_new */
+};
+PyTypeObject* PyDistributedStatesUnion_Type = &PyDistributedStatesUnion_Type_obj;
+
 std::vector<PyMethodDef> InitDistributedStatesPyClassMethodDefs() {
   std::vector<PyMethodDef> ret = {{nullptr}};
   AddPyMethodDefs(ret, {
@@ -255,6 +410,16 @@ void AddPyDistributedStatesTypeToModule(py::module_& module) {
   HT_RUNTIME_ERROR_IF(0 != PyModule_AddFunctions(
       module.ptr(), tensor_class_methods.data()))
     << "Failed to add Tensor class methods";     
+}
+
+void AddPyDistributedStatesUnionTypeToModule(py::module_& module) {
+  HT_RUNTIME_ERROR_IF(PyType_Ready(PyDistributedStatesUnion_Type) < 0) 
+    << "PyDistributedStatesUnion_Type not ready";
+  Py_INCREF(PyDistributedStatesUnion_Type);
+  HT_RUNTIME_ERROR_IF(0 != PyModule_AddObject(
+      module.ptr(), "DistributedStatesUnion", 
+      reinterpret_cast<PyObject*>(PyDistributedStatesUnion_Type)))
+    << "Failed to add PyDistributedStatesUnion_Type"; 
 }
 
 } // namespace graph

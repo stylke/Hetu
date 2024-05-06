@@ -54,9 +54,9 @@ class PlaceholderOpImpl final : public OpInterface {
   NDArrayMeta _data_meta;
 };
 
-Tensor MakePlaceholderOp(NDArrayMeta data_meta, const DistributedStates& ds = DistributedStates(), OpMeta op_meta = OpMeta());
+Tensor MakePlaceholderOp(NDArrayMeta data_meta, const DistributedStatesHierarchy& ds_hierarchy = DistributedStatesHierarchy(), OpMeta op_meta = OpMeta());
 
-Tensor MakeParallelPlaceholderOp(NDArrayMeta data_meta, const DistributedStatesList& multi_ds, OpMeta op_meta = OpMeta());
+Tensor MakeParallelPlaceholderOp(NDArrayMeta data_meta, const DistributedStatesHierarchy& ds_hierarchy, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -207,17 +207,21 @@ class DeviceGroup {
   DeviceGroup(const std::vector<Device>& devices) : _devices(devices) {
     // note the order of device group is important to recognize the heterogenous pipelines
     // std::sort(_devices.begin(), _devices.end());
-    _devices.erase(std::unique(_devices.begin(), _devices.end()),
-                   _devices.end());
+    for (const auto& device : devices) {
+      if (device.is_undetermined()) {
+        _dummy = true;
+      }
+    }
   }
 
   DeviceGroup(const std::vector<std::string>& devices) {
     _devices.reserve(devices.size());
-    for (const auto& device : devices)
+    for (const auto& device : devices) {
       _devices.emplace_back(device);
-    // std::sort(_devices.begin(), _devices.end());
-    _devices.erase(std::unique(_devices.begin(), _devices.end()),
-                   _devices.end());
+      if (device == "") {
+        _dummy = true;
+      }
+    }
   }
 
   DeviceGroup() : DeviceGroup(std::vector<Device>()) {}
@@ -281,6 +285,7 @@ class DeviceGroup {
 
  private:
   std::vector<Device> _devices;
+  bool _dummy{false};
 };
 
 std::ostream& operator<<(std::ostream&, const DeviceGroup&);

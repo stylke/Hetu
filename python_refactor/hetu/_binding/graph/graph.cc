@@ -61,6 +61,18 @@ PyObject* PyGraph_cur_strategy_id(PyGraph* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyGraph_use_hetero_id(PyGraph* self) {
+  HT_PY_FUNC_BEGIN
+  Py_RETURN_BOOLEAN_COND(Graph::GetGraph(self->graph_id).USE_HETERO_ID);
+  HT_PY_FUNC_END
+}
+
+PyObject* PyGraph_cur_hetero_id(PyGraph* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLong_FromInteger(Graph::GetGraph(self->graph_id).CUR_HETERO_ID);
+  HT_PY_FUNC_END
+}
+
 PyObject* PyGraph_set_num_strategy(PyGraph* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({"set_num_strategy(int num_strategy)"});
@@ -246,6 +258,8 @@ PyGetSetDef PyGraph_properties[] = {
   {PY_GET_SET_DEF_NAME("id"), (getter) PyGraph_id, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("num_strategy"), (getter) PyGraph_num_strategy, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("cur_strategy_id"), (getter) PyGraph_cur_strategy_id, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("use_hetero_id"), (getter) PyGraph_use_hetero_id, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("cur_hetero_id"), (getter) PyGraph_cur_hetero_id, nullptr, nullptr, nullptr}, 
   {nullptr}
 };
 

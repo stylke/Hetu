@@ -394,6 +394,7 @@ class SwitchExecGraph {
     friend class ParamSlice;
 
   public:
+    SwitchExecGraph() {}
     SwitchExecGraph(DefineAndRunGraph* define_graph, 
                     size_t plan_before, 
                     size_t plan_after):
@@ -488,8 +489,8 @@ class SwitchExecGraph {
                                  Tensor2NDArrayMap& tensor2data,
                                  Tensor2IntMap& tensor2degrees);
 
-    void SwitchParam(const DistributedStates& src_ds, const DeviceGroup& src_group,
-                     const DistributedStates& dst_ds, const DeviceGroup& dst_group,
+    void SwitchParam(const DistributedStatesUnion& src_ds_union, const DeviceGroupUnion& src_group_union,
+                     const DistributedStatesUnion& dst_ds_union, const DeviceGroupUnion& dst_group_union,
                      const Tensor& comm_input, const Tensor& after_param);
 
     void ProfileRunningDetails();
@@ -532,6 +533,24 @@ class SwitchExecGraph {
     // profile related
     SWITCH_PROFILE_LEVEL _profile_level = SWITCH_PROFILE_LEVEL::INFO; // profile的粒度（开启后会进行同步，因此端到端速度可能会变慢）
     Tensor2StringMap _info_mapping; // 记录tensor到相应param slice名称的映射（只针对BatchedISendIRecvOp的send部分的tensor）
+};
+
+class ComplexExecComm : public SwitchExecGraph {
+  public:
+    ComplexExecComm(const Operator& comm_op, const CommOpInfo& comm_info): 
+      SwitchExecGraph(),
+      _is_instantiated(false),
+      _comm_op(comm_op),
+      _comm_info(comm_info) {
+      _algorithm_level = SWITCH_ALGORITHM_LEVEL::NEW_GREEDY;
+    }
+
+    Tensor Instantiate();
+
+  protected:
+    bool _is_instantiated;
+    Operator _comm_op;
+    CommOpInfo _comm_info;
 };
 
 } // namespace graph

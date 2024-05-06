@@ -11,13 +11,13 @@ namespace graph {
 
 // devices by dim for collective communication
 DeviceGroup VocabParallelCrossEntropyOpImpl::get_devices_by_dim(const Tensor& input, int32_t dim) {
-  const auto& placement_group = input->placement_group();
+  const auto& placement_group = input->local_placement_group();
   const auto& placement = input->placement();
   HT_ASSERT(!placement_group.empty() && !placement.is_undetermined()) 
     << "Placement info should be assigned before get devices by dim " << dim;
 
   int32_t local_device_idx = placement_group.get_index(placement);
-  const auto& src_ds = input->get_distributed_states();
+  const auto& src_ds = input->get_local_distributed_states();
   const auto& order = src_ds.get_order();
   const auto& states = src_ds.get_states();
 
@@ -44,7 +44,7 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
   const NDArray& preds = inputs.at(0);
   const NDArray& labels = inputs.at(1);
 
-  if (op->input(0)->get_distributed_states().get_dim(1) == 1) {
+  if (op->input(0)->get_local_distributed_states().get_dim(1) == 1) {
     // no tp vocab parallel, just pure dp
     NDArray::sceloss(preds, labels, ignored_index(), reduction(),
                     op->instantiation_ctx().stream_index, outputs.at(0));    
@@ -84,8 +84,8 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
     // 3. x[label]
     // Get the partition's vocab indecies, label should in range [vocab_start_index, vocab_end_index)]
     auto vocab_size_per_partition = preds->shape(1);
-    auto local_device_index = op->placement_group().get_index(op->placement());
-    auto vocab_range_index = op->input(0)->get_distributed_states().map_device_to_state_index(local_device_index)[1];
+    auto local_device_index = op->local_placement_group().get_index(op->placement());
+    auto vocab_range_index = op->input(0)->get_local_distributed_states().map_device_to_state_index(local_device_index)[1];
     auto vocab_start_index = vocab_size_per_partition * vocab_range_index;
     auto vocab_end_index = vocab_start_index + vocab_size_per_partition;
     HTShape predict_logits_shape = {preds->shape(0), 1};
@@ -149,6 +149,11 @@ void VocabParallelCrossEntropyOpImpl::DoDeduceStates(
   outputs.at(0)->set_distributed_states(ds_labels);
 }
 
+void VocabParallelCrossEntropyOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+  TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(1));
+}
+
 bool VocabParallelCrossEntropyOpImpl::DoInstantiate(
   Operator& op, const Device& placement, StreamIndex stream_index) const {
   bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
@@ -180,7 +185,7 @@ void VocabParallelCrossEntropyGradientOpImpl::DoCompute(
                                     broadcasted, HTAxes(), op->instantiation_ctx().stream());
   }
 
-  if (op->input(0)->get_distributed_states().get_dim(1) == 1) {
+  if (op->input(0)->get_local_distributed_states().get_dim(1) == 1) {
     // no tp vocab parallel, just pure dp
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(
       op->instantiation_ctx().placement.type(), type(), hetu::impl::SoftmaxCrossEntropySparseGradient,
@@ -188,8 +193,8 @@ void VocabParallelCrossEntropyGradientOpImpl::DoCompute(
   } else {
     // tp vocab parallel loss
     auto vocab_size_per_partition = preds->shape(1);
-    auto local_device_index = op->placement_group().get_index(op->placement());
-    auto vocab_range_index = op->input(0)->get_distributed_states().map_device_to_state_index(local_device_index)[1];
+    auto local_device_index = op->local_placement_group().get_index(op->placement());
+    auto vocab_range_index = op->input(0)->get_local_distributed_states().map_device_to_state_index(local_device_index)[1];
     auto vocab_start_index = vocab_size_per_partition * vocab_range_index;
     auto vocab_end_index = vocab_start_index + vocab_size_per_partition;
     NDArray softmax = ctx.get_or_create(op->fw_op_id()).pop_ndarray("softmax");
@@ -212,6 +217,11 @@ HTShapeList VocabParallelCrossEntropyGradientOpImpl::DoInferShape(
 void VocabParallelCrossEntropyGradientOpImpl::DoDeduceStates(
   const TensorList& inputs, TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
+}
+
+void VocabParallelCrossEntropyGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+  TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }
 
 Tensor MakeVocabParallelCrossEntropyOp(Tensor preds, Tensor labels, const int64_t ignored_index, 

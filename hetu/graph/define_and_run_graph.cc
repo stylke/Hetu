@@ -22,8 +22,8 @@ Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   auto& op = MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
   // record the ops that have an explicit device group setting
   // which will then used to deduce the pp stages
-  if (op->device_groups().size() == NUM_STRATEGY) {
-    _ops_with_device_groups.emplace_back(op);
+  if (op->device_group_hierarchy().size() == NUM_STRATEGY) {
+    _ops_with_device_group_hierarchy.emplace_back(op);
   } 
   return _op_indexing[op->id()];
 }
@@ -69,7 +69,7 @@ NDArray DefineAndRunGraph::GetDetachedVariableDataInner(const Tensor& tensor) {
       return ret;
     } else {
       // The op has been instantiated in the current active graph. Let the executable graph handle it.
-      if (!it_1->second->producer()->device_group().contains(impl::comm::GetLocalDevice())) {
+      if (!it_1->second->producer()->placement_group_union().has(impl::comm::GetLocalDevice())) {
         HT_LOG_TRACE << "The data is not locate at local executable graph, return an empty NDArray.";
         return NDArray::empty(tensor->shape(), Device(kCPU), tensor->dtype(), kBlockingStream);
       }
@@ -100,127 +100,132 @@ NDArray DefineAndRunGraph::GetDetachedVariableDataInner(const Tensor& tensor) {
   }
 }
 
-DeviceGroup DefineAndRunGraph::GetVariableDeviceGroupInner(const Tensor& tensor) {
-  auto& device_group = tensor->producer()->device_group();
-  HT_RUNTIME_ERROR_IF(device_group.empty()) << "You are getting an empty device group, please ensure you have set "
-    << tensor->producer() << " a device group before!";
-  return device_group;
+DeviceGroupUnion DefineAndRunGraph::GetVariableDeviceGroupUnionInner(const Tensor& tensor) {
+  auto& device_group_union = tensor->producer()->device_group_union();
+  HT_RUNTIME_ERROR_IF(device_group_union.size() == 0) << "You are getting an empty device group union, please ensure you have set "
+    << tensor->producer() << " a device group hierarchy before!";
+  return device_group_union;
 }
 
 // 推导define graph在cur_strategy_id下的pipeline构造
-void DefineAndRunGraph::DeducePipeline(size_t cur_strategy_id) {
+void DefineAndRunGraph::DeducePipeline(size_t cur_strategy_id, int32_t pipeline_num) {
   auto old_strategy_id = CUR_STRATEGY_ID;
   CUR_STRATEGY_ID = cur_strategy_id;
-  std::unordered_map<Device, int32_t> device_to_p2pline_idx_map;
-  std::unordered_map<int32_t, std::vector<Device>> p2plines;
-  std::unordered_map<int32_t, DeviceGroupList> pipelines;
+  std::unordered_map<Device, int32_t> device_to_pipeline_idx_map;
+  std::vector<DeviceGroupList> pipelines(pipeline_num);
   int32_t total_p2pline = -1;
   int32_t total_pipeline = std::numeric_limits<int32_t>::max();
-  // 得到有多少条p2pline以及每条p2pline所含的gpu
-  // 注意这一步里的p2pline并不是最终的pipeline
-  // 其还需要经过merge操作
-  // 最终merge后的pipeline个数取决于最小的dup数量
+  // 得到所有pipeline
   // 以dp2tp2pp2为例
   // bias的dup为4但weight的dup为2
-  // 那么在一开始会生成四条pipeline但实际最终merge后pipeline条数为2
-  // 考虑到更复杂的混合并行也应该是如此
+  // 那么pipeline条数为2而不是4
+  // 因此实际上其取决于最小的dup
   // 其本质是除了dup外就是split而split一定不能使用不同的feed dict的data
   // 因此做split的参数最终一定要求是在同一个pipeline中
-  // 再扫一遍得到每条pipeline
-  for (const auto& op : _ops_with_device_groups) {
+  for (const auto& op : _ops_with_device_group_hierarchy) {
     // deduce pipeline的stages时只需要用到模型的parameters
     if (_parameter_ops.find(op->id()) == _parameter_ops.end()) {
       continue;
     }
-    auto& device_group = op->device_group();
-    auto& ds = op->output(0)->cur_distributed_states();
-    // HT_LOG_INFO << op << " device group: " << device_group << " and ds: " << ds.ds_info();
-    HT_ASSERT(!device_group.empty() && !ds.is_none())
-      << "device group & ds of " << op << " shouldn't be empty";
-    auto num_devices = device_group.num_devices();
-    total_pipeline = std::min(total_pipeline, ds.states(-1));
-    if (total_p2pline == -1) {
-      total_p2pline = num_devices;
-    } else {
-      HT_ASSERT(total_p2pline == num_devices)
-        << "currently assume all devices will participate in the pipeline parallel"
-        << ", and each parameter locates at a same amount of devices";
+    auto& dg_union = op->device_group_union();
+    auto& ds_union = op->output(0)->cur_ds_union();
+    // HT_LOG_INFO << op << " device group union: " << dg_union << " and ds union: " << ds_union.ds_union_info();
+    HT_ASSERT(dg_union.size() != 0 && ds_union.size() != 0 && dg_union.size() == ds_union.size())
+      << "dg union & ds union of " << op << " shouldn't be empty and should have the same size";
+    int32_t union_size = static_cast<int32_t>(dg_union.size());
+    int32_t dup_size = -1;
+    bool is_hetero = union_size > 1;
+    // hetero情况
+    if (is_hetero) {
+      HT_ASSERT(ds_union.hetero_dim() == -1)
+        << "Now onlt support param hetero on dup (-1)";
+      for (size_t i = 0; i < union_size; i++) {
+        auto& ds = ds_union.get(i);
+        auto ds_dup = ds.states(-1);
+        if (ds_dup != 1) {
+          HT_LOG_WARN_IF(ds.order(0) != -1) 
+            << op << " is a parameter, which is suggested to put dup at the first position in the ds order sequence"
+            << ", but now the ds is: " << ds.ds_info();
+        }
+      }
+      dup_size = union_size;
+    } 
+    // homo情况
+    else {
+      dup_size = ds_union.get(0).get_dim(-1);
     }
-    if (ds.states(-1) != 1) {
-      HT_LOG_WARN_IF(ds.order(0) != -1) 
-        << op << " is a parameter, which is suggested to put dup at the first position in the ds order sequence"
-        << ", but now the ds is: " << ds.ds_info();
+    HT_ASSERT(dup_size % pipeline_num == 0 && dup_size >= pipeline_num)
+      << "dup size should be divided by the number of pipelines";
+    // 相邻merge_ratio个dup算在一个pipeline里
+    size_t merge_ratio = dup_size / pipeline_num;
+    std::vector<std::vector<Device>> stages(pipeline_num);
+    // 不存在异构dp
+    // 即union中只有一个
+    // 默认在dup维度均分几条pipeline
+    if (!is_hetero) {
+      auto& ds = ds_union.get(0);
+      auto& device_group = dg_union.get(0);
+      for (int32_t i = 0; i < device_group.num_devices(); i++) {
+        auto state_index = ds.map_device_to_state_index(i);
+        int32_t dup_idx = dup_size == 1 ? 0 : state_index[-1];
+        int32_t pipeline_idx = dup_idx / merge_ratio;
+        // 记录device到pipeline的映射
+        if (device_to_pipeline_idx_map.find(device_group.get(i)) != device_to_pipeline_idx_map.end()) {
+          HT_ASSERT(device_to_pipeline_idx_map[device_group.get(i)] == pipeline_idx)
+            << "device " << device_group.get(i) << " is in two pipelines, which will cause chaos"
+            << ", the existing pipeline is " << device_to_pipeline_idx_map[device_group.get(i)]
+            << " and the new pipeline is " << pipeline_idx; 
+        } else {
+          device_to_pipeline_idx_map[device_group.get(i)] = pipeline_idx;
+        }
+        // 添加device到新的stage
+        stages[pipeline_idx].emplace_back(device_group.get(i));
+      }
     }
-    for (int32_t i = 0; i < num_devices; i++) {
-      auto state_index = ds.map_device_to_state_index(i);
-      // 按照split倒序然后dup的order找到其所在的p2pline
-      std::vector<int32_t> keys;
-      for (const auto& kv : state_index) {
-        keys.emplace_back(kv.first);
-      }
-      std::sort(keys.rbegin(), keys.rend());
-      int32_t interval = 1;
-      int32_t new_idx = 0;
-      for (int32_t key : keys) {
-        new_idx += state_index[key] * interval;
-        interval *= ds.states(key);
-      }
-      if (device_to_p2pline_idx_map.find(device_group.get(i)) != device_to_p2pline_idx_map.end()) {
-        HT_ASSERT(device_to_p2pline_idx_map[device_group.get(i)] == new_idx)
-          << "device " << device_group.get(i) << " is in two p2plines, which will cause chaos"
-          << ", the existing p2pline is " << device_to_p2pline_idx_map[device_group.get(i)]
-          << " and the new p2pline is " << new_idx; 
-      } else {
-        device_to_p2pline_idx_map[device_group.get(i)] = new_idx;
-      }
-      if (p2plines.find(new_idx) == p2plines.end()) {
-        p2plines[new_idx] = std::vector<Device>{device_group.get(i)};
-      } else {
-        bool repetitive_device = false;
-        for (const auto& device : p2plines[new_idx]) {
-          if (device == device_group.get(i)) {
-            repetitive_device = true;
-            break;
+    // 存在异构
+    // union中每个device group本质上就是一个stage
+    // 当然还要考虑相邻dup进行merge的情形
+    else {
+      for (size_t i = 0; i < pipeline_num; i++) {
+        for (size_t j = 0; j < merge_ratio; j++) {
+          auto& device_group = dg_union.get(i * merge_ratio + j);
+          for (const auto& device : device_group.devices()) {
+            // 记录device到pipeline的映射
+            if (device_to_pipeline_idx_map.find(device) != device_to_pipeline_idx_map.end()) {
+              HT_ASSERT(device_to_pipeline_idx_map[device] == i)
+                << "device " << device << " is in two pipelines, which will cause chaos"
+                << ", the existing pipeline is " << device_to_pipeline_idx_map[device]
+                << " and the new pipeline is " << i; 
+            } else {
+              device_to_pipeline_idx_map[device] = i;
+            }
+            // 添加device到新的stage
+            stages[i].emplace_back(device);  
           }
         }
-        if (!repetitive_device) {
-          p2plines[new_idx].emplace_back(device_group.get(i));
-        }
       }
     }
-  }
-  // merge相邻的p2pline
-  // 形成最终的pipeline
-  HT_ASSERT(total_p2pline % total_pipeline == 0)
-    << "total number of p2pline should be divided by total number of pipeline";
-  int32_t merge_ratio = total_p2pline / total_pipeline;
-  for (int32_t i = 0; i < total_pipeline; i++) {
-    pipelines[i] = DeviceGroupList();
-    int32_t total_stage = -1;
-    std::vector<std::vector<Device>> stages;
-    for (int32_t j = i * merge_ratio; j < (i + 1) * merge_ratio; j++) {
-      if (total_stage == -1) {
-        total_stage = p2plines[j].size();
-        for (const auto& device : p2plines[j]) {
-          stages.emplace_back(std::vector<Device>{device});
+    // 添加各个stage到各个pipeline
+    for (size_t i = 0; i < pipeline_num; i++) {
+      if (!stages[i].empty()) {
+        auto cur_stage_device_group = DeviceGroup(stages[i]);
+        int32_t cur_pipeline_len = static_cast<int32_t>(pipelines[i].size());
+        for (int32_t j = 0; j < cur_pipeline_len; j++) {
+          if (j != cur_pipeline_len - 1) {
+            HT_ASSERT(cur_stage_device_group != pipelines[i][j])
+              << "Duplicate stage in a single pipeline";
+          }
         }
-      } else {
-        HT_ASSERT(total_stage == p2plines[j].size())
-          << "can't merge p2plines with different stages";
-        for (int32_t stage_num = 0; stage_num < total_stage; stage_num++) {
-          stages.at(stage_num).emplace_back(p2plines[j][stage_num]);
+        if (cur_pipeline_len == 0 || pipelines[i][cur_pipeline_len - 1] != cur_stage_device_group) {
+          pipelines[i].emplace_back(std::move(cur_stage_device_group));
         }
       }
-    }
-    for (const auto& stage : stages) {
-      pipelines[i].emplace_back(DeviceGroup(stage));
     }
   }
   // 记录当前strategy下的device到pipeline映射
-  for (const auto& kv : device_to_p2pline_idx_map) {
+  for (const auto& kv : device_to_pipeline_idx_map) {
     const auto& device = kv.first;
-    const auto& p2pline_idx = kv.second;
-    const auto pipeline_idx = p2pline_idx / merge_ratio;
+    auto pipeline_idx = kv.second;
     _multi_pipeline_maps[CUR_STRATEGY_ID][device] = pipelines[pipeline_idx];
   }
   CUR_STRATEGY_ID = old_strategy_id;
@@ -242,6 +247,7 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
   Tensor2ShapeMap exec_shape_plan;
   RuntimeContext runtime_ctx{};
   // 扫描global topo并推导新的shape plan
+  // *这里的shape plan是define graph上的
   for (auto& op_ref : exec_graph_plan.global_topo) {
     auto& op = op_ref.get();
     // 设置placeholder（也有可能是中间的算子——具体要看feed_dict喂的是什么算子）的symbolic shape
@@ -269,28 +275,36 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
         << "Something wrong, can't find the input shape from the current shape plan!";
       input_shapes.push_back(it->second);
     }
-    HTShapeList output_shapes = op->InferShape(input_shapes, runtime_ctx);
-    auto output_shapes_size = output_shapes.size();
-    for (size_t i = 0; i < output_shapes_size; i++) {
+    auto it = exec_graph_plan.op_to_exec_op_mapping.find(op->id());
+    HT_ASSERT(it != exec_graph_plan.op_to_exec_op_mapping.end())
+      << op << " doesn't have an exec version";
+    auto& exec_op = it->second;
+    // 使用exec op的InferShape而不是op的InferShape
+    // 因为exec op已经具有placement group union
+    // 因此可以得到local device对应的ds
+    HTShapeList exec_output_shapes = exec_op->InferShape(input_shapes, runtime_ctx);
+    auto exec_output_shapes_size = exec_output_shapes.size();
+    for (size_t i = 0; i < exec_output_shapes_size; i++) {
       // 设置symbolic shape叶子节点的shape
       // 其相关联的非叶子的symbolic shape可以直接由计算链条获得新的shape
-      if (op->output(i)->symbolic()) {
-        HT_LOG_TRACE << local_device << ": op " << op 
-          << " output " << i << " has " << op->output(i)->symbolic_shape();
-        if (is_SyShape_leaf(op->output(i)->symbolic_shape())) {
-          op->output(i)->set_symbolic_shape(output_shapes[i]);
+      if (exec_op->output(i)->symbolic()) {
+        HT_LOG_TRACE << local_device << ": op " << exec_op 
+          << " output " << i << " has " << exec_op->output(i)->symbolic_shape();
+        if (is_SyShape_leaf(exec_op->output(i)->symbolic_shape())) {
+          exec_op->output(i)->set_symbolic_shape(exec_output_shapes[i]);
           HT_LOG_TRACE << local_device << ": set symbolic shape of " << op 
-            << " output " << i << " to " << output_shapes[i];
+            << " output " << i << " to " << exec_output_shapes[i];
         }
       }
-      HT_LOG_TRACE << local_device << ": " << op->output(i) << " shape " << output_shapes[i];
+      HT_LOG_TRACE << local_device << ": " << op->output(i) << " shape " << exec_output_shapes[i];
       auto it = shape_plan.find(op->output(i)->id());
       HT_ASSERT(it == shape_plan.end()) 
         << "Something wrong, the output shape should't exist in the current shape plan";
-      shape_plan.insert(std::make_pair(op->output(i)->id(), std::move(output_shapes[i]))); // move constructor
+      shape_plan.insert(std::make_pair(op->output(i)->id(), std::move(exec_output_shapes[i]))); // move constructor
     }
   }
-  // define graph中已经推导得到的shape
+  // define graph中已经推导得到的shape plan
+  // 赋值给exec graph的exec shape plan
   for (const auto& kv : exec_graph_plan.tensor_to_exec_tensor_mapping) {
     if (kv.second->producer()->num_outputs() == 0) {
       // 说明该tensor只是extra linker而并不会具有shape
@@ -302,7 +316,8 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
       << "can't find shape of tensor " << kv.second << " in the shape plan";
     exec_shape_plan[kv.second->id()] = it->second;
   }
-  // exec graph中还有一些新增的shape
+  // exec graph中还有一些新增的tensor
+  // 需要再进行一次额外的推导
   for (const auto& exec_tensor : exec_graph_plan.exec_graph->_record_exec_tensors) {
     auto& exec_op = exec_tensor->producer();
     HTShapeList exec_input_shapes;
@@ -329,8 +344,112 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
   exec_graph_plan.exec_graph->AddShapePlan(std::move(exec_shape_plan));
 }
 
+// Should call in the order of global topo sort
+DeviceGroupUnion DefineAndRunGraph::DeducePlacementGroup(Operator& op, Op2DGUnionMap& dg_union_map) {
+  // 通过op meta指定了device group的
+  if (op->device_group_hierarchy().size() > 0) {
+    HT_ASSERT(!is_comm_op(op))
+      << "Comm op shouldn't be provided with device group hierarchy to avoid chaos";
+    dg_union_map[op->id()] = op->device_group_union();
+    return op->device_group_union();
+  } 
+  // 未指定而需要推导的
+  else {
+    DeviceGroupUnion inferred;
+    // 最后的group op特殊处理
+    if (is_group_op(op)) {
+      std::set<Device> devices;
+      for (auto& input : op->in_dep_linkers()) {
+        auto it = dg_union_map.find(input->producer()->id());
+        HT_ASSERT(it != dg_union_map.end())
+          << input->producer() << " should have deduced placement group before";
+        auto dg_all = it->second.all();
+        for (auto& device : dg_all.devices()) {
+          devices.insert(device);
+        }
+      }
+      inferred = DeviceGroupUnion({DeviceGroup(std::vector<Device>(devices.begin(), devices.end()))});
+    } 
+    // 其余的算子
+    else {
+      HT_ASSERT(op->num_inputs() > 0)
+        << "Currently we cannot infer the devices "
+        << "for operators with zero in-degree. : " << op;
+      // 反向算子
+      if (op->fw_op_id() != -1) {
+        auto& fw_op = _op_indexing[op->fw_op_id()]; 
+        // HT_LOG_WARN << op << " has fw op " << fw_op;
+        // comm op要特殊处理
+        // 这是因为comm op是唯一一个tensor和op的placement group不一样的算子
+        // op group = src tensor group merge dst tensor group
+        if (is_comm_op(fw_op)) {
+          auto it = dg_union_map.find(fw_op->input(0)->producer()->id());
+          HT_ASSERT(it != dg_union_map.end())
+            << fw_op->input(0)->producer() << " should have deduced placement group before";
+          inferred = it->second;
+        } 
+        // 与前向算子所在的placement group一致
+        else {
+          auto it = dg_union_map.find(fw_op->id());
+          HT_ASSERT(it != dg_union_map.end())
+            << fw_op << " should have deduced placement group before";
+          inferred = it->second;
+        }
+      }
+      // 前向算子或中间临时插入的辅助算子
+      else {
+        if (is_comm_op(op)) {
+          auto& comm_op_impl = dynamic_cast<CommOpImpl&>(op->body());
+          // 如果comm op没有提供dst group
+          // 那么默认其和src group一样
+          if (comm_op_impl.dst_group_dierarchy().size() == 0) {
+            auto it = dg_union_map.find(op->input(0)->producer()->id());
+            HT_ASSERT(it != dg_union_map.end())
+              << op->input(0)->producer() << " should have deduced placement group before";
+            inferred = it->second;   
+          } 
+          // 否则直接使用comm op提供的dst group
+          else {
+            inferred = comm_op_impl.dst_group_dierarchy().get(CUR_STRATEGY_ID);
+          }
+        }
+        // 绝大多数情况走这条分支
+        else {
+          // 默认使用第一个输入所在的group 
+          /*
+          // is it a proper assumption?
+          // i.e. attn_weights = ht.where(causal_mask, attn_weights, mask)
+          // while causal_mask is on g0 but attn_weights is expected to be on g1
+          auto it = dg_union_map.find(op->input(0)->producer()->id());
+          HT_ASSERT(it != dg_union_map.end())
+            << op->input(0)->producer() << " should have deduced placement group before";
+          inferred = it->second; 
+          */ 
+          // 目前所有comm op均手动插入
+          // 因此这里要保证所有placement group都一样
+          for (auto& input : op->inputs()) {
+            auto it = dg_union_map.find(input->producer()->id());
+            HT_ASSERT(it != dg_union_map.end())
+              << input->producer() << " should have deduced placement group before";
+            if (inferred.size() == 0) {
+              inferred = it->second;
+            }
+            HT_ASSERT(inferred.check_equal(it->second))
+              << "Get different placement group unions"
+              << ", the input " << input << " is " << it->second
+              << ", but the history one is " << inferred;
+          }
+        }      
+      }
+    }
+    dg_union_map[op->id()] = inferred;
+    return inferred;
+  }
+}
+
 void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
-                                    Tensor2ShapeMap&& shape_plan) {
+                                    Tensor2ShapeMap&& shape_plan,
+                                    int32_t pipeline_num) {
 
   // deprecated: Test Case - 手动切换并行方案（验证切换时间）
   char* env = std::getenv("HETU_PARALLEL_CHANGE_TEST");
@@ -346,6 +465,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   auto exec_graph_num = _exec_graph_plan_pool.size();
   Tensor2ShapeMap exec_shape_plan;
   Op2OpMap op_to_exec_op_mapping;
+  Op2DGUnionMap op_to_pg_union_mapping;
   Tensor2TensorMap tensor_to_exec_tensor_mapping;
   auto origin_param_buffer = std::make_shared<ParamBuffer>("origin_param_buffer");
   auto transfer_param_buffer = std::make_shared<ParamBuffer>("transfer_param_buffer");
@@ -356,6 +476,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     
   exec_shape_plan.reserve(shape_plan.size());
   op_to_exec_op_mapping.reserve(_init_capacity);
+  op_to_pg_union_mapping.reserve(_init_capacity);
   tensor_to_exec_tensor_mapping.reserve(_init_capacity);
 
   // initializations of the exec graph
@@ -367,9 +488,10 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   Graph::push_graph_ctx(exec_graph->id());
 
   // assign pp stages
+  // HT_LOG_WARN << local_device << ": Deduce pipeline";
   if (_multi_pipeline_maps.find(CUR_STRATEGY_ID) == _multi_pipeline_maps.end()) {
     _multi_pipeline_maps[CUR_STRATEGY_ID] = Device2PipelineMap();
-    DeducePipeline(CUR_STRATEGY_ID);
+    DeducePipeline(CUR_STRATEGY_ID, pipeline_num);
   }
   exec_graph->SetPipeline(_multi_pipeline_maps[CUR_STRATEGY_ID]);
 
@@ -380,7 +502,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     return it->second;
   };
 
-  // todo: just use multi_ds[cur_strategy_id] which was deduced in define_and_run_graph
+  // just use ds_hierarchy which was deduced in define_and_run_graph
   // executable_graph needn't deduce states again!
   auto handle_exec_output = [&](Tensor& tensor, Tensor& exec_tensor) -> void {
     HT_LOG_TRACE << "handle mapping of tensor " << tensor->id() << " " << tensor;
@@ -411,9 +533,9 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
         exec_tensor->set_symbolic_shape(exec_tensor->shape());
       }
     }
-    // 4)、assign distributed_states
-    // just copy distributed_states here
-    exec_tensor->set_multi_distributed_states(tensor->multi_distributed_states());
+    // 4)、assign ds_hierarchy
+    // just copy it from define graph
+    exec_tensor->set_ds_hierarchy(tensor->ds_hierarchy());
     // 5)、assign add on inits
     auto it = _add_on_inits.find(tensor->id());
     if (_run_level != RunLevel::TOPO && it != _add_on_inits.end()) {
@@ -425,10 +547,9 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     // 6)、assign param 
     // 目前只是记录而并不会alloc
     if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
-        && exec_tensor->producer()->device_group().contains(local_device)) {
+        && exec_tensor->producer()->placement_group_union().has(local_device)) {
       origin_param_buffer->AddTensor(exec_tensor);
       /*
-      exec_tensor->set_placement_group(exec_tensor->producer()->device_group());
       exec_tensor->set_placement(local_device);
       Graph::AllocVariableData(exec_tensor);
       */
@@ -442,7 +563,8 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
 
     // 前处理
     // 1、获取exec op的inputs
-    // 2、进行autocast
+    // 2、推导placement group union
+    // 3、进行autocast
     TensorList exec_inputs, exec_in_deps;
     std::tie(exec_inputs, exec_in_deps) = Operator::transform_each_input_tensor(op, get_exec_input);
 
@@ -454,6 +576,10 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     }
     HT_LOG_INFO << "Exec op " << op << " with inputs " << exec_inputs << " and shapes " << exec_input_shapes;
     */
+
+    // HT_LOG_WARN << local_device << ": deduce placement group union for " << op;
+    auto pg_union = DeducePlacementGroup(op, op_to_pg_union_mapping);
+    // HT_LOG_WARN << local_device << ": placement group union for " << op << " is " << pg_union;
 
     auto autocast_id = AutoCast::cur_autocast_ctx();
     if (autocast_id != UINT64_MAX) {
@@ -480,13 +606,14 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
                 } else {
                   auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
                                   {exec_inputs[i]}, OpMeta().set(exec_inputs[i]->producer()->op_meta()).set_name(exec_inputs[i]->producer()->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
+                  exec_op->MapToParallelDevices(exec_inputs[i]->placement_group_union());
                   HT_LOG_TRACE << "Map " << &transfer_map << " insert: " << exec_inputs[i]->id() << " -> " << exec_op->output(0)->id();
                   // we have to set the exec shape plan manually before the initialization of the plan
                   exec_shape_plan[exec_op->output(0)->id()] = exec_op->output(0)->shape();
                   exec_graph->_record_exec_tensors.emplace_back(exec_op->output(0));
-                  exec_op->output(0)->set_multi_distributed_states(op->input(i)->multi_distributed_states()); // walkaround: set here by hand
+                  exec_op->output(0)->set_ds_hierarchy(op->input(i)->ds_hierarchy()); // walkaround: set here by hand
                   if (_parameter_ops.find(op->input(i)->producer()->id()) != _parameter_ops.end()
-                      && exec_inputs[i]->producer()->device_group().contains(local_device)) {
+                      && exec_inputs[i]->producer()->placement_group_union().has(local_device)) {
                     transfer_param_buffer->AddTensor(exec_op->output(0));
                   }
                   transfer_map[exec_inputs[i]->id()] = exec_op->output(0);
@@ -500,18 +627,44 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     }
 
     // 核心部分
-    // only deduce multi ds for define_and_run_graph, and copy directly for executable_graph
+    // only deduce ds hierarchy for define_and_run_graph, and copy directly for executable_graph
+    // 注意MakeCommOp在InferMeta时不得不特殊处理
+    // 需要从外面把CUR_HETERO_ID传进去
+    if (is_comm_op(op)) {
+      if (pg_union.has(local_device)) {
+        exec_graph->CUR_HETERO_ID = pg_union.get_index(local_device);
+      } else if (exec_inputs.at(0)->producer()->placement_group_union().has(local_device)) {
+        exec_graph->CUR_HETERO_ID = exec_inputs.at(0)->producer()->placement_group_union().get_index(local_device);
+      } else {
+        exec_graph->CUR_HETERO_ID = 0;
+      }
+    }
     auto& exec_op = Graph::MakeOp(
       op->_body, std::move(exec_inputs),
       OpMeta().set(op->op_meta()).set_is_deduce_states(false).set_extra_deps(std::move(exec_in_deps)),
       *exec_graph);
+    // HT_LOG_WARN << local_device << ": make exec op for " << op;
+    if (is_comm_op(op)) {
+      /*
+      HT_LOG_WARN << exec_op << " output shape is " << exec_op->output(0)->shape()
+        << " input shape is " << exec_op->input(0)->shape()
+        << " CUR_HETERO_ID is " << CUR_HETERO_ID;
+      */
+      exec_graph->CUR_HETERO_ID = 0;
+    }
 
     // 后处理
     // 1、建立op和exec_op的映射
-    // 2、设置tensor的shape和distributed_states
-    // 3、标记parameter并给即将创建的exec graph预先设置ParamBuffer
-    // 4、给grad设置placement和buffer
+    // 2、给op和输出的tensor分配placement group union
+    // 3、设置tensor的shape和ds_hierarchy
+    // 4、标记parameter并给即将创建的exec graph预先设置ParamBuffer
+    // 5、给grad设置placement和buffer
     op_to_exec_op_mapping[op->id()] = exec_op;
+    exec_op->MapToParallelDevices(pg_union);
+    /*
+    if (is_comm_op(exec_op))
+      HT_LOG_WARN << exec_op << " placement group is " << pg_union;
+    */
     Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
     if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
       Graph::MarkAsParameter(exec_op);
@@ -531,14 +684,12 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       }
       */
       // 热切换接口需要提前设置一些grad的信息
-      exec_grad->producer()->set_device_groups(exec_param->producer()->device_groups());
-      if (exec_grad->producer()->device_group().contains(local_device)) {
+      exec_grad->producer()->set_device_group_hierarchy(exec_param->producer()->device_group_hierarchy());
+      if (exec_grad->producer()->placement_group_union().has(local_device)) {
         current_grad_buffer->AddTensor(exec_grad);
         accumulate_grad_buffer->AddTensor(exec_grad);
-        exec_grad->set_placement_group(exec_param->producer()->device_group());
         exec_grad->set_placement(local_device);
-        HT_LOG_TRACE << "local grad " << exec_grad << " ds states = " << exec_grad->get_distributed_states().get_states() 
-          << " and order = " << exec_grad->get_distributed_states().get_order();
+        HT_LOG_TRACE << "local grad " << exec_grad << " ds union = " << exec_grad->cur_ds_union().ds_union_info();
       }
       grad_map[exec_param->id()] = exec_grad;
     }
@@ -574,6 +725,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
                                      CUR_STRATEGY_ID);
 
   Graph::pop_graph_ctx();
+  // HT_LOG_WARN << "Instantiating end";
 
   // deprecated: Test Case - 手动切换并行方案
   if (env != nullptr) {
@@ -657,7 +809,16 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     OpRefList global_topo = Graph::TopoSort(fetches, -1, is_feed_dict_op);
     HT_LOG_DEBUG << local_device << ": global topo of define graph is " << global_topo;
     // Instantiate会将新的exec_graph_plan加入pool中
-    Instantiate(std::move(global_topo), std::move(shape_plan));
+    int32_t pipeline_num = 0;
+    if (!loss->cur_ds_union().is_hetero()) {
+      pipeline_num = loss->cur_ds_union().get(0).states(0);
+    } else if (loss->cur_ds_union().hetero_dim() == 0) {
+      pipeline_num = loss->cur_ds_union().size();
+    } else {
+      HT_RUNTIME_ERROR << "Currently we use the ds of loss to deduce pipeline num"
+        << ", so the ds union of loss shouldn't be hetero on other dim except for 0";
+    }
+    Instantiate(std::move(global_topo), std::move(shape_plan), pipeline_num);
     // 补上fetches（其在instantiate中不需要用到，但是plan需要进行记录）
     auto& new_plan = _exec_graph_plan_pool.back();
     new_plan.fetches = fetches;

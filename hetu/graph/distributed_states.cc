@@ -392,5 +392,29 @@ std::string DistributedStates::ds_info() const {
   os << ", zero = " << _zero;
   return os.str();    
 }
+
+std::string DistributedStatesUnion::ds_union_info() const {
+  std::ostringstream os;
+  os << "ds list = {";
+  for (auto iter = _union.begin(); iter != _union.end(); iter++) {
+    os << "{" << iter->ds_info() << "}";
+    if (iter + 1 != _union.end()) {
+      os << ", ";
+    }
+  }
+  os << "}, hetero dim = " << _hetero_dim;
+  return os.str();    
+}
+
+std::ostream& operator<<(std::ostream& os, const DeviceGroupUnion& dg_union) {
+  os << "DeviceGroupUnion(" << dg_union.raw_data() << ")";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, const DeviceGroupHierarchy& dg_hierarchy) {
+  os << "DeviceGroupHierarchy(" << dg_hierarchy.raw_data() << ")";
+  return os;
+}
+
 }
 }

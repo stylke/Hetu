@@ -1,5 +1,5 @@
 {
-    "zero": true,
+    "zero": false,
     "devices": [
         0,
         1,
@@ -20,39 +20,66 @@
     ],
     "input": {
         "split": {
-            "0": 2
+            "0": [
+                2,
+                2
+            ]
         },
-        "dup": 2,
-        "device_group": [
-            0,
-            1,
+        "dup": [
             2,
-            3
+            2
+        ],
+        "device_group_union": [
+            [
+                0,
+                1
+            ],
+            [
+                2,
+                3
+            ]
         ],
         "type": "placeholder"
     },
     "gpt": {
         "wte": {
             "split": {
-                "0": 2
+                "0": [
+                    2,
+                    2
+                ]
             },
-            "dup": 2,
-            "device_group": [
-                0,
-                1,
+            "dup": [
                 2,
-                3
+                2
+            ],
+            "device_group_union": [
+                [
+                    0,
+                    1
+                ],
+                [
+                    2,
+                    3
+                ]
             ],
             "type": "variable"
         },
         "wpe": {
             "split": {},
-            "dup": 4,
-            "device_group": [
-                0,
-                1,
-                2,
-                3
+            "dup": [
+                4,
+                4
+            ],
+            "device_group_union": [
+                [
+                    0,
+                    1
+                ],
+                [
+                    2,
+                    3
+                ]
             ],
             "type": "variable"
         },
@@ -63,78 +90,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -146,78 +227,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -229,78 +364,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -312,78 +501,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -395,78 +638,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -478,78 +775,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -561,78 +912,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -644,78 +1049,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        0,
-                        1,
-                        2,
-                        3
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            0,
+                            1
+                        ],
+                        [
+                            2,
+                            3
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            0,
-                            1,
+                        "dup": [
                             2,
-                            3
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                0,
+                                1
+                            ],
+                            [
+                                2,
+                                3
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -727,78 +1186,126 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -810,78 +1317,126 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -893,78 +1448,126 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -976,78 +1579,126 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1059,78 +1710,126 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1142,78 +1841,126 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1225,78 +1972,126 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1308,78 +2103,126 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        4,
-                        5,
-                        10,
-                        11
+                    "dup": [
+                        2,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            5
+                        ],
+                        [
+                            6,
+                            7
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                1,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            4,
-                            5,
-                            10,
-                            11
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                5
+                            ],
+                            [
+                                6,
+                                7
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1391,78 +2234,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1474,78 +2371,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1557,78 +2508,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1640,78 +2645,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1723,78 +2782,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1806,78 +2919,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1889,78 +3056,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -1972,78 +3193,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        8,
-                        9,
-                        6,
-                        7
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            8,
+                            9
+                        ],
+                        [
+                            10,
+                            11
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            8,
-                            9,
-                            6,
-                            7
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                8,
+                                9
+                            ],
+                            [
+                                10,
+                                11
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -2055,78 +3330,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -2138,78 +3467,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -2221,78 +3604,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -2304,78 +3741,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -2387,78 +3878,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -2470,78 +4015,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -2553,78 +4152,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -2636,78 +4289,132 @@
                 ],
                 "layernorm1": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "attn": {
                     "qkv": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
                 },
                 "layernorm2": {
                     "split": {},
-                    "dup": 4,
-                    "device_group": [
-                        12,
-                        13,
-                        14,
-                        15
+                    "dup": [
+                        4,
+                        4
+                    ],
+                    "device_group_union": [
+                        [
+                            12,
+                            13
+                        ],
+                        [
+                            14,
+                            15
+                        ]
                     ],
                     "type": "variable"
                 },
                 "mlp": {
                     "dense_h_to_4h": {
                         "split": {
-                            "1": 2
+                            "1": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     },
                     "dense_4h_to_h": {
                         "split": {
-                            "0": 2
+                            "0": [
+                                2,
+                                2
+                            ]
                         },
-                        "dup": 2,
-                        "device_group": [
-                            12,
-                            13,
-                            14,
-                            15
+                        "dup": [
+                            2,
+                            2
+                        ],
+                        "device_group_union": [
+                            [
+                                12,
+                                13
+                            ],
+                            [
+                                14,
+                                15
+                            ]
                         ],
                         "type": "variable"
                     }
@@ -2716,39 +4423,66 @@
         },
         "layernorm_final": {
             "split": {},
-            "dup": 4,
-            "device_group": [
-                12,
-                13,
-                14,
-                15
+            "dup": [
+                4,
+                4
+            ],
+            "device_group_union": [
+                [
+                    12,
+                    13
+                ],
+                [
+                    14,
+                    15
+                ]
             ],
             "type": "variable"
         }
     },
     "lm_head": {
         "split": {
-            "1": 2
+            "1": [
+                2,
+                2
+            ]
         },
-        "dup": 2,
-        "device_group": [
-            12,
-            13,
-            14,
-            15
+        "dup": [
+            2,
+            2
+        ],
+        "device_group_union": [
+            [
+                12,
+                13
+            ],
+            [
+                14,
+                15
+            ]
         ],
         "type": "variable"
     },
     "label": {
         "split": {
-            "0": 2
+            "0": [
+                2,
+                2
+            ]
         },
-        "dup": 2,
-        "device_group": [
-            12,
-            13,
-            14,
-            15
+        "dup": [
+            2,
+            2
+        ],
+        "device_group_union": [
+            [
+                12,
+                13
+            ],
+            [
+                14,
+                15
+            ]
         ],
         "type": "placeholder"
     }

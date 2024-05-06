@@ -34,12 +34,103 @@ void OpInterface::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   }
 }
 
+void OpInterface::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                    TensorList& outputs, const OpMeta& op_meta) const {
+  HT_ASSERT(inputs_hetero_dim.size() > 0) << op_meta.name << ": distributed states hetero dim should be manually set when in_degree=0!";
+  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " " << op_meta.name << ": default copy states hetero dim from inputs";
+  int32_t default_hetero_dim = -3;
+  for (auto& hetero_dim : inputs_hetero_dim) {
+    if (default_hetero_dim == -3) {
+      default_hetero_dim = hetero_dim;
+    }
+    HT_ASSERT(default_hetero_dim == hetero_dim)
+      << "hetero dim should be equal for all inputs by default";
+  }
+  for (auto& output : outputs) {
+    output->cur_ds_union().set_hetero_dim(default_hetero_dim);
+  }
+}
+
+void OpInterface::DoDeduceStatesHierarchy(const TensorList& inputs, TensorList& outputs, 
+                                          const OpMeta& op_meta, Graph& graph) const {
+  int32_t hetero_size = 1;
+  std::vector<int32_t> inputs_hetero_dim;
+  for (const auto& input : inputs) {
+    HT_ASSERT(input->has_cur_ds_union())
+      << "Ds union of inputs should be created before deducing hetero dim"
+      <<  ", but cur strategy id is " << input->cur_strategy_id() 
+      << ", and size of its ds hierarchy is " << input->ds_hierarchy().size();
+    const auto& cur_ds_union = input->cur_ds_union();
+    inputs_hetero_dim.emplace_back(cur_ds_union.hetero_dim());
+    int32_t cur_hetero_size = cur_ds_union.size();
+    if (cur_hetero_size == 1) {
+      HT_ASSERT(cur_ds_union.hetero_dim() == NULL_HETERO_DIM)
+        << "Union size = 1 means homo";
+      continue;
+    }
+    if (hetero_size == 1) {
+      hetero_size = cur_hetero_size;
+    }
+    HT_ASSERT(cur_ds_union.hetero_dim() != NULL_HETERO_DIM)
+      << "Op input " << input << " has an illegal hetero ds";
+    HT_ASSERT(hetero_size == cur_hetero_size)
+      << "Op " << op_meta.name << " has an unaligned hetero ds size";
+  }
+  for (const auto& input : inputs) {
+    const auto& cur_ds_union = input->cur_ds_union();
+    HT_LOG_WARN_IF(cur_ds_union.size() != hetero_size)
+      << input << " has " << cur_ds_union.ds_union_info()
+      << ", although we aim to support homo & hetero deducing"
+      << ", but we currently don't suggest you to do so"
+      << ", there may be some unknown bugs remain";
+  }
+  for (auto& output : outputs) {
+    HT_ASSERT(!output->has_cur_ds_union())
+      << "Ds union of outputs shouldn't be created before deducing hetero dim";
+  }
+  // 创建所有outputs的ds union并确定hetero dim
+  graph.CREATE_STRATEGY = true;
+  // HT_LOG_WARN << "DeduceHeteroDim for " << op_meta.name;
+  DeduceHeteroDim(inputs_hetero_dim, outputs, op_meta);
+  graph.CREATE_STRATEGY = false;
+  // 依据是否为hetero
+  // 创建所有outputs的ds union中的ds
+  for (auto& output : outputs) {
+    auto& ds_union = output->cur_ds_union();
+    if (ds_union.hetero_dim() == NULL_HETERO_DIM) {
+      ds_union.add(DistributedStates());
+    } else {
+      HT_ASSERT(hetero_size != 1)
+        << "There is a hetero dim, so the hetero size shouldn't equal to 1";
+      for (int32_t i = 0; i < hetero_size; i++) {
+        ds_union.add(DistributedStates());
+      }
+    }
+  }
+  // 推导所有outputs的ds union中的ds
+  graph.USE_HETERO_ID = true;
+  for (size_t cur_hetero_id = 0; cur_hetero_id < hetero_size; cur_hetero_id++) {
+    graph.CUR_HETERO_ID = cur_hetero_id;
+    DeduceStates(inputs, outputs, op_meta);
+  }
+  /*
+  for (auto& output : outputs) {
+    HT_LOG_WARN << output << " ds union is " << output->cur_ds_union().ds_union_info();
+  }
+  */
+  graph.CUR_HETERO_ID = 0;
+  graph.USE_HETERO_ID = false;
+}
+
 bool OpInterface::DoMapToParallelDevices(Operator& op,
-                                         const DeviceGroup& pg) const {
-  op->instantiation_ctx().placement_group = pg;
+                                         const DeviceGroupUnion& pg_union) const {
+  HT_ASSERT(pg_union.size() > 0) 
+    << "Placement Group Union shouldn't be empty";
+  op->instantiation_ctx().placement_group_union = pg_union;
+  op->instantiation_ctx().has_placement_group = true;
   // set output statuses
   Operator::for_each_output_tensor(
-    op, [&](Tensor& tensor) { tensor->set_placement_group(pg); });
+    op, [&](Tensor& tensor) { tensor->set_placement_group_union(pg_union); });
   // TODO: add P2P communication ops for pipeline parallel
   return true;
 }
@@ -286,7 +377,7 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
       // if ds of all inputs are none, then do not deduce states; 
       // if ds of partial inputs are none, return error
       if (!exist_none_ds) {
-        _body->DeduceStates(_inputs, _outputs, _op_meta);
+        _body->DeduceStatesHierarchy(_inputs, _outputs, _op_meta, graph);
       } else if (exist_ds) {
         HT_LOG_ERROR << "Only part of " << name() << " inputs has distributed states!";
       }
@@ -311,13 +402,6 @@ const Graph& OpDef::graph() const {
 
 Graph& OpDef::graph() {
   return Graph::GetGraph(graph_id());
-}
-
-const DeviceGroup& OpDef::device_group() {
-  while (graph().CUR_STRATEGY_ID >= _op_meta.device_groups.size()) {
-    _op_meta.device_groups.push_back(DeviceGroup());
-  }
-  return _op_meta.device_groups[graph().CUR_STRATEGY_ID];
 }
 
 Operator& OpDef::get_self() {
@@ -378,6 +462,53 @@ bool OpDef::is_parameter() const {
   return graph._parameter_ops.find(id()) != graph._parameter_ops.end();
 }
 
+DeviceGroupUnion& OpDef::device_group_union() {
+  if (graph().CREATE_STRATEGY) {
+    while (graph().CUR_STRATEGY_ID >= _op_meta.device_group_hierarchy.size()) {
+      _op_meta.device_group_hierarchy.add(DeviceGroupUnion());
+    }
+  }
+  HT_ASSERT(graph().CUR_STRATEGY_ID < _op_meta.device_group_hierarchy.size())
+    << "Strategy id out of range";
+  return _op_meta.device_group_hierarchy.get(graph().CUR_STRATEGY_ID);
+}
+
+DeviceGroup& OpDef::device_group() {
+  auto& dg_union = device_group_union();
+  if (graph().USE_HETERO_ID) {
+    if (graph().CREATE_HETERO) {
+      while (graph().CUR_HETERO_ID >= dg_union.size()) {
+        dg_union.add(DeviceGroup());
+      }
+      return dg_union.get(graph().CUR_HETERO_ID);
+    }
+    // 其余情况暂时不支持使用
+    else {
+      HT_RUNTIME_ERROR << "Currently not support directly use device group";
+    }
+  }
+  // device_group都使用CUR_HETERO_ID的方式去用
+  // 否则请使用placement_group
+  else {
+    HT_RUNTIME_ERROR << "Ensure you have instantiate the CUR_HETERO_ID and set USE_HETERO_ID to true";
+  }
+}
+
+size_t OpDef::inferred_local_placement_group_idx() const {
+  HT_ASSERT(!graph().USE_HETERO_ID)
+    << "inferred_local_placement_group_idx should only used when hetero id is not provided";
+  auto inferred = hetu::impl::comm::GetLocalDevice();
+  HT_ASSERT(placement().is_undetermined() || placement() == inferred)
+    << "inferred_local_placement_group_idx is really a bad idea! "
+    << "It is mainly used when the op is not instantiated";
+  HT_ASSERT(_inst_ctx.has_placement_group)
+    << "inferred_local_placement_group_idx should at least guarantee there is a placement group union";
+  if (_inst_ctx.placement_group_union.has(inferred)) {
+    return _inst_ctx.placement_group_union.get_index(inferred);
+  }
+  return 0;
+}
+
 Operator::Operator(OpIdentifier ids, std::shared_ptr<OpInterface> body,
                    TensorList inputs, OpMeta op_meta) {
   this->_ptr =
@@ -400,13 +531,10 @@ std::ostream& operator<<(std::ostream& os, const OpMeta& meta) {
     os << "eager_device=" << meta.eager_device;
     first = false;
   }
-  if (!meta.device_groups.empty()) {
+  if (meta.device_group_hierarchy.size() != 0) {
     if (!first)
       os << ", ";
-    os << "device_group=";
-    for (auto& device_group : meta.device_groups) {
-      os << device_group << "; ";
-    }
+    os << "device_group_hierarchy = " << meta.device_group_hierarchy;
     first = false;
   }
   if (!meta.extra_deps.empty()) {

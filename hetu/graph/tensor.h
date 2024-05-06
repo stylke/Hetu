@@ -66,6 +66,8 @@ class TensorDef : public shared_ptr_target {
   size_t num_strategy() const;
 
   size_t cur_strategy_id() const;
+
+  size_t cur_hetero_id() const;
   
   const Operator& producer() const;
 
@@ -194,12 +196,12 @@ class TensorDef : public shared_ptr_target {
   }
 
   const Device& placement() noexcept {
-    return cur_distributed_states().get_placement();
+    return _placement;
   }
 
   void set_placement(const Device& p) {
     _meta.set_device(p);
-    cur_distributed_states().set_placement(p);
+    _placement = p;
   }
 
   const bool requires_grad() const noexcept {
@@ -240,43 +242,57 @@ class TensorDef : public shared_ptr_target {
 
   NDArray get_or_compute();
 
-  const DistributedStatesList& multi_distributed_states() const {
-    return _distributed_states;
+  bool has_cur_ds_union() {
+    return cur_strategy_id() < _ds_hierarchy.size();
   }
 
-  void set_multi_distributed_states(const DistributedStatesList& multi_ds) {
-    _distributed_states = multi_ds;
+  DistributedStatesUnion& cur_ds_union();
+
+  void set_cur_ds_union(const DistributedStatesUnion& ds_union);
+
+  DistributedStates& inferred_cur_ds();
+
+  const DistributedStatesHierarchy& ds_hierarchy() const {
+    return _ds_hierarchy;
   }
 
-  bool check_multi_ds_equal(const DistributedStatesList& multi_ds) {
-    HT_ASSERT(_distributed_states.size() == multi_ds.size())
-      << "multi_ds size should equal the same as tensor has: " 
-      << _distributed_states.size();
-    for (size_t i = 0; i < _distributed_states.size(); i++) {
-      if (!_distributed_states[i].check_equal(multi_ds[i])) {
+  void set_ds_hierarchy(const DistributedStatesHierarchy& ds_hierarchy) {
+    _ds_hierarchy = ds_hierarchy;
+  }
+
+  bool check_ds_hierarchy_equal(const DistributedStatesHierarchy& ds_hierarchy) {
+    if (_ds_hierarchy.size() != ds_hierarchy.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < _ds_hierarchy.size(); i++) {
+      if (_ds_hierarchy.get(i).size() != ds_hierarchy.get(i).size()) {
         return false;
+      }
+      for (size_t j = 0; j < _ds_hierarchy.get(i).size(); j++) {
+        if (!_ds_hierarchy.get(i).get(j).check_equal(ds_hierarchy.get(i).get(j))) {
+          return false;
+        }
       }
     }
     return true;
   }
 
-  DistributedStates& cur_distributed_states() {
-    while (cur_strategy_id() >= _distributed_states.size()) {
-      _distributed_states.push_back(DistributedStates());
-    }
-    return _distributed_states[cur_strategy_id()];
-  }
-
   bool has_distributed_states() {
-    return !cur_distributed_states().is_none();
+    if (has_cur_ds_union())
+      return true;
+    return false;
   }
 
   const DistributedStates& get_distributed_states() {
-    return cur_distributed_states();
+    return inferred_cur_ds();
   }
 
+  // 去除ds union中的hetero dim
+  // 获得局部placement group下的local ds
+  DistributedStates get_local_distributed_states();
+
   void set_distributed_states(const DistributedStates& distributed_states) {
-    cur_distributed_states().set_distributed_states(distributed_states);
+    inferred_cur_ds() = distributed_states;
   }
 
   const HTShape& global_shape() {
@@ -289,18 +305,42 @@ class TensorDef : public shared_ptr_target {
     }
     HTShape global_shape(local_shape.size());
     for (size_t d = 0; d < local_shape.size(); d++) {
-      global_shape[d] = local_shape[d] * cur_distributed_states().get_dim(d);
+      global_shape[d] = local_shape[d] * inferred_cur_ds().get_dim(d);
     }
     _global_shape = global_shape;
     return _global_shape;
   }
 
-  const DeviceGroup& placement_group() {
-    return cur_distributed_states().get_placement_group();
+  bool has_placement_group() const {
+    return _has_placement_group;
   }
 
-  void set_placement_group(const DeviceGroup& placement_group) {
-    cur_distributed_states().set_placement_group(placement_group);
+  const DeviceGroupUnion& placement_group_union() const {
+    HT_ASSERT(_has_placement_group)
+      << "Ensure you MapToParallelDevices before calling placement_group_union for " << name();
+    return _placement_group_union;
+  }
+
+  const DeviceGroup placement_group() const {
+    HT_LOG_WARN << "It's better to use placement_group_union instead of placement_group";
+    return _placement_group_union.all();
+  }
+
+  const DeviceGroup local_placement_group() const {
+    HT_ASSERT(!_placement.is_undetermined())
+      << "local_placement_group should be called only after instantiated the placement for " << name();
+    return _placement_group_union.get(_placement);
+  }
+
+  size_t local_placement_group_idx() const {
+    HT_ASSERT(!_placement.is_undetermined())
+      << "local_placement_group_idx should be called only after instantiated the placement for " << name();
+    return _placement_group_union.get_index(_placement);
+  }
+
+  void set_placement_group_union(const DeviceGroupUnion& placement_group_union) {
+    _placement_group_union = placement_group_union;
+    _has_placement_group = true;
   }  
 
   bool symbolic() const {
@@ -308,7 +348,8 @@ class TensorDef : public shared_ptr_target {
   }
 
   const SyShape& symbolic_shape() const {
-    HT_ASSERT(_symbolic) << "symbolic_shape() can only work after calling copy/set/init symbolic_shape";
+    HT_ASSERT(_symbolic) 
+      << name() << ": symbolic_shape() can only work after calling copy/set/init symbolic_shape";
     return _symbolic_shape;
   }
 
@@ -365,13 +406,20 @@ class TensorDef : public shared_ptr_target {
   NDArrayMeta _meta;
   OpRefList _consumers;
   bool _inform_graph_on_destruction;
-  DistributedStatesList _distributed_states; // for multi ds deduce
+  // deprecated: DistributedStatesList _distributed_states; // for multi ds deduce
+  DistributedStatesHierarchy _ds_hierarchy; // for multi ds multi hetero-dp deduce
   HTShape _global_shape;
   bool _is_grad{false};
 
   // Used when the tensor's shape is not fixed
   bool _symbolic;
   SyShape _symbolic_shape;
+
+  // Used only in exec graph
+  // *We move the attribute of placement group and placement from DistributedStates to TensorDef
+  bool _has_placement_group{false};
+  DeviceGroupUnion _placement_group_union{};
+  Device _placement{};
 
   std::optional<OpId> _contiguous_op_id{std::nullopt};
 };

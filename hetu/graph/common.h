@@ -23,6 +23,7 @@ using OpId = uint64_t;
 using OpType = std::string;
 using OpName = std::string;
 using OpList = std::vector<Operator>;
+using OpDeque = std::deque<Operator>;
 using OpRefList = std::vector<OpRef>;
 using OpCRefList = std::vector<OpCRef>;
 using OpRefDeque = std::deque<OpRef>;

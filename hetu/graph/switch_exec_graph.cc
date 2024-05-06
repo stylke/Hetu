@@ -6,6 +6,7 @@
 #include "hetu/graph/distributed_states.h"
 #include "hetu/graph/operator.h"
 #include "hetu/graph/ops/Split.h"
+#include "hetu/graph/ops/Slice.h"
 #include "hetu/graph/ops/Concatenate.h"
 #include "hetu/graph/ops/Contiguous.h"
 #include "hetu/graph/ops/placeholder.h"
@@ -142,7 +143,7 @@ static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer) {
                                        OpMeta().set_is_deduce_states(false).set_name("contiguous_" + tensor->name()));
     auto& contiguous_op = new_tensor->producer();
     if (tensor->placement() == local_device) {
-      contiguous_op->MapToParallelDevices(tensor->placement_group());
+      contiguous_op->MapToParallelDevices(tensor->placement_group_union());
       contiguous_op->Instantiate(local_device, kSwitchComputingStream);
       // 将contiguous算子插入到BatchedIsendIrecv/Slice算子和concat算子之间
       auto& consumer = tensor->consumer(0);
@@ -575,8 +576,12 @@ void SwitchExecGraph::MakeAllParamSlices(const Tensor& param, ParamBlock& block,
     auto& split_op = split_output->producer();
     // 其他device上生成的不需要map placement_group和placement
     if (hetu::impl::comm::GetLocalDevice() == device) { 
-      split_op->MapToParallelDevices(group);
+      split_op->MapToParallelDevices({{group}});
       split_op->Instantiate(device, kSwitchComputingStream);
+      dynamic_cast<ExecutableGraph&>(split_op->graph()).RecordExecTensor(split_output);
+    }
+    if (param->symbolic()) {
+      split_output->copy_symbolic_shape(dynamic_cast<SliceOpImpl&>(split_op->body()).get_symbolic_output_shape());
     }
     // dup会导致一个param_slice对应多个slice_instance
     // 这也是这个优化问题之所以这么复杂的原因
@@ -608,9 +613,10 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
     const auto& owned_slice_instance = param_slice->OwnedSliceInst(0);
     // 之后会被替换成BatchedISendIRecvOp算子
     // Question: MakePlaceholderOp的各个参数是否都有必要
-    auto needed_slice_instance = MakePlaceholderOp(owned_slice_instance->meta(), 
-                                                   param->get_distributed_states(), 
-                                                   OpMeta().set_device_groups({group}));
+    auto needed_slice_instance = MakePlaceholderOp(owned_slice_instance->meta());
+    if (owned_slice_instance->symbolic()) {
+      needed_slice_instance->copy_symbolic_shape(owned_slice_instance->symbolic_shape());
+    }
     param_slice->AddNeededSliceInst(device, needed_slice_instance);
     return needed_slice_instance;
   } 
@@ -632,8 +638,9 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
   auto& concatenate_op = concatenate_output->producer();
   // 其他device上生成的不需要map placement_group和placement
   if (hetu::impl::comm::GetLocalDevice() == device) { 
-    concatenate_op->MapToParallelDevices(group);
+    concatenate_op->MapToParallelDevices({{group}});
     concatenate_op->Instantiate(device, kSwitchComputingStream);
+    dynamic_cast<ExecutableGraph&>(concatenate_op->graph()).RecordExecTensor(concatenate_output);
   }  
   return concatenate_output;
 }
@@ -641,38 +648,85 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
 // 对于一个param
 // 进行全局的switch
 // 每台机器会知道自己拥有这个param的哪些部分以及需要这个param的哪些部分
-void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceGroup& src_group,
-                                   const DistributedStates& dst_ds, const DeviceGroup& dst_group,
-                                   const Tensor& comm_input, const Tensor& after_param) {
+// support hetero param now
+void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, const DeviceGroupUnion& src_group_union,
+                                  const DistributedStatesUnion& dst_ds_union, const DeviceGroupUnion& dst_group_union,
+                                  const Tensor& comm_input, const Tensor& after_param) {
+  // safety check
+  HT_ASSERT(src_ds_union.size() == src_group_union.size() && dst_ds_union.size() == dst_group_union.size())
+    << "union size mismatches";
+  HT_ASSERT((src_ds_union.hetero_dim() == -1 || src_ds_union.hetero_dim() == NULL_HETERO_DIM)
+            && (dst_ds_union.hetero_dim() == -1 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM))
+    << "hetero dim wrong";
+  size_t src_union_size = src_ds_union.size();
+  size_t dst_union_size = dst_ds_union.size();
+  DistributedStatesList local_src_ds_list, local_dst_ds_list;
+  for (size_t i = 0; i < src_union_size; i++) {
+    const auto& local_src_ds = src_ds_union.get_local(i);
+    HT_ASSERT(local_src_ds.get_device_num() == src_group_union.get(i).num_devices())
+      << "devices num mismatches";
+    HT_ASSERT(local_src_ds.states(-2) == 1)
+      << "shouldn't have partial";
+    local_src_ds_list.emplace_back(local_src_ds);
+  }
+  for (size_t i = 0; i < dst_union_size; i++) {
+    const auto& local_dst_ds = dst_ds_union.get_local(i);
+    HT_ASSERT(local_dst_ds.get_device_num() == dst_group_union.get(i).num_devices())
+      << "devices num mismatches";
+    HT_ASSERT(local_dst_ds.states(-2) == 1)
+      << "shouldn't have partial";
+    local_dst_ds_list.emplace_back(local_dst_ds);
+  }
   auto local_device = hetu::impl::comm::GetLocalDevice();
   std::vector<int32_t> block_shape;
   HTShape slice_shape;
-  std::vector<int32_t> src_multiple;
-  std::vector<int32_t> dst_multiple;
+  // key为union dim
+  std::unordered_map<size_t, std::vector<int32_t>> src_multiple;
+  std::unordered_map<size_t, std::vector<int32_t>> dst_multiple;
   // 获得最小粒度的块划分
   int32_t param_dims = comm_input->global_shape().size(); // size_t -> int32_t
   for (int32_t key = -2; key < param_dims; ++key) {
-    auto src_dim = src_ds.states(key);
-    auto dst_dim = dst_ds.states(key);
+    int32_t max_src_dim = -1;
+    int32_t max_dst_dim = -1;
+    std::vector<int32_t> local_src_dim_list;
+    std::vector<int32_t> local_dst_dim_list;
+    for (size_t i = 0; i < src_union_size; i++) {
+      int32_t local_src_dim = local_src_ds_list.at(i).states(key);
+      local_src_dim_list.emplace_back(local_src_dim);
+      max_src_dim = std::max(local_src_dim, max_src_dim);
+    }
+    for (size_t i = 0; i < dst_union_size; i++) {
+      int32_t local_dst_dim = local_dst_ds_list.at(i).states(key);
+      local_dst_dim_list.emplace_back(local_dst_dim);
+      max_dst_dim = std::max(local_dst_dim, max_dst_dim);
+    }
     if (key == -2) {
-      HT_ASSERT(src_dim == 1 && dst_dim == 1) 
+      HT_ASSERT(max_src_dim == 1 && max_dst_dim == 1) 
         << "parameter ds shouldn't have partial dim";
       continue;
     }
     if (key == -1) {
       continue;
     }
-    auto max_dim = std::max(src_dim, dst_dim);
-    HT_ASSERT(max_dim % src_dim == 0 && max_dim % dst_dim == 0)
-      << "only support scaling by an integer";
+    auto max_dim = std::max(max_src_dim, max_dst_dim);
     block_shape.push_back(max_dim); 
     slice_shape.push_back(comm_input->global_shape().at(key) / max_dim);
-    src_multiple.push_back(max_dim / src_dim);
-    dst_multiple.push_back(max_dim / dst_dim);
+    for (size_t i = 0; i < src_union_size; i++) {
+      const auto& local_src_dim = local_src_dim_list.at(i);
+      HT_ASSERT(max_dim % local_src_dim == 0)
+        << "only support scaling by an integer";
+      src_multiple[i].push_back(max_dim / local_src_dim);
+    }
+    for (size_t i = 0; i < dst_union_size; i++) {
+      const auto& local_dst_dim = local_dst_dim_list.at(i);
+      HT_ASSERT(max_dim % local_dst_dim == 0)
+        << "only support scaling by an integer";
+      dst_multiple[i].push_back(max_dim / local_dst_dim);
+    }
   }
   // 为当前param创建一个全局的、抽象的ParamBlock
   // 并为每个最小粒度的块划分创建一个抽象的ParamSlice
-  // 其只需要知道ds的切分shape，而不需要绑定param的真实shape
+  // 其需要知道ds的切分shape和param的真实shape
   const TensorName& param_block_name = after_param->name();
   HT_LOG_DEBUG << local_device << ": make an abstract block for " << param_block_name
     << ", whose shape is " << block_shape;
@@ -682,48 +736,54 @@ void SwitchExecGraph::SwitchParam(const DistributedStates& src_ds, const DeviceG
   _param_blocks.push_back(param_block_ptr);
   // 每个device作为发送端
   // 求出每个device拥有的小块儿并进行切分
-  auto src_devices_size = src_group.num_devices();
-  for(size_t i = 0; i < src_devices_size; ++i) {
-    // 初始化发送端的mapping
-    auto it = _send_mapping.find(src_group.get(i));
-    if (it == _send_mapping.end()) {
-      _send_mapping[src_group.get(i)] = std::make_pair(std::vector<Device>{}, std::vector<Tensor>{});
+  for (size_t union_dim = 0; union_dim < src_union_size; union_dim++) {
+    const auto& src_group = src_group_union.get(union_dim);
+    auto src_devices_size = src_group.num_devices();
+    for(size_t i = 0; i < src_devices_size; ++i) {
+      // 初始化发送端的mapping
+      auto it = _send_mapping.find(src_group.get(i));
+      if (it == _send_mapping.end()) {
+        _send_mapping[src_group.get(i)] = std::make_pair(std::vector<Device>{}, std::vector<Tensor>{});
+      }
+      auto cur_state_index = local_src_ds_list.at(union_dim).map_device_to_state_index(i);
+      std::vector<int32_t> cur_slice_num(param_dims, 0);
+      std::vector<int32_t> cur_slice_relative_num(param_dims, 0);
+      // 进行具体的切分
+      // 将ParamSliceInstance放入对应的ParamSlice
+      HT_LOG_DEBUG << local_device << ": MakeAllParamSlices for tensor " << comm_input << " at device " << src_group.get(i)
+        << ", cur_state_index = " << cur_state_index << " and src_multiple = " << src_multiple;
+      MakeAllParamSlices(comm_input, *param_block_ptr, src_group.get(i), src_group, cur_slice_num, cur_slice_relative_num, 
+                         cur_state_index, src_multiple.at(union_dim), 0);
     }
-    auto cur_state_index = src_ds.map_device_to_state_index(i);
-    std::vector<int32_t> cur_slice_num(param_dims, 0);
-    std::vector<int32_t> cur_slice_relative_num(param_dims, 0);
-    // 进行具体的切分
-    // 将ParamSliceInstance放入对应的ParamSlice
-    HT_LOG_DEBUG << local_device << ": MakeAllParamSlices for tensor " << comm_input << " at device " << src_group.get(i)
-      << ", cur_state_index = " << cur_state_index << " and src_multiple = " << src_multiple;
-    MakeAllParamSlices(comm_input, *param_block_ptr, src_group.get(i), src_group, cur_slice_num, cur_slice_relative_num, 
-                       cur_state_index, src_multiple, 0);
   }
   // 每个device作为接收端
   // 求出每个device需要的小块儿并进行合并
-  auto dst_devices_size = dst_group.num_devices();
-  for(size_t i = 0; i < dst_devices_size; ++i) {
-    // 初始化发送端的mapping
-    auto it = _recv_mapping.find(dst_group.get(i));
-    if (it == _recv_mapping.end()) {
-      _recv_mapping[dst_group.get(i)] = std::make_pair(std::vector<Device>{}, std::vector<Tensor>{});
-    }
-    auto cur_state_index = dst_ds.map_device_to_state_index(i);
-    std::vector<int32_t> cur_slice_num(param_dims, 0);
-    std::vector<int32_t> cur_slice_relative_num(param_dims, 0);
-    // 进行具体的合并
-    // 将新的ParamSliceInstance放入对应的ParamSlice
-    // 会先用placeholder（之后再用BatchedISendIRecvOp进行替换）表征ParamSliceInstance
-    // 返回的result即为新exec graph中最终合并后的param
-    HT_LOG_DEBUG << local_device << ": MergeAllParamSlices for tensor " << after_param << " at device " << dst_group.get(i)
-      << ", cur_state_index = " << cur_state_index << " and dst_multiple = " << dst_multiple;
-    auto result = MergeAllParamSlices(after_param, *param_block_ptr, dst_group.get(i), dst_group, cur_slice_num, cur_slice_relative_num, 
-                                      cur_state_index, dst_multiple, 0);
-    // 如果是local的result
-    // 记录result以及其与after graph param的映射
-    if (local_device == dst_group.get(i)) {
-      _comm_results_mapping.insert(std::make_pair(result->id(), after_param));
-      _comm_results.push_back(std::move(result));
+  for (size_t union_dim = 0; union_dim < dst_union_size; union_dim++) {
+    const auto& dst_group = dst_group_union.get(union_dim);
+    auto dst_devices_size = dst_group.num_devices();
+    for(size_t i = 0; i < dst_devices_size; ++i) {
+      // 初始化接收端的mapping
+      auto it = _recv_mapping.find(dst_group.get(i));
+      if (it == _recv_mapping.end()) {
+        _recv_mapping[dst_group.get(i)] = std::make_pair(std::vector<Device>{}, std::vector<Tensor>{});
+      }
+      auto cur_state_index = local_dst_ds_list.at(union_dim).map_device_to_state_index(i);
+      std::vector<int32_t> cur_slice_num(param_dims, 0);
+      std::vector<int32_t> cur_slice_relative_num(param_dims, 0);
+      // 进行具体的合并
+      // 将新的ParamSliceInstance放入对应的ParamSlice
+      // 会先用placeholder（之后再用BatchedISendIRecvOp进行替换）表征ParamSliceInstance
+      // 返回的result即为新exec graph中最终合并后的param
+      HT_LOG_DEBUG << local_device << ": MergeAllParamSlices for tensor " << after_param << " at device " << dst_group.get(i)
+        << ", cur_state_index = " << cur_state_index << " and dst_multiple = " << dst_multiple;
+      auto result = MergeAllParamSlices(after_param, *param_block_ptr, dst_group.get(i), dst_group, cur_slice_num, cur_slice_relative_num, 
+                                        cur_state_index, dst_multiple.at(union_dim), 0);
+      // 如果是local的result
+      // 记录result以及其与after graph param的映射
+      if (local_device == dst_group.get(i)) {
+        _comm_results_mapping.insert(std::make_pair(result->id(), after_param));
+        _comm_results.push_back(std::move(result));
+      }
     }
   }
 }
@@ -869,41 +929,45 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
           << dtype << " and " << before_param->dtype();
       }    
       // 确定ds和device group  
-      const auto& src_ds = before_param->get_distributed_states();
-      const auto& src_group = before_param->producer()->device_group();
-      const auto& dst_ds = after_param->get_distributed_states();
-      const auto& dst_group = after_param->producer()->device_group();
-      HT_ASSERT(!src_group.empty() && !dst_group.empty())
+      const auto& src_ds_union = before_param->cur_ds_union();
+      const auto& src_group_union = before_param->placement_group_union();
+      const auto& dst_ds_union = after_param->cur_ds_union();
+      const auto& dst_group_union = after_param->placement_group_union();
+      HT_ASSERT(src_group_union.size() != 0 && dst_group_union.size() != 0)
         << "src group and dst group shouldn't be empty, but before param "
-        << before_param << " src_group is " << src_group << " and after param "
-        << after_param << " dst group is " << dst_group;
+        << before_param << " src group union is " << src_group_union << " and after param "
+        << after_param << " dst group union is " << dst_group_union;
       // 将出现过的device都放入comm set中
-      for (auto& device : src_group.devices()) {
-        if (src_set.find(device) == src_set.end()) {
-          src_set.insert(device);
-        }
-        // 用来之后BatchedIsendIrecv以及MPI同步的
-        if (_comm_set.find(device) == _comm_set.end()) {
-          _comm_set.insert(device);
+      for (auto& src_group : src_group_union.raw_data()) {
+        for (auto& device : src_group.devices()) {
+          if (src_set.find(device) == src_set.end()) {
+            src_set.insert(device);
+          }
+          // 用来之后BatchedIsendIrecv以及MPI同步的
+          if (_comm_set.find(device) == _comm_set.end()) {
+            _comm_set.insert(device);
+          }
         }
       }
-      for (auto& device : dst_group.devices()) {
-        if (dst_set.find(device) == dst_set.end()) {
-          dst_set.insert(device);
-        }
-        // 用来之后BatchedIsendIrecv以及MPI同步的
-        if (_comm_set.find(device) == _comm_set.end()) {
-          _comm_set.insert(device);
+      for (auto& dst_group : dst_group_union.raw_data()) {
+        for (auto& device : dst_group.devices()) {
+          if (dst_set.find(device) == dst_set.end()) {
+            dst_set.insert(device);
+          }
+          // 用来之后BatchedIsendIrecv以及MPI同步的
+          if (_comm_set.find(device) == _comm_set.end()) {
+            _comm_set.insert(device);
+          }
         }
       }
       // 依据before_param生成通信图input的placeholder以及相应的feed_dict
       // 理论上也可以直接使用before_param作为input的tensor
       // 但这里还是希望尽量保证comm graph与before graph之间的隔离性
-      auto comm_input = MakePlaceholderOp(before_param->meta(), 
-                                          before_param->get_distributed_states(), 
-                                          OpMeta().set_device_groups({src_group}).set_name(before_param->name() + "_comm_input"));
-      if (src_group.contains(local_device)) {
-        comm_input->producer()->MapToParallelDevices(src_group);
+      auto comm_input = MakePlaceholderOp(before_param->meta(),
+                                          {{before_param->cur_ds_union()}},
+                                          OpMeta().set_device_group_hierarchy({{src_group_union}}).set_name(before_param->name() + "_comm_input"));
+      if (src_group_union.has(local_device)) {
+        comm_input->producer()->MapToParallelDevices(src_group_union);
         comm_input->producer()->Instantiate(local_device, kSwitchComputingStream);
         // 只求comm graph的topo的话并不需要实际的feed dict
         if (switch_level != SWITCH_LEVEL::TOPO) {
@@ -923,9 +987,9 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
       // 哪些device拥有哪些slice
       // 不进行实际的算法决策
       HT_LOG_DEBUG << local_device << ": switch param from " << before_param << " to " << after_param
-        << ", src group = " << src_group << " and dst_group = " << dst_group 
-        << ", src ds states = " << src_ds.get_states() << " and dst states = " << dst_ds.get_states();
-      SwitchParam(src_ds, src_group, dst_ds, dst_group, comm_input, after_param);
+        << ", src group union = " << src_group_union << " and dst group union = " << dst_group_union
+        << ", src ds states union = " << src_ds_union.ds_union_info() << " and dst states union = " << dst_ds_union.ds_union_info();
+      SwitchParam(src_ds_union, src_group_union, dst_ds_union, dst_group_union, comm_input, after_param);
     }
   }
 
@@ -1002,7 +1066,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
                                         comm_devices, dtype, 
                                         OpMeta().set_is_deduce_states(false));
   auto& batched_isend_irecv_op = result->producer();
-  batched_isend_irecv_op->MapToParallelDevices(comm_device_group);
+  batched_isend_irecv_op->MapToParallelDevices({{comm_device_group}});
   batched_isend_irecv_op->Instantiate(local_device, kSwitchCollectiveStream);
   TensorList recv_tensors = batched_isend_irecv_op->outputs();
   // we need to add dummy link for topo sort
@@ -1769,6 +1833,160 @@ void SwitchExecGraph::ProfileRunningDetails() {
     << "---------------------------------------------" << std::endl
     << recv_info_output.str()
     << "*********************************************";
+}
+
+// support symbolic shape
+Tensor ComplexExecComm::Instantiate() {
+  if (_is_instantiated) {
+    HT_RUNTIME_ERROR << "already inserted the repartition op";
+  }
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  const auto& src_ds = _comm_info.local_src_ds;
+  const auto& src_group = _comm_info.src_group;
+  const auto& dst_ds = _comm_info.local_dst_ds;
+  const auto& dst_group = _comm_info.dst_group;
+  const auto& comm_input = _comm_op->input(0);
+  const auto& comm_output = _comm_op->output(0);
+  const auto& dtype = comm_input->dtype();
+  HT_ASSERT(src_group.contains(local_device) || dst_group.contains(local_device))
+    << "local device is not in the comm group";
+  HT_ASSERT(src_ds.states(-2) == dst_ds.states(-2))
+    << "src ds and dst ds should have same partial";
+  // 再对partial维度进行划分
+  // partial idx相同的group进行repartition操作
+  DeviceGroupUnion partial_src_dg_union = DeviceGroupUnion::device_group_to_union(src_group, src_ds, -2, src_ds.states(-2));
+  DeviceGroupUnion partial_dst_dg_union = DeviceGroupUnion::device_group_to_union(dst_group, dst_ds, -2, dst_ds.states(-2));
+  size_t partial_idx = 0;
+  bool find_partial = false;
+  for (size_t i = 0; i < src_ds.states(-2); i++) {
+    if (partial_src_dg_union.get(i).contains(local_device)
+        || partial_dst_dg_union.get(i).contains(local_device)) {
+      HT_ASSERT(find_partial == false)
+        << "Currently only support local device in a single partial group";
+      partial_idx = i;
+      find_partial = true;
+    }
+  }
+  HT_ASSERT(find_partial)
+    << "double check fault";
+  auto& partial_src_group = partial_src_dg_union.get(partial_idx);
+  auto& partial_dst_group = partial_dst_dg_union.get(partial_idx);
+  auto partial_src_ds_states = src_ds.reduce_states(-2);
+  auto partial_src_ds_order = src_ds.reduce_order(-2);
+  DistributedStates partial_src_ds = DistributedStates(src_ds.get_device_num() / src_ds.states(-2),
+                                                       partial_src_ds_states,
+                                                       partial_src_ds_order,
+                                                       src_ds.zero());
+  auto partial_dst_ds_states = dst_ds.reduce_states(-2);
+  auto partial_dst_ds_order = dst_ds.reduce_order(-2);
+  DistributedStates partial_dst_ds = DistributedStates(dst_ds.get_device_num() / dst_ds.states(-2),
+                                                       partial_dst_ds_states,
+                                                       partial_dst_ds_order,
+                                                       dst_ds.zero());
+  // 因为要支持single exec graph multi shape plan
+  // 所以这里要设置symbolic shape
+  if (!comm_input->symbolic()) {
+    comm_input->init_symbolic_shape();
+  }
+  for (auto& device : partial_src_group.devices()) {
+    if (_comm_set.find(device) == _comm_set.end()) {
+      _comm_set.insert(device);
+    }
+  }
+  for (auto& device : partial_dst_group.devices()) {
+    if (_comm_set.find(device) == _comm_set.end()) {
+      _comm_set.insert(device);
+    }
+  }
+  // planning
+  SwitchParam({{partial_src_ds}}, {{partial_src_group}}, {{partial_dst_ds}}, {{partial_dst_group}}, comm_input, comm_output);
+  HT_ASSERT(_param_blocks.size() == 1)
+    << "size wrong";
+  for (auto& param_block_ptr : _param_blocks) {
+    param_block_ptr->ParamBlockComm(_send_mapping, _recv_mapping);
+  }
+  // 通信组
+  std::vector<Device> comm_devices(_comm_set.begin(), _comm_set.end());
+  auto comm_device_group = DeviceGroup(comm_devices);
+  // local_device send to other devices
+  std::vector<Device>& send_to_devices = _send_mapping[local_device].first;
+  TensorList& send_tensors = _send_mapping[local_device].second;
+  auto send_len = send_tensors.size();
+  // local_device receive from other devices
+  std::vector<Device>& recv_from_devices = _recv_mapping[local_device].first;
+  SyShapeList recv_tensor_shapes;
+  auto recv_len = _recv_mapping[local_device].second.size();
+  for (size_t i = 0; i < recv_len; ++i) {
+    HT_ASSERT(_recv_mapping[local_device].second[i]->symbolic())
+      << "recv tensors should be symbolic";
+    recv_tensor_shapes.push_back(_recv_mapping[local_device].second[i]->symbolic_shape());
+  }
+  /*
+  HT_LOG_WARN << local_device << ": will send " << send_len << " tensor to devices " 
+    << send_to_devices << " and recv " << recv_len << " tensor from devices " << recv_from_devices;
+  */
+  // if nothing to do
+  if (send_len == 0 && recv_len == 0) {
+    return comm_input;
+  }
+  auto batched_isend_irecv_output = MakeBatchedISendIRecvOp(send_tensors, send_to_devices, 
+                                                            recv_tensor_shapes, recv_from_devices, 
+                                                            comm_devices, dtype, 
+                                                            OpMeta().set_is_deduce_states(false)
+                                                                    .set_name("BatchedISendIRecvOp_for_" + _comm_op->name()));
+  auto& batched_isend_irecv_op = batched_isend_irecv_output->producer();
+  TensorList recv_tensors = batched_isend_irecv_op->outputs();
+  for (const auto& recv_tensor : recv_tensors) {
+    dynamic_cast<ExecutableGraph&>(batched_isend_irecv_op->graph()).RecordExecTensor(recv_tensor);
+  }
+  batched_isend_irecv_op->MapToParallelDevices({{comm_device_group}});
+  // intra
+  if (src_group == dst_group) {
+    batched_isend_irecv_op->Instantiate(local_device, kCollectiveStream);
+  } 
+  // inter
+  else {
+    batched_isend_irecv_op->Instantiate(local_device, kP2PStream);
+  }
+  // 将原先的placeholder替换为recv_tensor
+  HT_ASSERT(recv_len == recv_tensors.size())
+    << "something wrong with the recv len";
+  for (size_t i = 0; i < recv_len; ++i) {
+    auto& old_tensor = _recv_mapping[local_device].second[i];
+    auto& new_tensor = recv_tensors[i];
+    HT_ASSERT(old_tensor->num_consumers() == 1)
+      << "the slice instance should only used once (by a single concatenate op)";
+    auto& consumer = old_tensor->consumer(0);
+    for (size_t j = 0; j < consumer->num_inputs(); ++j) {
+      if (consumer->input(j)->id() == old_tensor->id()) {
+        Graph::ReplaceInput(consumer, j, new_tensor);
+      }
+    }
+  }
+  // add dummy link for topo sort
+  // connect comm_op->input producer with batchISendIRecvOp when needn't send
+  // 类似exec graph中替换成p2p recv算子时所做的对topo的操作
+  if (send_to_devices.size() == 0) { 
+    Graph::AddInDeps(batched_isend_irecv_op, {comm_input});
+  }
+  // connect batchISendIRecvOp with comm_op->ouput consumers when needn't recv
+  // 类似exec graph中替换成p2p send算子时所做的对topo的操作
+  if (recv_from_devices.size() == 0) { 
+    for (int i = 0; i < comm_output->num_consumers(); i++) {
+      Graph::AddInDeps(comm_output->consumer(i), {batched_isend_irecv_op->out_dep_linker()});
+    }
+  } 
+  // return new substituted tensor 
+  // if local device is not in dst group
+  // which means it only needs sending
+  // the _comm_results will be empty and we directly return the original output
+  _is_instantiated = true;
+  if (_comm_results.empty()) {
+    return comm_input;
+  }
+  HT_ASSERT(_comm_results.size() == 1)
+    << "wrong size";
+  return _comm_results[0];
 }
 
 } // namespace graph

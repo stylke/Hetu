@@ -16,19 +16,21 @@ class ArgType:
     DATA_TYPE = 10; DATA_TYPE_STR = ("hetu.dtype", "dtype", "DataType")
     DEVICE = 11; DEVICE_STR = ("hetu.device", "device", "Device")
     DEVICE_GROUP = 12; DEVICE_GROUP_STR = ("hetu.DeviceGroup", "DeviceGroup")
-    STREAM = 13; STREAM_STR = ("hetu.stream", "stream", "Stream")
-    ND_ARRAY = 14; ND_ARRAY_STR = ("hetu.NDArray", "NDArray", "hetu.ndarray", "ndarray")
-    ND_ARRAY_LIST = 15; ND_ARRAY_LIST_STR = ("List[hetu.NDArray]", "List[NDArray]", "List[hetu.ndarray]", "List[ndarray]", "NDArrayList")
-    TENSOR = 16; TENSOR_STR = ("hetu.Tensor", "Tensor", "hetu.tensor", "tensor")
-    TENSOR_LIST = 17; TENSOR_LIST_STR = ("List[hetu.Tensor]", "List[Tensor]", "List[hetu.tensor]", "List[tensor]", "TensorList")
-    OPERATOR = 18; OPERATOR_STR = ("hetu.Operator", "Operator", "hetu.operator", "operator")
-    OPERATOR_LIST = 19; OPERATOR_LIST_STR = ("List[hetu.Operator]", "List[Operator]", "List[hetu.operator]", "List[operator]", "OperatorList", "OpList")
-    FEED_DICT = 20; FEED_DICT_STR = ("FeedDict", "feed_dict")
-    DISTRIBUTED_STATES = 21; DISTRIBUTED_STATES_STR = ("hetu.DistributedStates", "DistributedStates")
-    DISTRIBUTED_STATES_LIST = 22; DISTRIBUTED_STATES_LIST_STR = ("List[hetu.DistributedStates]", "List[DistributedStates]", "DistributedStatesList") 
-    INT_SYMBOL = 23; INT_SYMBOL_STR = ("hetu.IntSymbol", "IntSymbol")
-    SYMBOLIC_SHAPE = 24; SYMBOLIC_SHAPE_STR = ("List[hetu.IntSymbol]", "List[IntSymbol]", "SyShape")
-    INITIALIZER = 25; INITIALIZER_STR = ("hetu.Initializer", "Initializer")
+    DG_HIERARCHY = 13; DG_HIERARCHY_STR = ("hetu.DeviceGroupHierarchy", "DeviceGroupHierarchy", "List[hetu.DeviceGroupList]", "List[DeviceGroupList]", "List[List[hetu.DeviceGroup]]", "List[List[DeviceGroup]]")
+    STREAM = 14; STREAM_STR = ("hetu.stream", "stream", "Stream")
+    ND_ARRAY = 15; ND_ARRAY_STR = ("hetu.NDArray", "NDArray", "hetu.ndarray", "ndarray")
+    ND_ARRAY_LIST = 16; ND_ARRAY_LIST_STR = ("List[hetu.NDArray]", "List[NDArray]", "List[hetu.ndarray]", "List[ndarray]", "NDArrayList")
+    TENSOR = 17; TENSOR_STR = ("hetu.Tensor", "Tensor", "hetu.tensor", "tensor")
+    TENSOR_LIST = 18; TENSOR_LIST_STR = ("List[hetu.Tensor]", "List[Tensor]", "List[hetu.tensor]", "List[tensor]", "TensorList")
+    OPERATOR = 19; OPERATOR_STR = ("hetu.Operator", "Operator", "hetu.operator", "operator")
+    OPERATOR_LIST = 20; OPERATOR_LIST_STR = ("List[hetu.Operator]", "List[Operator]", "List[hetu.operator]", "List[operator]", "OperatorList", "OpList")
+    FEED_DICT = 21; FEED_DICT_STR = ("FeedDict", "feed_dict")
+    DISTRIBUTED_STATES = 22; DISTRIBUTED_STATES_STR = ("hetu.DistributedStates", "DistributedStates")
+    DISTRIBUTED_STATES_LIST = 23; DISTRIBUTED_STATES_LIST_STR = ("List[hetu.DistributedStates]", "List[DistributedStates]", "DistributedStatesList") 
+    DS_HIERARCHY = 24; DS_HIERARCHY_STR = ("List[hetu.DistributedStatesUnion]", "List[DistributedStatesUnion]", "DistributedStatesHierarchy") 
+    INT_SYMBOL = 25; INT_SYMBOL_STR = ("hetu.IntSymbol", "IntSymbol")
+    SYMBOLIC_SHAPE = 26; SYMBOLIC_SHAPE_STR = ("List[hetu.IntSymbol]", "List[IntSymbol]", "SyShape")
+    INITIALIZER = 27; INITIALIZER_STR = ("hetu.Initializer", "Initializer")
 
     # None is for returning type rather than argument type. 
     # We slightly abuse the notation here.
@@ -54,6 +56,7 @@ class ArgType:
         ArgType.type_to_type_str_mapping[ArgType.DATA_TYPE] = ArgType.DATA_TYPE_STR
         ArgType.type_to_type_str_mapping[ArgType.DEVICE] = ArgType.DEVICE_STR
         ArgType.type_to_type_str_mapping[ArgType.DEVICE_GROUP] = ArgType.DEVICE_GROUP_STR
+        ArgType.type_to_type_str_mapping[ArgType.DG_HIERARCHY] = ArgType.DG_HIERARCHY_STR
         ArgType.type_to_type_str_mapping[ArgType.STREAM] = ArgType.STREAM_STR
         ArgType.type_to_type_str_mapping[ArgType.ND_ARRAY] = ArgType.ND_ARRAY_STR
         ArgType.type_to_type_str_mapping[ArgType.ND_ARRAY_LIST] = ArgType.ND_ARRAY_LIST_STR
@@ -64,6 +67,7 @@ class ArgType:
         ArgType.type_to_type_str_mapping[ArgType.FEED_DICT] = ArgType.FEED_DICT_STR
         ArgType.type_to_type_str_mapping[ArgType.DISTRIBUTED_STATES] = ArgType.DISTRIBUTED_STATES_STR
         ArgType.type_to_type_str_mapping[ArgType.DISTRIBUTED_STATES_LIST] = ArgType.DISTRIBUTED_STATES_LIST_STR
+        ArgType.type_to_type_str_mapping[ArgType.DS_HIERARCHY] = ArgType.DS_HIERARCHY_STR
         ArgType.type_to_type_str_mapping[ArgType.INT_SYMBOL] = ArgType.INT_SYMBOL_STR
         ArgType.type_to_type_str_mapping[ArgType.SYMBOLIC_SHAPE] = ArgType.SYMBOLIC_SHAPE_STR
         ArgType.type_to_type_str_mapping[ArgType.INITIALIZER] = ArgType.INITIALIZER_STR
@@ -286,6 +290,12 @@ def get_arg_getter_fn(arg_type, default_str, has_default, type_str, args):
             return "get_device_group_or_peek"
         else:
             return "get_device_group"
+    elif arg_type == ArgType.DG_HIERARCHY:
+        if has_default:
+            assert_default_is_none(type_str, default_str)
+            return "get_dg_hierarchy_or_peek"
+        else:
+            return "get_dg_hierarchy"
     elif arg_type == ArgType.STREAM:
         if has_default:
             assert_default_is_none(type_str, default_str)
@@ -346,6 +356,12 @@ def get_arg_getter_fn(arg_type, default_str, has_default, type_str, args):
             return "get_distributed_states_list_or_empty"
         else:
             return "get_distributed_states_list"
+    elif arg_type == ArgType.DS_HIERARCHY:
+        if has_default:
+            assert_default_is_none(type_str, default_str)
+            return "get_ds_hierarchy_or_empty"
+        else:
+            return "get_ds_hierarchy"
     elif arg_type == ArgType.INT_SYMBOL:
         if has_default:
             assert_default_is_none(type_str, default_str)

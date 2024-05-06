@@ -87,9 +87,9 @@ inline OpMeta CurrentOpMetaCtx() {
   auto eager_device_opt = get_eager_device_ctx().peek();
   if (eager_device_opt != nullopt)
     ret.set_eager_device(*eager_device_opt);
-  auto device_groups_opt = get_device_groups_ctx().peek();
-  if (device_groups_opt != nullopt)
-    ret.set_device_groups(*device_groups_opt);
+  auto device_group_hierarchy_opt = get_dg_hierarchy_ctx().peek();
+  if (device_group_hierarchy_opt != nullopt)
+    ret.set_device_group_hierarchy(*device_group_hierarchy_opt);
   // TODO: name & extra_deps
   return ret;
 }

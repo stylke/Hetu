@@ -6,6 +6,9 @@
 namespace hetu {
 namespace graph {
 
+// currenty deprecated
+// not support hetero APIs
+/*
 // temp utils of changing ds
 static DistributedStates dup2split(const DistributedStates& ds, int32_t split_dim) {
   const auto& states = ds.get_states();
@@ -344,6 +347,7 @@ void DefineAndRunGraph::SetVariableDistributedStates(Operator& op, int32_t dp, i
   }
   HT_RUNTIME_ERROR << "Unreachable, some assumptions are wrong, plz inform Lhy";
 }
+*/
 
 void DefineAndRunGraph::InstantiateTestCase(const OpRefList& topo,
                                             Tensor2ShapeMap& shape_plan) {

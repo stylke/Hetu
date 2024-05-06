@@ -164,6 +164,40 @@ void LinearOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   c->set_distributed_states({device_num, res_states, res_order});
 }
 
+void LinearOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                     TensorList& outputs, const OpMeta& op_meta) const {
+  int32_t hetero_a = inputs_hetero_dim.at(0);
+  int32_t hetero_b = inputs_hetero_dim.at(1);  
+  if (trans_a() && (hetero_a == 0 || hetero_a == 1)) {
+    hetero_a = 1 - hetero_a;
+  }
+  if (trans_b() && (hetero_b == 0 || hetero_b == 1)) {
+    hetero_b = 1 - hetero_b;
+  }
+  int32_t hetero_res;
+  if (hetero_a == NULL_HETERO_DIM) {
+    HT_ASSERT(hetero_b == NULL_HETERO_DIM)
+      << "Currently not support different union hetero type";
+    hetero_res = NULL_HETERO_DIM;
+  } else {
+    if (hetero_a == -1 || hetero_b == -1) {
+      if (hetero_a == -1) {
+        HT_RUNTIME_ERROR << "not supported yet";
+      }
+      if (hetero_b == -1) {
+        HT_ASSERT(hetero_a >= 0)
+          << "hetero a and hetero b can't simutaneously be -1";
+        hetero_res = hetero_a;
+      }
+    } else {
+      HT_ASSERT(hetero_a == 1 - hetero_b)
+        << "hetero a and hetero b should be opposite in this situation";
+      hetero_res = -2;
+    }
+  }   
+  outputs.at(0)->cur_ds_union().set_hetero_dim(hetero_res);
+}
+
 Tensor MakeLinearOp(Tensor a, Tensor b, Tensor bias, bool trans_a,
                     bool trans_b, OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b), std::move(bias)};

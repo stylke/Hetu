@@ -143,6 +143,13 @@ void ReduceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   outputs.at(0)->set_distributed_states(ds_output);
 }
 
+void ReduceOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                     TensorList& outputs, const OpMeta& op_meta) const {
+  HT_ASSERT(inputs_hetero_dim.at(0) < 0)
+    << "Currently not support complex hetero dim deducing";
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
+}
+
 void ReduceGradientOpImpl::DoCompute(Operator& op,
                                      const NDArrayList& inputs,
                                      NDArrayList& outputs, RuntimeContext& ctx) const {
@@ -167,6 +174,11 @@ HTShapeList ReduceGradientOpImpl::DoInferShape(Operator& op,
 void ReduceGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                           const OpMeta& op_meta) const {
   outputs.at(0)->set_distributed_states(inputs.at(2)->get_distributed_states());
+}
+
+void ReduceGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                             TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(2));
 }
 
 Tensor MakeReduceOp(Tensor input, ReductionType reduction, const HTAxes& axes,

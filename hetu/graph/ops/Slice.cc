@@ -72,6 +72,11 @@ void SliceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " slice op DoDeduceStates() finished";     
 }
 
+void SliceOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                    TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
+}
+
 void SliceGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                     NDArrayList& outputs, RuntimeContext& ctx) const {
   auto stream_idx = op->instantiation_ctx().stream_index;
@@ -90,6 +95,11 @@ HTShapeList SliceGradientOpImpl::DoInferShape(Operator& op,
 void SliceGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                          const OpMeta& op_meta) const {
   outputs.at(0)->set_distributed_states(inputs.at(1)->get_distributed_states());  
+}
+
+void SliceGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                            TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(1));
 }
 
 // fixed shape

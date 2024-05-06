@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from queue import Queue
 
-from hetu.nn.modules.parallel_multi_ds import parallel_data_provider, parallel_multi_data_provider, get_device_index
+from hetu.nn.modules.parallel_multi_ds import parallel_data_provider, parallel_multi_data_provider
 
 def get_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
     multi_ds_parallel_config = []
@@ -77,6 +77,8 @@ class GPTAttention(ht.nn.Module):
 
 
     def _attn(self, query, key_t, value, attention_mask=None):
+        raise NotImplementedError("Not supported for hetero dp")
+        '''
         # q*k^T, shape=[micro_batch_size, num_heads, seq_len, seq_len]
         attn_weights = ht.bmm(query, key_t)
         micro_batch_size, num_heads, seq_len, seq_len = attn_weights.global_shape
@@ -122,6 +124,7 @@ class GPTAttention(ht.nn.Module):
         attn_output = ht.bmm(attn_weights, value)
 
         return attn_output, attn_weights
+        '''
 
     def forward(
         self,
@@ -232,6 +235,7 @@ class GPTBlock(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs, layer_idx):
         super().__init__()
         self.config = config
+        self.layer_idx = layer_idx
         hidden_size = config.hidden_size
 
         self.ln_1 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm1', layer_idx), eps=config.layer_norm_epsilon, name=f'ln1_block{layer_idx}')
@@ -244,6 +248,7 @@ class GPTBlock(ht.nn.Module):
         hidden_states,
         attention_mask=None,
     ):
+        hidden_states = ht.comm(hidden_states, self.attn.qkv_dense.ds_union_map['split0_dup'], self.ln_1.device_group_unions, name=f"pipeline_layer_{self.layer_idx}")
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
         attn_output = self.attn(
@@ -342,7 +347,10 @@ class GPTLMHeadModel(ht.nn.Module):
             gather_output=False,
             name='lm_head'
         )
-        self.lm_head.weight = self.transformer.wte.embedding_table # share embedding table
+        # share embedding table
+        # we manually add comm op here
+        # because we don't know if it is a P2P or a BatchedIsendIrecv in hetero settings
+        self.lm_head.weight = ht.comm(self.transformer.wte.embedding_table, self.lm_head.ds_union_map['dup_split0'], self.lm_head.device_group_unions, name="share_weight_comm") 
         self.config = config
     
     def forward(

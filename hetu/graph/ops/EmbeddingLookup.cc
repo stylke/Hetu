@@ -64,6 +64,13 @@ void EmbeddingLookupOpImpl::DoDeduceStates(const TensorList& inputs, TensorList&
   outputs.at(0)->set_distributed_states(ds_output);
 }
 
+void EmbeddingLookupOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                              TensorList& outputs, const OpMeta& op_meta) const {
+  HT_ASSERT(inputs_hetero_dim.at(1) >= 0)
+    << "Only support hetero dim is a split dim";
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(1));
+}
+
 void EmbeddingLookupGradientOpImpl::DoCompute(Operator& op,
                                               const NDArrayList& inputs,
                                               NDArrayList& outputs,
@@ -108,6 +115,13 @@ void EmbeddingLookupGradientOpImpl::DoDeduceStates(const TensorList& inputs, Ten
     ds_tb_grad.set_distributed_states({device_num, res_states, res_order});
   }
   outputs.at(0)->set_distributed_states(ds_tb_grad);
+}
+
+void EmbeddingLookupGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                                      TensorList& outputs, const OpMeta& op_meta) const {
+  HT_ASSERT(inputs_hetero_dim.at(0) == 0)
+    << "Only support hetero dim is 0";
+  outputs.at(0)->cur_ds_union().set_hetero_dim(-2);
 }
 
 Tensor MakeEmbeddingLookupOp(Tensor input, Tensor id, std::vector<int64_t> multi_offset, OpMeta op_meta) {

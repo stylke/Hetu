@@ -9,13 +9,13 @@ namespace hetu {
 namespace graph {
 
 bool OptimizerUpdateOpInterface::DoMapToParallelDevices(
-  Operator& op, const DeviceGroup& placement_group) const {
+  Operator& op, const DeviceGroupUnion& placement_group_union) const {
   // use comm_op instead
   // if (placement_group.num_devices() > 1) {
   //   // TODO
   //   HT_NOT_IMPLEMENTED << "Fill this up with AllReduceOpImpl";
   // }
-  return OpInterface::DoMapToParallelDevices(op, placement_group);
+  return OpInterface::DoMapToParallelDevices(op, placement_group_union);
 }
 
 void SGDUpdateOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
@@ -85,7 +85,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
     DeviceGroup comm_group = reduce_scatter_impl.comm_group();
     // HT_LOG_WARN << op << " comm group: " << comm_group;
 
-    auto local_device_index = op->placement_group().get_index(op->placement());
+    auto local_device_index = op->local_placement_group().get_index(op->placement());
     auto scatter_num = comm_group.num_devices();
     HT_ASSERT(scatter_num == partial_grad->get_distributed_states().get_dim(-2))
       << "Adam: comm_group num must equal to partial size!";
@@ -136,6 +136,11 @@ void AdamOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   outputs.at(0)->set_distributed_states(ds_param);
 }
 
+void AdamOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                                   TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
+}
+
 Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, float learning_rate,
                        OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<SGDUpdateOpImpl>(learning_rate),
@@ -166,8 +171,9 @@ Tensor MakeAdamOp(Tensor param, Tensor grad, Tensor mean, Tensor variance,
                   float eps, float weight_decay, OpMeta op_meta) {
   // pure tp needn't zero 
   std::vector<bool> multi_zero; 
-  multi_zero.reserve(param->multi_distributed_states().size());   
-  for (const auto& ds : param->multi_distributed_states()) {
+  multi_zero.reserve(param->ds_hierarchy().size());   
+  for (const auto& ds_union : param->ds_hierarchy().raw_data()) {
+    auto ds = ds_union.get(0);
     bool zero = (ds.get_dim(-1) > 1) && ds.zero();
     multi_zero.push_back(zero);
   }                 

@@ -12,7 +12,7 @@ namespace hetu {
 namespace graph {
 
 #define _PY_TENSOR_CTOR_COMMON_ARGS                                            \
-  "DataType dtype=None, bool requires_grad=false, DistributedStates ds=None, " OP_META_ARGS
+  "DataType dtype=None, bool requires_grad=false, DistributedStatesHierarchy ds_hierarchy=None, " OP_META_ARGS
 
 inline PyObject* _from_shape_ctor_helper(ParsedPyArgs& parsed_args, 
                                          Initializer&& init, 
@@ -25,7 +25,7 @@ inline PyObject* _from_shape_ctor_helper(ParsedPyArgs& parsed_args,
     std::move(init), parsed_args.get_int64_list(0),
     parsed_args.get_dtype_or_peek(arg_offset + 1).value_or(kFloat32), 
     parsed_args.get_bool_or_default(arg_offset + 2),
-    parsed_args.get_distributed_states_or_empty(arg_offset + 3),     
+    parsed_args.get_ds_hierarchy_or_empty(arg_offset + 3),     
     parse_op_meta(parsed_args, arg_offset + 4));
   return reinterpret_cast<PyObject*>(self);
 }
@@ -41,7 +41,7 @@ inline PyObject* _like_tensor_ctor_helper(ParsedPyArgs& parsed_args,
     std::move(init), parsed_args.get_tensor(0)->shape(),
     parsed_args.get_dtype_or_peek(arg_offset + 1).value_or(kFloat32),
     parsed_args.get_bool_or_default(arg_offset + 2),
-    parsed_args.get_distributed_states_or_empty(arg_offset + 3),
+    parsed_args.get_ds_hierarchy_or_empty(arg_offset + 3),
     parse_op_meta(parsed_args, arg_offset + 4));
   return reinterpret_cast<PyObject*>(self);
 }
@@ -74,7 +74,7 @@ PyObject* TensorCopyCtor(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
       nullopt);
     self->tensor = MakeParameterOp(data, false, kUndeterminedDataType,
                                   parsed_args.get_bool_or_default(2),
-                                  parsed_args.get_distributed_states_or_empty(3),
+                                  parsed_args.get_ds_hierarchy_or_empty(3),
                                   parse_op_meta(parsed_args, 4));
   } else if (parsed_args.signature_index() == 1) {
     new (&self->tensor) Tensor();
@@ -82,7 +82,7 @@ PyObject* TensorCopyCtor(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
       parsed_args.get_ndarray(0), parsed_args.get_dtype_or_peek(1), nullopt);
     self->tensor = MakeParameterOp(data, false, kUndeterminedDataType,
                                   parsed_args.get_bool_or_default(2),
-                                  parsed_args.get_distributed_states_or_empty(3),
+                                  parsed_args.get_ds_hierarchy_or_empty(3),
                                   parse_op_meta(parsed_args, 4));
   } else if (parsed_args.signature_index() == 2) {
     new (&self->tensor) Tensor();
@@ -90,7 +90,7 @@ PyObject* TensorCopyCtor(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
       parsed_args.get_py_obj(0), parsed_args.get_dtype_or_peek(1), nullopt);
     self->tensor = MakeParameterOp(data, false, kUndeterminedDataType,
                                   parsed_args.get_bool_or_default(2),
-                                  parsed_args.get_distributed_states_or_empty(3),
+                                  parsed_args.get_ds_hierarchy_or_empty(3),
                                   parse_op_meta(parsed_args, 4));
   } else {
     Py_TYPE(self)->tp_free(self);
@@ -113,7 +113,7 @@ PyObject* PyTensor_placeholder(PyTypeObject* type, PyObject* args, PyObject* kwa
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   
   static PyArgParser parser({
-    "placeholder(DataType dtype, HTShape shape, DistributedStates ds=None, " OP_META_ARGS ")", 
+    "placeholder(DataType dtype, HTShape shape, DistributedStatesHierarchy ds_hierarchy=None, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
   
@@ -123,7 +123,7 @@ PyObject* PyTensor_placeholder(PyTypeObject* type, PyObject* args, PyObject* kwa
       MakePlaceholderOp(NDArrayMeta()
                           .set_dtype(parsed_args.get_dtype(0))
                           .set_shape(parsed_args.get_int64_list(1)),
-                        parsed_args.get_distributed_states_or_empty(2),
+                        parsed_args.get_ds_hierarchy_or_empty(2),
                         parse_op_meta(parsed_args, 3));
   } else {
     Py_TYPE(self)->tp_free(self);
@@ -148,7 +148,7 @@ PyObject* PyTensor_parallel_placeholder(PyTypeObject* type, PyObject* args, PyOb
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   
   static PyArgParser parser({
-    "parallel_placeholder(DataType dtype, HTShape global_shape, DistributedStatesList multi_ds, " OP_META_ARGS ")", 
+    "parallel_placeholder(DataType dtype, HTShape global_shape, DistributedStatesHierarchy ds_hierarchy, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
   
@@ -158,7 +158,7 @@ PyObject* PyTensor_parallel_placeholder(PyTypeObject* type, PyObject* args, PyOb
       MakeParallelPlaceholderOp(NDArrayMeta()
                                 .set_dtype(parsed_args.get_dtype(0))
                                 .set_shape(parsed_args.get_int64_list(1)),
-                              parsed_args.get_distributed_states_list(2), 
+                              parsed_args.get_ds_hierarchy(2), 
                               parse_op_meta(parsed_args, 3));
   } else {
     Py_TYPE(self)->tp_free(self);
@@ -183,7 +183,7 @@ PyObject* PyTensor_parallel_parameter(PyTypeObject* type, PyObject* args, PyObje
   auto* self = reinterpret_cast<PyTensor*>(unsafe_self);
   
   static PyArgParser parser({
-    "parallel_parameter(Initializer init, HTShape global_shape, List[DistributedStates] multi_ds, \
+    "parallel_parameter(Initializer init, HTShape global_shape, List[DistributedStatesUnion] ds_hierarchy, \
      List[int] local_idx=[-1], DataType dtype=None, bool requires_grad=false, " OP_META_ARGS ")", 
   });
   auto parsed_args = parser.parse(args, kwargs);
@@ -193,7 +193,7 @@ PyObject* PyTensor_parallel_parameter(PyTypeObject* type, PyObject* args, PyObje
     self->tensor =
       MakeParallelParameterOp(*(parsed_args.get_initializer(0)),
                               parsed_args.get_int64_list(1),
-                              parsed_args.get_distributed_states_list(2),
+                              parsed_args.get_ds_hierarchy(2),
                               parsed_args.get_int64_list_or_default(3),
                               parsed_args.get_dtype_or_peek(4).value_or(kFloat32),
                               parsed_args.get_bool_or_default(5),

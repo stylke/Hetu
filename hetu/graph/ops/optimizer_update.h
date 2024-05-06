@@ -45,7 +45,7 @@ class OptimizerUpdateOpInterface : public OpInterface {
 
   bool
   DoMapToParallelDevices(Operator& op,
-                         const DeviceGroup& placement_group) const override;
+                         const DeviceGroupUnion& placement_group_union) const override;
 
  public:
   inline bool require_contig_inputs() const override {
@@ -152,6 +152,9 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
 
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;
+
+  void DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+                         TensorList& outputs, const OpMeta& op_meta) const override;  
 
  public:
   bool operator==(const OpInterface& rhs) const override {
