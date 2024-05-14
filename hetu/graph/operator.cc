@@ -2,6 +2,7 @@
 #include "hetu/graph/graph.h"
 #include "hetu/graph/ops/group.h"
 #include "hetu/graph/ops/variable.h"
+#include "hetu/graph/ops/Communication.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/communication/comm_group.h"
@@ -251,6 +252,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
         HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
           << " output " << i << " shape = " << output_shape << " ds = " << op->output(i)->get_distributed_states().ds_info();
         if (runtime_ctx.has_runtime_allocation(output_id)) {
+          // HT_LOG_INFO << op->output(i) << " has runtime allocation";
           outputs.push_back(runtime_ctx.get_runtime_allocation(output_id));
         } 
         // alloc on-the-fly
@@ -429,7 +431,22 @@ void OpDef::BlockOrSyncInput(Tensor& input, RuntimeContext& runtime_ctx, size_t 
     return;
   // p2p ops are all gathered in group start/end, so the start/stop events for p2p ops is invalid, should not be used any more!
   // another case: shared weight p2p ops will not execute in micro batch i>0, so these ops will not record start/stop events.
-  if (is_peer_to_peer_recv_op(input_op))
+  auto is_pipeline_stage_recv_op = [](const Operator& op) -> bool {
+    if (is_peer_to_peer_recv_op(op)) {
+      return true;
+    }
+    if (is_batched_isend_irecv_op(op)) {
+      const auto& batched_isend_irecv_op_impl = dynamic_cast<BatchedISendIRecvOpImpl&>(op->body());
+      // 只收不发
+      if (batched_isend_irecv_op_impl.dst_devices().empty()) {
+        HT_ASSERT(!batched_isend_irecv_op_impl.src_devices().empty())
+          << "only one side could be empty";
+        return true;
+      }
+    }
+    return false;
+  };
+  if (is_pipeline_stage_recv_op(input_op))
     return;
   const auto& input_placement = input_op->instantiation_ctx().placement;
   const auto& current_placement = instantiation_ctx().placement;
@@ -452,8 +469,14 @@ void OpDef::BlockOrSyncInput(Tensor& input, RuntimeContext& runtime_ctx, size_t 
       return;
     }
     input_op->instantiation_ctx().stop[micro_batch_id]->Block(instantiation_ctx().stream());
-    HT_LOG_TRACE << "input op " << input_op << " stream is " << input_op->instantiation_ctx().stream() 
-      << " and current op " << name() << " stream is " << instantiation_ctx().stream();
+    /*
+    if (is_split_all_reduce_op(input_op)) {
+      HT_LOG_INFO << "input op " << input_op << " stream is " << input_op->instantiation_ctx().stream() 
+        << " and current op " << name() << " stream is " << instantiation_ctx().stream()
+        << ", block on micro batch " << micro_batch_id;
+      input_op->instantiation_ctx().stream().Sync();
+    }
+    */
   }
 }
 
@@ -506,7 +529,11 @@ size_t OpDef::inferred_local_placement_group_idx() const {
   if (_inst_ctx.placement_group_union.has(inferred)) {
     return _inst_ctx.placement_group_union.get_index(inferred);
   }
-  return 0;
+  if (graph().type() == GraphType::DEFINE_AND_RUN) {
+    HT_ASSERT(graph().SUGGESTED_HETERO_ID == 0)
+      << "Shouldn't change the SUGGESTED_HETERO_ID of the define graph";
+  }
+  return _inst_ctx.placement_group_union.size() > 1 ? graph().SUGGESTED_HETERO_ID : 0;
 }
 
 Operator::Operator(OpIdentifier ids, std::shared_ptr<OpInterface> body,

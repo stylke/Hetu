@@ -875,13 +875,11 @@ NDArrayList NDArray::split(const NDArray& input, size_t num_chunks,
   return split(input, chunks, axis, stream_id);
 }
 
-// deprecated: dynamic shape at inference when using different seq_len
 NDArrayList NDArray::split(const NDArray& input, const HTShape& chunks,
                            int64_t axis, StreamIndex stream_id) {
   auto parsed_axis = NDArrayMeta::ParseAxis(axis, input->ndim());
   if (parsed_axis == 0) {
     auto split_shapes = NDArrayMeta::Split(input->shape(), chunks, 0);
-    auto split_dynamic_shapes = NDArrayMeta::Split(input->dynamic_shape(), chunks, 0);
     size_t interval = input->numel() / input->shape(0);
     NDArrayList ret;
     ret.reserve(split_shapes.size());
@@ -889,7 +887,6 @@ NDArrayList NDArray::split(const NDArray& input, const HTShape& chunks,
     for (size_t i = 0; i < split_shapes.size(); i++) {
       auto split_meta = input->meta();
       split_meta.set_shape(split_shapes[i]);
-      split_meta.set_dynamic_shape(split_dynamic_shapes[i]);
       ret.emplace_back(split_meta, input->storage(), offset);
       offset += chunks[i] * interval;
     }

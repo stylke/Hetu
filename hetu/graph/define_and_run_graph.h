@@ -174,6 +174,11 @@ class DefineAndRunGraph : public Graph {
   size_t _active_exec_plan;
   bool _is_active = false;
 
+  // 如果判断不需要进行grad的热切换
+  // 此值为true时仍会进行grad热切换的topo计算
+  // 为false时则什么都不做
+  bool _need_grad_switch_topo = false;
+
  public: 
   /* deprecated: utils for parallel plan changing test case */
   /*

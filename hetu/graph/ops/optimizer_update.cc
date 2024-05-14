@@ -64,12 +64,16 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
   NDArray& variance = const_cast<NDArray&>(inputs.at(3));
   NDArray& step = const_cast<NDArray&>(inputs.at(4));
   if (!_multi_zero.at(op->graph().CUR_STRATEGY_ID)) {
+    // auto new_grad = NDArray::to(grad, param->device(), param->dtype(), op->instantiation_ctx().stream().stream_index());
+    // param = NDArray::sub(param, new_grad, op->instantiation_ctx().stream().stream_index());
+    // return;
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
                                     type(), hetu::impl::Adam, grad, param,
                                     mean, variance, step, learning_rate(), 
                                     beta1(), beta2(), eps(), weight_decay(), 
                                     op->instantiation_ctx().stream());
   } else {
+    HT_RUNTIME_ERROR << "Not supported yet";
     // param is dup, should split as reduce-scatter
     // partial_grad -> reduce-scatter -> scatter_grad, use partial_grad distributed states to deduce scatter info (offset, index, comm_group...)
     HT_ASSERT(is_reduce_scatter_op(op->input(1)->producer()))

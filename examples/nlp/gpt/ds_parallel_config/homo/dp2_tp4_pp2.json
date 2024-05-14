@@ -21,11 +21,11 @@
     "input": {
         "split": {
             "0": [
-                4
+                2
             ]
         },
         "dup": [
-            2
+            4
         ],
         "device_group_union": [
             [
@@ -45,11 +45,11 @@
         "wte": {
             "split": {
                 "0": [
-                    2
+                    4
                 ]
             },
             "dup": [
-                4
+                2
             ],
             "device_group_union": [
                 [
@@ -113,11 +113,11 @@
                     "qkv": {
                         "split": {
                             "1": [
-                                2
+                                4
                             ]
                         },
                         "dup": [
-                            4
+                            2
                         ],
                         "device_group_union": [
                             [
@@ -136,11 +136,11 @@
                     "dense": {
                         "split": {
                             "0": [
-                                2
+                                4
                             ]
                         },
                         "dup": [
-                            4
+                            2
                         ],
                         "device_group_union": [
                             [
@@ -180,11 +180,11 @@
                     "dense_h_to_4h": {
                         "split": {
                             "1": [
-                                2
+                                4
                             ]
                         },
                         "dup": [
-                            4
+                            2
                         ],
                         "device_group_union": [
                             [
@@ -203,11 +203,11 @@
                     "dense_4h_to_h": {
                         "split": {
                             "0": [
-                                2
+                                4
                             ]
                         },
                         "dup": [
-                            4
+                            2
                         ],
                         "device_group_union": [
                             [
@@ -253,11 +253,11 @@
                     "qkv": {
                         "split": {
                             "1": [
-                                2
+                                4
                             ]
                         },
                         "dup": [
-                            4
+                            2
                         ],
                         "device_group_union": [
                             [
@@ -276,11 +276,11 @@
                     "dense": {
                         "split": {
                             "0": [
-                                2
+                                4
                             ]
                         },
                         "dup": [
-                            4
+                            2
                         ],
                         "device_group_union": [
                             [
@@ -320,11 +320,11 @@
                     "dense_h_to_4h": {
                         "split": {
                             "1": [
-                                2
+                                4
                             ]
                         },
                         "dup": [
-                            4
+                            2
                         ],
                         "device_group_union": [
                             [
@@ -343,11 +343,11 @@
                     "dense_4h_to_h": {
                         "split": {
                             "0": [
-                                2
+                                4
                             ]
                         },
                         "dup": [
-                            4
+                            2
                         ],
                         "device_group_union": [
                             [
@@ -389,11 +389,11 @@
     "lm_head": {
         "split": {
             "1": [
-                2
+                4
             ]
         },
         "dup": [
-            4
+            2
         ],
         "device_group_union": [
             [
@@ -412,11 +412,11 @@
     "label": {
         "split": {
             "0": [
-                4
+                2
             ]
         },
         "dup": [
-            2
+            4
         ],
         "device_group_union": [
             [

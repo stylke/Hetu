@@ -261,7 +261,8 @@ def pretrain(args):
         for unused_rank in unused_rank_list:
             if rank_to_device_mapping[unused_rank] == all_devices.get_index(local_device):
                 pass
-                # TODO:不运行
+                # TODO: 不运行
+                # 目前是进入到exec graph阶段发现不在pipeline中才不运行的
         
         # heterogenous pipeline 
         if args.hetero_data:
@@ -357,7 +358,7 @@ def pretrain(args):
             except RuntimeError as e:
                 print(e)
                 os.killpg(0, signal.SIGTERM)
-            if (args.run_straggler_experiment and step == 5) or (args.run_memory_experiment and step == 0):
+            if (args.switch and step == 0) or (args.run_straggler_experiment and step == 5) or (args.run_memory_experiment and step == 0):
                 if 'HETU_MEMORY_LOG_FILE' in os.environ:
                     del os.environ['HETU_MEMORY_LOG_FILE'] 
                 if 'HETU_STRAGGLER_LOG_FILE' in os.environ:
@@ -405,9 +406,34 @@ def pretrain(args):
                                         strategy_id = strategy_id, 
                                         run_level = ht.run_level("update"))
             print(f"epoch {epoch} finished, consumed_samples = {consumed_samples}")
+            
+    # 热切换
+    def test_switch(): 
+        consumed_samples = 0 # should be reset when run next epoch
+        args.hetero_data = True
+        consumed_samples = run_plan(epoch = 0,
+                                    steps = args.steps,
+                                    consumed_samples = consumed_samples, 
+                                    global_batch_size = args.global_batch_size, 
+                                    micro_batch_size = args.micro_batch_size, 
+                                    seq_len = args.seq_length, 
+                                    strategy_id = 1, 
+                                    run_level = ht.run_level("update"))
+        args.hetero_data = False
+        consumed_samples = run_plan(epoch = 0,
+                                    steps = args.steps,
+                                    consumed_samples = consumed_samples, 
+                                    global_batch_size = args.global_batch_size, 
+                                    micro_batch_size = args.micro_batch_size, 
+                                    seq_len = args.seq_length, 
+                                    strategy_id = 0, 
+                                    run_level = ht.run_level("update"))
     
-    test_single_round()
-    # test_multi_round()
+    if args.switch:
+        test_switch()
+    else:
+        test_single_round()
+        # test_multi_round()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -437,6 +463,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
+    )
+    parser.add_argument(
+        "--switch", type=int, default=0, help='switch.'
     )
     parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'

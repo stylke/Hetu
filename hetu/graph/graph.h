@@ -58,6 +58,7 @@ class Graph {
   bool CREATE_HETERO = false;
   bool USE_HETERO_ID = false;
   size_t CUR_HETERO_ID = 0;
+  size_t SUGGESTED_HETERO_ID = 0;
 
   // disable copy constructor and move constructor
   Graph(const Graph&) = delete;
@@ -483,14 +484,16 @@ class Graph {
   }
 
   static void 
-  ReplaceInput(Operator& op, size_t input_index, Tensor& new_input) {
+  ReplaceInput(Operator& op, size_t input_index, Tensor& new_input, bool ignore_shape=false) {
     auto& old_input = op->_inputs[input_index];
     // stride may not be equal
     // since we need to replace the uncontiguous tensor
-    HT_ASSERT(old_input->shape() == new_input->shape())
-      << "ReplaceInput can only used when the new tensor shape is equal to the old one"
-      << ", but the new tensor " << new_input << " shape is " << new_input->shape()
-      << " and the old tensor " << old_input << " shape is " << old_input->shape();
+    if (!ignore_shape) {
+      HT_ASSERT(old_input->shape() == new_input->shape())
+        << "ReplaceInput can only used when the new tensor shape is equal to the old one"
+        << ", but the new tensor " << new_input << " shape is " << new_input->shape()
+        << " and the old tensor " << old_input << " shape is " << old_input->shape();
+    }
     if (old_input->symbolic()) {
       new_input->copy_symbolic_shape(old_input->symbolic_shape());
     }

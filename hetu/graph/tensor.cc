@@ -167,8 +167,10 @@ DistributedStates& TensorDef::inferred_cur_ds() {
   // 1、define graph
   // 比如在InferMeta
   // 但实际上我们并不关心define graph里的ds、dg、shape等
-  // 因此默认使用第一个
+  // 因此默认使用第0个
   if (graph().type() == GraphType::DEFINE_AND_RUN) {
+    HT_ASSERT(graph().SUGGESTED_HETERO_ID == 0)
+      << "Shouldn't change the SUGGESTED_HETERO_ID of the define graph";
     return ds_union.get(0);
   }
   // 2、exec graph
@@ -188,9 +190,9 @@ DistributedStates& TensorDef::inferred_cur_ds() {
       if (_placement_group_union.has(inferred)) {
         return ds_union.get(_placement_group_union.get_index(inferred));
       }
-      // 这里我们返回一个default ds
+      // 这里我们返回default ds
       else {
-        return ds_union.get(0);
+        return ds_union.is_hetero() ? ds_union.get(graph().SUGGESTED_HETERO_ID) : ds_union.get(0);
       }
     }
   }

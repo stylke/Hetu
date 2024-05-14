@@ -181,10 +181,12 @@ class ParallelVariableOpImpl : public OpInterface {
  protected:
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
-    auto cur_ds_union = _ds_hierarchy.get(Graph::GetGraph(Graph::cur_graph_ctx()).CUR_STRATEGY_ID);
-    Graph::GetGraph(Graph::cur_graph_ctx()).USE_HETERO_ID = true;
-    auto cur_ds = cur_ds_union.get(Graph::GetGraph(Graph::cur_graph_ctx()).CUR_HETERO_ID);
-    Graph::GetGraph(Graph::cur_graph_ctx()).USE_HETERO_ID = false;
+    const auto& cur_ds_union = _ds_hierarchy.get(Graph::GetGraph(Graph::cur_graph_ctx()).CUR_STRATEGY_ID);
+    // workaround 
+    // 这里不得不使用CUR_HETERO_ID（就算外部没有进行USE_HETERO_ID）
+    // 在define graph中，该值一定是0
+    // 在exec graph中，该值会在MakeOpInner时被合理地设置
+    const auto& cur_ds = cur_ds_union.is_hetero() ? cur_ds_union.get(Graph::GetGraph(Graph::cur_graph_ctx()).CUR_HETERO_ID) : cur_ds_union.get(0);
     HT_ASSERT(!_global_shape.empty())
       << "global shape should be initialized";
     HTShape cur_local_shape(_global_shape.size());

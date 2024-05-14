@@ -684,7 +684,8 @@ class OpDef : public shared_ptr_target {
     return _inst_ctx.placement_group_union;
   }
 
-  const DeviceGroup placement_group() const   {
+  const DeviceGroup placement_group() const {
+    HT_LOG_WARN << "It's better to use placement_group_union instead of placement_group";
     return _inst_ctx.placement_group_union.all();
   }
 
@@ -992,6 +993,9 @@ DECLARE_OP_INDICATOR_CHECKER(all_to_all, ALL_TO_ALL_OP)
 DECLARE_OP_INDICATOR_CHECKER(all_reduce, ALL_REDUCE_OP)
 DECLARE_OP_INDICATOR_CHECKER(all_gather, ALL_GATHER_OP)
 DECLARE_OP_INDICATOR_CHECKER(reduce_scatter, REDUCE_SCATTER_OP)
+DECLARE_OP_INDICATOR_CHECKER(split_all_reduce, SPLIT_ALL_REDUCE_OP)
+DECLARE_OP_INDICATOR_CHECKER(split_all_gather, SPLIT_ALL_GATHER_OP)
+DECLARE_OP_INDICATOR_CHECKER(split_reduce_scatter, SPLIT_REDUCE_SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(broadcast, BROADCAST_OP)
 DECLARE_OP_INDICATOR_CHECKER(reduce, REDUCE_OP)
 DECLARE_OP_INDICATOR_CHECKER(p2p, P2P_OP)

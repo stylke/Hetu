@@ -491,7 +491,7 @@ class SwitchExecGraph {
 
     void SwitchParam(const DistributedStatesUnion& src_ds_union, const DeviceGroupUnion& src_group_union,
                      const DistributedStatesUnion& dst_ds_union, const DeviceGroupUnion& dst_group_union,
-                     const Tensor& comm_input, const Tensor& after_param);
+                     const Tensor& comm_input, const Tensor& after_param, const HTShape& global_shape);
 
     void ProfileRunningDetails();
 

@@ -96,8 +96,11 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
         _comm_type = P2P_OP; 
         HT_LOG_DEBUG << "P2P_OP";
       } else {
+        /*
+        // hetero pp can't guanrantee that
         HT_ASSERT(info.src_group_union.check_equal(info.dst_group_union))
           << "Something wrong in deducing ds union or dg union";
+        */
         _comm_type = UNUSED_OP; 
         HT_LOG_DEBUG << "UNUSED_OP";
       }
@@ -202,8 +205,8 @@ DeviceGroup CommOpImpl::get_devices_by_dim(Operator& op, int32_t dim) const {
 
 // get split num and comm groups for local device
 // *currently only support split on a single dim
-std::tuple<size_t, DeviceGroupList> CommOpImpl::get_split_comm_groups(Operator& op, const DeviceGroupUnion& dg_union,
-                                                                      const DistributedStatesUnion& ds_union) const {
+std::tuple<size_t, std::vector<DeviceGroupList>> CommOpImpl::get_split_comm_groups_list(Operator& op, const DeviceGroupUnion& dg_union,
+                                                                                        const DistributedStatesUnion& ds_union) const {
   const auto& placement = op->placement();
   HT_ASSERT(!placement.is_undetermined())
     << "Please ensure you have instantiated the comm op";
@@ -254,7 +257,7 @@ std::tuple<size_t, DeviceGroupList> CommOpImpl::get_split_comm_groups(Operator& 
     split_dim = 0;
   }
 
-  DeviceGroupList comm_groups;
+  std::vector<DeviceGroupList> comm_groups_list;
   // 在每个策略中，每个tensor在第split_dim维被切分为若干份block，首先确定placement对应的block位置，即block_idx
   int32_t local_device_idx = local_dg.get_index(placement);
   auto state_index = local_ds.map_device_to_state_index(local_device_idx);
@@ -278,7 +281,7 @@ std::tuple<size_t, DeviceGroupList> CommOpImpl::get_split_comm_groups(Operator& 
   size_t micro_block_start_idx = block_idx * micro_block_num;
   for (size_t i = 0; i < micro_block_num; i++) {
     size_t micro_block_idx = micro_block_start_idx + i;
-    std::vector<Device> comm_group;
+    std::vector<std::vector<Device>> device_lists;
     // 在每个ds中找到micro_block_idx对应的device并组建通信组
     for (size_t j = 0; j < union_size; j++) {
       const auto& cur_ds = ds_list[j];
@@ -288,42 +291,64 @@ std::tuple<size_t, DeviceGroupList> CommOpImpl::get_split_comm_groups(Operator& 
       size_t cur_dup_size = cur_ds.get_dim(-1);
       // workaround
       // 当有多个dup时，采用round robin进行reduce
-      size_t cur_dup_idx = 0;
-      if (cur_dup_size >= dup_size) {
-        cur_dup_idx = dup_idx;
-      } else {
-        HT_ASSERT(dup_size % cur_dup_size == 0)
-          << "dup should be 2 or 4 or 8...";
-        cur_dup_idx = dup_idx % cur_dup_size;
-      }
+      // *后续更换算法时一定要注意这里需要保证所有dup都参与了
+      // 且不同device的视角下要能对齐comm group的方案
+      // 例如一个dup=2和一个dup=1，dup=2的都要分别和dup=1的进行reduce
+      // 所以在dup1的视角下，同一个micro_block要有两个comm group并做两次reduce
+      std::vector<Device> cur_device_list;
       // 找到cur dup idx下cur block idx对应的device
-      size_t cur_device_idx = 0;
-      while (cur_device_idx < dg_list[j].num_devices()) {
-        auto cur_state_index = cur_ds.map_device_to_state_index(cur_device_idx);
-        size_t tmp_dup_idx = 0;
-        if (cur_dup_size > 1) {
-          tmp_dup_idx = cur_state_index.at(-1);
-        }
-        if (tmp_dup_idx == cur_dup_idx) {
-          size_t tmp_block_idx = 0;
-          if (cur_state_index.find(split_dim) != cur_state_index.end()) {
-            tmp_block_idx = cur_state_index[split_dim];
+      // 一共dup份
+      for (size_t cur_dup_idx = 0; cur_dup_idx < cur_dup_size; cur_dup_idx++) {
+        size_t cur_device_idx = 0;
+        while (cur_device_idx < dg_list[j].num_devices()) {
+          auto cur_state_index = cur_ds.map_device_to_state_index(cur_device_idx);
+          size_t tmp_dup_idx = 0;
+          if (cur_dup_size > 1) {
+            tmp_dup_idx = cur_state_index.at(-1);
           }
-          if (tmp_block_idx == cur_block_idx) {
-            break;
+          if (tmp_dup_idx == cur_dup_idx) {
+            size_t tmp_block_idx = 0;
+            if (cur_state_index.find(split_dim) != cur_state_index.end()) {
+              tmp_block_idx = cur_state_index[split_dim];
+            }
+            if (tmp_block_idx == cur_block_idx) {
+              break;
+            }
           }
+          cur_device_idx++;
         }
-        cur_device_idx++;
+        HT_ASSERT(cur_device_idx != dg_list[j].num_devices())
+          << "Can't find the device that owns the micro block " << micro_block_idx
+          << " in the device group " << dg_list[j];
+        cur_device_list.emplace_back(dg_list[j].get(cur_device_idx));
       }
-      HT_ASSERT(cur_device_idx != dg_list[j].num_devices())
-        << "Can't find the device that owns the micro block " << micro_block_idx
-        << " in the device group " << dg_list[j];
-      comm_group.emplace_back(dg_list[j].get(cur_device_idx));
+      device_lists.emplace_back(std::move(cur_device_list));
     }
-    comm_groups.emplace_back(DeviceGroup(comm_group));
+    // 找到device list里面device数目最多的那个
+    // 例如如果device list分别数目是2、1、4
+    // 那么目前一共四个comm group
+    // 1-1-1、2-1-2、1-1-3、2-1-4
+    size_t max_device_num = 0;
+    for (auto& device_list : device_lists) {
+      max_device_num = std::max(max_device_num, device_list.size());
+    }
+    DeviceGroupList comm_groups;
+    for (size_t j = 0; j < max_device_num; j++) {
+      std::vector<Device> comm_devices;
+      for (auto& device_list : device_lists) {
+        auto device_idx = j % device_list.size();
+        comm_devices.emplace_back(device_list.at(device_idx));
+      }
+      DeviceGroup comm_group{comm_devices};
+      // 删掉local device不在里头的
+      if (comm_group.contains(placement)) {
+        comm_groups.emplace_back(std::move(comm_group));
+      }
+    }
+    comm_groups_list.emplace_back(std::move(comm_groups));
   }
-  HT_LOG_DEBUG << "get comm groups = " << comm_groups << ", split_num = " << micro_block_num;
-  return {micro_block_num, comm_groups};
+  HT_LOG_DEBUG << "get comm groups list = " << comm_groups_list << ", split_num = " << micro_block_num;
+  return {micro_block_num, comm_groups_list};
 }
 
 void CommOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
@@ -418,6 +443,10 @@ CommOpImpl::DoInferMeta(const TensorList& inputs) const {
   const Tensor& input = inputs.at(0);
   const HTShape& input_shape = input->shape();
   const DistributedStates& src_ds = input->get_distributed_states();
+  // workaround 
+  // 这里不得不使用CUR_HETERO_ID（就算外部没有进行USE_HETERO_ID）
+  // 在define graph中，该值一定是0
+  // 在exec graph中，该值会在Instantiate中MakeOp前被合理地设置
   input->producer()->graph().USE_HETERO_ID = true;
   const DistributedStates& dst_ds = get_dst_distributed_states(input->producer());
   input->producer()->graph().USE_HETERO_ID = false;
@@ -853,9 +882,11 @@ bool SplitAllReduceOpImpl::DoMapToParallelDevices(Operator& op,
 bool SplitAllReduceOpImpl::DoInstantiate(Operator& op, const Device& placement,
                                          StreamIndex stream_index) const {
   bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
-  for (const auto& comm_group : _comm_groups) {
-    auto ranks = DeviceGroupToWorldRanks(comm_group);
-    NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  for (const auto& comm_groups : _comm_groups_list) {
+    for (const auto& comm_group : comm_groups) {
+      auto ranks = DeviceGroupToWorldRanks(comm_group);
+      NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+    }
   }
   return ret;
 }
@@ -874,15 +905,27 @@ HTShapeList SplitAllReduceOpImpl::DoInferShape(Operator& op,
 NDArrayList SplitAllReduceOpImpl::DoCompute(Operator& op,
                                             const NDArrayList& inputs,
                                             RuntimeContext& ctx) const {
-  NDArrayList outputs = inputs; // just inplace here
+  // NDArrayList outputs = inputs; // just inplace here
+  NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
   NDArrayList split_inputs = NDArray::split(inputs.at(0), split_num());
   NDArrayList split_outputs = NDArray::split(outputs.at(0), split_num());
-  for (auto i = 0; i < _comm_groups.size(); i++) {
-    const auto& comm_group = _comm_groups[i];
-    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-                                    hetu::impl::AllReduce, split_inputs.at(i),
-                                    split_outputs.at(i), reduction_type(), comm_group,
-                                    op->instantiation_ctx().stream());
+  for (size_t i = 0; i < _comm_groups_list.size(); i++) {
+    const auto& comm_groups = _comm_groups_list[i];
+    // HT_LOG_INFO << op << " " << i << "-th comm groups is: " << comm_groups;
+    /*
+    if (comm_groups.size() > 1) {
+      split_outputs.at(i) = NDArray::empty(split_outputs.at(i)->shape(),
+                                           op->instantiation_ctx().placement,
+                                           op->output(i)->dtype(),
+                                           op->instantiation_ctx().stream_index);
+    }
+    */
+    for (const auto& comm_group : comm_groups) {
+      HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
+                                      hetu::impl::AllReduce, split_inputs.at(i),
+                                      split_outputs.at(i), reduction_type(), comm_group,
+                                      op->instantiation_ctx().stream());
+    }
   }
   return outputs;
 }
@@ -1020,14 +1063,14 @@ Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group,
                       {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeSplitAllReduceOp(Tensor input, DeviceGroupList comm_groups, size_t split_num, bool inplace, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<SplitAllReduceOpImpl>(std::move(comm_groups), split_num, kSUM, inplace), 
+Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num, bool inplace, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<SplitAllReduceOpImpl>(std::move(comm_groups_list), split_num, kSUM, inplace), 
                       {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeSplitAllReduceOp(Tensor input, DeviceGroupList comm_groups, size_t split_num,
+Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num,
                             ReductionType red_type, bool inplace, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<SplitAllReduceOpImpl>(std::move(comm_groups), split_num, red_type, inplace), 
+  return Graph::MakeOp(std::make_shared<SplitAllReduceOpImpl>(std::move(comm_groups_list), split_num, red_type, inplace), 
                       {input}, std::move(op_meta))->output(0);
 }
 

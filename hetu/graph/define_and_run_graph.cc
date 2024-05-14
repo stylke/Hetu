@@ -228,6 +228,12 @@ void DefineAndRunGraph::DeducePipeline(size_t cur_strategy_id, int32_t pipeline_
     auto pipeline_idx = kv.second;
     _multi_pipeline_maps[CUR_STRATEGY_ID][device] = pipelines[pipeline_idx];
   }
+  // workaround
+  // 获取当前device推荐的hetero id
+  auto it = device_to_pipeline_idx_map.find(hetu::impl::comm::GetLocalDevice());
+  if (it != device_to_pipeline_idx_map.end()) {
+    SUGGESTED_HETERO_ID = it->second;
+  }
   CUR_STRATEGY_ID = old_strategy_id;
 }
 
@@ -494,6 +500,8 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     DeducePipeline(CUR_STRATEGY_ID, pipeline_num);
   }
   exec_graph->SetPipeline(_multi_pipeline_maps[CUR_STRATEGY_ID]);
+  exec_graph->SUGGESTED_HETERO_ID = SUGGESTED_HETERO_ID;
+  SUGGESTED_HETERO_ID = 0;
 
   auto get_exec_input = [&](const Tensor& input) -> Tensor {
     auto it = tensor_to_exec_tensor_mapping.find(input->id());
@@ -636,14 +644,23 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       } else if (exec_inputs.at(0)->producer()->placement_group_union().has(local_device)) {
         exec_graph->CUR_HETERO_ID = exec_inputs.at(0)->producer()->placement_group_union().get_index(local_device);
       } else {
-        exec_graph->CUR_HETERO_ID = 0;
+        exec_graph->CUR_HETERO_ID = exec_graph->SUGGESTED_HETERO_ID;
       }
     }
+    // Debug use
+    /*
+    std::vector<HTShape> exec_input_shapes;
+    for (const auto& exec_input : exec_inputs) {
+      exec_input_shapes.emplace_back(exec_input->shape());
+    }
+    HT_LOG_WARN << local_device << ": make exec op for " << op
+      << ", exec inputs are " << exec_inputs
+      << ", exec input shapes are " << exec_input_shapes;
+    */
     auto& exec_op = Graph::MakeOp(
       op->_body, std::move(exec_inputs),
       OpMeta().set(op->op_meta()).set_is_deduce_states(false).set_extra_deps(std::move(exec_in_deps)),
       *exec_graph);
-    // HT_LOG_WARN << local_device << ": make exec op for " << op;
     if (is_comm_op(op)) {
       /*
       HT_LOG_WARN << exec_op << " output shape is " << exec_op->output(0)->shape()
@@ -973,7 +990,9 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 如果要改成非async的
       // 更改环境变量HETU_SWITCH_PROFILE低于TIME即可
       _param_switcher_pool[key]->SwitchParams(param_switch_mode, param_switch_level);
-      _grad_switcher_pool[key]->SwitchParams(grad_switch_mode, grad_switch_level);
+      if (!(grad_switch_level == SWITCH_LEVEL::TOPO && !_need_grad_switch_topo)) {
+        _grad_switcher_pool[key]->SwitchParams(grad_switch_mode, grad_switch_level);
+      }
     }
     _is_active = true;
     _active_exec_plan = next_active_exec_plan;

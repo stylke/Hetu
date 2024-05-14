@@ -135,16 +135,17 @@ class CommOpImpl final: public OpInterface {
       << "CommOp get dst ds error!";
     if (graph.USE_HETERO_ID) {
       if (_dst_ds_hierarchy.size() == 1) { // for comm op created in exec_graph, without multi ds
-        return _dst_ds_hierarchy.get(0).get(graph.CUR_HETERO_ID);
+        return _dst_ds_hierarchy.get(0).is_hetero() ? _dst_ds_hierarchy.get(0).get(graph.CUR_HETERO_ID) : _dst_ds_hierarchy.get(0).get(0);
       } else { // for comm op created in define_and_run_graph, with multi ds
         // HT_LOG_WARN << "get " << graph.CUR_HETERO_ID << " from " << _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID).ds_union_info();
-        return _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID).get(graph.CUR_HETERO_ID);
+        const auto& ds_union = _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID);
+        return ds_union.is_hetero() ? ds_union.get(graph.CUR_HETERO_ID) : ds_union.get(0);
       }
     } else {
       // inferred_local_placement_group_idx sucks!
       auto idx = op->inferred_local_placement_group_idx();
       if (_dst_ds_hierarchy.size() == 1) { // for comm op created in exec_graph, without multi ds
-        return _dst_ds_hierarchy.get(0).get(idx);
+        return _dst_ds_hierarchy.get(0).is_hetero() ? _dst_ds_hierarchy.get(0).get(idx) : _dst_ds_hierarchy.get(0).get(0);
       } else { // for comm op created in define_and_run_graph, with multi ds
         return _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID).get(idx);
       }
@@ -186,8 +187,8 @@ class CommOpImpl final: public OpInterface {
 
   DeviceGroup get_devices_by_dim(Operator& op, int32_t dim) const; 
 
-  std::tuple<size_t, DeviceGroupList> get_split_comm_groups(Operator& op, const DeviceGroupUnion& dg_union,
-                                                            const DistributedStatesUnion& ds_union) const;
+  std::tuple<size_t, std::vector<DeviceGroupList>> get_split_comm_groups_list(Operator& op, const DeviceGroupUnion& dg_union,
+                                                                              const DistributedStatesUnion& ds_union) const;
 
  protected:
   uint64_t _comm_type{UNKNOWN_OP};
@@ -620,11 +621,13 @@ Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, ReductionType r
 
 class SplitAllReduceOpImpl final : public OpInterface {
  public:
-  SplitAllReduceOpImpl(DeviceGroupList comm_groups, size_t split_num, ReductionType red_type = kSUM, bool inplace = false)
-  : OpInterface(quote(SplitAllReduceOp)), _comm_groups(comm_groups), _split_num(split_num), _red_type(red_type), _inplace(inplace) {
-    for (auto& _comm_group : _comm_groups) {
-      HT_ASSERT(_comm_group.num_devices() >= 2)
-               << "SplitAllReduce requires two or more comm devices in each comm group. Got " << _comm_group;
+  SplitAllReduceOpImpl(std::vector<DeviceGroupList> comm_groups_list, size_t split_num, ReductionType red_type = kSUM, bool inplace = false)
+  : OpInterface(quote(SplitAllReduceOp)), _comm_groups_list(comm_groups_list), _split_num(split_num), _red_type(red_type), _inplace(inplace) {
+    for (auto& comm_groups : _comm_groups_list) {
+      for (auto& comm_group : comm_groups) {
+        HT_ASSERT(comm_group.num_devices() >= 2)
+          << "SplitAllReduce requires two or more comm devices in each comm group. Got " << _comm_groups_list;
+      }
     }
   }
 
@@ -667,20 +670,20 @@ class SplitAllReduceOpImpl final : public OpInterface {
   bool _inplace{false};
 
  public:
-  const DeviceGroupList& comm_groups() const {
-    return _comm_groups;
+  const std::vector<DeviceGroupList>& comm_groups_list() const {
+    return _comm_groups_list;
   }
 
  protected:
-  DeviceGroupList _comm_groups;
+  std::vector<DeviceGroupList> _comm_groups_list;
   size_t _split_num;
   ReductionType _red_type{kNONE};
 };
 
-Tensor MakeSplitAllReduceOp(Tensor input, DeviceGroupList comm_groups, size_t split_num,
+Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num,
                             bool inplace = false, OpMeta op_meta = OpMeta());
 
-Tensor MakeSplitAllReduceOp(Tensor input, DeviceGroupList comm_groups, size_t split_num, ReductionType red_type, 
+Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num, ReductionType red_type, 
                             bool inplace = false, OpMeta op_meta = OpMeta());
 
 

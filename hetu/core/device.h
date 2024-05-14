@@ -209,6 +209,10 @@ class DeviceGroup {
     // std::sort(_devices.begin(), _devices.end());
     for (const auto& device : devices) {
       if (device.is_undetermined()) {
+        HT_LOG_WARN << "Currently shouldn't use dummy DeviceGroup"
+          << ", please use local ds or local dg"
+          << ", rather than create a dummy one"
+          << ", because it is dangerous";
         _dummy = true;
       }
     }

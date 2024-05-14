@@ -52,7 +52,7 @@ static bool is_fused_pipeline_stage_send_op(const Operator& op) {
   auto cur_op = op;
   while (true) {
     if (is_slice_op(cur_op)) {
-      cur_op = op->output(0)->consumer(0);
+      cur_op = cur_op->output(0)->consumer(0);
       continue;
     }
     if (is_batched_isend_irecv_op(cur_op)) {
@@ -76,7 +76,7 @@ static Operator get_next_pipeline_stage_send_op(const Operator& op) {
   auto cur_op = op;
   while (true) {
     if (is_slice_op(cur_op)) {
-      cur_op = op->output(0)->consumer(0);
+      cur_op = cur_op->output(0)->consumer(0);
       continue;
     }
     if (is_batched_isend_irecv_op(cur_op)) {
@@ -116,7 +116,7 @@ static bool is_fused_pipeline_stage_recv_op(const Operator& op) {
   auto cur_op = op;
   while (true) {
     if (is_concat_op(cur_op)) {
-      cur_op = op->input(0)->producer();
+      cur_op = cur_op->input(0)->producer();
       continue;
     }
     if (is_batched_isend_irecv_op(cur_op)) {
@@ -140,7 +140,7 @@ static Operator get_last_pipeline_stage_recv_op(const Operator& op) {
   auto cur_op = op;
   while (true) {
     if (is_concat_op(cur_op)) {
-      cur_op = op->input(0)->producer();
+      cur_op = cur_op->input(0)->producer();
       continue;
     }
     if (is_batched_isend_irecv_op(cur_op)) {
@@ -174,7 +174,7 @@ Operator& ExecutableGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
     if (device_group_union.has(inferred)) {
       CUR_HETERO_ID = device_group_union.get_index(inferred);
     } else {
-      CUR_HETERO_ID = 0;
+      CUR_HETERO_ID = SUGGESTED_HETERO_ID;
     }
   }
   OpRef op_ref = MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
@@ -595,6 +595,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
       if (!input->symbolic()) {
         input->init_symbolic_shape();
       }
+      bool ignore_shape=false;
       Tensor result;
 
       switch (comm_type) {
@@ -746,6 +747,11 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           // use derived method from switch exec graph
           auto complex_exec_comm = ComplexExecComm(comm_op, info);
           result = complex_exec_comm.Instantiate();
+          // only send
+          // need to ignore the shape when replacing the input 
+          if (result.get() == input.get()) {
+            ignore_shape = true;
+          }
           HT_LOG_DEBUG << local_device << ": substitute comm_op to batched_isend_irecv_op";
           break;
         }
@@ -753,10 +759,10 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           HT_ASSERT(info.src_group_union.check_equal(info.dst_group_union))
             << "wrong src and dst group relationship!";
           size_t split_num = 0;
-          DeviceGroupList comm_groups;
-          std::tie(split_num, comm_groups) = comm_op_impl.get_split_comm_groups(comm_op, info.src_group_union, info.src_ds_union);
+          std::vector<DeviceGroupList> comm_groups_list;
+          std::tie(split_num, comm_groups_list) = comm_op_impl.get_split_comm_groups_list(comm_op, info.src_group_union, info.src_ds_union);
           Tensor split_all_reduce_output = MakeSplitAllReduceOp(
-            input, comm_groups, split_num, 
+            input, comm_groups_list, split_num, 
             comm_op_impl.reduction_type(), false,
             OpMeta().set_is_deduce_states(false)
                     .set_name(input->name() + "_SplitAllReduce"));
@@ -765,7 +771,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           split_all_reduce_op->MapToParallelDevices(info.src_group_union);
           split_all_reduce_op->Instantiate(local_device, kCollectiveStream);
           result = split_all_reduce_output;
-          HT_LOG_DEBUG << local_device << ": substitute comm_op to split_all_reduce_op: " << comm_groups;         
+          HT_LOG_DEBUG << local_device << ": substitute comm_op to split_all_reduce_op: " << comm_groups_list;         
           break;
         }
         default: {
@@ -779,7 +785,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         auto& consumer_i = comm_op->output(0)->consumer(i);
         for (int j = 0; j < consumer_i->num_inputs(); j++) {
           if (consumer_i->input(j)->id() == comm_op->output(0)->id()) {
-            Graph::ReplaceInput(consumer_i, j, result);
+            Graph::ReplaceInput(consumer_i, j, result, ignore_shape);
           }
         }
       }
@@ -1067,6 +1073,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
       event->Record(Stream(op->placement(), kP2PStream));
       event->Block(Stream(op->placement(), kComputingStream));
+      event->Block(Stream(op->placement(), kOptimizerStream));
       _p2p_events.emplace_back(std::move(event));
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group end";
     }
@@ -1145,6 +1152,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         tensor2data[output->id()] = output_vals[i];
       }
     }
+  // op->instantiation_ctx().stream().Sync();
   // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op << " end...";
   }
 }
@@ -1487,6 +1495,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     OpDeque accumulated_ops_deque;
     for (auto& op_ref : local_bw_topo) {
       auto& op = op_ref.get();
+      // HT_LOG_INFO << "handling " << op;
       // update op placement group = variable op placement group
       // care about the placement group binding rules based on fw_op_id in autograd code (graph.cc)
       // grad_reduce = allreduce or reduce-scatter
@@ -1520,6 +1529,10 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           }
           // share weight with dp
           if (is_grad_reduce_op(grad_op) && is_sum_op(grad_op->input(0)->producer())) {
+            /*
+            HT_LOG_INFO << "share weight with dp, need to first sum "
+              << grad_op->input(0)->producer()->inputs() << " and then reduce";
+            */
             for (auto& sum_input : grad_op->input(0)->producer()->inputs()) {
               if (is_fused_pipeline_stage_recv_op(sum_input->producer())) {
                 accumulated_ops_deque.emplace_back(get_last_pipeline_stage_recv_op(sum_input->producer()));
@@ -1595,6 +1608,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         }
       }
     }
+    // HT_LOG_INFO << "try to get accumulated ops";
     OpIdSet accumulated_ops;
     while (!accumulated_ops_deque.empty()) {
       auto& op = accumulated_ops_deque.front();
@@ -1801,6 +1815,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
     event->Record(Stream(local_device, kP2PStream));
     event->Block(Stream(local_device, kComputingStream));
+    event->Block(Stream(local_device, kOptimizerStream));
     _p2p_events.emplace_back(std::move(event));
   }
   HT_LOG_DEBUG << local_device << ": 3. compute[end]";
