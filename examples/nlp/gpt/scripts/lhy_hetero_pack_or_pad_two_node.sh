@@ -5,7 +5,7 @@ SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
 
-SWITCH=1
+SWITCH=0
 
 # setting 1
 DP=4
@@ -45,8 +45,18 @@ LAYERS_NUM_LIST="2,30,20,12"
 MICRO_BATCH_NUM_LIST="[20,44]"
 UNUSED_RANK="[0,2,3,6,7,9,11]"
 RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
-RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
+# RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
 
+'''
+# setting 4
+DP=4
+TP=2
+PP=2
+SWITCH=0
+HETERO=false
+UNUSED_RANK="[]"
+RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
+'''
 
 ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
@@ -78,7 +88,8 @@ if [ "${HETERO}" = false ]; then
         --num_gpus 16 \
         --dp $DP \
         --tp $TP \
-        --pp $PP 
+        --pp $PP \
+        --zero
     mpirun --allow-run-as-root -np 16 \
         -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
         -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
@@ -117,13 +128,15 @@ else
         --num_gpus 16 \
         --dp $DP \
         --tp $TP \
-        --pp $PP 
+        --pp $PP \
+        --zero
     python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
         --num_layers $NUM_LAYERS \
         --num_gpus 16 \
         --dp $DP \
         --tp $TP \
         --pp $PP \
+        --zero \
         --hetero_layers $LAYERS_NUM_LIST \
         --rank_to_device_mapping $RANK_TO_DEVICE_MAPPING \
         --unused_rank $UNUSED_RANK

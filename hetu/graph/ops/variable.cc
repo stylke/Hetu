@@ -25,8 +25,9 @@ NDArrayList ParallelVariableOpImpl::DoAllocOutputs(Operator& op,
                                                    const NDArrayList& inputs,
                                                    RuntimeContext& runtime_ctx) const {
   auto ds_union = _ds_hierarchy.get(op->graph().CUR_STRATEGY_ID);
-  HT_ASSERT(ds_union.hetero_dim() == -1 || ds_union.hetero_dim() == NULL_HETERO_DIM)
-    << "ParallelVariableOp can only hetero on dup";
+  HT_ASSERT(ds_union.hetero_dim() == -1 || ds_union.hetero_dim() == 0 || ds_union.hetero_dim() == NULL_HETERO_DIM)
+    << "ParallelVariableOp " << op << " can only hetero on dup (normal dp param) or split0 (Adam mean or var)"
+    << ", but found " << ds_union.hetero_dim();
   auto ds = ds_union.get(op->inferred_local_placement_group_idx());
   auto local_idx = _local_idx.empty() ? -1 : _local_idx[op->graph().CUR_STRATEGY_ID];
   HT_ASSERT(_init == nullptr || local_idx != -1)

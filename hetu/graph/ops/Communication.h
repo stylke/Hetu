@@ -619,6 +619,65 @@ Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group,
 Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, ReductionType red_type, 
                            bool inplace = false, OpMeta op_meta = OpMeta());
 
+class SplitAllGatherOpImpl final : public OpInterface {
+ public:
+  SplitAllGatherOpImpl(std::vector<DeviceGroupList> comm_groups_list, size_t split_num, bool inplace = false)
+  : OpInterface(quote(SplitAllGatherOp)), _comm_groups_list(comm_groups_list), _split_num(split_num), _inplace(inplace) {
+    for (auto& comm_groups : _comm_groups_list) {
+      for (auto& comm_group : comm_groups) {
+        HT_ASSERT(comm_group.num_devices() >= 2)
+          << "SplitAllGather requires two or more comm devices in each comm group. Got " << _comm_groups_list;
+      }
+    }
+  }
+
+  inline uint64_t op_indicator() const noexcept override {
+    return _inplace ? SPLIT_ALL_GATHER_OP | INPLACE_OP : SPLIT_ALL_GATHER_OP;
+  }
+
+  inline size_t split_num() const {
+    return _split_num;
+  }
+
+  inline bool inplace() const {
+    return _inplace;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(Operator& op,
+                              const DeviceGroupUnion& pg_union) const override;
+
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;
+
+  std::vector<NDArrayMeta> 
+  DoInferMeta(const TensorList& inputs) const override;
+
+  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
+                           RuntimeContext& runtime_ctx) const override;
+
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) const {};
+  
+  bool _inplace{false};
+
+ public:
+  const std::vector<DeviceGroupList>& comm_groups_list() const {
+    return _comm_groups_list;
+  }
+
+ protected:
+  std::vector<DeviceGroupList> _comm_groups_list;
+  size_t _split_num;
+};
+
+Tensor MakeSplitAllGatherOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num,
+                            bool inplace = false, OpMeta op_meta = OpMeta());
+
 class SplitAllReduceOpImpl final : public OpInterface {
  public:
   SplitAllReduceOpImpl(std::vector<DeviceGroupList> comm_groups_list, size_t split_num, ReductionType red_type = kSUM, bool inplace = false)
@@ -685,6 +744,74 @@ Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_grou
 
 Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num, ReductionType red_type, 
                             bool inplace = false, OpMeta op_meta = OpMeta());
+
+class SplitReduceScatterOpImpl final : public OpInterface {
+ public:
+  SplitReduceScatterOpImpl(std::vector<DeviceGroupList> comm_groups_list, size_t split_num, ReductionType red_type = kSUM, bool inplace = false)
+  : OpInterface(quote(SplitAllReduceOp)), _comm_groups_list(comm_groups_list), _split_num(split_num), _red_type(red_type), _inplace(inplace) {
+    for (auto& comm_groups : _comm_groups_list) {
+      for (auto& comm_group : comm_groups) {
+        HT_ASSERT(comm_group.num_devices() >= 2)
+          << "SplitReduceScatter requires two or more comm devices in each comm group. Got " << _comm_groups_list;
+      }
+    }
+  }
+
+  inline uint64_t op_indicator() const noexcept override {
+    return _inplace ? SPLIT_REDUCE_SCATTER_OP | INPLACE_OP : SPLIT_REDUCE_SCATTER_OP;
+  }
+
+  inline size_t split_num() const {
+    return _split_num;
+  }
+
+  inline bool inplace() const {
+    return _inplace;
+  }
+
+  ReductionType reduction_type() const {
+    return _red_type;
+  }
+
+ protected:
+  bool DoMapToParallelDevices(Operator& op,
+                              const DeviceGroupUnion& pg_union) const override;
+
+  bool DoInstantiate(Operator& op, const Device& placement,
+                     StreamIndex stream_index) const override;
+
+  std::vector<NDArrayMeta> 
+  DoInferMeta(const TensorList& inputs) const override;
+
+  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
+                           RuntimeContext& runtime_ctx) const override;
+
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& ctx) const {};
+  
+  bool _inplace{false};
+
+ public:
+  const std::vector<DeviceGroupList>& comm_groups_list() const {
+    return _comm_groups_list;
+  }
+
+ protected:
+  std::vector<DeviceGroupList> _comm_groups_list;
+  size_t _split_num;
+  ReductionType _red_type{kNONE};
+};
+
+Tensor MakeSplitReduceScatterOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num,
+                                bool inplace = false, OpMeta op_meta = OpMeta());
+
+Tensor MakeSplitReduceScatterOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num, ReductionType red_type, 
+                                bool inplace = false, OpMeta op_meta = OpMeta());
+
 
 
 }

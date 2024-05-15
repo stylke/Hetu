@@ -162,7 +162,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       // should use last bw grad here, correspond to first use in fw, 
       // if the tensor was shared in different pp stages
       OpId fw_op_id = filtered.back()->producer()->fw_op_id();
-      // comm op的multi ds中只要有一组满足is_all_allreduce || is_all_reduce_scatter的条件, 
+      // comm op的multi ds中只要有一组满足reduce通信的条件, 
       // 就要走先sum再comm的路径
       auto& graph = filtered[0]->graph();
       DistributedStatesHierarchy dst_ds_hierarchy;
@@ -240,12 +240,14 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
     }
 
     if (op->num_inputs() > 0) {
+      TensorList grad_inputs;
       // workaround
       // 两个连续的comm op部分情况下需要进行等价变换
       // 要先做inter group的comm再做intra group的comm
       // 目前主要针对share weight grad
-      // 例如要先SplitAllReduce再BatchedIsendIrecv
+      // 例如要先BatchedIsendIrecv再SplitAllReduce/SplitReduceScatter
       // 更多情形目前还未遇到
+      bool skip_actual_gradient_op = false;
       if (is_comm_op(op)) {
         auto& comm_op_impl = dynamic_cast<CommOpImpl&>(op->body());
         HT_ASSERT(grad_outputs.size() == 1)
@@ -255,58 +257,94 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         if (comm_op_impl.dst_group_dierarchy().size() != 0 
             && is_comm_op(prev_grad_op) 
             && prev_grad_op->fw_op_id() == -1) {
+          skip_actual_gradient_op = true;
           // 修正prev op
           HT_ASSERT(prev_grad_op->num_inputs() == 1)
             << "Comm op inputs size should be 1";
+          HT_ASSERT(is_variable_op(op->input(0)->producer()))
+            << "This workaround is target for sharing weight like wte"
+            << ", we are not sure if it still works for other weird situations";
           /*
           HT_LOG_WARN << op->input(0)->cur_ds_union().ds_union_info()
             << " and " << prev_grad_op->input(0)->cur_ds_union().ds_union_info();
           */
           auto& graph = prev_grad_op->graph();
-          DistributedStatesHierarchy new_ds_hierarchy;
+          DistributedStatesHierarchy inter_ds_hierarchy, intra_ds_hierarchy;
           bool is_need_comm_op = false;
           for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
             graph.CUR_STRATEGY_ID = cur_strategy_id;
-            DistributedStatesUnion new_ds_union;
+            DistributedStatesUnion inter_ds_union, intra_ds_union;
             HT_ASSERT(op->input(0)->has_cur_ds_union())
               << "something wrong when initializing or deducing the ds for " << op->input(0);
             for (size_t cur_hetero_id = 0; cur_hetero_id < op->input(0)->cur_ds_union().size(); cur_hetero_id++) {
               auto& original_ds = op->input(0)->cur_ds_union().get(cur_hetero_id);
               HT_ASSERT(original_ds.is_valid())
                 << "something wrong when initializing or deducing the ds for " << op->input(0);
-              if (original_ds.get_dim(-1) > 1) { // duplicate->partial
+              // original_ds是wte的ds
+              // grad的partial与variable的dup是一致的
+              if (original_ds.get_dim(-1) > 1) { 
                 int32_t device_num = original_ds.get_device_num();
-                std::pair<std::vector<int32_t>, int32_t> src2dst({{-1}, -2});
+                std::pair<std::vector<int32_t>, int32_t> inter_src2dst({{-1}, -2});
+                std::pair<std::vector<int32_t>, int32_t> intra_src2dst({{-1}, 0});
                 if (op->input(0)->cur_ds_union().hetero_dim() == -1) {
-                  new_ds_union.set_hetero_dim(-2);
+                  inter_ds_union.set_hetero_dim(-2);
+                  intra_ds_union.set_hetero_dim(-1);
+                  if (original_ds.zero()) {
+                    intra_ds_union.set_hetero_dim(0);
+                  }
                 } else {
                   HT_ASSERT(op->input(0)->cur_ds_union().hetero_dim() == NULL_HETERO_DIM)
-                    << "only support hetero on -1";
+                    << "only support original comm op input hetero on -1";
                 }
-                std::unordered_map<int32_t, int32_t> new_states = original_ds.combine_states(src2dst);
-                std::vector<int32_t> new_order = original_ds.combine_order(src2dst);
+                std::unordered_map<int32_t, int32_t> new_states = original_ds.combine_states(inter_src2dst);
+                std::vector<int32_t> new_order = original_ds.combine_order(inter_src2dst);
                 DistributedStates new_ds({device_num, new_states, new_order});
-                new_ds_union.add(new_ds);
+                inter_ds_union.add(new_ds);
+                // SplitReduceScatter
+                if (original_ds.zero()) {
+                  new_states = original_ds.combine_states(intra_src2dst);
+                  new_order = original_ds.combine_order(intra_src2dst);
+                  new_ds = {device_num, new_states, new_order};
+                  intra_ds_union.add(new_ds);
+                } 
+                // SplitAllReduce
+                else {
+                  intra_ds_union.add(original_ds);
+                }
                 is_need_comm_op = true;
-              } else {
-                new_ds_union.add(original_ds);
+              } 
+              else {
+                inter_ds_union.add(original_ds);
+                intra_ds_union.add(original_ds);
               }
             }
-            new_ds_hierarchy.add(new_ds_union);
+            inter_ds_hierarchy.add(inter_ds_union);
+            intra_ds_hierarchy.add(intra_ds_union);
           }
           graph.CUR_STRATEGY_ID = 0;
           HT_ASSERT(is_need_comm_op)
             << "something wrong, if two comm op appears, that means there must have partial->dup";
-          grad_outputs.at(0) = MakeCommOp(prev_grad_op->input(0), new_ds_hierarchy, 
-            OpMeta().set_name("workaround_share_weight_pipeline_comm")); // inter group op
+          // 1、make inter comm op
+          // BacthedIsendIrecv/p2p
+          grad_outputs.at(0) = MakeCommOp(prev_grad_op->input(0), inter_ds_hierarchy, 
+            OpMeta().set_name("workaround_share_weight_grad_inter_comm")); // inter group op
           grad_outputs.at(0)->set_is_grad(true);
           grad_outputs.at(0)->producer()->set_fw_op_id(op->id());
+          // 2、make intra comm op
+          // SplitAllReduce/SplitReduceScatter
+          // 将partial再都转化为dup（SplitAllReduce）或者split0（SplitReduceScatter）
+          grad_outputs.at(0) = MakeCommOp(grad_outputs.at(0), intra_ds_hierarchy, 
+            OpMeta().set_name("workaround_share_weight_grad_intra_comm")); // intra group op
+          grad_inputs = {grad_outputs.at(0)};
         }
       }
 
       // 实际求导操作
       // 生成相应的gradient算子
-      auto grad_inputs = op->Gradient(grad_outputs);
+      // workaround: share weight grad
+      if (!skip_actual_gradient_op) {
+        grad_inputs = op->Gradient(grad_outputs);
+      } 
 
       // states deduce
       // 如出现partial需要自动将其转化为dup或split
@@ -336,6 +374,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
               int32_t device_num = ds_grad.get_device_num();
               // std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
               std::pair<std::vector<int32_t>, int32_t> src2dst;
+              // zero
               if (is_variable_op(op->input(i)->producer()) && op->input(i)->get_distributed_states().zero()) {
                 // attention: the result tensor was dp grouped split0, not really split0!
                 // so should do allgather still within the same dp group later! 
@@ -349,22 +388,18 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
                     << "hetero dim in the union should be consistent";
                   dst_ds_union.set_hetero_dim(0);
                 } 
-                // 2、tp reduce
-                else if (grad_inputs[i]->cur_ds_union().hetero_dim() == 0) {
-                  HT_ASSERT(dst_ds_union.hetero_dim() == 0 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM)
-                    << "hetero dim in the union should be consistent";
-                  dst_ds_union.set_hetero_dim(0);
-                }
                 // 暂时不会有其余情况
                 else {
                   HT_ASSERT(grad_inputs[i]->cur_ds_union().hetero_dim() == NULL_HETERO_DIM)
-                    << "only support grad hetero on -2 or 0"
+                    << "only support grad hetero on -2 for variables"
                     << ", but " << grad_inputs[i] << " cur ds union is " 
                     << grad_inputs[i]->cur_ds_union().ds_union_info();
                 }
                 HT_ASSERT(dst_ds_union.hetero_dim() == 0 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM)
                   << "hetero dim in the union should be consistent";
-              } else {
+              } 
+              // 非zero
+              else {
                 src2dst = {{-2}, -1}; // allreduce
                 // 1、sync the gradients for dp
                 if (grad_inputs[i]->cur_ds_union().hetero_dim() == -2) {
@@ -380,7 +415,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
                 }
                 else {
                   HT_ASSERT(grad_inputs[i]->cur_ds_union().hetero_dim() == NULL_HETERO_DIM)
-                    << "only support grad hetero on -2 or 0"
+                    << "only support grad hetero on -2 or 0 when zero is off"
                     << ", but " << grad_inputs[i] << " cur ds union is " 
                     << grad_inputs[i]->cur_ds_union().ds_union_info();
                 }

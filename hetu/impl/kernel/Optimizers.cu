@@ -137,7 +137,7 @@ void SGDUpdateWithGradScalerCuda(const NDArray& grad, const NDArray& infinite_co
 void AdamCuda(const NDArray& grad, NDArray& param, NDArray& mean,
               NDArray& variance, NDArray& step, 
               float lr, float beta1, float beta2,
-              float eps, float weight_decay,
+              float eps, float weight_decay, bool update_step,
               const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(grad);
   HT_ASSERT_CUDA_DEVICE(param);
@@ -173,7 +173,8 @@ void AdamCuda(const NDArray& grad, NDArray& param, NDArray& mean,
                                             };
                                         });
   });
-  step->data_ptr<int64_t>()[0] = (step->data_ptr<int64_t>()[0] + 1);
+  if (update_step)
+    step->data_ptr<int64_t>()[0] = (step->data_ptr<int64_t>()[0] + 1);
   NDArray::MarkUsedBy({grad, grad_, param, mean, variance, step}, stream);
 }
 

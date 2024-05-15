@@ -63,62 +63,119 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
   NDArray& mean = const_cast<NDArray&>(inputs.at(2));
   NDArray& variance = const_cast<NDArray&>(inputs.at(3));
   NDArray& step = const_cast<NDArray&>(inputs.at(4));
+  // 不开zero
   if (!_multi_zero.at(op->graph().CUR_STRATEGY_ID)) {
-    // auto new_grad = NDArray::to(grad, param->device(), param->dtype(), op->instantiation_ctx().stream().stream_index());
-    // param = NDArray::sub(param, new_grad, op->instantiation_ctx().stream().stream_index());
-    // return;
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
                                     type(), hetu::impl::Adam, grad, param,
                                     mean, variance, step, learning_rate(), 
-                                    beta1(), beta2(), eps(), weight_decay(), 
+                                    beta1(), beta2(), eps(), weight_decay(), true,
                                     op->instantiation_ctx().stream());
-  } else {
-    HT_RUNTIME_ERROR << "Not supported yet";
-    // param is dup, should split as reduce-scatter
-    // partial_grad -> reduce-scatter -> scatter_grad, use partial_grad distributed states to deduce scatter info (offset, index, comm_group...)
-    HT_ASSERT(is_reduce_scatter_op(op->input(1)->producer()))
-      << "Adam: zero input grad must be reduce-scatter result!"
-      << ", grad producer = " << op->input(1)->producer()
-      << ", grad = " << op->input(1)
-      << ", param = " << op->input(0)
-      << ", grad ds = " << op->input(1)->get_distributed_states().ds_info()
-      << ", param ds = " << op->input(0)->get_distributed_states().ds_info();
-    auto& reduce_scatter_op = op->input(1)->producer();
-    auto& reduce_scatter_impl = reinterpret_cast<ReduceScatterOpImpl&>(reduce_scatter_op->body());
-    auto& partial_grad = reduce_scatter_op->input(0);
-    DeviceGroup comm_group = reduce_scatter_impl.comm_group();
-    // HT_LOG_WARN << op << " comm group: " << comm_group;
-
-    auto local_device_index = op->local_placement_group().get_index(op->placement());
-    auto scatter_num = comm_group.num_devices();
-    HT_ASSERT(scatter_num == partial_grad->get_distributed_states().get_dim(-2))
-      << "Adam: comm_group num must equal to partial size!";
-    auto param_size = param->numel();
-    auto param_size_per_scatter = DIVUP(param_size, scatter_num); // todo: padding for reduce-scatter & all-gather
-    auto scatter_index = partial_grad->get_distributed_states().map_device_to_state_index(local_device_index)[-2];
-    auto param_start_index = param_size_per_scatter * scatter_index;
-    auto param_end_index = param_start_index + param_size_per_scatter;
-    HT_ASSERT(grad->numel() == param_size_per_scatter && param_end_index <= param_size) 
-      << "now need param size can be div by dp group size! "
-      << "got grad size = " << grad->numel() 
-      << " vs. param_size_per_scatter = " 
-      << param_size_per_scatter;
-
-    auto param_scatter = NDArray(
-      NDArrayMeta().set_shape(grad->shape())
-                   .set_dtype(param->dtype())
-                   .set_device(param->device()), 
-      param->storage(), param->storage_offset() + param_start_index);
-    // only update scatter part of param
-    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
-                                    type(), hetu::impl::Adam, grad, param_scatter,
-                                    mean, variance, step, learning_rate(), 
-                                    beta1(), beta2(), eps(), weight_decay(), 
-                                    op->instantiation_ctx().stream());
-    // in-place allgather
-    HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), 
-                                    hetu::impl::AllGather, param_scatter, param, 
-                                    comm_group, op->instantiation_ctx().stream());
+  } 
+  // 开zero
+  else {
+    // homo
+    if (is_reduce_scatter_op(op->input(1)->producer())) {
+      // param is dup, should split as reduce-scatter
+      // partial_grad -> reduce-scatter -> scatter_grad, use partial_grad distributed states to deduce scatter info (offset, index, comm_group...)
+      auto& reduce_scatter_op = op->input(1)->producer();
+      auto& reduce_scatter_impl = reinterpret_cast<ReduceScatterOpImpl&>(reduce_scatter_op->body());
+      auto& partial_grad = reduce_scatter_op->input(0);
+      DeviceGroup comm_group = reduce_scatter_impl.comm_group();
+      // HT_LOG_WARN << op << " comm group: " << comm_group;
+      auto local_device_index = op->local_placement_group().get_index(op->placement());
+      auto scatter_num = comm_group.num_devices();
+      HT_ASSERT(!partial_grad->cur_ds_union().is_hetero())
+        << "Adam: reduce scatter shouln't have hetero grad";
+      HT_ASSERT(scatter_num == partial_grad->get_local_distributed_states().get_dim(-2))
+        << "Adam: comm_group num must equal to partial size!";
+      auto param_size = param->numel();
+      auto param_size_per_scatter = DIVUP(param_size, scatter_num); // todo: padding for reduce-scatter & all-gather
+      auto scatter_index = partial_grad->get_local_distributed_states().map_device_to_state_index(local_device_index)[-2];
+      auto param_start_index = param_size_per_scatter * scatter_index;
+      auto param_end_index = param_start_index + param_size_per_scatter;
+      HT_ASSERT(grad->numel() == param_size_per_scatter && param_end_index <= param_size) 
+        << "now need param size can be div by dp group size! "
+        << "got grad size = " << grad->numel() 
+        << " vs. param_size_per_scatter = " 
+        << param_size_per_scatter;
+      auto param_scatter = NDArray(
+        NDArrayMeta().set_shape(grad->shape())
+                     .set_dtype(param->dtype())
+                     .set_device(param->device()), 
+        param->storage(), param->storage_offset() + param_start_index);
+      // only update scatter part of param
+      HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
+                                      type(), hetu::impl::Adam, grad, param_scatter,
+                                      mean, variance, step, learning_rate(), 
+                                      beta1(), beta2(), eps(), weight_decay(), true,
+                                      op->instantiation_ctx().stream());
+      // in-place allgather
+      HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), 
+                                      hetu::impl::AllGather, param_scatter, param, 
+                                      comm_group, op->instantiation_ctx().stream());
+    }
+    // hetero
+    else if (is_split_reduce_scatter_op(op->input(1)->producer())) {
+      auto& split_reduce_scatter_op = op->input(1)->producer();
+      auto& split_reduce_scatter_impl = reinterpret_cast<SplitReduceScatterOpImpl&>(split_reduce_scatter_op->body());
+      auto& partial_grad = split_reduce_scatter_op->input(0);
+      const std::vector<DeviceGroupList>& comm_groups_list = split_reduce_scatter_impl.comm_groups_list();
+      // HT_LOG_WARN << op << " comm group: " << comm_group;
+      auto local_device_index = op->local_placement_group().get_index(op->placement());
+      auto scatter_num = comm_groups_list.at(0).at(0).num_devices();
+      HT_ASSERT(partial_grad->cur_ds_union().hetero_dim() == -2)
+        << "Adam: split reduce scatter should have hetero grad whose hetero dim is -2";
+      HT_ASSERT(scatter_num == partial_grad->cur_ds_union().size())
+        << "Adam: comm_group num must equal to hetero partial size!";
+      auto split_num = split_reduce_scatter_impl.split_num();
+      auto param_size_per_split = DIVUP(param->numel(), split_num);
+      auto param_size_per_scatter_per_split = DIVUP(param_size_per_split, scatter_num); // todo: padding for reduce-scatter & all-gather
+      auto scatter_index = partial_grad->local_placement_group_idx();
+      auto param_start_index = param_size_per_scatter_per_split * scatter_index;
+      auto param_end_index = param_start_index + param_size_per_scatter_per_split;
+      HT_ASSERT(grad->numel() / split_num == param_size_per_scatter_per_split && param_end_index <= param_size_per_split) 
+        << "now need param size can be div by dp group size! "
+        << "got grad size per split = " << grad->numel() 
+        << " vs. param_size_per_scatter_per_split = " 
+        << param_size_per_scatter_per_split;
+      // 对每个split出来的micro block
+      // 都进行Adam运算与AllGather
+      NDArrayList split_param = NDArray::split(param, split_num);
+      NDArrayList split_grad = NDArray::split(grad, split_num);
+      NDArrayList split_mean = NDArray::split(mean, split_num);
+      NDArrayList split_variance = NDArray::split(variance, split_num);
+      for (size_t i = 0; i < split_num; i++) {
+        auto split_param_scatter = NDArray(
+          NDArrayMeta().set_shape(split_grad.at(i)->shape())
+                       .set_dtype(split_param.at(i)->dtype())
+                       .set_device(split_param.at(i)->device()), 
+          split_param.at(i)->storage(), split_param.at(i)->storage_offset() + param_start_index);
+        // only update scatter part of param
+        // 注意这里只有最后一次需要更新step
+        HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
+                                        type(), hetu::impl::Adam, split_grad.at(i), split_param_scatter,
+                                        split_mean.at(i), split_variance.at(i), step, learning_rate(), 
+                                        beta1(), beta2(), eps(), weight_decay(), i == split_num - 1 ? true : false,
+                                        op->instantiation_ctx().stream());
+        const auto& comm_groups = comm_groups_list.at(i);
+        for (const auto& comm_group : comm_groups) {
+          // in-place allgather
+          HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
+                                          hetu::impl::AllGather, split_param_scatter,
+                                          split_param.at(i), comm_group,
+                                          op->instantiation_ctx().stream());
+        }
+      }
+    }
+    // 不可能有其他情形
+    else {
+      HT_RUNTIME_ERROR << "Adam: zero input grad must be (split)-reduce-scatter result!"
+        << ", grad producer = " << op->input(1)->producer()
+        << ", grad = " << op->input(1)
+        << ", param = " << op->input(0)
+        << ", grad ds = " << op->input(1)->get_distributed_states().ds_info()
+        << ", param ds = " << op->input(0)->get_distributed_states().ds_info();
+    }
   }
 }
 

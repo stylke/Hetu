@@ -511,13 +511,17 @@ TensorList CommOpImpl::DoGradient(Operator& op,
       // sounds cool~
       /*
       HT_ASSERT(ds_input.get_device_num() == ds_output.get_device_num())
-              << "distributed states for input and output tensor must be matched!";
+        << "distributed states for input and output tensor must be matched!";
       */
       HT_ASSERT(ds_output.states(-2) == 1)
-              << "partial should already be handled by intermediate comm op during gradient computing!";
+        << "partial shouldn't appear in forward comm op output";
+      HT_ASSERT(ds_grad_output.get_dim(-2) == 1)
+        << "partial shouldn't appear in backward comm op input"
+        << ", all the things should be done in Gradients() in graph.cc";
       DistributedStates ds_grad_input(ds_input);
-      if (ds_grad_input.get_dim(-2) > 1) { // partial->duplicate
-        std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
+      // partial->duplicate
+      if (ds_grad_input.get_dim(-2) > 1) { 
+        std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1}); 
         auto res_states = ds_grad_input.combine_states(src2dst);
         auto res_order = ds_grad_input.combine_order(src2dst);
         auto device_num = ds_grad_input.get_device_num();
@@ -874,6 +878,82 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
 //                                   _comm_group, op->instantiation_ctx().stream());
 // }
 
+bool SplitAllGatherOpImpl::DoMapToParallelDevices(Operator& op, 
+                                                  const DeviceGroupUnion& pg_union) const {
+  return OpInterface::DoMapToParallelDevices(op, pg_union);
+}
+
+bool SplitAllGatherOpImpl::DoInstantiate(Operator& op, const Device& placement,
+                                         StreamIndex stream_index) const {
+  bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
+  for (const auto& comm_groups : _comm_groups_list) {
+    for (const auto& comm_group : comm_groups) {
+      auto ranks = DeviceGroupToWorldRanks(comm_group);
+      NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+    }
+  }
+  return ret;
+}
+
+std::vector<NDArrayMeta> 
+SplitAllGatherOpImpl::DoInferMeta(const TensorList& inputs) const {
+  const Tensor& input = inputs.at(0);
+  DataType dtype = input->dtype();
+  HTShape gather_shape = input->shape();
+  int32_t num_devices = -1;
+  for (const auto& comm_groups : _comm_groups_list) {
+    for (const auto& comm_group : comm_groups) {
+      if (num_devices == -1) {
+        num_devices = comm_group.num_devices();
+      }
+      HT_ASSERT(num_devices == comm_group.num_devices())
+        << "num_devices of each comm group shoud be equal";
+    }
+  }
+  gather_shape[0] *= num_devices;
+  return {NDArrayMeta().set_dtype(dtype).set_shape(gather_shape)};
+}
+
+HTShapeList SplitAllGatherOpImpl::DoInferShape(Operator& op, 
+                                               const HTShapeList& input_shapes,
+                                               RuntimeContext& runtime_ctx) const {
+  HTShape gather_shape = input_shapes.at(0);
+  int32_t num_devices = -1;
+  for (const auto& comm_groups : _comm_groups_list) {
+    for (const auto& comm_group : comm_groups) {
+      if (num_devices == -1) {
+        num_devices = comm_group.num_devices();
+      }
+      HT_ASSERT(num_devices == comm_group.num_devices())
+        << "num_devices of each comm group shoud be equal";
+    }
+  }
+  gather_shape[0] *= num_devices;
+  return {gather_shape};
+}
+
+NDArrayList SplitAllGatherOpImpl::DoCompute(Operator& op,
+                                            const NDArrayList& inputs,
+                                            RuntimeContext& ctx) const {
+  HT_ASSERT(inputs.at(0)->dtype() == op->input(0)->dtype())
+    << "Data type mismatched for SplitAllGather communication: " << inputs.at(0)->dtype()
+    << " vs. " << op->input(0)->dtype();
+  NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
+  NDArrayList split_inputs = NDArray::split(inputs.at(0), split_num());
+  NDArrayList split_outputs = NDArray::split(outputs.at(0), split_num());
+  for (size_t i = 0; i < _comm_groups_list.size(); i++) {
+    const auto& comm_groups = _comm_groups_list[i];
+    // HT_LOG_INFO << op << " " << i << "-th comm groups is: " << comm_groups;
+    for (const auto& comm_group : comm_groups) {
+      HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
+                                      hetu::impl::AllGather, split_inputs.at(i),
+                                      split_outputs.at(i), comm_group,
+                                      op->instantiation_ctx().stream());
+    }
+  }
+  return outputs;
+}
+
 bool SplitAllReduceOpImpl::DoMapToParallelDevices(Operator& op, 
                                                   const DeviceGroupUnion& pg_union) const {
   return OpInterface::DoMapToParallelDevices(op, pg_union);
@@ -905,24 +985,106 @@ HTShapeList SplitAllReduceOpImpl::DoInferShape(Operator& op,
 NDArrayList SplitAllReduceOpImpl::DoCompute(Operator& op,
                                             const NDArrayList& inputs,
                                             RuntimeContext& ctx) const {
-  // NDArrayList outputs = inputs; // just inplace here
+  // TODO: use broadcast and always inplace
+  bool can_inplace = true;
+  for (const auto& comm_groups : _comm_groups_list) {
+    if (comm_groups.size() > 1) {
+      can_inplace = false;
+      break;
+    }
+  }
+  NDArrayList outputs = inputs;
+  if (!can_inplace) {
+    outputs = DoAllocOutputs(op, inputs, ctx);
+  }
+  NDArrayList split_inputs = NDArray::split(inputs.at(0), split_num());
+  NDArrayList split_outputs = NDArray::split(outputs.at(0), split_num());
+  for (size_t i = 0; i < _comm_groups_list.size(); i++) {
+    const auto& comm_groups = _comm_groups_list[i];
+    // HT_LOG_INFO << op << " " << i << "-th comm groups is: " << comm_groups;
+    for (const auto& comm_group : comm_groups) {
+      HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
+                                      hetu::impl::AllReduce, split_inputs.at(i),
+                                      split_outputs.at(i), reduction_type(), comm_group,
+                                      op->instantiation_ctx().stream());
+    }
+  }
+  return outputs;
+}
+
+bool SplitReduceScatterOpImpl::DoMapToParallelDevices(Operator& op, 
+                                                      const DeviceGroupUnion& pg_union) const {
+  return OpInterface::DoMapToParallelDevices(op, pg_union);
+}
+
+bool SplitReduceScatterOpImpl::DoInstantiate(Operator& op, const Device& placement,
+                                             StreamIndex stream_index) const {
+  bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
+  for (const auto& comm_groups : _comm_groups_list) {
+    for (const auto& comm_group : comm_groups) {
+      auto ranks = DeviceGroupToWorldRanks(comm_group);
+      NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+    }
+  }
+  return ret;
+}
+
+std::vector<NDArrayMeta> 
+SplitReduceScatterOpImpl::DoInferMeta(const TensorList& inputs) const {
+  const Tensor& input = inputs.at(0);
+  DataType dtype = input->dtype();
+  HTShape scatter_shape = input->shape();
+  int32_t num_devices = -1;
+  for (const auto& comm_groups : _comm_groups_list) {
+    for (const auto& comm_group : comm_groups) {
+      if (num_devices == -1) {
+        num_devices = comm_group.num_devices();
+      }
+      HT_ASSERT(num_devices == comm_group.num_devices())
+        << "num_devices of each comm group shoud be equal";
+    }
+  }
+  scatter_shape[0] /= num_devices;
+  HT_ASSERT(scatter_shape[0] >= 1) << "SplitReduceScatter: input shape[0]: " 
+    << input->shape()[0] << " must >= comm devices num: " << num_devices;  
+  return {NDArrayMeta().set_dtype(dtype).set_shape(scatter_shape)};
+}
+
+HTShapeList SplitReduceScatterOpImpl::DoInferShape(Operator& op, 
+                                                   const HTShapeList& input_shapes,
+                                                   RuntimeContext& runtime_ctx) const {
+  HTShape scatter_shape = input_shapes.at(0);
+  int32_t num_devices = -1;
+  for (const auto& comm_groups : _comm_groups_list) {
+    for (const auto& comm_group : comm_groups) {
+      if (num_devices == -1) {
+        num_devices = comm_group.num_devices();
+      }
+      HT_ASSERT(num_devices == comm_group.num_devices())
+        << "num_devices of each comm group shoud be equal";
+    }
+  }
+  scatter_shape[0] /= num_devices;
+  HT_ASSERT(scatter_shape[0] >= 1) << "SplitReduceScatter: input shape[0]: " 
+    << input_shapes.at(0)[0] << " must >= comm devices num: " << num_devices;  
+  return {scatter_shape};
+}
+
+NDArrayList SplitReduceScatterOpImpl::DoCompute(Operator& op,
+                                                const NDArrayList& inputs,
+                                                RuntimeContext& ctx) const {
+  HT_ASSERT(inputs.at(0)->dtype() == op->input(0)->dtype())
+    << "Data type mismatched for SplitReduceScatter communication: " << inputs.at(0)->dtype()
+    << " vs. " << op->input(0)->dtype();
   NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
   NDArrayList split_inputs = NDArray::split(inputs.at(0), split_num());
   NDArrayList split_outputs = NDArray::split(outputs.at(0), split_num());
   for (size_t i = 0; i < _comm_groups_list.size(); i++) {
     const auto& comm_groups = _comm_groups_list[i];
     // HT_LOG_INFO << op << " " << i << "-th comm groups is: " << comm_groups;
-    /*
-    if (comm_groups.size() > 1) {
-      split_outputs.at(i) = NDArray::empty(split_outputs.at(i)->shape(),
-                                           op->instantiation_ctx().placement,
-                                           op->output(i)->dtype(),
-                                           op->instantiation_ctx().stream_index);
-    }
-    */
     for (const auto& comm_group : comm_groups) {
       HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
-                                      hetu::impl::AllReduce, split_inputs.at(i),
+                                      hetu::impl::ReduceScatter, split_inputs.at(i),
                                       split_outputs.at(i), reduction_type(), comm_group,
                                       op->instantiation_ctx().stream());
     }
@@ -1063,6 +1225,11 @@ Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group,
                       {input}, std::move(op_meta))->output(0);
 }
 
+Tensor MakeSplitAllGatherOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num, bool inplace, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<SplitAllGatherOpImpl>(std::move(comm_groups_list), split_num, inplace), 
+                      {input}, std::move(op_meta))->output(0);
+}
+
 Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num, bool inplace, OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<SplitAllReduceOpImpl>(std::move(comm_groups_list), split_num, kSUM, inplace), 
                       {input}, std::move(op_meta))->output(0);
@@ -1071,6 +1238,17 @@ Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_grou
 Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num,
                             ReductionType red_type, bool inplace, OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<SplitAllReduceOpImpl>(std::move(comm_groups_list), split_num, red_type, inplace), 
+                      {input}, std::move(op_meta))->output(0);
+}
+
+Tensor MakeSplitReduceScatterOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num, bool inplace, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<SplitReduceScatterOpImpl>(std::move(comm_groups_list), split_num, kSUM, inplace), 
+                      {input}, std::move(op_meta))->output(0);
+}
+
+Tensor MakeSplitReduceScatterOp(Tensor input, std::vector<DeviceGroupList> comm_groups_list, size_t split_num,
+                                ReductionType red_type, bool inplace, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<SplitReduceScatterOpImpl>(std::move(comm_groups_list), split_num, red_type, inplace), 
                       {input}, std::move(op_meta))->output(0);
 }
 

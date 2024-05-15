@@ -358,7 +358,7 @@ def pretrain(args):
             except RuntimeError as e:
                 print(e)
                 os.killpg(0, signal.SIGTERM)
-            if (args.switch and step == 0) or (args.run_straggler_experiment and step == 5) or (args.run_memory_experiment and step == 0):
+            if (args.run_straggler_experiment and step == 5) or (args.run_memory_experiment and step == 0):
                 if 'HETU_MEMORY_LOG_FILE' in os.environ:
                     del os.environ['HETU_MEMORY_LOG_FILE'] 
                 if 'HETU_STRAGGLER_LOG_FILE' in os.environ:
@@ -373,6 +373,8 @@ def pretrain(args):
                 if label_device_group != None:
                     loss_out = results[0].numpy(force=True).mean()
                     print(f"{local_device}: [Epoch {epoch}] (step {step}, consumed_samples = {consumed_samples}): loss = {loss_out:.3f}, time = {end_time - start_time:.4f}")
+            if args.switch and step == 0:
+                return consumed_samples
         return consumed_samples
     
     # 单轮样例 

@@ -774,6 +774,25 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           HT_LOG_DEBUG << local_device << ": substitute comm_op to split_all_reduce_op: " << comm_groups_list;         
           break;
         }
+        case SPLIT_REDUCE_SCATTER_OP: {
+          HT_ASSERT(info.src_group_union.check_equal(info.dst_group_union))
+            << "wrong src and dst group relationship!";
+          size_t split_num = 0;
+          std::vector<DeviceGroupList> comm_groups_list;
+          std::tie(split_num, comm_groups_list) = comm_op_impl.get_split_comm_groups_list(comm_op, info.src_group_union, info.src_ds_union);
+          Tensor split_reduce_scatter_output = MakeSplitReduceScatterOp(
+            input, comm_groups_list, split_num, 
+            comm_op_impl.reduction_type(), false,
+            OpMeta().set_is_deduce_states(false)
+                    .set_name(input->name() + "_SplitReduceScatter"));
+          RecordExecTensor(split_reduce_scatter_output);
+          auto& split_reduce_scatter_op = split_reduce_scatter_output->producer();
+          split_reduce_scatter_op->MapToParallelDevices(info.src_group_union);
+          split_reduce_scatter_op->Instantiate(local_device, kCollectiveStream);
+          result = split_reduce_scatter_output;
+          HT_LOG_DEBUG << local_device << ": substitute comm_op to split_reduce_scatter_op: " << comm_groups_list;         
+          break;
+        }
         default: {
           HT_RUNTIME_ERROR << "Not supported yet";
         }

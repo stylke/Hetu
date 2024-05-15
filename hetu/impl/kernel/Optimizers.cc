@@ -108,7 +108,7 @@ void adam_update_cpu(const spec_t* grad, spec_t* param, spec_t* mean,
 void AdamCpu(const NDArray& grad, NDArray& param, NDArray& mean,
              NDArray& variance, NDArray& step, 
              float lr, float beta1, float beta2,
-             float eps, float weight_decay,
+             float eps, float weight_decay, bool update_step,
              const Stream& stream) {
   HT_ASSERT_CPU_DEVICE(grad);
   HT_ASSERT_CPU_DEVICE(param);
@@ -133,7 +133,8 @@ void AdamCpu(const NDArray& grad, NDArray& param, NDArray& mean,
             step->data_ptr<int64_t>()[0], lr, beta1, beta2, eps, weight_decay, size);      
     },"Adam");
   });
-  step = NDArray::add(step, 1, kBlockingStream);
+  if (update_step)
+    step = NDArray::add(step, 1, kBlockingStream);
   NDArray::MarkUsedBy({grad, param, mean, variance}, stream);
 }
 
