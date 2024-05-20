@@ -202,6 +202,15 @@ void AdamOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }
 
+void AdamOpImpl::DoSpecialMergeStrategy(Operator& op, Operator& another_op) {
+  HT_ASSERT(is_adam_op(op) && is_adam_op(another_op))
+    << "two ops should both be adam ops";
+  auto& another_op_impl = dynamic_cast<AdamOpImpl&>(another_op->body());
+  _multi_zero.insert(_multi_zero.end(), another_op_impl.multi_zero().begin(), another_op_impl.multi_zero().end());
+  HT_ASSERT(_multi_zero.size() == op->graph().NUM_STRATEGY)
+    << "size mismatch";
+}
+
 Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, float learning_rate,
                        OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<SGDUpdateOpImpl>(learning_rate),

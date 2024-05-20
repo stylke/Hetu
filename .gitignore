@@ -14,9 +14,13 @@ cmake/config.cmake
 .hypothesis/
 examples/nlp/gpt/_cache.pkl
 examples/nlp/gpt/experiments/
+examples/elastic/data/
 third_party/nccl/
 
 # Python
+*.json
+*.txt
+*/elastic.egg-info/
 .mypy_cache
 */*.pyc
 */*.so*

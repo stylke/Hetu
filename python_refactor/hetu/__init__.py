@@ -57,7 +57,7 @@ def control_dependencies(control_inputs):
     return _OpContext(extra_deps=control_inputs)
 
 class _GraphContext(object):
-    def __init__(self, g, create_new=False, prefix='default', num_strategy=-1):
+    def __init__(self, g, create_new=False, prefix="default", num_strategy=-1):
         if isinstance(g, Graph):
             assert create_new == False, f"Using type {type(g).__name__} to create a hetu.Graph is not allowed, please use a str instead."
             self.graph = g
@@ -68,7 +68,7 @@ class _GraphContext(object):
                 else:
                     raise NotImplementedError("Can only create define_and_run graph for now.")
             else:
-                if prefix == 'default':
+                if prefix == "default":
                     if g == "eager":
                         self.graph = _hetu_core._internal_context.get_default_eager_graph()
                     elif g == "define_and_run":
@@ -90,7 +90,8 @@ class _GraphContext(object):
     def __enter__(self):
         if len(cur_graph_contexts) > 0:
             if str(self.graph) != str(cur_graph_contexts[0].graph):
-                print(f"Caution! You wrap {self.graph} graph in {cur_graph_contexts[0].graph} graph, we just return you the latter!")
+                pass
+                # print(f"Caution! You wrap {self.graph} graph in {cur_graph_contexts[0].graph} graph, we just return you the latter!")
             self.wrapped_context = True
             return cur_graph_contexts[0]
         self.wrapped_context = False
@@ -104,7 +105,7 @@ class _GraphContext(object):
         _hetu_core._internal_context.pop_graph_ctx()
         cur_graph_contexts.remove(self)
 
-def graph(g, create_new=False, prefix='default', num_strategy=-1):
+def graph(g, create_new=False, prefix="default", num_strategy=-1):
     return _GraphContext(g, create_new=create_new, prefix=prefix, num_strategy=num_strategy)
 
 class _AutocastContext(object):
@@ -140,5 +141,34 @@ class _RunLevel(object):
         else:
             raise ValueError(f"No level for '{type}' in hetu.Graph")
         
-def run_level(type = "update"):
+def run_level(type="update"):
     return _RunLevel(type).type
+
+class _MergeStrategyContext(object):
+    def __init__(self, target_graph="default", num_strategy=-1):
+        self.graph = _hetu_core._internal_context.make_new_define_and_run_graph("tmp_define_and_run")
+        self.graph.set_num_strategy(num_strategy)
+        if target_graph == "default":
+            self.target_graph = _hetu_core._internal_context.get_default_define_and_run_graph()
+        else:
+            self.target_graph = _hetu_core._internal_context.get_graph(target_graph + '_' + "define_and_run")
+        
+    def __enter__(self):
+        if len(cur_graph_contexts) > 0:
+            assert str(self.graph) != str(cur_graph_contexts[0].graph), \
+                f"Caution! You wrap {self.tmp_graph} graph in {cur_graph_contexts[0].graph} graph"
+        _hetu_core._internal_context.push_graph_ctx(self.graph.id)
+        cur_graph_contexts.append(self)
+        return self
+    
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_graph_ctx()
+        cur_graph_contexts.remove(self)
+        graph_id = self.graph.id
+        self.target_graph.merge_strategy(graph_id)
+        self.graph = None
+        _hetu_core._internal_context.delete_graph(graph_id)
+        
+def merge_strategy(target_graph="default", num_strategy=-1):
+    return _MergeStrategyContext(target_graph=target_graph, num_strategy=num_strategy)
+        

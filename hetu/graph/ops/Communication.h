@@ -96,6 +96,8 @@ class CommOpImpl final: public OpInterface {
   bool DoMapToParallelDevices(Operator& op,
                               const DeviceGroupUnion& pg_union) const override;
 
+  void DoSpecialMergeStrategy(Operator& op, Operator& another_op) override;
+
   bool DoInstantiate(Operator& op, const Device& placement,
                      StreamIndex stream_index) const override;                              
 
@@ -118,6 +120,10 @@ class CommOpImpl final: public OpInterface {
                  RuntimeContext& runtime_ctx) const {}
 
  public: 
+  const DistributedStatesHierarchy& dst_ds_hierarchy() {
+    return _dst_ds_hierarchy;
+  }
+
   const DistributedStatesUnion& get_dst_ds_union(Operator& op) const {
     auto& graph = op->graph();
     HT_ASSERT(_dst_ds_hierarchy.size() == 1 || _dst_ds_hierarchy.size() == graph.NUM_STRATEGY)
@@ -163,7 +169,7 @@ class CommOpImpl final: public OpInterface {
     return _red_type;
   }
   
-  const DeviceGroupHierarchy& dst_group_dierarchy() {
+  const DeviceGroupHierarchy& dst_group_hierarchy() {
     return _dst_group_hierarchy;
   }
   

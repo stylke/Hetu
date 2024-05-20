@@ -136,6 +136,40 @@ bool OpInterface::DoMapToParallelDevices(Operator& op,
   return true;
 }
 
+void OpInterface::DoMergeStrategy(Operator& op, Operator& another_op) {
+  // merge op dg_hierarchy & merge tensor ds_hierarchy
+  // some ops like comm and variable need special treatment
+  HT_ASSERT(op->type() == another_op->type())
+    << "cannot merge two ops with different types: "
+    << op << " and " << another_op;
+  // merge op dg_hierarchy
+  DeviceGroupHierarchy new_dg_hierarchy(op->device_group_hierarchy());
+  for (const auto& dg_union : another_op->device_group_hierarchy().raw_data()) {
+    new_dg_hierarchy.add(dg_union);
+  }
+  HT_ASSERT(new_dg_hierarchy.size() == 0 || new_dg_hierarchy.size() == op->graph().NUM_STRATEGY)
+    << "please set the correct NUM_STRATEGY of the graph before merge strategy"
+    << ", if dg hierarchy size is not zero";
+  op->set_device_group_hierarchy(new_dg_hierarchy);
+  // merge tensor ds_hierarchy
+  HT_ASSERT(op->num_outputs() == another_op->num_outputs())
+    << "output size should be equal";
+  for (size_t i = 0; i < another_op->num_outputs(); i++) {
+    op->output(i)->merge_strategy(another_op->output(i));
+  }
+  /*
+  Operator::for_each_output_tensor_pair(
+    op, another_op, 
+    [&](Tensor& tensor, Tensor& another_tensor) { tensor->merge_strategy(another_tensor); }
+  );
+  */
+  DoSpecialMergeStrategy(op, another_op);
+}
+
+void OpInterface::DoSpecialMergeStrategy(Operator& op, Operator& another_op) {
+  return;
+}
+
 bool OpInterface::DoInstantiate(Operator& op, const Device& placement,
                                 StreamIndex stream_index) const {
   auto& inst_ctx = op->instantiation_ctx();

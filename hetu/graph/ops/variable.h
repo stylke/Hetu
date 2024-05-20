@@ -201,6 +201,21 @@ class ParallelVariableOpImpl : public OpInterface {
     return {Tensor()};
   }
 
+  void DoSpecialMergeStrategy(Operator& op, Operator& another_op) {
+    HT_ASSERT(is_variable_op(op) && is_variable_op(another_op))
+      << "two ops should both be variables";
+    auto& another_op_impl = dynamic_cast<ParallelVariableOpImpl&>(another_op->body());
+    _multi_provided_data.insert(_multi_provided_data.end(), another_op_impl._multi_provided_data.begin(), another_op_impl._multi_provided_data.end());
+    _local_idx.insert(_local_idx.end(), another_op_impl._local_idx.begin(), another_op_impl._local_idx.end());
+    for (const auto& ds_union : another_op_impl._ds_hierarchy.raw_data()) {
+      _ds_hierarchy.add(ds_union);
+    }
+    HT_ASSERT((_multi_provided_data.size() == 0 || _multi_provided_data.size() == op->graph().NUM_STRATEGY)
+              && _local_idx.size() == op->graph().NUM_STRATEGY
+              && _ds_hierarchy.size() == op->graph().NUM_STRATEGY)
+      << "size mismatch";
+  }
+
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override {
     auto cur_ds_union = _ds_hierarchy.get(op->graph().CUR_STRATEGY_ID);

@@ -254,7 +254,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
           << "Comm op outputs size should be 1";
         auto& prev_grad_op = grad_outputs.at(0)->producer();
         // 判断comm op是inter op且prev op是在对gradient进行reduce时临时引入的intra op
-        if (comm_op_impl.dst_group_dierarchy().size() != 0 
+        if (comm_op_impl.dst_group_hierarchy().size() != 0 
             && is_comm_op(prev_grad_op) 
             && prev_grad_op->fw_op_id() == -1) {
           skip_actual_gradient_op = true;

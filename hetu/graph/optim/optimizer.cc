@@ -49,7 +49,7 @@ Tensor Optimizer::MakeStates(const Tensor& variable, const Tensor& grad, const O
                                           .set_device_group_hierarchy(producer->device_group_hierarchy())
                                           .set_eager_device(producer->eager_device())
                                           .set_name(variable->name() + "_" + state_name));  
-
+  Graph::MarkAsOptimizerVariable(states);
   return std::move(states);
 }
 

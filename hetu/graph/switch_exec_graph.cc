@@ -664,7 +664,9 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
   for (size_t i = 0; i < src_union_size; i++) {
     const auto& local_src_ds = src_ds_union.get_local(i);
     HT_ASSERT(local_src_ds.get_device_num() == src_group_union.get(i).num_devices())
-      << "devices num mismatches";
+      << "devices num mismatches for " << after_param << " at union idx " << i
+      << ", src ds union = " << src_ds_union.ds_union_info()
+      << ", src group union = " << src_group_union;
     HT_ASSERT(local_src_ds.states(-2) == 1)
       << "shouldn't have partial";
     local_src_ds_list.emplace_back(local_src_ds);
@@ -820,6 +822,8 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
   if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM
       || switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
     comm_graph_name_prefix = "param";
+  } else if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER) {
+    comm_graph_name_prefix = "param_and_optimizer_variable";
   } else if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD
              || switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
     comm_graph_name_prefix = "grad";
@@ -835,7 +839,9 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
   std::unordered_set<Device> src_set;
   std::unordered_set<Device> dst_set;
   DataType dtype = DataType::UNDETERMINED;
-  for (auto& define_param_ref : _define_graph_params) {
+  auto& define_enumerate_params = (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER ?
+                                   _define_graph_params_and_optvars : _define_graph_params);
+  for (auto& define_param_ref : define_enumerate_params) {
     auto& define_param = define_param_ref.get();
     // Test Case
     /*
@@ -897,7 +903,8 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
     } 
     // 只在后头的图里
     else if (!is_before_active && is_after_active) {
-      if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
+      if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM
+          || switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER) {
         // 为了保证正确性我们这里还是会从add init里再度对其赋值
         // 这里只对after的add init赋值而不会产生性能上的开销
         // 目的是为了防止在新的after graph中有新的topo而需要访问这一before graph中未使用的param
@@ -1313,6 +1320,9 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   } else if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
     before_param_buffer = _switch_graph_pair.first->_transfer_param_buffer;
     after_param_buffer = _switch_graph_pair.second->_transfer_param_buffer;
+  } else if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER) {
+    before_param_buffer = _switch_graph_pair.first->_origin_param_and_optimizer_buffer;
+    after_param_buffer = _switch_graph_pair.second->_origin_param_and_optimizer_buffer;
   } else if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD) {
     before_param_buffer = _switch_graph_pair.first->_current_grad_buffer;
     after_param_buffer = _switch_graph_pair.second->_current_grad_buffer;
@@ -1595,7 +1605,8 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       if (it != _comm_results_mapping.end()) {
         // 如果是param
         if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM 
-            || switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+            || switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM
+            || switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER) {
           auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
           event->Record(op->instantiation_ctx().stream());
           _switch_graph_pair.second->_switch_param_events[it->second->id()] = std::move(event);
@@ -1619,7 +1630,8 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     // 给新图的_preserved_data赋上NDArray
     // 对于grad则不需要（_preserved_data表示已经算出来的）
     if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM 
-        || switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
+        || switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM
+        || switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER) {
       _switch_graph_pair.second->_preserved_data[kv.second->id()] = it->second;
     }
     // allocation check
@@ -1659,12 +1671,14 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       _concat_buffer->Free();
     }
   }
-  // 已在处理feed_dict时自动清除
-  /*
-  // 将before graph中保留的数据全部清除
-  // TODO: 最坏情况需要1.5倍的显存开销，后续需要分bucket进行发送并清除
-  _switch_graph_pair.first->_preserved_data.clear();
-  */
+
+  // workaround
+  // 逻辑上feed_dict时已自动清除
+  // 但切换origin param buffer而不切换origin param and optimizer buffer时
+  // optimizer需要进行丢弃
+  if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
+    _switch_graph_pair.first->_preserved_data.clear();
+  }
 
   // 非profile情形下这里不需要同步
   // 下一个exec graph需要某一个param时再进行sync
@@ -1689,9 +1703,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     */
     auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
     mpi_group->Barrier(true);
-    std::string log_prefix = (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM ||switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) ?
-                             "param" : "grad";
-    HT_LOG_INFO << local_device << ": " << log_prefix << " switch running time = " << COST_MSEC(switch_params_running) << " ms";
+    HT_LOG_INFO << local_device << ": switch running time = " << COST_MSEC(switch_params_running) << " ms";
     char* switch_log_file = std::getenv("HETU_SWITCH_LOG_FILE");
     if (switch_log_file != nullptr && hetu::impl::comm::GetWorldRank() == 0) {
       std::ofstream file;
@@ -1714,9 +1726,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   
   // memory debug use
   // hetu::impl::comm::EmptyNCCLCache();
-  std::string log_prefix = (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM ||switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) ?
-                           "param" : "grad";
-  HT_LOG_INFO << local_device << ": " << log_prefix << " switch from " << _switch_graph_pair.first->name()
+  HT_LOG_INFO << local_device << ": switch from " << _switch_graph_pair.first->name()
    << " to " << _switch_graph_pair.second->name() << " is done (async)";
   // HT_RUNTIME_ERROR << local_device << ": breakpoint";
 }

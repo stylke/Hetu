@@ -87,6 +87,24 @@ PyObject* PyGraph_set_num_strategy(PyGraph* self, PyObject* args, PyObject* kwar
   HT_PY_FUNC_END
 }
 
+PyObject* PyGraph_merge_strategy(PyGraph* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({"merge_strategy(int graph_id)"});
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    auto& graph = Graph::GetGraph(self->graph_id);
+    auto& another_graph = Graph::GetGraph(parsed_args.get_int64(0));
+    HT_ASSERT(graph.type() == GraphType::DEFINE_AND_RUN && another_graph.type() == GraphType::DEFINE_AND_RUN)
+      << "Currently only support merge two define graph";
+    dynamic_cast<DefineAndRunGraph&>(graph).MergeGraph(dynamic_cast<DefineAndRunGraph&>(another_graph));
+    Py_RETURN_NONE;
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }  
+  HT_PY_FUNC_END
+}
+
 PyObject* PyGraph_run(PyGraph* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -139,6 +157,27 @@ PyObject* PyGraph_get_graph(PyObject*, PyObject* args, PyObject* kwargs) {
     Py_RETURN_NONE;
   } else if (parsed_args.signature_index() == 1) {
     return PyGraph_New(Graph::GetGraph(parsed_args.get_string(0)).id());
+    Py_RETURN_NONE;
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
+PyObject* PyGraph_delete_graph(PyObject*, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "delete_graph(int graph_id)",
+    "delete_graph(str graph_name)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    // Call `Graph::GetGraph` to check whether `graph_id` is valid
+    Graph::DeleteGraph(parsed_args.get_int64(0));
+    Py_RETURN_NONE;
+  } else if (parsed_args.signature_index() == 1) {
+    Graph::DeleteGraph(parsed_args.get_string(0));
     Py_RETURN_NONE;
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -242,6 +281,7 @@ PyObject* PyPopGraphCtx(PyObject*, PyObject* args, PyObject* kwargs) {
 // NOLINTNEXTLINE
 PyMethodDef PyGraphCtx_methods[] = {
   {"get_graph", (PyCFunction) PyGraph_get_graph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+  {"delete_graph", (PyCFunction) PyGraph_delete_graph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {"get_default_define_and_run_graph", (PyCFunction) PyGraph_get_default_define_and_run_graph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {"get_default_define_by_run_graph", (PyCFunction) PyGraph_get_default_define_by_run_graph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {"get_default_eager_graph", (PyCFunction) PyGraph_get_default_eager_graph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
@@ -266,7 +306,8 @@ PyGetSetDef PyGraph_properties[] = {
 // NOLINTNEXTLINE
 PyMethodDef PyGraph_methods[] = {
   {"run", (PyCFunction) PyGraph_run, METH_VARARGS | METH_KEYWORDS, nullptr }, 
-  {"set_num_strategy", (PyCFunction) PyGraph_set_num_strategy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+  {"set_num_strategy", (PyCFunction) PyGraph_set_num_strategy, METH_VARARGS | METH_KEYWORDS, nullptr },
+  {"merge_strategy", (PyCFunction) PyGraph_merge_strategy, METH_VARARGS | METH_KEYWORDS, nullptr },  
   {nullptr}
 };
 

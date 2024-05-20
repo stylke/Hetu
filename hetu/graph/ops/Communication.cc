@@ -410,6 +410,21 @@ bool CommOpImpl::DoMapToParallelDevices(Operator& op,
   return true;  
 }
 
+void CommOpImpl::DoSpecialMergeStrategy(Operator& op, Operator& another_op) {
+  HT_ASSERT(is_comm_op(op) && is_comm_op(another_op))
+    << "two ops should both be comm ops";
+  auto& another_op_impl = dynamic_cast<CommOpImpl&>(another_op->body());
+  for (const auto& dg_union : another_op_impl.dst_group_hierarchy().raw_data()) {
+    _dst_group_hierarchy.add(dg_union);
+  }
+  for (const auto& ds_union : another_op_impl.dst_ds_hierarchy().raw_data()) {
+    _dst_ds_hierarchy.add(ds_union);
+  }
+  HT_ASSERT((_dst_group_hierarchy.size() == 0 || _dst_group_hierarchy.size() == op->graph().NUM_STRATEGY)
+             && _dst_ds_hierarchy.size() == op->graph().NUM_STRATEGY)
+    << "size mismatch";
+}
+
 // unused comm ops have been removed before do intantiate
 bool CommOpImpl::DoInstantiate(Operator& op, const Device& placement,
                                StreamIndex stream_index) const {

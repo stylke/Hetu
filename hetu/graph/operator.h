@@ -314,6 +314,10 @@ class OpInterface : public shared_ptr_target {
     return DoMapToParallelDevices(op, placement_group_union);
   }
 
+  inline void MergeStrategy(Operator& op, Operator& another_op) {
+    DoMergeStrategy(op, another_op); 
+  }
+
   inline bool Instantiate(Operator& op, const Device& placement,
                           StreamIndex stream_id) const {
     return DoInstantiate(op, placement, stream_id);
@@ -359,6 +363,10 @@ class OpInterface : public shared_ptr_target {
 
   virtual bool DoMapToParallelDevices(Operator& op,
                                       const DeviceGroupUnion& placement_group_union) const;
+
+  virtual void DoMergeStrategy(Operator& op, Operator& another_op);
+
+  virtual void DoSpecialMergeStrategy(Operator& op, Operator& another_op);
 
   virtual bool DoInstantiate(Operator& op, const Device& placement,
                              StreamIndex stream_id) const;
@@ -422,6 +430,10 @@ class OpDef : public shared_ptr_target {
 
   inline bool MapToParallelDevices(const DeviceGroupUnion& placement_group_union) {
     return _body->MapToParallelDevices(get_self(), placement_group_union);
+  }
+
+  inline void MergeStrategy(Operator& another_op) {
+    return _body->MergeStrategy(get_self(), another_op);
   }
 
   inline void DeduceStates() {

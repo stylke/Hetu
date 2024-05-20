@@ -230,15 +230,27 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
   HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": alloc exec variable " << tensor;
   // TODO: check meta is valid & maybe we can use non-blocking stream?
   if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()) {
-    HT_ASSERT(_origin_param_buffer->HasTensor(tensor))
-      << "Cannot find param " << tensor << " in the origin param buffer";
-    // alloc on-the-fly
-    if (!_origin_param_buffer->IsAllocated()) {
-      _origin_param_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
+    if (_use_origin_param_and_optimizer_buffer) {
+      HT_ASSERT(_origin_param_and_optimizer_buffer->HasTensor(tensor))
+        << "Cannot find param " << tensor << " in the origin param and optimizer buffer";
+      // alloc on-the-fly
+      if (!_origin_param_and_optimizer_buffer->IsAllocated()) {
+        _origin_param_and_optimizer_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
+      }
+      _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
+                                              _origin_param_and_optimizer_buffer->AsStorage(), 
+                                              _origin_param_and_optimizer_buffer->GetElementOffest(tensor));
+    } else {
+      HT_ASSERT(_origin_param_buffer->HasTensor(tensor))
+        << "Cannot find param " << tensor << " in the origin param buffer";
+      // alloc on-the-fly
+      if (!_origin_param_buffer->IsAllocated()) {
+        _origin_param_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
+      }
+      _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
+                                              _origin_param_buffer->AsStorage(), 
+                                              _origin_param_buffer->GetElementOffest(tensor));
     }
-    _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
-                                            _origin_param_buffer->AsStorage(), 
-                                            _origin_param_buffer->GetElementOffest(tensor));
   } else {
     // 另外一些是variable但不是parameter的正常走mempool
     // 分配的是碎片化的显存
@@ -595,7 +607,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
       if (!input->symbolic()) {
         input->init_symbolic_shape();
       }
-      bool ignore_shape=false;
+      bool ignore_flag = false;
       Tensor result;
 
       switch (comm_type) {
@@ -747,11 +759,6 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           // use derived method from switch exec graph
           auto complex_exec_comm = ComplexExecComm(comm_op, info);
           result = complex_exec_comm.Instantiate();
-          // only send
-          // need to ignore the shape when replacing the input 
-          if (result.get() == input.get()) {
-            ignore_shape = true;
-          }
           HT_LOG_DEBUG << local_device << ": substitute comm_op to batched_isend_irecv_op";
           break;
         }
@@ -797,14 +804,21 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           HT_RUNTIME_ERROR << "Not supported yet";
         }
       }
-      result->set_cur_ds_union(info.dst_ds_union); // assign distributed states union for result tensor
 
+      // only send, then need to ignore the shape & ds when replacing the input 
+      if (result.get() == input.get()) {
+        ignore_flag = true;
+      }
+      // assign distributed states union for result tensor
+      if (!ignore_flag) {
+        result->set_cur_ds_union(info.dst_ds_union); 
+      }
       // find all comm_op->output consumers, and replace the correspond input tensor with result tensor
       for (int i = comm_op->output(0)->num_consumers() - 1; i >= 0; i--) {
         auto& consumer_i = comm_op->output(0)->consumer(i);
         for (int j = 0; j < consumer_i->num_inputs(); j++) {
           if (consumer_i->input(j)->id() == comm_op->output(0)->id()) {
-            Graph::ReplaceInput(consumer_i, j, result, ignore_shape);
+            Graph::ReplaceInput(consumer_i, j, result, ignore_flag);
           }
         }
       }
@@ -1741,7 +1755,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   HT_LOG_DEBUG << local_device << ": 3. compute[begin]";
   if (_pipeline_map.find(local_device) == _pipeline_map.end()) {
-    HT_LOG_WARN << "Can't figure out which pipeline the local device belongs to"
+    HT_LOG_WARN << local_device << ": can't figure out which pipeline the local device belongs to"
       << ", so we just return";
     auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
     comm_group->Barrier(true);
@@ -2137,11 +2151,13 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "other time: " << other_time << " ms" << std::endl;
       if (_straggler_log_file_path != "") {
         std::ofstream file;
-        std::string suffix = "_" + std::to_string(hetu::impl::comm::GetWorldRank()) + ".txt";
+        std::string suffix = "_" + std::to_string(hetu::impl::comm::GetWorldRank()) + ".json";
         file.open(_straggler_log_file_path + suffix, std::ios_base::app);
         if (file.is_open()) {
-          file << "total run time: " << COST_MSEC(run) << " ms" << std::endl;
-          file << "compute time: " << compute_time << " ms" << std::endl;
+          file << "{" << std::endl;
+          file << "\"total run time\": " << COST_MSEC(run) << "," << std::endl;
+          file << "\"compute time\": " << compute_time << std::endl;
+          file << "}," << std::endl; 
           file.close();
         } else {
           HT_RUNTIME_ERROR << "Error opening the file";

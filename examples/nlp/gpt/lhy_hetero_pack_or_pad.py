@@ -419,7 +419,7 @@ def pretrain(args):
                                     global_batch_size = args.global_batch_size, 
                                     micro_batch_size = args.micro_batch_size, 
                                     seq_len = args.seq_length, 
-                                    strategy_id = 1, 
+                                    strategy_id = 0, 
                                     run_level = ht.run_level("update"))
         args.hetero_data = False
         consumed_samples = run_plan(epoch = 0,
@@ -428,7 +428,7 @@ def pretrain(args):
                                     global_batch_size = args.global_batch_size, 
                                     micro_batch_size = args.micro_batch_size, 
                                     seq_len = args.seq_length, 
-                                    strategy_id = 0, 
+                                    strategy_id = 1, 
                                     run_level = ht.run_level("update"))
     
     if args.switch:

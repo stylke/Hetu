@@ -104,6 +104,8 @@ class DefineAndRunGraph : public Graph {
     return _exec_graph_plan_pool[num];
   }
 
+  void MergeGraph(DefineAndRunGraph& another_graph);
+
  protected:
   Operator& MakeOpInner(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta);

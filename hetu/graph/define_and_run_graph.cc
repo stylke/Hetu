@@ -107,6 +107,23 @@ DeviceGroupUnion DefineAndRunGraph::GetVariableDeviceGroupUnionInner(const Tenso
   return device_group_union;
 }
 
+void DefineAndRunGraph::MergeGraph(DefineAndRunGraph& another_graph) {
+  HT_ASSERT(_op_indexing.size() == another_graph._op_indexing.size())
+    << "two graph op indexing should be aligned";
+  NUM_STRATEGY += another_graph.NUM_STRATEGY;
+  // workaround
+  // 按照op index进行对齐
+  for (auto& kv : _op_indexing) {
+    OpId op_id =  kv.first;
+    Operator& op = kv.second;
+    auto it = another_graph._op_indexing.find(op_id);
+    HT_ASSERT(it != another_graph._op_indexing.end())
+      << "cannot find " << op << " in the graph to merge";
+    Operator& another_op = it->second;
+    op->MergeStrategy(another_op);
+  }
+}
+
 // 推导define graph在cur_strategy_id下的pipeline构造
 void DefineAndRunGraph::DeducePipeline(size_t cur_strategy_id, int32_t pipeline_num) {
   auto old_strategy_id = CUR_STRATEGY_ID;
@@ -408,7 +425,7 @@ DeviceGroupUnion DefineAndRunGraph::DeducePlacementGroup(Operator& op, Op2DGUnio
           auto& comm_op_impl = dynamic_cast<CommOpImpl&>(op->body());
           // 如果comm op没有提供dst group
           // 那么默认其和src group一样
-          if (comm_op_impl.dst_group_dierarchy().size() == 0) {
+          if (comm_op_impl.dst_group_hierarchy().size() == 0) {
             auto it = dg_union_map.find(op->input(0)->producer()->id());
             HT_ASSERT(it != dg_union_map.end())
               << op->input(0)->producer() << " should have deduced placement group before";
@@ -416,7 +433,7 @@ DeviceGroupUnion DefineAndRunGraph::DeducePlacementGroup(Operator& op, Op2DGUnio
           } 
           // 否则直接使用comm op提供的dst group
           else {
-            inferred = comm_op_impl.dst_group_dierarchy().get(CUR_STRATEGY_ID);
+            inferred = comm_op_impl.dst_group_hierarchy().get(CUR_STRATEGY_ID);
           }
         }
         // 绝大多数情况走这条分支
@@ -475,6 +492,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   Tensor2TensorMap tensor_to_exec_tensor_mapping;
   auto origin_param_buffer = std::make_shared<ParamBuffer>("origin_param_buffer");
   auto transfer_param_buffer = std::make_shared<ParamBuffer>("transfer_param_buffer");
+  auto origin_param_and_optimizer_buffer = std::make_shared<ParamBuffer>("origin_param_and_optimizer_buffer");
   auto current_grad_buffer = std::make_shared<ParamBuffer>("current_grad_buffer");
   auto accumulate_grad_buffer = std::make_shared<ParamBuffer>("accumulate_grad_buffer");
   Tensor2TensorMap transfer_map;
@@ -552,15 +570,16 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       // 之后会使用热切换
       _add_on_inits.erase(tensor->id());
     }
-    // 6)、assign param 
+    // 6)、assign param & optimizer states
     // 目前只是记录而并不会alloc
     if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
         && exec_tensor->producer()->placement_group_union().has(local_device)) {
       origin_param_buffer->AddTensor(exec_tensor);
-      /*
-      exec_tensor->set_placement(local_device);
-      Graph::AllocVariableData(exec_tensor);
-      */
+    }
+    if ((_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
+        || _optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end())
+        && exec_tensor->producer()->placement_group_union().has(local_device)) {
+      origin_param_and_optimizer_buffer->AddTensor(exec_tensor);
     }
   };
 
@@ -728,6 +747,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   // assign param buffer, grad buffer and transfer map
   exec_graph->_origin_param_buffer = std::move(origin_param_buffer);
   exec_graph->_transfer_param_buffer = std::move(transfer_param_buffer);
+  exec_graph->_origin_param_and_optimizer_buffer = std::move(origin_param_and_optimizer_buffer);
   exec_graph->_current_grad_buffer = std::move(current_grad_buffer);
   exec_graph->_accumulate_grad_buffer = std::move(accumulate_grad_buffer);
   exec_graph->_transfer_map = std::move(transfer_map);
@@ -942,10 +962,17 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 如果旧的exec graph没开AMP
       // 或者是刚刚进行了update（使得transfer param是空的）
       // 那么只能切换origin param buffer
+      // 2024.5.20 Update: 
+      // 将optimzer和origin param放到一个buffer中
+      // 但目前在hetero+zero情形下无法使用
       if (old_exec_graph->_transfer_param_buffer->IsEmpty()
           || (old_exec_graph->_run_level == RunLevel::UPDATE
               && param_switch_level == SWITCH_LEVEL::EXEC)) {
-        param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
+        if (old_exec_graph->_use_origin_param_and_optimizer_buffer) {
+          param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER;
+        } else {
+          param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
+        }
       }
       // 3、----- buffer释放 -----
       // 如果旧的exec graph是grad

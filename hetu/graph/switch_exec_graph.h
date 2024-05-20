@@ -42,6 +42,7 @@ enum class SWITCH_PROFILE_LEVEL : int8_t {
 enum class SWITCH_MODE : int8_t {
   SWITCH_ORIGIN_PARAM = 0,
   SWITCH_TRANSFER_PARAM,
+  SWITCH_ORIGIN_PARAM_AND_OPTIMIZER,
   SWITCH_CURRENT_GRAD,
   SWITCH_ACCUMULATE_GRAD
 };
@@ -400,6 +401,7 @@ class SwitchExecGraph {
                     size_t plan_after):
       _define_graph(define_graph) {
       _define_graph_params = define_graph->params();
+      _define_graph_params_and_optvars = define_graph->params_and_opt_vars();
       _switch_plan_pair = std::make_pair(plan_before, plan_after);
       _switch_graph_pair = std::make_pair(define_graph->GetPlan(plan_before).exec_graph, 
                                           define_graph->GetPlan(plan_after).exec_graph);
@@ -499,6 +501,7 @@ class SwitchExecGraph {
     // basic attributes
     DefineAndRunGraph* _define_graph; // 定义图
     TensorCRefList _define_graph_params; // 定义图的params tensor
+    TensorCRefList _define_graph_params_and_optvars; // 定义图的params以及optimizer variables的tensor
     std::pair<size_t, size_t> _switch_plan_pair; // 需要切换的两个exec graph plan的编号
     ExecGraphPair _switch_graph_pair; // 需要切换的两个exec graph的指针
 

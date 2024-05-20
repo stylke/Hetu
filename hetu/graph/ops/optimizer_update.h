@@ -154,7 +154,9 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
                       const OpMeta& op_meta) const override;
 
   void DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
-                         TensorList& outputs, const OpMeta& op_meta) const override;  
+                         TensorList& outputs, const OpMeta& op_meta) const override; 
+
+  void DoSpecialMergeStrategy(Operator& op, Operator& another_op) override;
 
  public:
   bool operator==(const OpInterface& rhs) const override {

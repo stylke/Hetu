@@ -70,12 +70,23 @@ PyObject* CommGroup_GetGlobalDeviceGroup(PyObject*, PyObject* args, PyObject* kw
   HT_PY_FUNC_END
 }
 
+// workaround
+PyObject* CommGroup_GlobalCommBarrier(PyObject*, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  SynchronizeAllStreams(hetu::impl::comm::GetLocalDevice());
+  auto& mpi_comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+  mpi_comm_group->Barrier(true);
+  Py_RETURN_NONE;
+  HT_PY_FUNC_END
+}
+
 std::vector<PyMethodDef> InitCommGroupPyClassMethodDefs() {
   std::vector<PyMethodDef> ret = {{nullptr}};
   AddPyMethodDefs(ret, {
     {"init_comm_group", (PyCFunction) CommGroup_Init, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"local_device", (PyCFunction) CommGroup_GetLocalDevice, METH_VARARGS | METH_KEYWORDS, nullptr }, 
-    {"global_device_group", (PyCFunction) CommGroup_GetGlobalDeviceGroup, METH_VARARGS | METH_KEYWORDS, nullptr },         
+    {"global_device_group", (PyCFunction) CommGroup_GetGlobalDeviceGroup, METH_VARARGS | METH_KEYWORDS, nullptr },    
+    {"global_comm_barrier", (PyCFunction) CommGroup_GlobalCommBarrier, METH_VARARGS | METH_KEYWORDS, nullptr },     
     {nullptr}
   });
   

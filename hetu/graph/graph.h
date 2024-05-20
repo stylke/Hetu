@@ -101,6 +101,23 @@ class Graph {
     return params;
   }
 
+  TensorCRefList params_and_opt_vars() const {
+    TensorCRefList params_and_opt_vars;
+    for (auto& op_id : _parameter_ops) {
+      auto it = _op_indexing.find(op_id);
+      HT_ASSERT(it != _op_indexing.end());
+      Operator::for_each_output_tensor(it->second, 
+        [&](const Tensor& tensor) { params_and_opt_vars.emplace_back(tensor); });
+    }
+    for (auto& op_id : _optimizer_variable_ops) {
+      auto it = _op_indexing.find(op_id);
+      HT_ASSERT(it != _op_indexing.end());
+      Operator::for_each_output_tensor(it->second, 
+        [&](const Tensor& tensor) { params_and_opt_vars.emplace_back(tensor); });
+    }
+    return params_and_opt_vars;
+  }
+
   std::unordered_set<TensorId> param_ids() const {
     std::unordered_set<TensorId> param_ids;
     for (auto& op_id : _parameter_ops) {
@@ -174,8 +191,18 @@ class Graph {
     _parameter_ops.insert(id);
   }
 
+  virtual void MarkOpAsOptimizerVariable(OpId id) {
+    auto it = _op_indexing.find(id);
+    HT_VALUE_ERROR_IF(it == _op_indexing.end())
+      << "Operator with id " << id << " is not in graph " << name();
+    HT_VALUE_ERROR_IF(!is_variable_op(it->second))
+      << "Cannot mark a non-variable op " << it->second << " as a parameter";
+    _optimizer_variable_ops.insert(id);
+  }
+
   virtual void RemoveOp(Operator& op) {
     _parameter_ops.erase(op->id());
+    _optimizer_variable_ops.erase(op->id());
     _source_ops.erase(op->id());
     _sink_ops.erase(op->id());
     _op_out_degrees.erase(op->id());
@@ -244,6 +271,7 @@ class Graph {
     _op_indexing.clear();
     _preserved_data.clear();
     _parameter_ops.clear();
+    _optimizer_variable_ops.clear();
     _source_ops.clear();
     _sink_ops.clear();
   }
@@ -267,6 +295,7 @@ class Graph {
 
   std::unordered_map<OpId, Operator> _op_indexing;
   std::unordered_set<OpId> _parameter_ops;
+  std::unordered_set<OpId> _optimizer_variable_ops;
   std::unordered_set<OpId> _source_ops;
   std::unordered_set<OpId> _sink_ops;
   
@@ -320,6 +349,30 @@ class Graph {
     return *(it->second);
   }
 
+  static void DeleteGraph(GraphId graph_id) {
+    HT_VALUE_ERROR_IF(graph_id >= Graph::_global_graphs.size())
+      << "Graph with id " << graph_id << " does not exist";
+    const auto& graph_name = Graph::_global_graphs[graph_id]->name();
+    auto it = Graph::_name_to_graphs.find(graph_name);
+    HT_VALUE_ERROR_IF(it == Graph::_name_to_graphs.end())
+      << "Graph with name \"" << graph_name << "\" does not exist";
+    Graph::_global_graphs[graph_id]->Clear();
+    Graph::_global_graphs[graph_id] = nullptr;
+    Graph::_name_to_graphs.erase(it);
+  }
+ 
+  static void DeleteGraph(const GraphName& graph_name) {
+    auto it = Graph::_name_to_graphs.find(graph_name);
+    HT_VALUE_ERROR_IF(it == Graph::_name_to_graphs.end())
+      << "Graph with name \"" << graph_name << "\" does not exist";
+    auto graph_id = it->second->id();
+    HT_VALUE_ERROR_IF(graph_id >= Graph::_global_graphs.size())
+      << "Graph with id " << graph_id << " does not exist";
+    Graph::_global_graphs[graph_id]->Clear();
+    Graph::_global_graphs[graph_id] = nullptr;
+    Graph::_name_to_graphs.erase(it);
+  }
+
   static Graph& get_default_eager_graph() {
     Graph::InitOnce();
     return *Graph::_default_eager_graph;
@@ -356,6 +409,11 @@ class Graph {
   static void MarkAsParameter(const Tensor& tensor) {
     Graph::GetGraph(tensor->graph_id())
       .MarkOpAsParameter(tensor->producer_id());
+  }
+
+  static void MarkAsOptimizerVariable(const Tensor& tensor) {
+    Graph::GetGraph(tensor->graph_id())
+      .MarkOpAsOptimizerVariable(tensor->producer_id());
   }
 
   static inline OpCRefList GetProducerOpCRefList(const TensorList& tensors) {

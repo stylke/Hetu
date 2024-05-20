@@ -102,6 +102,16 @@ NDArray TensorDef::get_or_compute() {
   return graph().GetOrCompute(get_self());
 }
 
+void TensorDef::merge_strategy(Tensor& tensor) {
+  for (const auto& ds_union : tensor->ds_hierarchy().raw_data()) {
+    _ds_hierarchy.add(ds_union);
+  }
+  HT_ASSERT(_ds_hierarchy.size() == 0 || _ds_hierarchy.size() == graph().NUM_STRATEGY)
+    << name() << ": please set the correct NUM_STRATEGY of the graph before merge strategy"
+    << ", found _ds_hierarchy.size() = " << _ds_hierarchy.size()
+    << " but graph().NUM_STRATEGY = " << graph().NUM_STRATEGY;
+}
+
 size_t TensorDef::num_strategy() const {
   return graph().NUM_STRATEGY;
 }
