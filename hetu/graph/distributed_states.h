@@ -132,6 +132,22 @@ class DistributedStates {
   Device _placement;
 };
 
+class SplitPattern {
+ public:
+  SplitPattern(bool contiguous) : _contiguous(contiguous) {};
+
+  bool is_contiguous() const {
+    return _contiguous;
+  }
+
+  bool check_equal(const SplitPattern& another) const {
+    return _contiguous == another.is_contiguous();
+  }
+
+ protected:
+  bool _contiguous;
+};
+
 #define NULL_HETERO_DIM -3
 
 class DistributedStatesUnion {
@@ -144,6 +160,14 @@ class DistributedStatesUnion {
       HT_ASSERT(hetero_dim != NULL_HETERO_DIM)
         << "hetero size must be 1 if the hetero dim is NULL";
     }
+  }
+
+  const SplitPattern& split_pattern() const {
+    return _split_pattern;
+  }
+
+  void set_split_pattern(const SplitPattern& split_pattern) {
+    _split_pattern = split_pattern;
   }
 
   bool is_hetero() const {
@@ -255,6 +279,7 @@ class DistributedStatesUnion {
  protected:
   DistributedStatesList _union;
   int32_t _hetero_dim{NULL_HETERO_DIM};
+  SplitPattern _split_pattern{SplitPattern(true)};
 };
 
 class DistributedStatesHierarchy {

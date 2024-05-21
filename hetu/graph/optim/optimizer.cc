@@ -42,7 +42,7 @@ Tensor Optimizer::MakeStates(const Tensor& variable, const Tensor& grad, const O
   const auto& grad_ds_hierarchy = grad->ds_hierarchy(); 
   // HT_ASSERT (ds_variable.is_valid() && ds_grad.is_valid()) 
   //   << "Diastributed States for varibale " << variable << " must be valid!";  
-
+  // HT_LOG_INFO << variable->name() + "_" + state_name << " directly use grad " << grad << ": " << grad_ds_hierarchy.get(1).ds_union_info();
   Tensor states = MakeParallelVariableOp(ZerosInitializer(), grad->global_shape(),
                                          grad_ds_hierarchy, {0}, grad->dtype(), false,
                                          OpMeta()

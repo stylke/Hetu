@@ -372,15 +372,22 @@ void CommOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   output->set_distributed_states(ds_dst);
 }
 
-void CommOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void CommOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                    TensorList& outputs, const OpMeta& op_meta) const {
   int32_t hetero_dim = NULL_HETERO_DIM;
+  SplitPattern split_pattern = SplitPattern(true);
   if (_dst_ds_hierarchy.size() == 1) { // for comm op created in exec_graph, without multi ds
     hetero_dim = _dst_ds_hierarchy.get(0).hetero_dim();
+    split_pattern = _dst_ds_hierarchy.get(0).split_pattern();
   } else { // for comm op created in define_and_run_graph, with multi ds
     hetero_dim = _dst_ds_hierarchy.get(outputs.at(0)->graph().CUR_STRATEGY_ID).hetero_dim();
+    split_pattern = _dst_ds_hierarchy.get(outputs.at(0)->graph().CUR_STRATEGY_ID).split_pattern();
   }
   outputs.at(0)->cur_ds_union().set_hetero_dim(hetero_dim);
+  // workaround
+  // set split pattern here
+  // only here
+  outputs.at(0)->cur_ds_union().set_split_pattern(split_pattern);
 }
 
 bool CommOpImpl::DoMapToParallelDevices(Operator& op,

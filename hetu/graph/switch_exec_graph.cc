@@ -560,14 +560,19 @@ void SwitchExecGraph::CreateParamBlock(ParamBlock& block,
 // 将ParamBlock划分成OwnedParamSlice（抽象）
 // 切分param成ParamSliceInstance（实际的tensor）
 void SwitchExecGraph::MakeAllParamSlices(const Tensor& param, ParamBlock& block, 
-                                    const Device& device, const DeviceGroup& group,
-                                    std::vector<int32_t>& slice_num, std::vector<int32_t>& slice_relative_num,
-                                    const std::unordered_map<int32_t, int32_t>& state,
-                                    const std::vector<int32_t>& multiple, int32_t dim) {
+                                         const Device& device, const DeviceGroup& group,
+                                         std::vector<int32_t>& slice_num, std::vector<int32_t>& slice_relative_num,
+                                         const std::unordered_map<int32_t, int32_t>& state,
+                                         const std::vector<int32_t>& multiple, int32_t dim,
+                                         bool is_uncontiguous, int32_t uncontiguous_ordinal, 
+                                         int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple) {
   if (dim == multiple.size()) {
     auto& param_slice = block.GetParamSlice(slice_num);
     HTShape indices(slice_relative_num.begin(), slice_relative_num.end()); // int32_t -> int64_t
     HTShape splits(multiple.begin(), multiple.end()); // int32_t -> int64_t
+    if (is_uncontiguous) {
+      splits.at(0) /= uncontiguous_multiple;
+    }
     // 都先进行split
     auto split_output = MakeSplitOp(param, 
                                     indices, 
@@ -593,10 +598,26 @@ void SwitchExecGraph::MakeAllParamSlices(const Tensor& param, ParamBlock& block,
   if (it != state.end()) {
     basic_slice_num = it->second * multiple[dim];
   }
+  // 非连续切分
+  // 目前只支持在dim0上（zero的optimizer states）
+  // 更复杂的情形用不太到
+  if (dim == 0 && is_uncontiguous) {
+    for (int32_t i = uncontiguous_ordinal, j = 0; i < multiple[dim] / uncontiguous_slice_multiple; i += uncontiguous_multiple, j++) {
+      for (int32_t k = 0; k < uncontiguous_slice_multiple; k++) {
+        slice_num[dim] = basic_slice_num + i * uncontiguous_slice_multiple + k;
+        slice_relative_num[dim] = j * uncontiguous_slice_multiple + k;
+        MakeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1, 
+                           is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple);
+      }
+    }   
+    return;  
+  }
+  // 其余正常的连续切分
   for (int32_t i = 0; i < multiple[dim]; ++i) {
     slice_num[dim] = basic_slice_num + i;
     slice_relative_num[dim] = i;
-    MakeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1);
+    MakeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1,
+                       is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple);
   }                            
 }
 
@@ -607,7 +628,9 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
                                     const Device& device, const DeviceGroup& group,
                                     std::vector<int32_t>& slice_num, std::vector<int32_t>& slice_relative_num,
                                     const std::unordered_map<int32_t, int32_t>& state,
-                                    const std::vector<int32_t>& multiple, int32_t dim) {
+                                    const std::vector<int32_t>& multiple, int32_t dim,
+                                    bool is_uncontiguous, int32_t uncontiguous_ordinal, 
+                                    int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple) {
   if (dim == multiple.size()) {
     auto& param_slice = block.GetParamSlice(slice_num);
     const auto& owned_slice_instance = param_slice->OwnedSliceInst(0);
@@ -626,12 +649,30 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
   if (it != state.end()) {
     basic_slice_num = it->second * multiple[dim];
   }
-  for (int32_t i = 0; i < multiple[dim]; ++i) {
-    slice_num[dim] = basic_slice_num + i;
-    slice_relative_num[dim] = i;
-    Tensor merged_slice = MergeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1);
-    merged_slices.push_back(std::move(merged_slice));
-  }  
+  // 非连续切分
+  // 目前只支持在dim0上（zero的optimizer states）
+  // 更复杂的情形用不太到
+  if (dim == 0 && is_uncontiguous) {
+    for (int32_t i = uncontiguous_ordinal, j = 0; i < multiple[dim] / uncontiguous_slice_multiple; i += uncontiguous_multiple, j++) {
+      for (int32_t k = 0; k < uncontiguous_slice_multiple; k++) {
+        slice_num[dim] = basic_slice_num + i * uncontiguous_slice_multiple + k;
+        slice_relative_num[dim] = j * uncontiguous_slice_multiple + k;
+        Tensor merged_slice = MergeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1,
+                                                  is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple);
+        merged_slices.push_back(std::move(merged_slice));
+      }
+    }   
+  }
+  // 其余正常的连续切分
+  else {
+    for (int32_t i = 0; i < multiple[dim]; ++i) {
+      slice_num[dim] = basic_slice_num + i;
+      slice_relative_num[dim] = i;
+      Tensor merged_slice = MergeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1,
+                                                is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple);
+      merged_slices.push_back(std::move(merged_slice));
+    }  
+  }
   auto concatenate_name = "concat_" + param->name() + "_at_dim_" + std::to_string(dim);
   auto concatenate_output = MakeConcatenateOp(std::move(merged_slices), dim, 
                                               OpMeta().set_name(concatenate_name).set_is_deduce_states(false));         
@@ -655,9 +696,22 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
   // safety check
   HT_ASSERT(src_ds_union.size() == src_group_union.size() && dst_ds_union.size() == dst_group_union.size())
     << "union size mismatches";
-  HT_ASSERT((src_ds_union.hetero_dim() == -1 || src_ds_union.hetero_dim() == NULL_HETERO_DIM)
-            && (dst_ds_union.hetero_dim() == -1 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM))
-    << "hetero dim wrong";
+  bool src_uncontiguous = (src_ds_union.hetero_dim() == 0 && !src_ds_union.split_pattern().is_contiguous());
+  bool dst_uncontiguous = (dst_ds_union.hetero_dim() == 0 && !dst_ds_union.split_pattern().is_contiguous());
+  // 目前支持切换
+  // 1、非异构
+  // 2、异构维度是dup
+  // 3、异构维度是split0且非连续切分
+  // 其中3主要是针对开zero后的optimizer states
+  HT_ASSERT((src_ds_union.hetero_dim() == -1 
+            || src_ds_union.hetero_dim() == NULL_HETERO_DIM 
+            || src_uncontiguous)
+            && (dst_ds_union.hetero_dim() == -1 
+            || dst_ds_union.hetero_dim() == NULL_HETERO_DIM
+            || dst_uncontiguous))
+    << "hetero dim wrong for " << after_param
+    << ", found src ds union is " << src_ds_union.ds_union_info()
+    << ", and dst ds union is " << dst_ds_union.ds_union_info();
   size_t src_union_size = src_ds_union.size();
   size_t dst_union_size = dst_ds_union.size();
   DistributedStatesList local_src_ds_list, local_dst_ds_list;
@@ -683,8 +737,15 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
   std::vector<int32_t> block_shape;
   HTShape slice_shape;
   // key为union dim
-  std::unordered_map<size_t, std::vector<int32_t>> src_multiple;
+  // 最终最小的切分
+  std::unordered_map<size_t, std::vector<int32_t>> src_multiple; 
   std::unordered_map<size_t, std::vector<int32_t>> dst_multiple;
+  // uncontiguous split pattern的切分
+  int32_t src_uncontiguous_multiple = src_union_size; 
+  int32_t dst_uncontiguous_multiple = dst_union_size; 
+  // uncontiguous split pattern的切分下slice相对于最终的mutual slice的切分
+  int32_t src_uncontiguous_slice_multiple = 1; 
+  int32_t dst_uncontiguous_slice_multiple = 1; 
   // 获得最小粒度的块划分
   int32_t param_dims = global_shape.size(); // size_t -> int32_t
   for (int32_t key = -2; key < param_dims; ++key) {
@@ -710,7 +771,24 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
     if (key == -1) {
       continue;
     }
+    // hetero & zero
+    if (key == 0 && src_uncontiguous) {
+      max_src_dim *= src_uncontiguous_multiple;
+    }
+    if (key == 0 && dst_uncontiguous) {
+      max_dst_dim *= dst_uncontiguous_multiple;
+    }
     auto max_dim = std::max(max_src_dim, max_dst_dim);
+    if (key == 0 && src_uncontiguous) {
+      HT_ASSERT(max_dim % max_src_dim == 0)
+        << "only support scaling by an integer";
+      src_uncontiguous_slice_multiple = max_dim / max_src_dim;
+    }
+    if (key == 0 && dst_uncontiguous) {
+      HT_ASSERT(max_dim % max_dst_dim == 0)
+        << "only support scaling by an integer";
+      dst_uncontiguous_slice_multiple = max_dim / max_dst_dim;
+    }
     block_shape.push_back(max_dim); 
     slice_shape.push_back(global_shape.at(key) / max_dim);
     for (size_t i = 0; i < src_union_size; i++) {
@@ -759,6 +837,9 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
       HTShape curr_device_input_local_shape(global_shape.size());
       for (size_t d = 0; d < curr_device_input_local_shape.size(); d++) {
         curr_device_input_local_shape[d] = global_shape.at(d) / local_src_ds_list.at(union_dim).get_dim(d);
+        if (d == 0 && src_uncontiguous) {
+          curr_device_input_local_shape[d] = curr_device_input_local_shape[d] / src_uncontiguous_multiple;
+        }
       }
       comm_input->set_symbolic_shape(curr_device_input_local_shape);
       comm_input->set_shape(curr_device_input_local_shape);
@@ -766,7 +847,9 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
         << ", cur_state_index = " << cur_state_index << " and src_multiple = " << src_multiple.at(union_dim)
         << ", comm_input shape = " << curr_device_input_local_shape;
       MakeAllParamSlices(comm_input, *param_block_ptr, src_group.get(i), src_group, cur_slice_num, cur_slice_relative_num, 
-                         cur_state_index, src_multiple.at(union_dim), 0);
+                         cur_state_index, src_multiple.at(union_dim), 0,
+                         src_uncontiguous, union_dim, 
+                         src_uncontiguous_multiple, src_uncontiguous_slice_multiple);
     }
   }
   HT_LOG_DEBUG << "set comm input shape back to " << input_local_shape;
@@ -793,7 +876,17 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
       HT_LOG_DEBUG << local_device << ": MergeAllParamSlices for tensor " << after_param << " at device " << dst_group.get(i)
         << ", cur_state_index = " << cur_state_index << " and dst_multiple = " << dst_multiple;
       auto result = MergeAllParamSlices(after_param, *param_block_ptr, dst_group.get(i), dst_group, cur_slice_num, cur_slice_relative_num, 
-                                        cur_state_index, dst_multiple.at(union_dim), 0);
+                                        cur_state_index, dst_multiple.at(union_dim), 0,
+                                        dst_uncontiguous, union_dim, 
+                                        dst_uncontiguous_multiple, dst_uncontiguous_slice_multiple);
+      HT_ASSERT(result->shape() == after_param->shape())
+        << "result shape mismatches for " << after_param
+        << ", the global shape is " << global_shape
+        << ", the slice shape is " << slice_shape
+        << ", the src ds union is " << src_ds_union.ds_union_info()
+        << ", the dst ds union is " << dst_ds_union.ds_union_info()
+        << ", the shape in comm graph is " << result->shape()
+        << ", but the shape in after graph is " << after_param->shape();
       // 如果是local的result
       // 记录result以及其与after graph param的映射
       if (local_device == dst_group.get(i)) {
@@ -1569,6 +1662,11 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
       auto& output = op->output(0);
       auto output_data = NDArray(output->meta(), _concat_buffer->AsStorage(), _concat_buffer->GetElementOffest(output));
       runtime_ctx.add_runtime_allocation(output->id(), output_data);
+    }
+    // 其余情况都是一些inplace的op
+    else {
+      HT_ASSERT(is_slice_op(op) || (is_concat_op(op) && op->num_inputs() == 1))
+        << op << " with inputs " << op->inputs() << " doesn't have pre-allocated concat buffer";
     }
     // 正常按照算子的逻辑进行处理
     NDArrayList input_vals;

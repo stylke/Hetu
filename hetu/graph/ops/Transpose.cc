@@ -84,7 +84,7 @@ void TransposeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outpu
   outputs.at(0)->set_distributed_states({device_num, new_states, new_order});     
 }
 
-void TransposeOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void TransposeOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                         TensorList& outputs, const OpMeta& op_meta) const {
   HTAxes perm = get_perms();
   auto get_perm_index = [&](int32_t key) -> int32_t {

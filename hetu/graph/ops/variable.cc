@@ -81,6 +81,7 @@ Tensor MakeVariableOp(const Initializer& init, HTShape shape,
       out->set_distributed_states(ds);
     }
     out->cur_ds_union().set_hetero_dim(ds_hierarchy.get(cur_strategy_id).hetero_dim());
+    out->cur_ds_union().set_split_pattern(ds_hierarchy.get(cur_strategy_id).split_pattern());
   }
   graph.CUR_STRATEGY_ID = 0;
   graph.CUR_HETERO_ID = 0;
@@ -116,6 +117,7 @@ Tensor MakeVariableOp(NDArray provided_data, bool copy_provided_data,
       out->set_distributed_states(ds);
     }
     out->cur_ds_union().set_hetero_dim(ds_hierarchy.get(cur_strategy_id).hetero_dim());
+    out->cur_ds_union().set_split_pattern(ds_hierarchy.get(cur_strategy_id).split_pattern());
   }
   graph.CUR_STRATEGY_ID = 0;
   graph.CUR_HETERO_ID = 0;
@@ -175,6 +177,7 @@ Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape,
       out->set_distributed_states(ds);
     }
     out->cur_ds_union().set_hetero_dim(ds_hierarchy.get(cur_strategy_id).hetero_dim());
+    out->cur_ds_union().set_split_pattern(ds_hierarchy.get(cur_strategy_id).split_pattern());
   }
   graph.CUR_STRATEGY_ID = 0;
   graph.CUR_HETERO_ID = 0;
@@ -211,6 +214,7 @@ Tensor MakeParallelVariableOp(NDArray provided_data,
       out->set_distributed_states(ds);
     }
     out->cur_ds_union().set_hetero_dim(ds_hierarchy.get(cur_strategy_id).hetero_dim());
+    out->cur_ds_union().set_split_pattern(ds_hierarchy.get(cur_strategy_id).split_pattern());
   }
   graph.CUR_STRATEGY_ID = 0;
   graph.CUR_HETERO_ID = 0;
@@ -246,6 +250,7 @@ Tensor MakeParallelVariableOp(NDArrayList multi_provided_data,
       out->set_distributed_states(ds);
     }
     out->cur_ds_union().set_hetero_dim(ds_hierarchy.get(cur_strategy_id).hetero_dim());
+    out->cur_ds_union().set_split_pattern(ds_hierarchy.get(cur_strategy_id).split_pattern());
   }
   graph.CUR_STRATEGY_ID = 0;
   graph.CUR_HETERO_ID = 0;

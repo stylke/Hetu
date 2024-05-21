@@ -229,30 +229,35 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
   }
   HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": alloc exec variable " << tensor;
   // TODO: check meta is valid & maybe we can use non-blocking stream?
-  if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()) {
-    if (_use_origin_param_and_optimizer_buffer) {
-      HT_ASSERT(_origin_param_and_optimizer_buffer->HasTensor(tensor))
-        << "Cannot find param " << tensor << " in the origin param and optimizer buffer";
-      // alloc on-the-fly
-      if (!_origin_param_and_optimizer_buffer->IsAllocated()) {
-        _origin_param_and_optimizer_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
-      }
-      _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
-                                              _origin_param_and_optimizer_buffer->AsStorage(), 
-                                              _origin_param_and_optimizer_buffer->GetElementOffest(tensor));
-    } else {
-      HT_ASSERT(_origin_param_buffer->HasTensor(tensor))
-        << "Cannot find param " << tensor << " in the origin param buffer";
-      // alloc on-the-fly
-      if (!_origin_param_buffer->IsAllocated()) {
-        _origin_param_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
-      }
-      _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
-                                              _origin_param_buffer->AsStorage(), 
-                                              _origin_param_buffer->GetElementOffest(tensor));
+  bool is_param = (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end());
+  bool is_optvar = (_optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end());
+  if (_use_origin_param_and_optimizer_buffer && (is_param || is_optvar)) {
+    HT_ASSERT(_origin_param_and_optimizer_buffer->HasTensor(tensor))
+      << "Cannot find param " << tensor << " in the origin param and optimizer buffer";
+    // alloc on-the-fly
+    if (!_origin_param_and_optimizer_buffer->IsAllocated()) {
+      _origin_param_and_optimizer_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
     }
-  } else {
-    // 另外一些是variable但不是parameter的正常走mempool
+    _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
+                                            _origin_param_and_optimizer_buffer->AsStorage(), 
+                                            _origin_param_and_optimizer_buffer->GetElementOffest(tensor));
+  } 
+  // deprecated:
+  // 目前一定会使用origin_param_and_optimizer_buffer
+  else if (!_use_origin_param_and_optimizer_buffer && is_param) {
+    HT_ASSERT(_origin_param_buffer->HasTensor(tensor))
+      << "Cannot find param " << tensor << " in the origin param buffer";
+    // alloc on-the-fly
+    if (!_origin_param_buffer->IsAllocated()) {
+      _origin_param_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
+    }
+    _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
+                                            _origin_param_buffer->AsStorage(), 
+                                            _origin_param_buffer->GetElementOffest(tensor));
+  }
+  // 其余不在buffer中
+  else {
+    // 另外一些是variable但不是param/optvar的正常走mempool
     // 分配的是碎片化的显存
     // mempool debug use
     HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": on-the-fly alloc variable " << tensor
@@ -2150,15 +2155,10 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms" << std::endl;
       if (_straggler_log_file_path != "") {
-        std::ofstream file;
         std::string suffix = "_" + std::to_string(hetu::impl::comm::GetWorldRank()) + ".json";
-        file.open(_straggler_log_file_path + suffix, std::ios_base::app);
+        ofstream_sync file(_straggler_log_file_path + suffix, std::ios_base::app);
         if (file.is_open()) {
-          file << "{" << std::endl;
-          file << "\"total run time\": " << COST_MSEC(run) << "," << std::endl;
-          file << "\"compute time\": " << compute_time << std::endl;
-          file << "}," << std::endl; 
-          file.close();
+          file << compute_time << std::endl;
         } else {
           HT_RUNTIME_ERROR << "Error opening the file";
         }

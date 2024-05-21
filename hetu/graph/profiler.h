@@ -2,6 +2,11 @@
 
 #include "hetu/core/device.h"
 #include "hetu/impl/memory/CUDACachingMemoryPool.cuh"
+#include <string.h>
+#include <fstream>
+#include <iostream>
+#include <unistd.h>
+#include <fcntl.h>
 
 namespace hetu {
 namespace graph {
@@ -64,6 +69,44 @@ std::shared_ptr<CUDAProfiler> GetCUDAProfiler(const Device& device);
 std::ostream& operator<<(std::ostream& os, const CUDAMemoryInfo& memory_info);
 
 std::ostream& operator<<(std::ostream& os, const MicroBatchMemoryInfo& micro_batch_memory_info);
+
+class ofstream_sync : public std::ofstream {
+  public:
+    ofstream_sync(const std::string& filename, std::ios_base::openmode mode = std::ios_base::out)
+      : std::ofstream(filename, mode),
+        _filename(filename),
+        _mode(mode) {
+    }
+
+    ~ofstream_sync() {
+      this->flush();
+      this->close();
+      // 再次打开文件并将系统缓存同步到磁盘
+      auto fd = ::open(_filename.c_str(), convert_mode(_mode));
+      if (fd == -1) {
+        HT_RUNTIME_ERROR << "Failed to open file " << _filename;
+      }
+      if (fsync(fd) == -1) {
+        ::close(fd);
+        HT_RUNTIME_ERROR << "Failed to fsync file " << _filename;
+      }
+      ::close(fd);
+    }
+
+  private:
+    std::string _filename;
+    std::ios_base::openmode _mode;
+
+    // 将ios_base::openmode转换为open系统调用使用的标志
+    static int convert_mode(std::ios_base::openmode mode) {
+      int flags = 0;
+      if (mode & std::ios_base::in) flags |= O_RDONLY;
+      if (mode & std::ios_base::out) flags |= O_WRONLY | O_CREAT;
+      if (mode & std::ios_base::app) flags |= O_APPEND;
+      if (mode & std::ios_base::trunc) flags |= O_TRUNC;
+      return flags;
+    }
+};
 
 } // namespace graph
 } // namespace hetu

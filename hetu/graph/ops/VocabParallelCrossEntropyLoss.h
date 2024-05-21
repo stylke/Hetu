@@ -46,7 +46,7 @@ class VocabParallelCrossEntropyOpImpl : public LossOpImpl {
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;  
 
-  void DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+  void DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                          TensorList& outputs, const OpMeta& op_meta) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
@@ -94,7 +94,7 @@ class VocabParallelCrossEntropyGradientOpImpl : public LossGradientOpImpl {
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;  
 
-  void DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+  void DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                          TensorList& outputs, const OpMeta& op_meta) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,

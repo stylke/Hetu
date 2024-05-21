@@ -149,7 +149,7 @@ void VocabParallelCrossEntropyOpImpl::DoDeduceStates(
   outputs.at(0)->set_distributed_states(ds_labels);
 }
 
-void VocabParallelCrossEntropyOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void VocabParallelCrossEntropyOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
   TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(1));
 }
@@ -219,7 +219,7 @@ void VocabParallelCrossEntropyGradientOpImpl::DoDeduceStates(
   outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
 }
 
-void VocabParallelCrossEntropyGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void VocabParallelCrossEntropyGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
   TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }

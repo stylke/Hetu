@@ -158,26 +158,19 @@ class Trainer:
     def begin_profiling(self, strategy_args, comm_args):
         os.makedirs(os.path.basename(os.path.dirname(self.log_file)), exist_ok=True)
         with open(self.log_file, "w") as file:
-            file.write("[\n")
+            file.truncate(0)
+            file.flush()
+            os.fsync(file.fileno())
         os.environ['HETU_STRAGGLER_LOG_FILE'] = self.log_file_path
         
     def end_profiling(self, strategy_args, comm_args):
         assert os.path.exists(self.log_file) and "HETU_STRAGGLER_LOG_FILE" in os.environ, \
             "the log file and corresponding env is not existed" 
-        ht.global_comm_barrier()
-        with open(self.log_file, "r") as file:
-            content = file.read()
-        # 查找最后一个逗号的位置并删除它，然后添加右括号
-        content = content.rstrip() 
-        if content.endswith(","):
-            content = content[:-1] 
-        content += "\n]"
-        with open(self.log_file, "w") as file:
-            file.write(content)
-            file.flush()  
+        with open(self.log_file, "a") as file:
+            file.write("EOF")
+            file.flush()
             os.fsync(file.fileno())
         del os.environ["HETU_STRAGGLER_LOG_FILE"]
-        ht.global_comm_barrier()
         
     def detect_straggler_and_plan(
         self, 
@@ -189,13 +182,21 @@ class Trainer:
         unused_devices = []
         sliding_window = SLIDING_WINDOW
         
+        ht.global_comm_barrier()
         for rank_idx in range(comm_args.all_devices.num_devices):
             device_idx = strategy_args.rank_to_device_mapping[rank_idx]
             curr_log_file = self.log_file_path + "_" + str(device_idx) + ".json"
-            with open(curr_log_file, "r") as file:
-                # print(f"{comm_args.local_device}: reading {curr_log_file}")
-                content = file.read()
-                straggler_info: List[Dict[str, float]] = ast.literal_eval(content)
+            straggler_info: List[float] = []
+            # polling
+            while True:
+                with open(curr_log_file, "r") as file:
+                    content = file.readlines()
+                    # print(f"{comm_args.local_device}: reading {curr_log_file}, content is {content}")
+                    if content[-1] != "EOF":
+                        continue
+                    straggler_info = [float(line.strip()) for line in content[1:-1]]
+                    assert len(straggler_info) == sliding_window, "file length wrong"
+                    break
             if rank_idx in strategy_args.suspended_rank_list:
                 # 已经是straggler了
                 # 通过workload上的profile信息进行分析
@@ -207,7 +208,7 @@ class Trainer:
             else:
                 # 还不是straggler
                 # 通过compute stream上的profile信息进行分析
-                straggler_compute_time = np.array([x["compute time"] for x in straggler_info[-sliding_window:]]).mean()
+                straggler_compute_time = np.array(straggler_info).mean()
                 straggler_pipeline = rank_idx % (strategy_args.dp * strategy_args.tp) // strategy_args.tp
                 straggler_stage = rank_idx // (strategy_args.dp * strategy_args.tp)
                 straggler_layers = strategy_args.hetero_layers[straggler_pipeline][straggler_stage]
@@ -220,7 +221,8 @@ class Trainer:
                 alpha = self.build_ctxs.hetero_tp_alpha[int(math.log2(strategy_args.tp // curr_tp))]
                 straggler_ratio = ((straggler_compute_time / straggler_layers / straggler_mbn / alpha) 
                     / (self.build_ctxs.normal_compute_time / self.build_ctxs.normal_layers / self.build_ctxs.normal_mbn))
-                used_devices_sr[device_idx] = straggler_ratio
+                used_devices_sr[device_idx] = straggler_ratio          
+        ht.global_comm_barrier()
         
         new_strategy_model = StrategyModel(
             self.build_ctxs,
@@ -501,9 +503,11 @@ class Trainer:
         if envs.elastic:
             self.begin_profiling(strategy_args, comm_args)
         curr_consumed_samples = dataset_args.consumed_samples
-        cnt = 0
+        detect_and_plan_cnt = 0
         for epoch in range(dataset_args.epoch, dataset_args.epochs):
             for step in range(dataset_args.step, dataset_args.steps):
+                if envs.elastic: 
+                    detect_and_plan_cnt += 1
                 # load data for each dp
                 if train_iter:
                     micro_batches = []
@@ -565,7 +569,7 @@ class Trainer:
                         loss_out = results[0].numpy(force=True).mean()
                         print(f"{comm_args.local_device}: [Epoch {dataset_args.epoch}] (step {step}, consumed_samples = {curr_consumed_samples}): loss = {loss_out:.3f}, time = {end_time - start_time:.4f}")
                 # detect stragglers and judge if the system need to switch strategy
-                if envs.elastic and cnt >= SLIDING_WINDOW and cnt % SLIDING_WINDOW == 0:
+                if envs.elastic and detect_and_plan_cnt == SLIDING_WINDOW + 1:
                     self.end_profiling(strategy_args, comm_args)
                     need_switch = self.detect_straggler_and_plan(strategy_args, comm_args)
                     if need_switch:
@@ -580,8 +584,8 @@ class Trainer:
                     # 不需要切换而可以继续训练
                     # 重新开始一个SLIDING_WINDOW的profiling
                     self.begin_profiling(strategy_args, comm_args)
+                    detect_and_plan_cnt = 0 
                 # 总共训练的iter
-                cnt += 1
             # epoch结束后要清空curr_consumed_samples
             curr_consumed_samples = 0
         return True, TrainerDatasetArgs(

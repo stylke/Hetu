@@ -693,7 +693,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     // 1、建立op和exec_op的映射
     // 2、给op和输出的tensor分配placement group union
     // 3、设置tensor的shape和ds_hierarchy
-    // 4、标记parameter并给即将创建的exec graph预先设置ParamBuffer
+    // 4、标记param/optvar并给即将创建的exec graph预先设置ParamBuffer
     // 5、给grad设置placement和buffer
     op_to_exec_op_mapping[op->id()] = exec_op;
     exec_op->MapToParallelDevices(pg_union);
@@ -704,6 +704,9 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
     if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
       Graph::MarkAsParameter(exec_op);
+    }
+    if (_optimizer_variable_ops.find(op->id()) != _optimizer_variable_ops.end()) {
+      Graph::MarkAsOptimizerVariable(exec_op);
     }
     if (is_optimizer_update_op(exec_op)) {
       Tensor& param = op->input(0);

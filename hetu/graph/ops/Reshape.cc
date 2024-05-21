@@ -121,7 +121,7 @@ void ArrayReshapeOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& ou
   outputs.at(0)->set_distributed_states(ds_output);
 }
 
-void ArrayReshapeOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void ArrayReshapeOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                            TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }
@@ -143,7 +143,7 @@ void ArrayReshapeGradientOpImpl::DoDeduceStates(const TensorList& inputs, Tensor
   outputs.at(0)->set_distributed_states(inputs.at(1)->get_distributed_states());    
 }
 
-void ArrayReshapeGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void ArrayReshapeGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                                    TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(1));
 }

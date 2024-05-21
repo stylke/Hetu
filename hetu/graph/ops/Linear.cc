@@ -164,7 +164,7 @@ void LinearOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   c->set_distributed_states({device_num, res_states, res_order});
 }
 
-void LinearOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void LinearOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                      TensorList& outputs, const OpMeta& op_meta) const {
   int32_t hetero_a = inputs_hetero_dim.at(0);
   int32_t hetero_b = inputs_hetero_dim.at(1);  

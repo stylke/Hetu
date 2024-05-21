@@ -402,7 +402,8 @@ std::string DistributedStatesUnion::ds_union_info() const {
       os << ", ";
     }
   }
-  os << "}, hetero dim = " << _hetero_dim;
+  os << "}, hetero dim = " << _hetero_dim
+    << ", is contiguous = " << _split_pattern.is_contiguous();
   return os.str();    
 }
 

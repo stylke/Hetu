@@ -62,7 +62,7 @@ void LayerNormOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outpu
   outputs.at(2)->set_distributed_states(ds_input); // save_var for backward
 }
 
-void LayerNormOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void LayerNormOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                         TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
   outputs.at(1)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
@@ -101,7 +101,7 @@ void LayerNormGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorLis
   outputs.at(2)->set_distributed_states(ds_bias_scale);
 }
 
-void LayerNormGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void LayerNormGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                                 TensorList& outputs, const OpMeta& op_meta) const {
   HT_ASSERT(inputs_hetero_dim.at(0) >= 0 && inputs_hetero_dim.at(0) < outputs.at(0)->ndim() - normalized_shape().size())
     << "Currently not support complex hetero dim deducing"
@@ -176,7 +176,7 @@ void FusedLayerNormOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& 
   outputs.at(2)->set_distributed_states(ds_input); // save_var for backward
 }
 
-void FusedLayerNormOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void FusedLayerNormOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                              TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
   outputs.at(1)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
@@ -215,7 +215,7 @@ void FusedLayerNormGradientOpImpl::DoDeduceStates(const TensorList& inputs, Tens
   outputs.at(2)->set_distributed_states(ds_bias_scale);
 }
 
-void FusedLayerNormGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void FusedLayerNormGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                                      TensorList& outputs, const OpMeta& op_meta) const {
   HT_ASSERT(inputs_hetero_dim.at(0) >= 0 && inputs_hetero_dim.at(0) < outputs.at(0)->ndim() - normalized_shape().size())
     << "Currently not support complex hetero dim deducing"

@@ -411,6 +411,10 @@ class Graph {
       .MarkOpAsParameter(tensor->producer_id());
   }
 
+  static void MarkAsOptimizerVariable(const Operator& op) {
+    Graph::GetGraph(op->graph_id()).MarkOpAsOptimizerVariable(op->id());
+  }
+
   static void MarkAsOptimizerVariable(const Tensor& tensor) {
     Graph::GetGraph(tensor->graph_id())
       .MarkOpAsOptimizerVariable(tensor->producer_id());

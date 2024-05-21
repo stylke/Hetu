@@ -291,6 +291,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
                   intra_ds_union.set_hetero_dim(-1);
                   if (original_ds.zero()) {
                     intra_ds_union.set_hetero_dim(0);
+                    intra_ds_union.set_split_pattern(SplitPattern(false));
                   }
                 } else {
                   HT_ASSERT(op->input(0)->cur_ds_union().hetero_dim() == NULL_HETERO_DIM)
@@ -387,6 +388,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
                   HT_ASSERT(dst_ds_union.hetero_dim() == 0 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM)
                     << "hetero dim in the union should be consistent";
                   dst_ds_union.set_hetero_dim(0);
+                  dst_ds_union.set_split_pattern(SplitPattern(false));
                 } 
                 // 暂时不会有其余情况
                 else {

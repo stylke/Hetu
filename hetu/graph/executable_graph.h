@@ -216,7 +216,7 @@ class ExecutableGraph : public Graph {
   Tensor2TensorMap _grad_grad_map; // 未substitue comm op前的grad到substitue comm op后的grad的映射
   Tensor2TensorMap _reversed_grad_grad_map; // substitue comm op后的grad到未substitue comm op前的grad的映射
   bool _use_current_grad_buffer{false};
-  bool _use_origin_param_and_optimizer_buffer{false};
+  bool _use_origin_param_and_optimizer_buffer{true};
   double _grad_scale; 
 
   // 记录上一个图的param切换完的event

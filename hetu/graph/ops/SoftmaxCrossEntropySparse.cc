@@ -56,7 +56,7 @@ void SCESOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   outputs.at(0)->set_distributed_states(ds_preds);
 }
 
-void SCESOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void SCESOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                    TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }
@@ -97,7 +97,7 @@ void SCESGradOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& output
   outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
 }
 
-void SCESGradOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void SCESGradOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                        TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }

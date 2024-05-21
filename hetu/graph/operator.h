@@ -281,7 +281,7 @@ class OpInterface : public shared_ptr_target {
     return DoDeduceStates(inputs, outputs, op_meta);
   }
 
-  inline void DeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+  inline void DeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                               TensorList& outputs, const OpMeta& op_meta) const {
     bool is_all_homo = true;
     for (const auto& input_hetero_dim : inputs_hetero_dim) {
@@ -296,7 +296,7 @@ class OpInterface : public shared_ptr_target {
       }
       return;
     }
-    return DoDeduceHeteroDim(inputs_hetero_dim, outputs, op_meta);
+    return DoDeduceHeterProp(inputs_hetero_dim, outputs, op_meta);
   }
 
   inline void DeduceStatesHierarchy(const TensorList& inputs, TensorList& outputs, 
@@ -350,7 +350,7 @@ class OpInterface : public shared_ptr_target {
   virtual void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                               const OpMeta& op_meta) const;
 
-  virtual void DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim, 
+  virtual void DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim, 
                                  TensorList& outputs, const OpMeta& op_meta) const;
 
   virtual void DoDeduceStatesHierarchy(const TensorList& inputs, TensorList& outputs, 

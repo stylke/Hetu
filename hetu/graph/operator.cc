@@ -35,7 +35,7 @@ void OpInterface::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   }
 }
 
-void OpInterface::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void OpInterface::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                     TensorList& outputs, const OpMeta& op_meta) const {
   HT_ASSERT(inputs_hetero_dim.size() > 0) << op_meta.name << ": distributed states hetero dim should be manually set when in_degree=0!";
   HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " " << op_meta.name << ": default copy states hetero dim from inputs";
@@ -91,8 +91,8 @@ void OpInterface::DoDeduceStatesHierarchy(const TensorList& inputs, TensorList& 
   }
   // 创建所有outputs的ds union并确定hetero dim
   graph.CREATE_STRATEGY = true;
-  // HT_LOG_WARN << "DeduceHeteroDim for " << op_meta.name;
-  DeduceHeteroDim(inputs_hetero_dim, outputs, op_meta);
+  // HT_LOG_WARN << "DeduceHeterProp for " << op_meta.name;
+  DeduceHeterProp(inputs_hetero_dim, outputs, op_meta);
   graph.CREATE_STRATEGY = false;
   // 依据是否为hetero
   // 创建所有outputs的ds union中的ds

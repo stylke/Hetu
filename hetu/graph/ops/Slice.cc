@@ -72,7 +72,7 @@ void SliceOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " slice op DoDeduceStates() finished";     
 }
 
-void SliceOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void SliceOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                     TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }
@@ -97,7 +97,7 @@ void SliceGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& o
   outputs.at(0)->set_distributed_states(inputs.at(1)->get_distributed_states());  
 }
 
-void SliceGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void SliceGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                             TensorList& outputs, const OpMeta& op_meta) const {
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(1));
 }

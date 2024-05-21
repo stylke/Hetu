@@ -366,7 +366,7 @@ class ParamBlock {
       size_t cnt = 1, sum = 0;
       for (int32_t i = size - 1; i >= 0; --i) {
         HT_ASSERT(slice_num[i] < _block_shape[i]) 
-          << "slice_num dim " << i << " is out of range"
+          << _block_name << ": slice_num dim " << i << " is out of range"
           << ", slice_num = " << slice_num << " and block_shape = " << _block_shape;
         sum += slice_num[i] * cnt;
         cnt *= _block_shape[i];
@@ -473,13 +473,17 @@ class SwitchExecGraph {
                             const Device& device, const DeviceGroup& group,
                             std::vector<int32_t>& slice_num, std::vector<int32_t>& slice_relative_num,
                             const std::unordered_map<int32_t, int32_t>& state,
-                            const std::vector<int32_t>& multiple, int32_t dim);
+                            const std::vector<int32_t>& multiple, int32_t dim,
+                            bool is_uncontiguous, int32_t uncontiguous_ordinal, 
+                            int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple);
 
     Tensor MergeAllParamSlices(const Tensor& param, ParamBlock& block, 
                                const Device& device, const DeviceGroup& group,
                                std::vector<int32_t>& slice_num, std::vector<int32_t>& slice_relative_num,
                                const std::unordered_map<int32_t, int32_t>& state,
-                               const std::vector<int32_t>& multiple, int32_t dim);
+                               const std::vector<int32_t>& multiple, int32_t dim,
+                               bool is_uncontiguous, int32_t uncontiguous_ordinal, 
+                               int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple);
     
     void MakeCommGraph(SWITCH_MODE switch_mode,
                        SWITCH_LEVEL switch_level);

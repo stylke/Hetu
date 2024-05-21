@@ -118,7 +118,7 @@ static DistributedStates MatMulDeduceStates(Tensor a, Tensor b, bool trans_a, bo
   return ds_c;
 }
 
-static int32_t MatMulDeduceHeteroDim(int32_t hetero_a, int32_t hetero_b, bool trans_a, bool trans_b) {
+static int32_t MatMulDeduceHeterProp(int32_t hetero_a, int32_t hetero_b, bool trans_a, bool trans_b) {
   if (trans_a && (hetero_a == 0 || hetero_a == 1)) {
     hetero_a = 1 - hetero_a;
   }
@@ -157,11 +157,11 @@ void MatMulOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   outputs.at(0)->set_distributed_states(ds_c);
 }
 
-void MatMulOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void MatMulOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                      TensorList& outputs, const OpMeta& op_meta) const {
   int32_t hetero_a = inputs_hetero_dim.at(0);
   int32_t hetero_b = inputs_hetero_dim.at(1);  
-  int32_t hetero_res = MatMulDeduceHeteroDim(hetero_a, hetero_b, trans_a(), trans_b()); 
+  int32_t hetero_res = MatMulDeduceHeterProp(hetero_a, hetero_b, trans_a(), trans_b()); 
   /* 
   HT_LOG_WARN << outputs.at(0) << " inputs hetero dim is " << hetero_a << " and " << hetero_b
     << ", and the output hetero dim is " << hetero_res;           
@@ -219,11 +219,11 @@ void MatMulGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& 
   outputs.at(0)->set_distributed_states(ds_c);
 }
 
-void MatMulGradientOpImpl::DoDeduceHeteroDim(const std::vector<int32_t>& inputs_hetero_dim,
+void MatMulGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                              TensorList& outputs, const OpMeta& op_meta) const {
   int32_t hetero_a = inputs_hetero_dim.at(0);
   int32_t hetero_b = inputs_hetero_dim.at(1);  
-  int32_t hetero_res = MatMulDeduceHeteroDim(hetero_a, hetero_b, trans_a(), trans_b());              
+  int32_t hetero_res = MatMulDeduceHeterProp(hetero_a, hetero_b, trans_a(), trans_b());              
   outputs.at(0)->cur_ds_union().set_hetero_dim(hetero_res);
 }
 
