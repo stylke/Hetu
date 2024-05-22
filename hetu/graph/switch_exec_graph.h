@@ -461,7 +461,8 @@ class SwitchExecGraph {
     }
     
     void SwitchParams(SWITCH_MODE switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM,
-                      SWITCH_LEVEL switch_level = SWITCH_LEVEL::EXEC);
+                      SWITCH_LEVEL switch_level = SWITCH_LEVEL::EXEC,
+                      std::string switch_name = "switch");
 
   protected:
     void CreateParamBlock(ParamBlock& block,

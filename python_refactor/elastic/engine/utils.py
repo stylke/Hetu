@@ -62,7 +62,7 @@ class TrainerCommArgs(Args):
         self.input_device_group_union: List[ht.DeviceGroup] = kwargs["input_device_group_union"]
         self.label_ds_union: ht.DistributedStatesUnion = kwargs["label_ds_union"]
         self.label_device_group_union: List[ht.DeviceGroup] = kwargs["label_device_group_union"]
-        self.local_device = kwargs["local_device"]
+        self.local_device: ht.device = kwargs["local_device"]
         self.all_devices: ht.DeviceGroup = kwargs["all_devices"]
         
 class TrainerEnvs(Args):

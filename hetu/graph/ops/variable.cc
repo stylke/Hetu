@@ -63,6 +63,9 @@ Tensor MakeVariableOp(const Initializer& init, HTShape shape,
   auto out = Graph::MakeOp(std::make_shared<VariableOpImpl>(
                            init, std::move(shape), dtype, requires_grad), TensorList(), 
                            std::move(op_meta.set_is_deduce_states(false)))->output(0);
+  if (ds_hierarchy.size() == 0) {
+    return out;
+  }
   // assign multi ds for variable
   auto& graph = out->graph();
   graph.CREATE_STRATEGY = true;
@@ -99,6 +102,9 @@ Tensor MakeVariableOp(NDArray provided_data, bool copy_provided_data,
                            std::move(provided_data), copy_provided_data, dtype,
                            requires_grad), TensorList(), 
                            std::move(op_meta.set_is_deduce_states(false)))->output(0);
+  if (ds_hierarchy.size() == 0) {
+    return out;
+  }
   // assign multi ds for variable
   auto& graph = out->graph();
   graph.CREATE_STRATEGY = true;

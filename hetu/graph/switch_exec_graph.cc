@@ -879,17 +879,17 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
                                         cur_state_index, dst_multiple.at(union_dim), 0,
                                         dst_uncontiguous, union_dim, 
                                         dst_uncontiguous_multiple, dst_uncontiguous_slice_multiple);
-      HT_ASSERT(result->shape() == after_param->shape())
-        << "result shape mismatches for " << after_param
-        << ", the global shape is " << global_shape
-        << ", the slice shape is " << slice_shape
-        << ", the src ds union is " << src_ds_union.ds_union_info()
-        << ", the dst ds union is " << dst_ds_union.ds_union_info()
-        << ", the shape in comm graph is " << result->shape()
-        << ", but the shape in after graph is " << after_param->shape();
       // 如果是local的result
       // 记录result以及其与after graph param的映射
       if (local_device == dst_group.get(i)) {
+        HT_ASSERT(result->shape() == after_param->shape())
+          << local_device << ": result shape mismatches for " << after_param
+          << ", the global shape is " << global_shape
+          << ", the slice shape is " << slice_shape
+          << ", the src ds union is " << src_ds_union.ds_union_info()
+          << ", the dst ds union is " << dst_ds_union.ds_union_info()
+          << ", the shape in comm graph is " << result->shape()
+          << ", but the shape in after graph is " << after_param->shape();
         _comm_results_mapping.insert(std::make_pair(result->id(), after_param));
         _comm_results.push_back(std::move(result));
       }
@@ -1395,7 +1395,9 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
 // context switch
 // 将before graph中的所有params以尽量高效的方式
 // 重新分配到after graph中
-void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_level) {
+void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, 
+                                   SWITCH_LEVEL switch_level, 
+                                   std::string switch_name) {
 
   // utils
   auto local_device = hetu::impl::comm::GetLocalDevice();
@@ -1501,7 +1503,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     // 结束对准备工作的profile
     if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
       TOK(switch_params_making);
-      HT_LOG_INFO << local_device << ": switch params making graph & plan time = " << COST_MSEC(switch_params_making) << " ms";
+      HT_LOG_INFO << local_device << ": " << switch_name << " making graph & plan time = " << COST_MSEC(switch_params_making) << " ms";
     }
   }
 
@@ -1801,7 +1803,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     */
     auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
     mpi_group->Barrier(true);
-    HT_LOG_INFO << local_device << ": switch running time = " << COST_MSEC(switch_params_running) << " ms";
+    HT_LOG_INFO << local_device << ": " << switch_name << " running time = " << COST_MSEC(switch_params_running) << " ms";
     char* switch_log_file = std::getenv("HETU_SWITCH_LOG_FILE");
     if (switch_log_file != nullptr && hetu::impl::comm::GetWorldRank() == 0) {
       std::ofstream file;
@@ -1824,7 +1826,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   
   // memory debug use
   // hetu::impl::comm::EmptyNCCLCache();
-  HT_LOG_INFO << local_device << ": switch from " << _switch_graph_pair.first->name()
+  HT_LOG_INFO << local_device << ": " << switch_name << " from " << _switch_graph_pair.first->name()
    << " to " << _switch_graph_pair.second->name() << " is done (async)";
   // HT_RUNTIME_ERROR << local_device << ": breakpoint";
 }
@@ -1946,7 +1948,7 @@ void SwitchExecGraph::ProfileRunningDetails() {
     recv_info_output << std::endl;
   }
 
-  HT_LOG_INFO << local_device << ": switch params running details: " << std::endl
+  HT_LOG_INFO << local_device << ": switch running details: " << std::endl
     << "*********************************************" << std::endl
     << "comm buffer num = " << comm_buffer_num << ", alloc time = " << comm_buffer_alloc_time << " ms" << std::endl
     << "comm buffer num = " << comm_buffer_num << ", free time = " << comm_buffer_free_time << " ms" << std::endl

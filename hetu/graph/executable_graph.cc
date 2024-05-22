@@ -1248,7 +1248,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   
   GetExecEnvs();
   TIK(run);
-  _run_level = run_level;
   _grad_scale = grad_scale;
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
@@ -1665,20 +1664,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     // update & cached execute plan 
     _execute_plan.update(local_placeholder_variable_ops, local_fw_topo, local_bw_topo, local_topo, dtype_transfer_tensor,
                          shared_weight_tensor, shared_weight_p2p, shared_weight_grad_p2p, accumulated_tensor, accumulated_ops);
-    // sync partially
-    std::vector<int> ranks;
-    for (const auto& stage : _pipeline_map[hetu::impl::comm::GetLocalDevice()]) {
-      for (const auto& device : stage.devices()) {
-        auto rank = hetu::impl::comm::DeviceToWorldRank(device);
-        if (std::find(ranks.begin(), ranks.end(), rank) == ranks.end()) {
-          ranks.push_back(rank);
-        }
-      }
-    }
-    if (ranks.size() >= 2) {
-      std::sort(ranks.begin(), ranks.end());
-      auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
-      comm_group->Barrier(true);
+    if (_used_ranks.size() >= 2) {
+      auto& mpi_comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(_used_ranks);
+      mpi_comm_group->Barrier(true);
     }
   }
   TOK(run);
@@ -1762,8 +1750,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   if (_pipeline_map.find(local_device) == _pipeline_map.end()) {
     HT_LOG_WARN << local_device << ": can't figure out which pipeline the local device belongs to"
       << ", so we just return";
-    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
-    comm_group->Barrier(true);
     return {};
   }
   auto& pipeline = _pipeline_map[local_device];
@@ -2016,8 +2002,10 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   bool is_analysis_perf = false;
   if (is_analysis_perf || _is_analysis_straggler) {
-    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
-    comm_group->Barrier(true);
+    if (_used_ranks.size() >= 2) {
+      auto& mpi_comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(_used_ranks);
+      mpi_comm_group->Barrier(true);
+    }
   }
   TOK(run);
   HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)
@@ -2155,8 +2143,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms" << std::endl;
       if (_straggler_log_file_path != "") {
-        std::string suffix = "_" + std::to_string(hetu::impl::comm::GetWorldRank()) + ".json";
-        ofstream_sync file(_straggler_log_file_path + suffix, std::ios_base::app);
+        ofstream_sync file(_straggler_log_file_path, std::ios_base::app);
         if (file.is_open()) {
           file << compute_time << std::endl;
         } else {

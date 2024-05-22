@@ -426,6 +426,8 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
       graph.CUR_STRATEGY_ID = 0;
     } else if (graph.type() == GraphType::EXECUTABLE) {
       deduce_states();
+    } else if (graph.type() == GraphType::EAGER) {
+      // eager graph no need to deduce states
     } else {
       HT_LOG_ERROR << "deduce states do not support this graph type: " << graph.type();
     }

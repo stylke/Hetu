@@ -14,13 +14,16 @@ import builtins # bool is resovled as hetu.bool
 cur_graph_contexts = []
 
 class _OpContext(object):
-    def __init__(self, eager_device=None, devices=None, stream_index=None, extra_deps=None):
+    def __init__(self, 
+            eager_device=None, 
+            device_group_hierarchy=None, 
+            stream_index=None, 
+            extra_deps=None
+        ):
         self.eager_device = eager_device
-        self.devices = devices
+        self.device_group_hierarchy = device_group_hierarchy
         self.stream_index = stream_index
         self.extra_deps = extra_deps
-        if devices is not None:
-            self.devices = DeviceGroup(devices)
         if stream_index is not None:
             if ((not isinstance(stream_index, builtins.int)) or 
                 isinstance(stream_index, builtins.bool)):
@@ -38,26 +41,31 @@ class _OpContext(object):
     def __enter__(self):
         _hetu_core._internal_context.push_op_ctx(
             eager_device=self.eager_device,
-            device_group=self.devices, 
+            device_group_hierarchy=self.device_group_hierarchy, 
             stream_index=self.stream_index, 
-            extra_deps=self.extra_deps)
+            extra_deps=self.extra_deps
+        )
         return self
     
     def __exit__(self, e_type, e_value, e_trace):
         _hetu_core._internal_context.pop_op_ctx(
             pop_eager_device=(self.eager_device is not None),
-            pop_device_group=(self.devices is not None), 
+            pop_device_group_hierarchy=(self.device_group_hierarchy is not None), 
             pop_stream_index=(self.stream_index is not None), 
-            pop_extra_deps=(self.extra_deps is not None))
+            pop_extra_deps=(self.extra_deps is not None)
+        )
 
-def context(eager_device=None, devices=None, stream_index=None, extra_deps=None):
-    return _OpContext(eager_device=eager_device, devices=devices, stream_index=stream_index, extra_deps=extra_deps)
+def context(eager_device=None, device_group_hierarchy=None, stream_index=None, extra_deps=None):
+    return _OpContext(eager_device=eager_device, device_group_hierarchy=device_group_hierarchy, stream_index=stream_index, extra_deps=extra_deps)
 
 def control_dependencies(control_inputs):
     return _OpContext(extra_deps=control_inputs)
 
 class _GraphContext(object):
-    def __init__(self, g, create_new=False, prefix="default", num_strategy=-1):
+    def __init__(self, g, create_new=False, prefix="default", num_strategy=-1, tmp=False):
+        if tmp == True:
+            assert create_new == True, "Temporary graph must be a new graph"
+        self.tmp = tmp
         if isinstance(g, Graph):
             assert create_new == False, f"Using type {type(g).__name__} to create a hetu.Graph is not allowed, please use a str instead."
             self.graph = g
@@ -65,8 +73,10 @@ class _GraphContext(object):
             if create_new:
                 if g == "define_and_run":
                     self.graph = _hetu_core._internal_context.make_new_define_and_run_graph(prefix + '_' + g)
+                elif g == "eager":
+                    self.graph = _hetu_core._internal_context.make_new_eager_graph(prefix + '_' + g)
                 else:
-                    raise NotImplementedError("Can only create define_and_run graph for now.")
+                    raise NotImplementedError("Can only create define_and_run or eager graph for now.")
             else:
                 if prefix == "default":
                     if g == "eager":
@@ -76,16 +86,16 @@ class _GraphContext(object):
                     elif g == "define_by_run":
                         self.graph = _hetu_core._internal_context.get_default_define_by_run_graph()
                 else:
-                     self.graph = _hetu_core._internal_context.get_graph(prefix + '_' + g)
+                    self.graph = _hetu_core._internal_context.get_graph(prefix + '_' + g)
         elif isinstance(g, builtins.int):
             assert create_new == False, f"Using type {type(g).__name__} to create a hetu.Graph is not allowed, please use a str instead."
             self.graph = _hetu_core._internal_context.get_graph(g)
         else:
             raise ValueError(f"Cannot parse type '{type(g).__name__}' as hetu.Graph")
         if num_strategy >= 1:
-          # print(f'before set num_startegy: {self.graph.num_strategy}')
-          self.graph.set_num_strategy(num_strategy)
-          # print(f'after set num_startegy: {self.graph.num_strategy}, cur_strategy_id: {self.graph.cur_strategy_id}')
+            # print(f'before set num_startegy: {self.graph.num_strategy}')
+            self.graph.set_num_strategy(num_strategy)
+            # print(f'after set num_startegy: {self.graph.num_strategy}, cur_strategy_id: {self.graph.cur_strategy_id}')
 
     def __enter__(self):
         if len(cur_graph_contexts) > 0:
@@ -104,9 +114,13 @@ class _GraphContext(object):
             return
         _hetu_core._internal_context.pop_graph_ctx()
         cur_graph_contexts.remove(self)
+        if self.tmp:
+            graph_id = self.graph.id
+            self.graph = None
+            _hetu_core._internal_context.delete_graph(graph_id)
 
-def graph(g, create_new=False, prefix="default", num_strategy=-1):
-    return _GraphContext(g, create_new=create_new, prefix=prefix, num_strategy=num_strategy)
+def graph(g, create_new=False, prefix="default", num_strategy=-1, tmp=False):
+    return _GraphContext(g, create_new=create_new, prefix=prefix, num_strategy=num_strategy, tmp=tmp)
 
 class _AutocastContext(object):
     def __init__(self, dtype = None):

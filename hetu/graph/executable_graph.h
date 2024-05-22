@@ -74,6 +74,18 @@ class ExecutableGraph : public Graph {
     _pipeline_map = pipeline_map;
   }
 
+  void SetUsedRanks(const std::vector<int>& used_ranks) {
+    _used_ranks = used_ranks;
+  }
+
+  bool NeedRank(int rank) {
+    return std::find(_used_ranks.begin(), _used_ranks.end(), rank) != _used_ranks.end();
+  }
+
+  void SetRunLevel(RunLevel run_level) {
+    _run_level = run_level;
+  }
+
   void SetShapePlan(size_t num) {
     HT_ASSERT(num < _shape_plan_pool.size())
       << "plan number shouldn't exceed the size of the plan pool";
@@ -202,6 +214,7 @@ class ExecutableGraph : public Graph {
   // run相关
   std::unordered_map<TensorId, std::unique_ptr<Initializer>> _add_on_inits;
   Device2PipelineMap _pipeline_map;
+  std::vector<int> _used_ranks;
   int _num_micro_batches;
   std::vector<std::unique_ptr<Event>> _p2p_events;
 

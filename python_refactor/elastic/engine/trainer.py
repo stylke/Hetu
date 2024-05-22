@@ -8,11 +8,14 @@ import hetu as ht
 from typing import List, Dict, Any
 from .utils import *
 from .wrapper import *
+from .straggler import *
 from .strategy import StrategyModel
 from .parallel_config import parse_multi_ds_parallel_config, config2ds
 from .data_utils import get_mask_and_position_ids, build_pretraining_data_loader
 
 SLIDING_WINDOW = 2
+PRE_PROFILING_ROUND = 5
+WORKLOAD_BIAS_THRESHOLD = 0.1
 LOG_FILE_PATH = "./elastic_log/straggler"
         
 class TrainerCrucialOps(Args):
@@ -43,6 +46,9 @@ class Trainer:
         self.strategy_model = None
         self.strategy_models_pool = []
         self.ds_parallel_configs_pool = []
+        
+        self.local_straggler = None
+        self.device_to_straggler_mapping = {}
     
     def train_data_iterator(self, dataset, consumed_samples, mbs, dp_rank, dp_size):
         train_dataloader = build_pretraining_data_loader(dataset, consumed_samples, mbs, dp_rank, dp_size)
@@ -57,7 +63,7 @@ class Trainer:
             max_seq_len=args.seq_len,
             vocab_file=args.vocab_file,
             merge_file=args.merge_file)
-        return self.dataset
+        return self.dataset    
     
     def build(self, args, ctxs, ds_parallel_configs):
         '''
@@ -71,6 +77,7 @@ class Trainer:
             merge_file
         ctxs:
             bf16
+            ...
         '''
         assert self.is_built == False, "should only build once"
         # Build Dataset
@@ -155,23 +162,50 @@ class Trainer:
                 train_op=train_op
             )
             
-    def begin_profiling(self, strategy_args, comm_args):
-        os.makedirs(os.path.basename(os.path.dirname(self.log_file)), exist_ok=True)
-        with open(self.log_file, "w") as file:
-            file.truncate(0)
-            file.flush()
-            os.fsync(file.fileno())
-        os.environ['HETU_STRAGGLER_LOG_FILE'] = self.log_file_path
-        
-    def end_profiling(self, strategy_args, comm_args):
-        assert os.path.exists(self.log_file) and "HETU_STRAGGLER_LOG_FILE" in os.environ, \
-            "the log file and corresponding env is not existed" 
-        with open(self.log_file, "a") as file:
-            file.write("EOF")
-            file.flush()
-            os.fsync(file.fileno())
-        del os.environ["HETU_STRAGGLER_LOG_FILE"]
-        
+    def setup_stragglers(
+        self, 
+        args,
+        local_device: ht.device, 
+        all_devices: ht.DeviceGroup
+    ):
+        '''
+        args:
+            micro_batch_size
+            seq_len
+            hidden_size
+        '''
+        self.log_file_path = LOG_FILE_PATH
+        suffix = "_" + str(all_devices.get_index(local_device)) + ".txt"
+        self.log_file = self.log_file_path + suffix
+        workload_info = WorkloadInfo(
+            args.micro_batch_size,
+            args.seq_len,
+            args.hidden_size // args.tp
+        )
+        for device_idx in range(all_devices.num_devices):
+            self.device_to_straggler_mapping[device_idx] = Straggler(
+                all_devices.get(device_idx),
+                self.log_file_path + "_" + str(device_idx) + ".txt",
+                workload_info
+            )
+        self.local_straggler = self.device_to_straggler_mapping[all_devices.get_index(local_device)]
+        self.local_straggler.begin_profile()
+        print(f"{local_device}: pre-profiling straggler workload...")
+        for _ in range(PRE_PROFILING_ROUND):
+            self.local_straggler.run_profile()
+        self.local_straggler.end_profile()
+        ht.global_comm_barrier()
+        all_workload_baseline_time = []
+        for device_idx in range(all_devices.num_devices):
+            straggler_info = Straggler.read_profile(self.log_file_path + "_" + str(device_idx) + ".txt", PRE_PROFILING_ROUND - 1)
+            self.device_to_straggler_mapping[device_idx].workload_baseline_time = np.array(straggler_info).mean()
+            all_workload_baseline_time.append(self.device_to_straggler_mapping[device_idx].workload_baseline_time)
+        all_workload_baseline_time_mean = np.array(all_workload_baseline_time).mean()
+        if abs(self.local_straggler.workload_baseline_time - all_workload_baseline_time_mean) / all_workload_baseline_time_mean > WORKLOAD_BIAS_THRESHOLD:
+            print(f"{local_device}: is heterogenous at the beginning")
+        for device_idx, straggler in self.device_to_straggler_mapping.items():
+            print(f"Device {device_idx} initial workload consuming time = {straggler.workload_baseline_time}")
+
     def detect_straggler_and_plan(
         self, 
         strategy_args: TrainerStrategyArgs, 
@@ -185,43 +219,35 @@ class Trainer:
         ht.global_comm_barrier()
         for rank_idx in range(comm_args.all_devices.num_devices):
             device_idx = strategy_args.rank_to_device_mapping[rank_idx]
-            curr_log_file = self.log_file_path + "_" + str(device_idx) + ".json"
-            straggler_info: List[float] = []
-            # polling
-            while True:
-                with open(curr_log_file, "r") as file:
-                    content = file.readlines()
-                    # print(f"{comm_args.local_device}: reading {curr_log_file}, content is {content}")
-                    if content[-1] != "EOF":
-                        continue
-                    straggler_info = [float(line.strip()) for line in content[1:-1]]
-                    assert len(straggler_info) == sliding_window, "file length wrong"
-                    break
-            if rank_idx in strategy_args.suspended_rank_list:
-                # 已经是straggler了
-                # 通过workload上的profile信息进行分析
-                # TODO
-                suspended_devices_sr[device_idx] = 1.0
-            elif rank_idx in strategy_args.unused_rank_list:
+            curr_log_file = self.log_file_path + "_" + str(device_idx) + ".txt"
+            if rank_idx in strategy_args.unused_rank_list:
                 # 完全无法使用
+                # TODO
                 unused_devices.append(device_idx)
             else:
-                # 还不是straggler
-                # 通过compute stream上的profile信息进行分析
+                straggler_info: List[float] = Straggler.read_profile(curr_log_file, sliding_window)
                 straggler_compute_time = np.array(straggler_info).mean()
-                straggler_pipeline = rank_idx % (strategy_args.dp * strategy_args.tp) // strategy_args.tp
-                straggler_stage = rank_idx // (strategy_args.dp * strategy_args.tp)
-                straggler_layers = strategy_args.hetero_layers[straggler_pipeline][straggler_stage]
-                straggler_mbn = strategy_args.hetero_micro_batch_num_list[straggler_pipeline]
-                curr_tp = 0
-                for curr_tp_rank_idx in range(rank_idx - rank_idx % strategy_args.tp, rank_idx - rank_idx % strategy_args.tp + strategy_args.tp):
-                    if curr_tp_rank_idx not in strategy_args.suspended_rank_list:
-                        curr_tp += 1
-                assert strategy_args.tp % curr_tp == 0, "hetero tp only support 1, 2, 4, 8"
-                alpha = self.build_ctxs.hetero_tp_alpha[int(math.log2(strategy_args.tp // curr_tp))]
-                straggler_ratio = ((straggler_compute_time / straggler_layers / straggler_mbn / alpha) 
-                    / (self.build_ctxs.normal_compute_time / self.build_ctxs.normal_layers / self.build_ctxs.normal_mbn))
-                used_devices_sr[device_idx] = straggler_ratio          
+                if rank_idx in strategy_args.suspended_rank_list:
+                    # 已经是straggler了
+                    # 通过workload上的profile信息进行分析
+                    suspended_devices_sr[device_idx] = (straggler_compute_time 
+                        / self.device_to_straggler_mapping[device_idx].workload_baseline_time)
+                else:
+                    # 还不是straggler
+                    # 通过compute stream上的profile信息进行分析
+                    straggler_pipeline = rank_idx % (strategy_args.dp * strategy_args.tp) // strategy_args.tp
+                    straggler_stage = rank_idx // (strategy_args.dp * strategy_args.tp)
+                    straggler_layers = strategy_args.hetero_layers[straggler_pipeline][straggler_stage]
+                    straggler_mbn = strategy_args.hetero_micro_batch_num_list[straggler_pipeline]
+                    curr_tp = 0
+                    for curr_tp_rank_idx in range(rank_idx - rank_idx % strategy_args.tp, rank_idx - rank_idx % strategy_args.tp + strategy_args.tp):
+                        if curr_tp_rank_idx not in strategy_args.suspended_rank_list:
+                            curr_tp += 1
+                    assert strategy_args.tp % curr_tp == 0, "hetero tp only support 1, 2, 4, 8"
+                    alpha = self.build_ctxs.hetero_tp_alpha[int(math.log2(strategy_args.tp // curr_tp))]
+                    straggler_ratio = ((straggler_compute_time / straggler_layers / straggler_mbn / alpha) 
+                        / (self.build_ctxs.normal_compute_time / self.build_ctxs.normal_layers / self.build_ctxs.normal_mbn))
+                    used_devices_sr[device_idx] = straggler_ratio          
         ht.global_comm_barrier()
         
         new_strategy_model = StrategyModel(
@@ -257,14 +283,15 @@ class Trainer:
                 strategies_id.append(len(self.ds_parallel_configs_pool))
                 self.ds_parallel_configs_pool.append(ds_parallel_configs[i])
                 new_ds_parallel_configs.append(ds_parallel_configs[i])
-        self.add_strategy(args, new_ds_parallel_configs)
+        if len(new_ds_parallel_configs) > 0:
+            self.add_strategy(args, new_ds_parallel_configs)
         return strategies, strategies_id 
             
     def train(
             self, 
             args, 
             ds_parallel_configs, 
-            local_device,
+            local_device: ht.device,
             all_devices: ht.DeviceGroup,
             strategy_id: int = 0,
             elastic: bool = True
@@ -309,14 +336,12 @@ class Trainer:
             memory_file=args.memory_file,
             elastic=elastic
         )
-        if elastic:
-            self.log_file_path = LOG_FILE_PATH
-            suffix = "_" + str(all_devices.get_index(local_device)) + ".json"
-            self.log_file = self.log_file_path + suffix
         if self.build_ctxs.bf16:
             precision = "ht.bfloat16"
         else:
             precision = "ht.float32"
+        if elastic:
+            self.setup_stragglers(args, local_device, all_devices)
         with ht.autocast(eval(precision)):
             is_complete, rest_of_dataset = self.run_plan(
                 initial_args, 
@@ -457,11 +482,17 @@ class Trainer:
         num_micro_batches = args.global_batch_size // mbs_times_dp
         
         # Hetero TP
-        for unused_rank in strategy_args.suspended_rank_list:
+        is_suspended = False
+        is_unused = False
+        for suspended_rank in strategy_args.suspended_rank_list:
+            if strategy_args.rank_to_device_mapping[suspended_rank] == comm_args.all_devices.get_index(comm_args.local_device):
+                assert is_suspended == False, "multiple local device mapping"
+                is_suspended = True
+        for unused_rank in strategy_args.unused_rank_list:
             if strategy_args.rank_to_device_mapping[unused_rank] == comm_args.all_devices.get_index(comm_args.local_device):
-                pass
-                # TODO: 不运行
-                # 目前是进入到exec graph阶段发现不在pipeline中才不运行的
+                assert is_suspended == False, "can't be both suspended and unused"
+                assert is_unused == False, "multiple local device mapping"
+                is_unused = True      
         
         # Hetero Data
         if strategy_args.hetero_data:
@@ -501,13 +532,13 @@ class Trainer:
            
         # Start Training 
         if envs.elastic:
-            self.begin_profiling(strategy_args, comm_args)
+            self.local_straggler.begin_profile()
         curr_consumed_samples = dataset_args.consumed_samples
-        detect_and_plan_cnt = 0
+        detect_straggler_and_plan_cnt = 0
         for epoch in range(dataset_args.epoch, dataset_args.epochs):
             for step in range(dataset_args.step, dataset_args.steps):
                 if envs.elastic: 
-                    detect_and_plan_cnt += 1
+                    detect_straggler_and_plan_cnt += 1
                 # load data for each dp
                 if train_iter:
                     micro_batches = []
@@ -541,6 +572,10 @@ class Trainer:
                 if envs.run_memory_experiment and step == 0:
                     os.environ["HETU_MEMORY_LOG_FILE"] = envs.memory_file
                 try:
+                    # 由于目前热切换写在了run里
+                    # 因此所有情况都需要跑一下run
+                    # 但对于suspended和unused的rank这里实际上是空壳
+                    # Hetu C++ Backend
                     results = self.build_ops.train_op.graph.run(
                         self.build_ops.loss_op, 
                         [self.build_ops.loss_op, self.build_ops.train_op], 
@@ -552,6 +587,8 @@ class Trainer:
                     )
                     # NOTE: 实际上应该扫描一次alloc到update之间的所有数据
                     # grad_scale = 当前run的数据的batch_size除以总的这之间run加起来的batch_size
+                    if is_suspended:
+                        self.local_straggler.run_profile()
                 except RuntimeError as e:
                     print(e)
                     os.killpg(0, signal.SIGTERM)
@@ -562,6 +599,7 @@ class Trainer:
                         del os.environ["HETU_STRAGGLER_LOG_FILE"] 
                     # TODO: 目前跑实验会直接强行终止
                     os.killpg(0, signal.SIGTERM)
+                ht.global_comm_barrier()
                 end_time = time.time()
                 curr_consumed_samples += args.global_batch_size
                 if run_level == ht.run_level("update"):
@@ -569,8 +607,8 @@ class Trainer:
                         loss_out = results[0].numpy(force=True).mean()
                         print(f"{comm_args.local_device}: [Epoch {dataset_args.epoch}] (step {step}, consumed_samples = {curr_consumed_samples}): loss = {loss_out:.3f}, time = {end_time - start_time:.4f}")
                 # detect stragglers and judge if the system need to switch strategy
-                if envs.elastic and detect_and_plan_cnt == SLIDING_WINDOW + 1:
-                    self.end_profiling(strategy_args, comm_args)
+                if envs.elastic and detect_straggler_and_plan_cnt == SLIDING_WINDOW + 1:
+                    self.local_straggler.end_profile()
                     need_switch = self.detect_straggler_and_plan(strategy_args, comm_args)
                     if need_switch:
                         return False, TrainerDatasetArgs(
@@ -583,8 +621,8 @@ class Trainer:
                         )
                     # 不需要切换而可以继续训练
                     # 重新开始一个SLIDING_WINDOW的profiling
-                    self.begin_profiling(strategy_args, comm_args)
-                    detect_and_plan_cnt = 0 
+                    self.local_straggler.begin_profile()
+                    detect_straggler_and_plan_cnt = 0 
                 # 总共训练的iter
             # epoch结束后要清空curr_consumed_samples
             curr_consumed_samples = 0

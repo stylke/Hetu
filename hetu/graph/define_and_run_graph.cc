@@ -518,6 +518,20 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     DeducePipeline(CUR_STRATEGY_ID, pipeline_num);
   }
   exec_graph->SetPipeline(_multi_pipeline_maps[CUR_STRATEGY_ID]);
+  std::vector<int> used_ranks;
+  for (const auto& kv : _multi_pipeline_maps[CUR_STRATEGY_ID]) {
+    for (const auto& stage : kv.second) {
+      for (const auto& device : stage.devices()) {
+        auto rank = hetu::impl::comm::DeviceToWorldRank(device);
+        if (std::find(used_ranks.begin(), used_ranks.end(), rank) == used_ranks.end()) {
+          used_ranks.push_back(rank);
+        }
+      }
+    }
+  }
+  std::sort(used_ranks.begin(), used_ranks.end());
+  // HT_LOG_WARN << "used ranks = " << used_ranks;
+  exec_graph->SetUsedRanks(used_ranks);
   exec_graph->SUGGESTED_HETERO_ID = SUGGESTED_HETERO_ID;
   SUGGESTED_HETERO_ID = 0;
 
@@ -1019,9 +1033,9 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 目前已修改成async版本
       // 如果要改成非async的
       // 更改环境变量HETU_SWITCH_PROFILE低于TIME即可
-      _param_switcher_pool[key]->SwitchParams(param_switch_mode, param_switch_level);
+      _param_switcher_pool[key]->SwitchParams(param_switch_mode, param_switch_level, "switch params and opt-states");
       if (!(grad_switch_level == SWITCH_LEVEL::TOPO && !_need_grad_switch_topo)) {
-        _grad_switcher_pool[key]->SwitchParams(grad_switch_mode, grad_switch_level);
+        _grad_switcher_pool[key]->SwitchParams(grad_switch_mode, grad_switch_level, "switch grads");
       }
     }
     _is_active = true;
@@ -1069,10 +1083,14 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   // GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " before empty cache");
   // hetu::impl::ProfileAfterEmptyAllCUDACache(local_device);
   HT_LOG_DEBUG << exec_graph->name() << " start running..." ;
-  Graph::push_graph_ctx(exec_graph->id()); // 防止exec graph run内部MakeOp时忘记加
-  auto ret = exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches, 
-                             cur_strategy_id, run_level, grad_scale);
-  Graph::pop_graph_ctx();
+  NDArrayList ret;
+  exec_graph->SetRunLevel(run_level);
+  if (exec_graph->NeedRank(hetu::impl::comm::DeviceToWorldRank(local_device))) {
+    Graph::push_graph_ctx(exec_graph->id()); // 防止exec graph run内部MakeOp时忘记加
+    ret = exec_graph->Run(exec_loss, exec_fetches, exec_feed_dict, num_micro_batches, 
+                          cur_strategy_id, run_level, grad_scale);
+    Graph::pop_graph_ctx();
+  }
   // 释放graph切换相关的event
   exec_graph->_switch_param_events.clear();
   exec_graph->_switch_grad_events.clear();
