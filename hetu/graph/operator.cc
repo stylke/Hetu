@@ -467,6 +467,7 @@ void OpDef::BlockOrSyncInput(Tensor& input, RuntimeContext& runtime_ctx, size_t 
     return;
   // p2p ops are all gathered in group start/end, so the start/stop events for p2p ops is invalid, should not be used any more!
   // another case: shared weight p2p ops will not execute in micro batch i>0, so these ops will not record start/stop events.
+  // besides, switch exec graph handles this event by itself
   auto is_pipeline_stage_recv_op = [](const Operator& op) -> bool {
     if (is_peer_to_peer_recv_op(op)) {
       return true;

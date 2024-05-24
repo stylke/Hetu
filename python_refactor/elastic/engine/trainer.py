@@ -201,7 +201,7 @@ class Trainer:
             self.device_to_straggler_mapping[device_idx].workload_baseline_time = np.array(straggler_info).mean()
             all_workload_baseline_time.append(self.device_to_straggler_mapping[device_idx].workload_baseline_time)
         all_workload_baseline_time_mean = np.array(all_workload_baseline_time).mean()
-        if abs(self.local_straggler.workload_baseline_time - all_workload_baseline_time_mean) / all_workload_baseline_time_mean > WORKLOAD_BIAS_THRESHOLD:
+        if abs(self.local_straggler.workload_baseline_time - all_workload_baseline_time_mean) / all_workload_baseline_time_mean >= WORKLOAD_BIAS_THRESHOLD:
             print(f"{local_device}: is heterogenous at the beginning")
         for device_idx, straggler in self.device_to_straggler_mapping.items():
             print(f"Device {device_idx} initial workload consuming time = {straggler.workload_baseline_time}")

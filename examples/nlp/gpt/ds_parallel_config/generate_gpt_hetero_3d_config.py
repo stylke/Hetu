@@ -152,9 +152,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '--zero', action='store_true', help='use zero or not.'
     )
-    # parser.add_argument(
-    #     '--save_folder', type=str, default='./'
-    # )
+    parser.add_argument(
+        '--file_name', type=str, default=""
+    )
     args = parser.parse_args()
     num_layers = args.num_layers
         
@@ -168,7 +168,10 @@ if __name__ == '__main__':
             f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
     ds_parallel_config = generate_gpt_3d_config(ast.literal_eval(args.rank_to_device_mapping), ast.literal_eval(args.unused_rank), hetero_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
     save_folder = './ds_parallel_config/hetero'
-    file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
+    if args.file_name == "":
+        file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
+    else:
+        file_name = args.file_name
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
     with open(f'{save_folder}/{file_name}', 'w') as f:

@@ -359,6 +359,12 @@ void ParamSlice::ParamSliceComm(Device2DTListPairMap& send_mapping,
   auto owned_len = _owned_slice_instances.size();
   HT_ASSERT(needed_len == _needed_devices.size() && owned_len == _owned_devices.size())
     << "something wrong with the size";
+  if (owned_len == 0) {
+    // 该slice无法进行热切换
+    // 需要从CPU/SSD中加载
+    // TODO
+    HT_RUNTIME_ERROR << "NotImplementedError: hot switch doesn't work";
+  }
   for (size_t i = 0; i < needed_len; ++i) {
     auto& needed_device = _needed_devices[i];
     bool already_owned = false;
@@ -1507,6 +1513,11 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     }
   }
 
+  // 如果该device不用参与该次热切换
+  // 这里直接返回即可
+  if (_comm_set.find(local_device) == _comm_set.end()) {
+    return;
+  }
   if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
     GetCUDAProfiler(local_device)->PrintCurrMemoryInfo("switch exec graph before warm up");
   }
@@ -1532,25 +1543,22 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     // stream同步
     SynchronizeAllStreams(local_device);
     // rank同步
-    // 这里对全部rank进行同步
-    /*
-    if (!_comm_set.empty()) {
-      std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
-      DeviceGroup mpi_device_group{mpi_devices};
-      auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
+    // 这里对参与热切换的rank进行同步
+    std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
+    DeviceGroup mpi_device_group{mpi_devices};
+    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
+    if (_comm_set.size() >= 2) {
       mpi_group->Barrier(true);
-      HT_LOG_DEBUG << local_device << ": params switch comm set = " << mpi_device_group;
     }
-    */
-    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
-    mpi_group->Barrier(true);
     if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
       GetCUDAProfiler(local_device)->PrintCurrMemoryInfo("switch exec graph begin");
     }
     if (_profile_level <= SWITCH_PROFILE_LEVEL::NVLINK) {
       GetCUDAProfiler(local_device)->PrintNvlinkStart();
     }
-    mpi_group->Barrier(true);
+    if (_comm_set.size() >= 2) {
+      mpi_group->Barrier(true);
+    }
   }
   
   // 启动！
@@ -1674,6 +1682,9 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     NDArrayList input_vals;
     input_vals.reserve(op->num_inputs());
     for (const auto& input : op->inputs()) {
+      if (is_batched_isend_irecv_op(input->producer())) {
+        input->producer()->instantiation_ctx().stop[0]->Block(op->instantiation_ctx().stream());
+      }
       auto it = tensor2data.find(input->id());
       HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
         << local_device << ": Failed to execute the \"" << op->type() << "\" operation "
@@ -1792,17 +1803,13 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     }  
     TOK(switch_params_running); // 结束计时
     // rank同步（不同rank耗时不一样，因此放在TOK之后）
-    // 这里对全部rank进行同步
-    /*
-    if (!_comm_set.empty()) {
+    // 这里对参与热切换的rank进行同步
+    if (_comm_set.size() >= 2) {
       std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
       DeviceGroup mpi_device_group{mpi_devices};
       auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
       mpi_group->Barrier(true);
     }
-    */
-    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
-    mpi_group->Barrier(true);
     HT_LOG_INFO << local_device << ": " << switch_name << " running time = " << COST_MSEC(switch_params_running) << " ms";
     char* switch_log_file = std::getenv("HETU_SWITCH_LOG_FILE");
     if (switch_log_file != nullptr && hetu::impl::comm::GetWorldRank() == 0) {

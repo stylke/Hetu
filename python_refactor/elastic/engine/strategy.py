@@ -2,11 +2,12 @@ import math
 import heapq
 import pulp
 from typing import List, Dict, Any
-from pulp import LpProblem, LpMinimize, LpVariable, lpSum
+from pulp import LpProblem, LpMinimize, LpVariable, LpStatus, lpSum
 from .utils import Args, TrainerCtxs, TrainerStrategyArgs
 from .parallel_config import generate_gpt_3d_config, config_spread_zero
 
 DEVICES_PER_NODE = 8
+INF_SR = 10000.0
 
 class TPGroup(Args):
     def __init__(
@@ -16,6 +17,7 @@ class TPGroup(Args):
         tp: int,
         devices: List[int],
         sr: List[float],
+        unused: bool = False
     ):
         assert len(devices) == len(sr), "length mismatches"
         tp_devices_num = len(devices)
@@ -28,6 +30,17 @@ class TPGroup(Args):
         # 减少搜索空间
         if self.sr < ctxs.straggler_threshold:
             self.sr = 1.0
+        self.unused = unused
+    
+    @staticmethod    
+    def print(item) -> float:
+        if isinstance(item, TPGroup):
+            return item.sr
+        elif item is None:
+            # 如果是 None，则返回一个字符串 'None'
+            return 1.0
+        else:
+            raise ValueError(f"item type {type(item) is not supported}")
 
 class StrategyModel:
     def __init__(
@@ -53,6 +66,13 @@ class StrategyModel:
         # Results
         self.strategies = None
         self.ds_parallel_configs = None
+        used_devices_set = set(used_devices_sr.keys())
+        suspended_devices_set = set(suspended_devices_sr.keys())
+        unused_devices_set = set(unused_devices)
+        assert bool(used_devices_set & suspended_devices_set) == False \
+            and bool(used_devices_set & unused_devices_set) == False \
+            and bool(suspended_devices_set & unused_devices_set) == False \
+            , "different types of devices shouldn't have overlap"
         
     def __eq__(self, other):
         if not isinstance(other, StrategyModel):
@@ -67,15 +87,25 @@ class StrategyModel:
         )
         if flag == False:
             return flag_1
+        # 对于used devices
+        # 其使用compute stream进行profile
+        # 比较精准
         for k, v in self.used_devices_sr.items():
             if k not in other.used_devices_sr:
                 return False
-            if abs(v - other.used_devices_sr[k]) > self.ctxs.straggler_safe_gap:
+            if abs(v - other.used_devices_sr[k]) >= self.ctxs.straggler_safe_gap:
                 return False
+        # 对于suspended devices
+        # 其使用workload进行profile
+        # 并不是很精准
+        # 这里为了减少策略的频繁更换
+        # 我们不区分被判定为是straggler的那些suspended devices的sr
         for k, v in self.suspended_devices_sr.items():
             if k not in other.suspended_devices_sr:
                 return False
-            if abs(v - other.suspended_devices_sr[k]) > self.ctxs.straggler_safe_gap:
+            if v >= self.ctxs.straggler_threshold and other.suspended_devices_sr[k] >= self.ctxs.straggler_threshold:
+                pass
+            elif abs(v - other.suspended_devices_sr[k]) >= self.ctxs.straggler_safe_gap:
                 return False
         return True
      
@@ -141,22 +171,57 @@ class StrategyModel:
         
     def sovle_tp_arrangments(self):
         available_devices_sr = self.used_devices_sr.copy()
-        available_devices_sr.update(self.suspended_devices_sr)
+        # 为了减少策略的频繁更换
+        # 只有当suspended devices重新变回非straggler时
+        # 我们才考虑将其纳入新的候选devices中
+        available_devices_sr.update(
+            {device_idx: sr for device_idx, sr in self.suspended_devices_sr.items() if sr < self.ctxs.straggler_threshold}
+        )
+        new_suspended_devices = [device_idx for device_idx, sr in self.suspended_devices_sr.items() if sr >= self.ctxs.straggler_threshold]
         # print(f"available_devices_sr = {available_devices_sr}")
         all_tp_groups = []
-        new_suspended_devices = []
         # 对于所有node
         for node_idx in range(self.all_nodes_num):
             node_available_devices_num = 0
             node_devices_num = DEVICES_PER_NODE
             node_devices_range = range(node_idx * node_devices_num, (node_idx + 1) * node_devices_num)
+            # 要么全在unused devices中
+            # 要么一个都不在
+            is_unused = [int(device_idx in self.unused_devices) for device_idx in node_devices_range]
+            node_unused_num = sum(is_unused)
+            assert node_unused_num == 0 or node_unused_num == node_devices_num, \
+                "now only support all-or-nothing unused ranks in a typical node"
+            if node_unused_num == node_devices_num:
+                # 按顺序组建dummy tp group
+                tp_cnt = 0
+                tp_devices = []
+                tp_sr = []
+                for device_idx in node_devices_range:
+                    tp_cnt += 1
+                    tp_devices.append(device_idx)
+                    tp_sr.append(INF_SR)
+                    if tp_cnt == self.tp:
+                        all_tp_groups.append(
+                            TPGroup(
+                                self.ctxs, 
+                                node_idx, 
+                                self.tp, 
+                                tp_devices, 
+                                tp_sr, 
+                                unused=True
+                            )
+                        )    
+                        tp_devices.clear()
+                        tp_sr.clear()
+                        tp_cnt = 0
+                continue
             for device_idx in node_devices_range:
-                if device_idx in self.unused_devices:
+                if device_idx not in available_devices_sr:
                     continue
                 node_available_devices_num += 1
             node_max_homo_devices_num = node_devices_num - self.tp
             assert node_available_devices_num > node_max_homo_devices_num, \
-                "unused ranks currently shouldn't be larger than tp - 1"
+                f"{node_available_devices_num} <= {node_max_homo_devices_num}: unused ranks currently shouldn't be larger than tp - 1"
             node_available_devices_sr = {k: v for k, v in available_devices_sr.items() if k in node_devices_range}
             # 非straggler按照device的序号升序排列
             # straggler按照sr升序排
@@ -190,7 +255,15 @@ class StrategyModel:
                 for idx in range(tp_idx * self.tp, min((tp_idx + 1) * self.tp, final_used_devices)):
                     tp_devices.append(node_available_devices_sr[idx][0])
                     tp_sr.append(node_available_devices_sr[idx][1])
-                all_tp_groups.append(TPGroup(self.ctxs, node_idx, self.tp, tp_devices, tp_sr))    
+                all_tp_groups.append(
+                    TPGroup(
+                        self.ctxs, 
+                        node_idx, 
+                        self.tp, 
+                        tp_devices, 
+                        tp_sr
+                    )
+                )    
             # 求解新的suspended devices
             for idx in range(final_used_devices, node_available_devices_num):
                 new_suspended_devices.append(node_available_devices_sr[idx][0])
@@ -259,6 +332,10 @@ class StrategyModel:
                         return
                 # 搜完一条pipeline接着搜下一条
                 if stage_idx == self.pp:
+                    # 目前不支持整条pipeline都unused
+                    # 即减少了dp维度
+                    if pipeline[-1] != None and pipeline[-1].unused == True:
+                        return
                     pipelines.append(pipeline.copy())
                     pipelines_straggler_tp_group_num.append(pipeline_straggler_tp_group_num)
                     # print(f"dfs pipeline {pipeline_idx} finished, visited_normal_tp_group_num = {visited_normal_tp_group_num}")
@@ -301,7 +378,12 @@ class StrategyModel:
         l_values_list = []
         m_values_list = []
         for pipelines_template in all_pipelines_template:
-            print("pipelines_template =", pipelines_template)
+            print_formatted_pipelines_template = [
+                [TPGroup.print(item) for item in pipeline]
+                    for pipeline in pipelines_template
+            ]
+            print("**********************************************") 
+            print("pipelines_template =", print_formatted_pipelines_template)
             y_values = [
                 [(tp_group.sr if tp_group != None else 1.0) for tp_group in pipeline]
                     for pipeline in pipelines_template
@@ -310,11 +392,18 @@ class StrategyModel:
                 [(tp_group.hetero_ratio if tp_group != None else 1.0) for tp_group in pipeline]
                     for pipeline in pipelines_template
             ]
-            objective, l_values, m_values = self.solve_pp_arrangement(y_values, hetero_values)
+            is_unused = [
+                [(tp_group.unused if tp_group != None else False) for tp_group in pipeline]
+                    for pipeline in pipelines_template
+            ]
+            is_solved, objective, l_values, m_values = self.solve_pp_arrangement(y_values, hetero_values, is_unused)
+            if not is_solved:
+                continue
             objective_list.append(objective)
             l_values_list.append(l_values)
             m_values_list.append(m_values)
-        top_k = min(self.ctxs.top_k, len(objective_list))
+        top_k = min(self.ctxs.top_k, len(objective_list))       
+        assert top_k != 0, "no possible strategies"
         top_k_idx = heapq.nsmallest(top_k, range(len(objective_list)), key=lambda i: objective_list[i])
         top_k_l_values = [l_values_list[i] for i in top_k_idx]
         top_k_m_values = [m_values_list[i] for i in top_k_idx]
@@ -368,7 +457,8 @@ class StrategyModel:
     def solve_pp_arrangement(
         self, 
         y_values: List[List[float]], 
-        hetero_values: List[List[float]]
+        hetero_values: List[List[float]],
+        is_unused: List[List[bool]]
     ):    
         # 第一个整数线性规划问题
         dp = self.dp
@@ -398,10 +488,16 @@ class StrategyModel:
             # 约束条件
             model += lpSum(l_vars) == L
             for j in range(pp):
-                model += max_y_times_l >= y_values[i][j] * l_vars[j]
-                model += k_values[j] * l_vars[j] + d_values[j] <= C / hetero_values[i][j]
+                if is_unused[i][j]:
+                    model += l_vars[j] == 0
+                else:
+                    model += max_y_times_l >= y_values[i][j] * l_vars[j]
+                    model += k_values[j] * l_vars[j] + d_values[j] <= C / hetero_values[i][j]
             # 求解问题
             model.solve()
+            if LpStatus[model.status] != 'Optimal':
+                print("No solution")
+                return False, None, None, None
             # 打印结果
             # print(f"Q1, num = {i}, Optimal Objective Value:", model.objective.value())
             o_values.append(model.objective.value())
@@ -427,6 +523,9 @@ class StrategyModel:
             model += m_vars[i] >= pp
         # 求解问题
         model.solve()
+        if LpStatus[model.status] != 'Optimal':
+            print("No solution")
+            return False, None, None, None
         # 打印结果
         # print("Q2, Optimal Objective Value:", model.objective.value())
         for var in model.variables():
@@ -434,12 +533,10 @@ class StrategyModel:
             if 'm_' in var.name:
                 m_values.append(int(var.varValue))
 
-        print("**********************************************") 
-        print("Result:")
         print("objective =", model.objective.value()) 
         print("l_values =", l_values)  
         print("m_values =", m_values)  
-        return model.objective.value(), l_values, m_values
+        return True, model.objective.value(), l_values, m_values
                 
                         
                     

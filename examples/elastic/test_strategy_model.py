@@ -54,6 +54,7 @@ strategy_args = TrainerStrategyArgs(
     hetero_micro_batch_num_list=hetero_micro_batch_num_list
 )
 
+# setting 1
 used_devices_sr = {
     0:1.5,
     1:1,
@@ -72,10 +73,46 @@ used_devices_sr = {
     14:1,
     15:5.0
 }
+suspended_devices_sr = {}
+unused_devices = []
+
+# setting 2
+used_devices_sr = {
+    8:1,
+    9:1,
+    10:1,
+    11:0.8,
+    12:1.2,
+    13:1,
+    14:1,
+    15:5.0
+}
+suspended_devices_sr = {}
+unused_devices = [0, 1, 2, 3, 4, 5, 6, 7]
+
+# setting 3
+used_devices_sr = {
+    0:1.5,
+    2:1,
+    3:1,
+    4:2.0,
+    5:1.1,
+    6:1,
+    7:3.0,
+    8:1,
+    9:1,
+    10:1,
+    11:0.8,
+    12:1.2,
+    13:1,
+    14:1,
+    15:5.0
+}
 suspended_devices_sr = {
-    
+    1:1.1,
 }
 unused_devices = []
+
 strategy_model = StrategyModel(
     ctxs,
     strategy_args,
@@ -84,4 +121,6 @@ strategy_model = StrategyModel(
     unused_devices
 )
 strategies, _ = strategy_model.make_plans()
+
+print("**********************************************") 
 Args.print_args_list(strategies)
