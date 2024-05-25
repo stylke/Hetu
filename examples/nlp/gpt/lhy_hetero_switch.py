@@ -19,8 +19,11 @@ import ptvsd
 local_device = None
 all_devices = None
 
-def distributed_init(use_two_node: bool = False):
-    if use_two_node:
+def distributed_init(use_two_node: bool = False, tencent: bool = False):
+    if tencent:
+        hostname = socket.gethostname()
+        os.environ['HETU_LOCAL_HOSTNAME'] = os.environ['LOCAL_HOSTNAME']
+    elif use_two_node:
         hostname = socket.gethostname()
         if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
             os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
@@ -562,9 +565,12 @@ if __name__ == '__main__':
     parser.add_argument(
         "--bf16", action="store_true", help="Use bfloat16."
     )
+    parser.add_argument(
+        "--tencent", action="store_true", help="Use tencent env."
+    )
     args = parser.parse_args()
     pynvml.nvmlInit()
-    distributed_init(args.use_two_node)
+    distributed_init(args.use_two_node, args.tencent)
     with ht.graph("define_and_run", num_strategy=args.num_strategy):
         if args.bf16:
             precision = "ht.bfloat16"

@@ -176,7 +176,7 @@ class HtMultiVocabParallelEmbedding(Module):
             tp_union = [ds_union_dup_split0.get(i).get_dim(0) for i in range(hetero_size)]
             hetero_dim = ds_union_dup_split0.hetero_dim
             assert hetero_dim == -1 or hetero_dim == -3, "VocabParallelEmbedding only support hetero on dup"
-            assert (np.array_equal(np.array(dp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union])) 
+            assert np.array_equal(np.array(dp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union]) 
                 , f'VocabParallelEmbedding get wrong ds_parallel_config: {ds_parallel_config}!')
             device_group_index, device_index = get_local_index(device_group_union)
             self.device_index.append(device_index)
@@ -241,7 +241,7 @@ class HtMultiColumnParallelLinear(Module):
             tp_union = [ds_union_dup_split1.get(i).get_dim(1) for i in range(hetero_size)]
             hetero_dim = ds_union_dup_split1.hetero_dim
             assert hetero_dim == -1 or hetero_dim == -3, "ColumnParallelLinear only support hetero on dup"
-            assert (np.array_equal(np.array(dp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union]))
+            assert np.array_equal(np.array(dp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union])
                 , f'ColumnParallelLinear get wrong ds_parallel_config: {ds_parallel_config}!')        
             device_group_index, device_index = get_local_index(device_group_union)
             self.device_index.append(device_index)
@@ -278,7 +278,11 @@ class HtMultiColumnParallelLinear(Module):
             print(f"warning: column parallel linear need extra communication for \
                     adapt input tensor distributed_states into {self.ds_union_map['split0_dup']}!")
         
-        tensor_split01 = hetu.linear(tensor_split0_dup, self.weight, self.bias, trans_b=True, device_group_hierarchy=self.device_group_unions, name=self.name)
+        if self.bias != None:
+            tensor_split01 = hetu.linear(tensor_split0_dup, self.weight, self.bias, trans_a=False, trans_b=True, device_group_hierarchy=self.device_group_unions, name=self.name)
+        else:
+            tensor_split01 = hetu.linear(tensor_split0_dup, self.weight, trans_a=False, trans_b=True, device_group_hierarchy=self.device_group_unions, name=self.name)
+        
         if not self.gather_output:
             output = tensor_split01
         else:
@@ -324,7 +328,7 @@ class HtMultiRowParallelLinear(Module):
             tp_union = [ds_union_dup_split0.get(i).get_dim(0) for i in range(hetero_size)]
             hetero_dim = ds_union_dup_split0.hetero_dim
             assert hetero_dim == -1 or hetero_dim == -3, "RowParallelLinear only support hetero on dup"
-            assert (np.array_equal(np.array(dp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union]))
+            assert np.array_equal(np.array(dp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union])
                 , f'RowParallelLinear get wrong ds_parallel_config: {ds_parallel_config}!')        
             device_group_index, device_index = get_local_index(device_group_union)
             self.device_index.append(device_index)
@@ -366,7 +370,11 @@ class HtMultiRowParallelLinear(Module):
         else:
             tensor_split01 = hetu.comm(input_p, self.ds_union_map['split01']) # exists src_ds == dst_ds case, just ignore it in comm_op
 
-        tensor_split0_partial = hetu.linear(tensor_split01, self.weight, trans_b=False, device_group_hierarchy=self.device_group_unions, name=self.name)
+        if self.bias != None:
+            tensor_split0_partial = hetu.linear(tensor_split01, self.weight, self.bias, trans_a=False, trans_b=False, device_group_hierarchy=self.device_group_unions, name=self.name)
+        else:
+            tensor_split0_partial = hetu.linear(tensor_split01, self.weight, trans_a=False, trans_b=False, device_group_hierarchy=self.device_group_unions, name=self.name)
+            
         if tensor_split0_partial.check_ds_hierarchy_equal(self.ds_union_map['split0_dup']): # pure dp
             tensor_split0_dup = tensor_split0_partial
         else:

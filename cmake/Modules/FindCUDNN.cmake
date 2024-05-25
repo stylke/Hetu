@@ -49,6 +49,7 @@ set(file "${PROJECT_BINARY_DIR}/detect_cudnn_version.cc")
 file(WRITE ${file} "
     #include <iostream>
     #include \"${CUDNN_INCLUDE_PATH}/cudnn.h\"
+    #include \"${CUDNN_INCLUDE_PATH}/cudnn_version.h\"
     int main()
     {
         std::cout << CUDNN_MAJOR << '.' << CUDNN_MINOR << '.' << CUDNN_PATCHLEVEL;
@@ -61,7 +62,7 @@ try_run(CUDNN_VERSION_MATCHED compile_result ${PROJECT_BINARY_DIR} ${file}
     CMAKE_FLAGS  "-DINCLUDE_DIRECTORIES=${CUDAToolkit_INCLUDE_DIR}"
     LINK_LIBRARIES ${CUDNN_LIBRARY_PATH})
 if (NOT CUDNN_VERSION_MATCHED)
-    message(FATAL_ERROR "Found CUDNN header version and library version do not match! \
+    message(FATAL_ERROR "Found CUDNN header version and library version do not match! .h version is ${CUDNN_VERSION}\
         (include: ${CUDNN_INCLUDE_PATH}, library: ${CUDNN_LIBRARY_PATH}). Please set CUDNN_ROOT manually.")
 endif()
 message(STATUS "CUDNN version: ${CUDNN_VERSION}")
