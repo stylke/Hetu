@@ -128,7 +128,14 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
       HT_ASSERT(scatter_num == partial_grad->cur_ds_union().size())
         << "Adam: comm_group num must equal to hetero partial size!";
       auto split_num = split_reduce_scatter_impl.split_num();
-      auto param_size_per_split = DIVUP(param->numel(), split_num);
+      auto relative_param = param;
+      if (is_reduce_scatter_op(op->input(1)->producer()->input(0)->producer())) {
+        auto& reduce_scatter_op = op->input(1)->producer()->input(0)->producer();
+        auto num_chunks = reduce_scatter_op->local_placement_group().num_devices();
+        auto idx = reduce_scatter_op->local_placement_group().get_index(op->placement());
+        relative_param = NDArray::split(relative_param, num_chunks).at(idx);
+      }
+      auto param_size_per_split = DIVUP(relative_param->numel(), split_num);
       auto param_size_per_scatter_per_split = DIVUP(param_size_per_split, scatter_num); // todo: padding for reduce-scatter & all-gather
       auto scatter_index = partial_grad->local_placement_group_idx();
       auto param_start_index = param_size_per_scatter_per_split * scatter_index;
@@ -140,7 +147,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
         << param_size_per_scatter_per_split;
       // 对每个split出来的micro block
       // 都进行Adam运算与AllGather
-      NDArrayList split_param = NDArray::split(param, split_num);
+      NDArrayList split_param = NDArray::split(relative_param, split_num);
       NDArrayList split_grad = NDArray::split(grad, split_num);
       NDArrayList split_mean = NDArray::split(mean, split_num);
       NDArrayList split_variance = NDArray::split(variance, split_num);

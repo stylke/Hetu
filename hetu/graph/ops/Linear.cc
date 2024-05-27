@@ -27,30 +27,30 @@ TensorList LinearOpImpl::DoGradient(Operator& op,const TensorList& grad_outputs)
   if (!trans_a() && !trans_b()) {
     // case 1: c = Linear(a, b)
     // grad_a = Linear(grad_c, b^T), grad_b = Linear(a^T, grad_c)
-    grad_a = op->requires_grad(0) ? MakeMatMulOp(grad_c, b, false, true, g_op_meta.set_name(op->grad_name(0)))
+    grad_a = op->requires_grad(0) ? MakeLinearOp(grad_c, b, false, true, g_op_meta.set_name(op->grad_name(0)))
                                  : Tensor();
-    grad_b = op->requires_grad(1) ? MakeMatMulOp(a, grad_c, true, false, g_op_meta.set_name(op->grad_name(1)))
+    grad_b = op->requires_grad(1) ? MakeLinearOp(a, grad_c, true, false, g_op_meta.set_name(op->grad_name(1)))
                                  : Tensor();
   } else if (trans_a() && !trans_b()) {
     // case 2: c = Linear(a^T, b)
     // grad_a = Linear(b, grad_c^T), grad_b = Linear(a, grad_c)
-    grad_a = op->requires_grad(0) ? MakeMatMulOp(b, grad_c, false, true, g_op_meta.set_name(op->grad_name(0)))
+    grad_a = op->requires_grad(0) ? MakeLinearOp(b, grad_c, false, true, g_op_meta.set_name(op->grad_name(0)))
                                  : Tensor();
-    grad_b = op->requires_grad(1) ? MakeMatMulOp(a, grad_c, false, false, g_op_meta.set_name(op->grad_name(1)))
+    grad_b = op->requires_grad(1) ? MakeLinearOp(a, grad_c, false, false, g_op_meta.set_name(op->grad_name(1)))
                                  : Tensor();
   } else if (!trans_a() && trans_b()) {
     // case 3: c = Linear(a, b^T)
     // grad_a = Linear(grad_c, b), grad_b = Linear(grad_c^T, a)
-    grad_a = op->requires_grad(0) ? MakeMatMulOp(grad_c, b, false, false, g_op_meta.set_name(op->grad_name(0)))
+    grad_a = op->requires_grad(0) ? MakeLinearOp(grad_c, b, false, false, g_op_meta.set_name(op->grad_name(0)))
                                  : Tensor();
-    grad_b = op->requires_grad(1) ? MakeMatMulOp(grad_c, a, true, false, g_op_meta.set_name(op->grad_name(1)))
+    grad_b = op->requires_grad(1) ? MakeLinearOp(grad_c, a, true, false, g_op_meta.set_name(op->grad_name(1)))
                                  : Tensor();
   } else {
     // case 4: c = Linear(a^T, b^T)
     // grad_a = Linear(b^T, grad_c^T), grad_b = Linear(grad_c^T, a^T)
-    grad_a = op->requires_grad(0) ? MakeMatMulOp(b, grad_c, true, true, g_op_meta.set_name(op->grad_name(0)))
+    grad_a = op->requires_grad(0) ? MakeLinearOp(b, grad_c, true, true, g_op_meta.set_name(op->grad_name(0)))
                                  : Tensor();
-    grad_b = op->requires_grad(1) ? MakeMatMulOp(grad_c, a, true, true, g_op_meta.set_name(op->grad_name(1)))
+    grad_b = op->requires_grad(1) ? MakeLinearOp(grad_c, a, true, true, g_op_meta.set_name(op->grad_name(1)))
                                  : Tensor();
   }
   if (op->num_inputs() == 2) {

@@ -409,11 +409,18 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
                     << "hetero dim in the union should be consistent";
                   dst_ds_union.set_hetero_dim(-1);
                 } 
-                // 2、tp reduce
+                // 2、tp/sp reduce
                 else if (grad_inputs[i]->cur_ds_union().hetero_dim() == 0) {
                   HT_ASSERT(dst_ds_union.hetero_dim() == 0 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM)
                     << "hetero dim in the union should be consistent";
                   dst_ds_union.set_hetero_dim(0);
+                  // sp会显式地在正向传播时插入all gather
+                  // 因此这里不需要做reduce
+                  // 交给之后comm op的DoGradient去自动处理
+                  if (is_comm_op(op->input(i)->producer())) {
+                    dst_ds_union.add(ds_grad);
+                    continue;
+                  }
                 }
                 else {
                   HT_ASSERT(grad_inputs[i]->cur_ds_union().hetero_dim() == NULL_HETERO_DIM)

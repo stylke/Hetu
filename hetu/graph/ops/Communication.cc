@@ -113,6 +113,9 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
         if (info.src_ds.check_pure_duplicate()) {
           _comm_type = COMM_SPLIT_OP;
           HT_LOG_DEBUG << "COMM_SPLIT_OP";
+        } else if (info.src_ds.check_scatter(info.dst_ds)) {
+          _comm_type = SCATTER_OP;
+          HT_LOG_DEBUG << "SCATTER_OP";
         } else if (info.src_ds.check_allreduce(info.dst_ds)) {
           _comm_type = ALL_REDUCE_OP;
           HT_LOG_DEBUG << "ALL_REDUCE_OP";
@@ -123,7 +126,9 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
           _comm_type = REDUCE_SCATTER_OP;
           HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
         } else {
-          HT_RUNTIME_ERROR << "Not supported yet";
+          HT_RUNTIME_ERROR << "No matching comm type for " << op
+            << ", src ds is " << info.src_ds.ds_info()
+            << ", and dst ds is " << info.dst_ds.ds_info();
         }
       } 
       // 1-2-2、src group和dst group不一样
@@ -149,15 +154,27 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
     for (size_t i = 0; i < size; i++) {
       auto src_local_ds = info.src_ds_union.get_local(i);
       auto dst_local_ds = info.dst_ds_union.get_local(i);
-      HT_ASSERT(src_local_ds.check_equal(dst_local_ds))
-        << "Currently only support equal local ds for different src and dst hetero dim";
+      // 2024.5.26 Update: 需要更复杂的支持
+      // 允许先使用局部通信算子先将src local ds转化成dst local ds
+      // 所有local ds一样后，再进行split的异构全局通信
+      // 目前只会遇到sp + layernorm的weight gradient的local ds需要额外做reduce
+      // 剩下情况local ds都是一样的
+      HT_ASSERT(src_local_ds.check_equal(dst_local_ds)
+                || src_local_ds.check_reducescatter(dst_local_ds)
+                || src_local_ds.check_allreduce(dst_local_ds))
+        << "Currently there are only several local ds patterns for different src and dst hetero dim"
+        << ", but for " << op << ", src ds union is " << info.src_ds_union.ds_union_info()
+        << ", and dst ds union is " << info.dst_ds_union.ds_union_info()
+        << ", which shouldn't appear (but maybe support)";
       HT_ASSERT(src_local_ds.states(0) == 1 || src_local_ds.states(1) == 1)
         << "Currently only support local ds splits on a single dim";
+      /*
       HT_ASSERT(src_local_ds.states(-2) == 1)
         << op << " has local partial"
         << ", the src ds union is " << info.src_ds_union.ds_union_info()
         << ", and dst ds union is " << info.dst_ds_union.ds_union_info()
         << ", which is not supported yet";
+      */
     }
     if (info.src_ds_union.hetero_dim() == -2 && info.dst_ds_union.hetero_dim() == -1) {
       _comm_type = SPLIT_ALL_REDUCE_OP;
@@ -170,6 +187,29 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
       HT_LOG_DEBUG << "SPLIT_ALL_GATHER_OP";
     } else {
       HT_RUNTIME_ERROR << "Currently not supported yet";
+    }
+    // src local ds -> dst local ds
+    if (!info.local_src_ds.check_equal(info.local_dst_ds)) {
+      if (info.local_src_ds.check_pure_duplicate()) {
+        _comm_type |= COMM_SPLIT_OP;
+        HT_LOG_DEBUG << "LOCAL_COMM_SPLIT_OP";
+      } else if (info.local_src_ds.check_scatter(info.local_dst_ds)) {
+        _comm_type |= SCATTER_OP;
+        HT_LOG_DEBUG << "LOCAL_SCATTER_OP";
+      } else if (info.local_src_ds.check_allreduce(info.local_dst_ds)) {
+        _comm_type |= ALL_REDUCE_OP;
+        HT_LOG_DEBUG << "LOCAL_ALL_REDUCE_OP";
+      } else if (info.local_src_ds.check_allgather(info.local_dst_ds)) {
+        _comm_type |= ALL_GATHER_OP;
+        HT_LOG_DEBUG << "LOCAL_ALL_GATHER_OP";
+      } else if (info.local_src_ds.check_reducescatter(info.local_dst_ds)) {
+        _comm_type |= REDUCE_SCATTER_OP;
+        HT_LOG_DEBUG << "LOCAL_REDUCE_SCATTER_OP";
+      } else {
+        HT_RUNTIME_ERROR << "No matching comm type for " << op
+          << ", src ds is " << info.src_ds.ds_info()
+          << ", and dst ds is " << info.dst_ds.ds_info();
+      }
     }
   }
   return _comm_type;
@@ -217,7 +257,7 @@ std::tuple<size_t, std::vector<DeviceGroupList>> CommOpImpl::get_split_comm_grou
   size_t union_size = dg_union.size();
   size_t union_idx = dg_union.get_index(placement);
   DeviceGroup local_dg = dg_union.get(union_idx);
-  DistributedStates local_ds = ds_union.get(union_idx);
+  DistributedStates local_ds = ds_union.get_local(union_idx);
   DeviceGroupList dg_list;
   DistributedStatesList ds_list;
 
@@ -537,11 +577,27 @@ TensorList CommOpImpl::DoGradient(Operator& op,
       */
       HT_ASSERT(ds_output.states(-2) == 1)
         << "partial shouldn't appear in forward comm op output";
+      /*
       HT_ASSERT(ds_grad_output.get_dim(-2) == 1)
         << "partial shouldn't appear in backward comm op input"
         << ", all the things should be done in Gradients() in graph.cc";
+      */
+
+      // ********************* COMM DETAILS ************************
+      // tp:
+      // col foward, no comm: ->dup->dup-> (no op)
+      // col backward, all-reduce: ->partial->dup-> (insert at Gradients() in graph.cc)
+      // row forward, all-reduce: ->partial->dup-> (manually insert comm op in .py)
+      // row backward, no comm: ->dup->dup-> (forward op DoGradient())
+      // sp:
+      // col forward, all-gather: ->split0->dup-> (manually insert comm op in .py)
+      // col backward, reduces-scatter: ->partial->split0-> (forward op DoGradient())
+      // row forward, reduce-scatter: ->partial->split0-> (manually insert comm op in .py)
+      // row backward, all-gather: ->split0->dup-> (forward op DoGradient())
+      
+      // partial need to transfer to dup
+      // cases: tp row backward & sp row backward
       DistributedStates ds_grad_input(ds_input);
-      // partial->duplicate
       if (ds_grad_input.get_dim(-2) > 1) { 
         std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1}); 
         auto res_states = ds_grad_input.combine_states(src2dst);

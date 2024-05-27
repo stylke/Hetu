@@ -107,6 +107,7 @@ class DistributedStates {
   bool check_reduce_dim(const DistributedStates& dst_distributed_states, int dim) const;
 
   bool check_allreduce(const DistributedStates& dst_distributed_states) const;
+  bool check_scatter(const DistributedStates& dst_distributed_states) const;
   bool check_allgather(const DistributedStates& dst_distributed_states) const;
   bool check_reducescatter(const DistributedStates& dst_distributed_states) const;
   bool check_boradcast(const DistributedStates& dst_distributed_states) const;
@@ -116,6 +117,7 @@ class DistributedStates {
   std::vector<int32_t> get_loop_sizes() const;
   std::unordered_map<int32_t, int32_t> map_device_to_state_index(int32_t device_index) const;
   int32_t get_dup_group_index(int32_t device_index) const;
+  DeviceGroup get_devices_by_dim(int32_t dim, int32_t local_device_idx, DeviceGroup group) const;
   std::string ds_info() const;
 
  protected:
@@ -183,6 +185,32 @@ class DistributedStatesUnion {
   }
 
   void set_hetero_dim(int32_t hetero_dim) {
+    _hetero_dim = hetero_dim;
+  }
+
+  void change_hetero_dim(int32_t hetero_dim) {
+    size_t union_size = _union.size();
+    HT_ASSERT(_hetero_dim != NULL_HETERO_DIM && union_size > 1)
+      << "must be hetero already";
+    for (size_t i = 0; i < union_size; i++) {
+      auto& ds = _union.at(i);
+      HT_ASSERT(ds.order(0) == _hetero_dim)
+        << "now only support hetero change in its first order";
+      auto local_ds = get_local(i);
+      auto new_states = local_ds.get_states();
+      auto new_order = local_ds.get_order();
+      if (new_states.find(hetero_dim) == new_states.end()) {
+        new_states[hetero_dim] = union_size;
+      } else {
+        new_states[hetero_dim] *= union_size;
+      }
+      if (std::find(new_order.begin(), new_order.end(), hetero_dim) == new_order.end()) {
+        new_order.insert(new_order.begin(), hetero_dim);
+      }
+      HT_ASSERT(new_order.at(0) == hetero_dim)
+        << "now only support hetero change in its first order";
+      _union.at(i) = DistributedStates(ds.get_device_num(), new_states, new_order, ds.zero());
+    }
     _hetero_dim = hetero_dim;
   }
 

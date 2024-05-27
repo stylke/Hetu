@@ -1,6 +1,9 @@
 import hetu as ht
 import numpy as np
+import torch
 from queue import Queue
+
+from hetu.nn.modules.parallel_multi_ds import parallel_data_provider, parallel_multi_data_provider
 
 def get_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
     multi_ds_parallel_config = []
@@ -65,6 +68,7 @@ class GPTAttention(ht.nn.Module):
             self.embed_dim,
             self.embed_dim,
             get_multi_ds_parallel_config(ds_parallel_configs, 'dense', layer_idx),
+            sp=True,
             bias=self.add_bias,
             name=f'rowp_{name}'
         )
@@ -128,10 +132,6 @@ class GPTAttention(ht.nn.Module):
         hidden_states,
         attention_mask=None,
     ):
-        embed_dim = hidden_states.global_shape[-1]
-        # [micro_batch_size*seq_len, embed_dim]
-        hidden_states = hidden_states.reshape([self.config.mbs_times_dp_symbol * self.config.seq_len_symbol, ht.IntSymbol(embed_dim)])
-        # print(f'hidden_states.global_shape={hidden_states.global_shape}, hidden_states.shape={hidden_states.shape}, hidden_states.distributed_states={hidden_states.distributed_states}')        
         # column parallel, [micro_batch_size*seq_len, 3*embed_dim]
         qkv = self.qkv_dense(hidden_states)
         # print(f'qkv.global_shape={qkv.global_shape}, qkv.shape={qkv.shape}, qkv.distributed_states={qkv.distributed_states}')        
@@ -160,12 +160,8 @@ class GPTAttention(ht.nn.Module):
         attn_output = attn_output.reshape([self.config.mbs_times_dp_symbol * self.config.seq_len_symbol, ht.IntSymbol(self.num_heads * self.head_dim)])
         # row parallel, shape=[micro_batch_size*seq_len, num_heads*head_dim]
         attn_output = self.dense(attn_output)
-        # [micro_batch_size, seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([self.config.mbs_times_dp_symbol, self.config.seq_len_symbol, ht.IntSymbol(self.num_heads * self.head_dim)])
         # dropout
         # attn_output = self.resid_dropout(attn_output)
-
-        # [micro_batch_size, seq_len, num_heads*head_dim]
         return attn_output
 
 
@@ -194,6 +190,7 @@ class ParallelMLP(ht.nn.Module):
             config.ffn_hidden_size,
             config.hidden_size,
             get_multi_ds_parallel_config(ds_parallel_configs, 'dense_4h_to_h', layer_idx),
+            sp=True,
             bias=self.add_bias,
             name=f'rowp_{name}'
             # init_method=output_layer_init_method
@@ -220,12 +217,17 @@ class GPTMLP(ht.nn.Module):
 
     def forward(self, hidden_states):
         origin_shape = hidden_states.global_shape # [b, seq_len, hidden_size]
+        assert len(origin_shape) == 2, "sp: all is 2 dim matmul"
+        '''
         if len(origin_shape) != 2: # shape adaptor
             hidden_states = hidden_states.reshape([self.config.mbs_times_dp_symbol * self.config.seq_len_symbol, ht.IntSymbol(origin_shape[-1])])
+        '''
         hidden_states = self.parallel_mlp(hidden_states)
+        '''
         if len(origin_shape) != 2: # shape adaptor
             # two undetermined dim, we therefore should use symbolic shape here
             hidden_states = hidden_states.reshape([self.config.mbs_times_dp_symbol, self.config.seq_len_symbol, ht.IntSymbol(origin_shape[-1])])
+        '''
         return hidden_states
 
 class GPTBlock(ht.nn.Module):
@@ -235,9 +237,10 @@ class GPTBlock(ht.nn.Module):
         self.layer_idx = layer_idx
         hidden_size = config.hidden_size
 
-        self.ln_1 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm1', layer_idx), eps=config.layer_norm_epsilon, name=f'ln1_block{layer_idx}')
+        # sequence parallel: layernorm前做reduce-scatter(这一部分由row prallel的reduce-scatter完成); layernorm后做allgather
+        self.ln_1 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm1', layer_idx), sp=True, eps=config.layer_norm_epsilon, name=f'ln1_block{layer_idx}')
         self.attn = GPTAttention(config, ds_parallel_configs, layer_idx=layer_idx, name=f'attn_block{layer_idx}')
-        self.ln_2 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm2', layer_idx), eps=config.layer_norm_epsilon, name=f'ln2_block{layer_idx}')
+        self.ln_2 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm2', layer_idx), sp=True, eps=config.layer_norm_epsilon, name=f'ln2_block{layer_idx}')
         self.mlp = GPTMLP(config, ds_parallel_configs, layer_idx=layer_idx, name=f'mlp_block{layer_idx}')
 
     def forward(
@@ -245,7 +248,10 @@ class GPTBlock(ht.nn.Module):
         hidden_states,
         attention_mask=None,
     ):
-        hidden_states = ht.comm(hidden_states, self.attn.qkv_dense.ds_union_map['split0_dup'], self.ln_1.device_group_unions, name=f"pipeline_layer_{self.layer_idx}")
+        if self.ln_1.sp:
+            hidden_states = ht.comm(hidden_states, self.ln_1.ds_union_map['split0'], self.ln_1.device_group_unions, name=f"pipeline_layer_{self.layer_idx}_comm")
+        else:
+            hidden_states = ht.comm(hidden_states, self.attn.qkv_dense.ds_union_map['split0_dup'], self.ln_1.device_group_unions, name=f"pipeline_layer_{self.layer_idx}_comm")
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
         attn_output = self.attn(
@@ -284,7 +290,7 @@ class GPTModel(ht.nn.Module):
             #         blocks.append(GPTBlock(config, block_config, layer_idx=i))
             #         break
         self.h = ht.nn.ModuleList(blocks)
-        self.ln_f = ht.nn.HtMultiParallelLayerNorm(self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm_final'), eps=config.layer_norm_epsilon, name='ln_final')
+        self.ln_f = ht.nn.HtMultiParallelLayerNorm(self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm_final'), sp=True, eps=config.layer_norm_epsilon, name='ln_final')
 
     def forward(
         self,
@@ -320,6 +326,28 @@ class GPTModel(ht.nn.Module):
             hidden_states = hidden_states + token_type_embeds
         # dropout
         # hidden_states = self.drop(hidden_states)
+        
+        # [bsz, seq_len, embed_dim] -> [bsz * seq_len, embed_dim]
+        _, _, embed_dim = hidden_states.global_shape
+        hidden_states = hidden_states.reshape([self.config.mbs_times_dp_symbol * self.config.seq_len_symbol, ht.IntSymbol(embed_dim)])
+        # for sequence parallel
+        # todo: this is pretty hacky, find a better way
+        sp = True
+        if sp:
+            ds_hierarchy_input = hidden_states.ds_hierarchy
+            ds_hierarchy_output = []
+            for ds_union_input in ds_hierarchy_input:
+                ds_list_split0 = []
+                for ds_input in ds_union_input.ds_list:
+                    ds_split0 = ht.DistributedStates(ds_input.device_num, {0: ds_input.device_num}, [0])
+                    assert ds_union_input.hetero_dim == -3 or ds_union_input.hetero_dim == 0, \
+                        "Workaround: sp assume input only hetero on split0"
+                    assert ds_input.device_num == ds_input.get_dim(0) * ds_input.get_dim(-1), \
+                        "Workaround: sp assume input only split in dimension 0 for dp"
+                    ds_list_split0.append(ds_split0)
+                ds_hierarchy_output.append(ht.DistributedStatesUnion(ds_list_split0, 0 if ds_union_input.hetero_dim != -3 else -3))
+            # [b * seq_len // tp, embed_dim]
+            hidden_states = ht.comm(hidden_states, ds_hierarchy_output, name="workaround_sp_comm")
 
         # 12 x multihead self-attn
         for i, block in enumerate(self.h):
@@ -365,9 +393,15 @@ class GPTLMHeadModel(ht.nn.Module):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
         )
+        
+        # need allgather here: [b*s//tp, h] -> [b*s, h]
+        if not hidden_states.check_ds_hierarchy_equal(self.lm_head.ds_union_map['split0_dup']):
+            hidden_states = ht.comm(hidden_states, self.lm_head.ds_union_map['split0_dup'])
+        # [b*s, h] -> [b, s, h]
+        _, n_embd = hidden_states.global_shape
+        hidden_states = hidden_states.reshape([self.config.mbs_times_dp_symbol, self.config.seq_len_symbol, ht.IntSymbol(n_embd)])
         # [b, seq_len, n_embd] -> [b, seq_len-1, n_embd]
         shift_hidden_states = ht.slice(hidden_states, [ht.IntSymbol(0), ht.IntSymbol(0), ht.IntSymbol(0)], [hidden_states.symbolic_shape[0], hidden_states.symbolic_shape[1] - 1, hidden_states.symbolic_shape[2]])
-        _,  _, n_embd = hidden_states.global_shape
         # [b*(seq_len-1), n_embd]
         shift_hidden_states = shift_hidden_states.reshape([self.config.mbs_times_dp_symbol * (self.config.seq_len_symbol - 1), ht.IntSymbol(n_embd)])
         # column parallel, [b*(seq_len-1), n_embd]->[b*(seq_len-1), vocab_size], and splited in vocab dimension

@@ -2,7 +2,7 @@ import os
 import signal
 import math
 import hetu as ht
-from hetu_gpt_multi_ds_parallel_symbolic import GPTLMHeadModel
+from hetu_gpt_multi_ds_parallel_symbolic_sp import GPTLMHeadModel
 from hetu.nn.modules.parallel_multi_ds import config2ds
 from gpt_config import GPTConfig
 from data_utils import GPTJsonDataset, get_mask_and_position_ids, build_pretraining_data_loader

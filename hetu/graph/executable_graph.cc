@@ -422,7 +422,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
       continue;
     // 处理1
     // handle unused or redundant comm ops
-    if (is_comm_op(op)) {
+    if (is_comm_op(op) && op->placement_group_union().has(preferred_device)) {
       auto& comm_op_impl = dynamic_cast<CommOpImpl&>(op->body());
       // 1. remove unused comm ops
       if (comm_op_impl.get_comm_type(op, preferred_device) == UNUSED_OP) {
@@ -612,202 +612,241 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
       if (!input->symbolic()) {
         input->init_symbolic_shape();
       }
-      bool ignore_flag = false;
-      Tensor result;
+      bool ignore_flag = false, local_comm_flag = false, determine_flag = false;
+      Tensor result = input;
 
-      switch (comm_type) {
-        case UNUSED_OP: {
-          HT_RUNTIME_ERROR << "Unused comm op should already be deleted when instantiating";
-          break;
-        }
-        case P2P_OP: {
-          Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
-          HT_ASSERT(output->shape() == input->shape())
-            << "p2p shape should be equal";
-          // p2p send
-          if (info.src_group.contains(local_device)) {
-            // 自己发给自己
-            if (info.dst_group.get(info.src_group.get_index(local_device)) == local_device) {
-              HT_LOG_DEBUG << local_device << ": redundant p2p send from " 
-                << info.src_group << " to " << info.dst_group;
-              result = input;
-            } 
-            // 发给别人
-            else {
-              HT_LOG_DEBUG << local_device << ": send from stage " << info.src_group << " to " << info.dst_group;
-              Tensor send_out_dep_linker = MakeP2PSendOp(
-                input, info.dst_group, info.src_group.get_index(local_device), 
-                OpMeta().set_is_deduce_states(false));
-              // since send_out_dep_linker has an empty shape and is useless, recording its shape is unnecessary
-              // but here we still do it to make the code looks more consistent
-              RecordExecTensor(send_out_dep_linker);
-              auto& send_op = send_out_dep_linker->producer();
-              send_op->MapToParallelDevices(info.src_group_union);
-              send_op->Instantiate(local_device, kP2PStream);
-              // add dummy link for topo sort
-              for (int i = 0; i < comm_op->output(0)->num_consumers(); i++) {
-                Graph::AddInDeps(comm_op->output(0)->consumer(i), {send_out_dep_linker});
-              }
-              result = input;
-            }
-          }
-          // p2p recv
+      if ((comm_type & UNUSED_OP) != 0) {
+        HT_RUNTIME_ERROR << "Unused comm op should already be deleted when instantiating";
+      }
+      if ((comm_type & BATCHED_ISEND_IRECV_OP) != 0) {
+        // 1. local_device send data to other devices 
+        // 2. local_device recv data from other devices
+        // use derived method from switch exec graph
+        auto complex_exec_comm = ComplexExecComm(comm_op, info);
+        result = complex_exec_comm.Instantiate();
+        HT_LOG_DEBUG << local_device << ": substitute comm_op to batched_isend_irecv_op";
+        determine_flag = true;
+      }
+      if ((comm_type & P2P_OP) != 0) {
+        Tensor& output = comm_op->output(0); // output meta was already deduced in DoInferMeta
+        HT_ASSERT(output->shape() == result->shape())
+          << "p2p shape should be equal";
+        // p2p send
+        if (info.src_group.contains(local_device)) {
+          // 自己发给自己
+          if (info.dst_group.get(info.src_group.get_index(local_device)) == local_device) {
+            HT_LOG_DEBUG << local_device << ": redundant p2p send from " 
+              << info.src_group << " to " << info.dst_group;
+          } 
+          // 发给别人
           else {
-            HT_ASSERT(info.dst_group.contains(local_device))
-              << "dst group must contain local device";
-            // 自己收自己
-            if (info.src_group.get(info.dst_group.get_index(local_device)) == local_device) {
-              HT_LOG_DEBUG << local_device << ": redundant p2p recv from " 
-                << info.src_group << " to " << info.dst_group;
-              result = input;
-            } 
-            // 自己收别人
-            else {
-              HT_LOG_DEBUG << local_device << ": just recv from stage " << info.src_group << " to " << info.dst_group;
-              Tensor recv_output = MakeP2PRecvOp(
-                info.src_group, output->dtype(), input->symbolic_shape(),
-                info.dst_group.get_index(local_device), 
-                OpMeta().set_is_deduce_states(false));
-              RecordExecTensor(recv_output);
-              auto& recv_op = recv_output->producer();
-              recv_op->MapToParallelDevices(info.dst_group_union);
-              recv_op->Instantiate(local_device, kP2PStream);
-              // add dummy link for topo sort
-              Graph::AddInDeps(recv_op, {input});
-              result = recv_output;
+            HT_LOG_DEBUG << local_device << ": send from stage " << info.src_group << " to " << info.dst_group;
+            Tensor send_out_dep_linker = MakeP2PSendOp(
+              result, info.dst_group, info.src_group.get_index(local_device), 
+              OpMeta().set_is_deduce_states(false));
+            // since send_out_dep_linker has an empty shape and is useless, recording its shape is unnecessary
+            // but here we still do it to make the code looks more consistent
+            RecordExecTensor(send_out_dep_linker);
+            auto& send_op = send_out_dep_linker->producer();
+            send_op->MapToParallelDevices(info.src_group_union);
+            send_op->Instantiate(local_device, kP2PStream);
+            // add dummy link for topo sort
+            for (int i = 0; i < comm_op->output(0)->num_consumers(); i++) {
+              Graph::AddInDeps(comm_op->output(0)->consumer(i), {send_out_dep_linker});
             }
           }
-          break;
         }
-        case COMM_SPLIT_OP: {
-          HT_ASSERT(info.src_group == info.dst_group)
-            << "wrong src and dst group relationship for " << comm_op
-            << ", src_group = " << info.src_group << " and dst group = " << info.dst_group;
-          auto local_device_index = info.src_group.get_index(local_device);
-          const auto& local_dst_ds = info.local_dst_ds;
-          auto cur_state_index = local_dst_ds.map_device_to_state_index(local_device_index);
-          const auto& order = local_dst_ds.get_order();
-          const auto& states = local_dst_ds.get_states();
-          HTAxes keys; 
-          HTShape indices, splits;
-          for (auto o : order) {
-            if (o >= 0) { 
-              keys.push_back(o);
-              splits.push_back(states.at(o));
-              indices.push_back(cur_state_index[o]);
-            }
+        // p2p recv
+        else {
+          HT_ASSERT(info.dst_group.contains(local_device))
+            << "dst group must contain local device";
+          // 自己收自己
+          if (info.src_group.get(info.dst_group.get_index(local_device)) == local_device) {
+            HT_LOG_DEBUG << local_device << ": redundant p2p recv from " 
+              << info.src_group << " to " << info.dst_group;
+          } 
+          // 自己收别人
+          else {
+            HT_LOG_DEBUG << local_device << ": just recv from stage " << info.src_group << " to " << info.dst_group;
+            Tensor recv_output = MakeP2PRecvOp(
+              info.src_group, output->dtype(), result->symbolic_shape(),
+              info.dst_group.get_index(local_device), 
+              OpMeta().set_is_deduce_states(false));
+            RecordExecTensor(recv_output);
+            auto& recv_op = recv_output->producer();
+            recv_op->MapToParallelDevices(info.dst_group_union);
+            recv_op->Instantiate(local_device, kP2PStream);
+            // add dummy link for topo sort
+            Graph::AddInDeps(recv_op, {result});
+            result = recv_output;
           }
-          HT_LOG_DEBUG << local_device << ": keys = " << keys << "; indices = " << indices << "; splits = " << splits;
-          Tensor split_output = MakeSplitOp(
-            input, keys, indices, splits, 
-            OpMeta().set_is_deduce_states(false));
-          RecordExecTensor(split_output);
-          auto& split_op = split_output->producer();
-          split_op->MapToParallelDevices(info.src_group_union);
-          split_op->Instantiate(local_device, kComputingStream);
-          result = split_output;
-          break;
         }
-        case ALL_REDUCE_OP: {
-          HT_ASSERT(info.src_group == info.dst_group)
-            << "wrong src and dst group relationship!";
-          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2); // do allreduce among comm_group
-          Tensor all_reduce_output = MakeAllReduceOp(
-            input, comm_group, // comm_group is a subset of placement_group
-            comm_op_impl.reduction_type(), false,
-            OpMeta().set_is_deduce_states(false)
-                    .set_name(input->name() + "_AllReduce"));
-          RecordExecTensor(all_reduce_output);
-          auto& all_reduce_op = all_reduce_output->producer();
-          all_reduce_op->MapToParallelDevices(info.src_group_union);
-          all_reduce_op->Instantiate(local_device, kCollectiveStream);
-          result = all_reduce_output;
-          HT_LOG_DEBUG << local_device << ": substitute comm_op to all_reduce_op: " << comm_group;        
-          break;
-        } 
-        case ALL_GATHER_OP: {
-          HT_ASSERT(info.src_group == info.dst_group)
-            << "wrong src and dst group relationship!";
-          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
-          Tensor all_gather_output = MakeAllGatherOp(
-            input, comm_group,
-            OpMeta().set_is_deduce_states(false)
-                    .set_name(input->name() + "_AllGather"));
-          RecordExecTensor(all_gather_output);
-          auto& all_gather_op = all_gather_output->producer();
-          all_gather_op->MapToParallelDevices(info.src_group_union);
-          all_gather_op->Instantiate(local_device, kCollectiveStream);
-          result = all_gather_output;
-          HT_LOG_DEBUG << local_device << ": substitute comm_op to all_gather_op: " << comm_group;
-          break;
+        determine_flag = true;
+      }
+      if ((comm_type & COMM_SPLIT_OP) != 0) {
+        HT_ASSERT(info.src_group == info.dst_group)
+          << "wrong src and dst group relationship for " << comm_op
+          << ", src_group = " << info.src_group << " and dst group = " << info.dst_group;
+        auto local_device_index = info.src_group.get_index(local_device);
+        const auto& local_dst_ds = info.local_dst_ds;
+        auto cur_state_index = local_dst_ds.map_device_to_state_index(local_device_index);
+        const auto& order = local_dst_ds.get_order();
+        const auto& states = local_dst_ds.get_states();
+        HTAxes keys; 
+        HTShape indices, splits;
+        for (auto o : order) {
+          if (o >= 0) { 
+            keys.push_back(o);
+            splits.push_back(states.at(o));
+            indices.push_back(cur_state_index[o]);
+          }
         }
-        case REDUCE_SCATTER_OP: {
-          HT_ASSERT(info.src_group == info.dst_group)
-            << "wrong src and dst group relationship!";
-          DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2);
-          Tensor reduce_scatter_output =  MakeReduceScatterOp(
-            input, comm_group,
-            comm_op_impl.reduction_type(), false,
-            OpMeta().set_is_deduce_states(false)
-                    .set_name(input->name() + "_ReduceScatter"));
-          RecordExecTensor(reduce_scatter_output);
-          auto& reduce_scatter_op = reduce_scatter_output->producer();
-          reduce_scatter_op->MapToParallelDevices(info.src_group_union);
-          reduce_scatter_op->Instantiate(local_device, kCollectiveStream);
-          result = reduce_scatter_output;
-          HT_LOG_DEBUG << local_device << ": substitute comm_op to reduce_scatter_op: " << comm_group;
-          break;
+        HT_LOG_DEBUG << local_device << ": keys = " << keys << "; indices = " << indices << "; splits = " << splits;
+        Tensor split_output = MakeSplitOp(
+          result, keys, indices, splits, 
+          OpMeta().set_is_deduce_states(false));
+        RecordExecTensor(split_output);
+        auto& split_op = split_output->producer();
+        split_op->MapToParallelDevices(info.src_group_union);
+        split_op->Instantiate(local_device, kComputingStream);
+        result = split_output;
+        HT_LOG_DEBUG << local_device << ": substitute comm_op to split_op";        
+        determine_flag = true;
+        local_comm_flag = true;
+      }
+      if ((comm_type & SCATTER_OP) != 0) {
+        HT_ASSERT(info.src_group == info.dst_group)
+          << "wrong src and dst group relationship!";
+        auto local_device_index = info.src_group.get_index(local_device);
+        auto cur_state_index = info.local_dst_ds.map_device_to_state_index(local_device_index);
+        auto split_num = info.local_dst_ds.get_dim(0) / info.local_src_ds.get_dim(0);
+        auto indice = cur_state_index[0] % split_num;
+        HTAxes keys = {0};
+        HTShape indices = {indice};
+        HTShape splits = {split_num};
+        Tensor scatter_output = MakeSplitOp(result, keys, indices, splits, OpMeta().set_is_deduce_states(false));
+        RecordExecTensor(scatter_output);
+        auto& scatter_op = scatter_output->producer();
+        scatter_op->MapToParallelDevices(info.src_group_union);
+        scatter_op->Instantiate(local_device, kComputingStream);
+        result = scatter_output;
+        HT_LOG_DEBUG << local_device << ": substitute comm_op to scatter_op";      
+        determine_flag = true;
+        local_comm_flag = true;
+      }
+      if ((comm_type & ALL_REDUCE_OP) != 0) {
+        HT_ASSERT(info.src_group == info.dst_group)
+          << "wrong src and dst group relationship!";
+        DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2); // do allreduce among comm_group
+        Tensor all_reduce_output = MakeAllReduceOp(
+          result, comm_group, // comm_group is a subset of placement_group
+          comm_op_impl.reduction_type(), false,
+          OpMeta().set_is_deduce_states(false)
+                  .set_name(result->name() + "_AllReduce"));
+        RecordExecTensor(all_reduce_output);
+        auto& all_reduce_op = all_reduce_output->producer();
+        all_reduce_op->MapToParallelDevices(info.src_group_union);
+        all_reduce_op->Instantiate(local_device, kCollectiveStream);
+        result = all_reduce_output;
+        HT_LOG_DEBUG << local_device << ": substitute comm_op to all_reduce_op: " << comm_group;        
+        determine_flag = true;
+        local_comm_flag = true;
+      } 
+      if ((comm_type & ALL_GATHER_OP) != 0) {
+        HT_ASSERT(info.src_group == info.dst_group)
+          << "wrong src and dst group relationship!";
+        // DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
+        int32_t local_device_idx = info.dst_group.get_index(local_device);
+        DeviceGroup comm_group = info.local_dst_ds.get_devices_by_dim(-1, local_device_idx, info.dst_group);
+        Tensor all_gather_output = MakeAllGatherOp(
+          result, comm_group,
+          OpMeta().set_is_deduce_states(false)
+                  .set_name(result->name() + "_AllGather"));
+        RecordExecTensor(all_gather_output);
+        auto& all_gather_op = all_gather_output->producer();
+        all_gather_op->MapToParallelDevices(info.src_group_union);
+        all_gather_op->Instantiate(local_device, kCollectiveStream);
+        result = all_gather_output;
+        HT_LOG_DEBUG << local_device << ": substitute comm_op to all_gather_op: " << comm_group;
+        determine_flag = true;
+        local_comm_flag = true;
+      }
+      if ((comm_type & REDUCE_SCATTER_OP) != 0) {
+        HT_ASSERT(info.src_group == info.dst_group)
+          << "wrong src and dst group relationship!";
+        DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2);
+        Tensor reduce_scatter_output =  MakeReduceScatterOp(
+          result, comm_group,
+          comm_op_impl.reduction_type(), false,
+          OpMeta().set_is_deduce_states(false)
+                  .set_name(result->name() + "_ReduceScatter"));
+        RecordExecTensor(reduce_scatter_output);
+        auto& reduce_scatter_op = reduce_scatter_output->producer();
+        reduce_scatter_op->MapToParallelDevices(info.src_group_union);
+        reduce_scatter_op->Instantiate(local_device, kCollectiveStream);
+        result = reduce_scatter_output;
+        HT_LOG_DEBUG << local_device << ": substitute comm_op to reduce_scatter_op: " << comm_group;
+        determine_flag = true;
+        local_comm_flag = true;
+      }
+      if ((comm_type & SPLIT_ALL_REDUCE_OP) != 0) {
+        HT_ASSERT(info.src_group_union.check_equal(info.dst_group_union))
+          << "wrong src and dst group relationship!";
+        // 先前进行了局部通信
+        // 对齐了所有的local ds
+        DistributedStatesUnion intermediate_ds_union(info.dst_ds_union);
+        if (local_comm_flag) {
+          intermediate_ds_union.change_hetero_dim(info.src_ds_union.hetero_dim());
+          result->set_cur_ds_union(intermediate_ds_union); 
         }
-        case BATCHED_ISEND_IRECV_OP: {
-          // 1. local_device send data to other devices 
-          // 2. local_device recv data from other devices
-          // use derived method from switch exec graph
-          auto complex_exec_comm = ComplexExecComm(comm_op, info);
-          result = complex_exec_comm.Instantiate();
-          HT_LOG_DEBUG << local_device << ": substitute comm_op to batched_isend_irecv_op";
-          break;
+        size_t split_num = 0;
+        std::vector<DeviceGroupList> comm_groups_list;
+        std::tie(split_num, comm_groups_list) = comm_op_impl.get_split_comm_groups_list(comm_op, info.src_group_union, intermediate_ds_union);
+        Tensor split_all_reduce_output = MakeSplitAllReduceOp(
+          result, comm_groups_list, split_num, 
+          comm_op_impl.reduction_type(), false,
+          OpMeta().set_is_deduce_states(false)
+                  .set_name(result->name() + "_SplitAllReduce"));
+        RecordExecTensor(split_all_reduce_output);
+        auto& split_all_reduce_op = split_all_reduce_output->producer();
+        split_all_reduce_op->MapToParallelDevices(info.src_group_union);
+        split_all_reduce_op->Instantiate(local_device, kCollectiveStream);
+        result = split_all_reduce_output;
+        HT_LOG_DEBUG << local_device << ": substitute comm_op to split_all_reduce_op: " << comm_groups_list;         
+        determine_flag = true;
+      }
+      if ((comm_type & SPLIT_REDUCE_SCATTER_OP) != 0) {
+        HT_ASSERT(info.src_group_union.check_equal(info.dst_group_union))
+          << "wrong src and dst group relationship!";
+        // 先前进行了局部通信
+        // 对齐了所有的local ds
+        DistributedStatesUnion intermediate_ds_union(info.dst_ds_union);
+        if (local_comm_flag) {
+          intermediate_ds_union.change_hetero_dim(info.src_ds_union.hetero_dim());
+          result->set_cur_ds_union(intermediate_ds_union); 
         }
-        case SPLIT_ALL_REDUCE_OP: {
-          HT_ASSERT(info.src_group_union.check_equal(info.dst_group_union))
-            << "wrong src and dst group relationship!";
-          size_t split_num = 0;
-          std::vector<DeviceGroupList> comm_groups_list;
-          std::tie(split_num, comm_groups_list) = comm_op_impl.get_split_comm_groups_list(comm_op, info.src_group_union, info.src_ds_union);
-          Tensor split_all_reduce_output = MakeSplitAllReduceOp(
-            input, comm_groups_list, split_num, 
-            comm_op_impl.reduction_type(), false,
-            OpMeta().set_is_deduce_states(false)
-                    .set_name(input->name() + "_SplitAllReduce"));
-          RecordExecTensor(split_all_reduce_output);
-          auto& split_all_reduce_op = split_all_reduce_output->producer();
-          split_all_reduce_op->MapToParallelDevices(info.src_group_union);
-          split_all_reduce_op->Instantiate(local_device, kCollectiveStream);
-          result = split_all_reduce_output;
-          HT_LOG_DEBUG << local_device << ": substitute comm_op to split_all_reduce_op: " << comm_groups_list;         
-          break;
-        }
-        case SPLIT_REDUCE_SCATTER_OP: {
-          HT_ASSERT(info.src_group_union.check_equal(info.dst_group_union))
-            << "wrong src and dst group relationship!";
-          size_t split_num = 0;
-          std::vector<DeviceGroupList> comm_groups_list;
-          std::tie(split_num, comm_groups_list) = comm_op_impl.get_split_comm_groups_list(comm_op, info.src_group_union, info.src_ds_union);
-          Tensor split_reduce_scatter_output = MakeSplitReduceScatterOp(
-            input, comm_groups_list, split_num, 
-            comm_op_impl.reduction_type(), false,
-            OpMeta().set_is_deduce_states(false)
-                    .set_name(input->name() + "_SplitReduceScatter"));
-          RecordExecTensor(split_reduce_scatter_output);
-          auto& split_reduce_scatter_op = split_reduce_scatter_output->producer();
-          split_reduce_scatter_op->MapToParallelDevices(info.src_group_union);
-          split_reduce_scatter_op->Instantiate(local_device, kCollectiveStream);
-          result = split_reduce_scatter_output;
-          HT_LOG_DEBUG << local_device << ": substitute comm_op to split_reduce_scatter_op: " << comm_groups_list;         
-          break;
-        }
-        default: {
-          HT_RUNTIME_ERROR << "Not supported yet";
-        }
+        size_t split_num = 0;
+        std::vector<DeviceGroupList> comm_groups_list;
+        std::tie(split_num, comm_groups_list) = comm_op_impl.get_split_comm_groups_list(comm_op, info.src_group_union, intermediate_ds_union);
+        Tensor split_reduce_scatter_output = MakeSplitReduceScatterOp(
+          result, comm_groups_list, split_num, 
+          comm_op_impl.reduction_type(), false,
+          OpMeta().set_is_deduce_states(false)
+                  .set_name(result->name() + "_SplitReduceScatter"));
+        RecordExecTensor(split_reduce_scatter_output);
+        auto& split_reduce_scatter_op = split_reduce_scatter_output->producer();
+        split_reduce_scatter_op->MapToParallelDevices(info.src_group_union);
+        split_reduce_scatter_op->Instantiate(local_device, kCollectiveStream);
+        result = split_reduce_scatter_output;
+        HT_LOG_DEBUG << local_device << ": substitute comm_op to split_reduce_scatter_op: " << comm_groups_list;         
+        determine_flag = true;
+      }
+      if (!determine_flag) {
+        HT_RUNTIME_ERROR << local_device << ": " << comm_op << " type is not supported yet"
+          << ", src ds union is " << info.src_ds_union.ds_union_info()
+          << ", and dst ds union is " << info.dst_ds_union.ds_union_info()
+          << ", src group is " << info.src_group_union
+          << ", dst group is " << info.dst_group_union;
       }
 
       // only send, then need to ignore the shape & ds when replacing the input 
@@ -1443,7 +1482,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           } else {
             if (is_placeholder_op(op_ref) || is_variable_op(op_ref)) {
               _placeholder_variable_ops.push_back(op_ref);
-            } else if (is_grad_reduce_op(op_ref) && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0))) {
+            } else if (is_grad_reduce_op(op_ref)
+                       && is_grad_reduce_op(op_ref.get()->output(0)->consumer(0))
+                       && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0)->output(0)->consumer(0))) {
+              update_op_list.push_back(op_ref);
+            } else if (is_grad_reduce_op(op_ref) 
+                       && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0))) {
               update_op_list.push_back(op_ref);
             } else if (is_optimizer_update_op(op_ref)) {
               update_op_list.push_back(op_ref);
@@ -1588,7 +1632,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           // case 2, 3 or (case 1 with sum)
           if (!is_weight_share_case) {
             if (is_grad_reduce_op(grad_op)) {
-              accumulated_tensor.insert(grad_op->input(0)->id());
+              if (is_grad_reduce_op(grad_op->input(0)->producer())) {
+                accumulated_tensor.insert(grad_op->input(0)->producer()->input(0)->id());
+                accumulated_ops_deque.push_back(grad_op->input(0)->producer());
+              } else {
+                accumulated_tensor.insert(grad_op->input(0)->id());
+              }
               accumulated_ops_deque.push_back(grad_op);
             } else if (is_sum_op(grad_op)) { // examples: shared wte
               accumulated_tensor.insert(grad->id());
@@ -1614,7 +1663,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             Tensor& grad = op->input(0);
             Operator& grad_op = grad->producer();
             if (is_grad_reduce_op(grad_op)) {
-              accumulated_tensor.insert(grad_op->input(0)->id());
+              if (is_grad_reduce_op(grad_op->input(0)->producer())) {
+                accumulated_tensor.insert(grad_op->input(0)->producer()->input(0)->id());
+                accumulated_ops_deque.push_back(grad_op->input(0)->producer());
+              } else {
+                accumulated_tensor.insert(grad_op->input(0)->id());
+              }
               accumulated_ops_deque.push_back(grad_op);
             } else {
               accumulated_tensor.insert(grad->id());

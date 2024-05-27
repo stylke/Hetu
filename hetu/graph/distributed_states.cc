@@ -295,11 +295,16 @@ bool DistributedStates::check_allreduce(const DistributedStates& dst_distributed
   return states(-2) > 1 && check_combine(dst_distributed_states, src2dst);
 }
 
-// 判断逻辑有待验证
-// TODO: map不要用at，因为并不存在这个key，会报异常
+// split0_dup -> split0
+bool DistributedStates::check_scatter(const DistributedStates& dst_distributed_states) const {
+  std::pair<std::vector<int32_t>, int32_t> src2dst = {{-1}, 0};
+  return states(-1) > 1 && check_combine(dst_distributed_states, src2dst);
+}
+
+// split0 -> split0_dup
 bool DistributedStates::check_allgather(const DistributedStates& dst_distributed_states) const {
-  std::pair<std::vector<int32_t>, int32_t> src2dst = {{0}, -1};
-  return states(0) > 1 && check_combine(dst_distributed_states, src2dst);
+  std::pair<std::vector<int32_t>, int32_t> src2dst = {{-1}, 0};
+  return states(0) > 1 && dst_distributed_states.states(-1) > 1 && dst_distributed_states.check_combine(*this, src2dst);
 }
 
 bool DistributedStates::check_reducescatter(const DistributedStates& dst_distributed_states) const {
@@ -361,6 +366,25 @@ int32_t DistributedStates::get_dup_group_index(int32_t device_index) const {
     interval *= get_dim(dim);
   }
   return dup_group_idx;
+}
+
+// devices by dim for collective communication
+DeviceGroup DistributedStates::get_devices_by_dim(int32_t dim, 
+  int32_t local_device_idx, DeviceGroup group) const {
+  auto order = get_order();
+  auto states = get_states();
+  auto idx = std::find(order.begin(), order.end(), dim);
+  int32_t interval = 1;
+  for (auto cur_order = idx + 1; cur_order != order.end(); cur_order++) {
+    interval *= states[*cur_order];
+  }
+  int32_t macro_interval = interval * get_dim(dim);
+  int32_t start = local_device_idx - local_device_idx % macro_interval + local_device_idx % interval;
+  std::vector<Device> comm_group;
+  for (auto i = start; i < start + macro_interval; i += interval) {
+    comm_group.push_back(group.get(i));
+  }
+  return DeviceGroup(comm_group);
 }
 
 std::string DistributedStates::ds_info() const {
