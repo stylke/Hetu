@@ -176,6 +176,10 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                       StreamIndex stream_id = DEFAULT_STREAM,
                       NDArray& output = EMPTY);
 
+  static NDArray swiglu(const NDArray& input,
+                        StreamIndex stream_id = DEFAULT_STREAM,
+                        NDArray& output = EMPTY);
+
   static NDArray tanh(const NDArray& input,
                       StreamIndex stream_id = DEFAULT_STREAM,
                       NDArray& output = EMPTY);

@@ -42,11 +42,16 @@ mkdir -p ${LOG_FOLDER}
 LOG_FILE=${LOG_FOLDER}/gbs${GLOBAL_BATCH_SIZE}_mbs${MICRO_BATCH_SIZE}_dp${DP}_tp${TP}_pp${PP}.log
 echo log will save to ${LOG_FILE}...
 
-ROOT_FOLDER=/data/nolan/develop/bak/ht/hot_switch/gh/Megatron-LM/data
+#ROOT_FOLDER=/data/nolan/develop/bak/ht/hot_switch/gh/Megatron-LM/data
+ROOT_FOLDER=/jizhicfs/hymiezhao/hetu-gh/Hetu-dev/examples/nlp/gpt/data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
 JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json
 MERGE_FILE=${ROOT_FOLDER}/merges.txt
+
+export LD_LIBRARY_PATH=/jizhicfs/hymiezhao/hetu-gh/Hetu-dev/build/hetu/third_party/cutlass/install:$LD_LIBRARY_PATH
+source /jizhicfs/hymiezhao/hetu-gh/Hetu-dev/init2.sh
+source /jizhicfs/hymiezhao/hetu-gh/Hetu-dev/hetu_refactor.exp
 
 # ds_parallel_config can use ds_parallel_config/generate_gpt_3d_config.py for auto-generate
 export NCCL_DEBUG=VERSION

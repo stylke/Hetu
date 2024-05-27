@@ -75,7 +75,8 @@ void PadCuda(const NDArray& input, NDArray& output, const HTShape& paddings,
       endpoint[i * 2 + 1] = input->shape(i);
     } else {
       HT_ASSERT((input->shape(i) + paddings[(i - (4 - len / 2)) * 2] +
-                 paddings[(i - (4 - len / 2)) * 2 + 1]) == (output->shape(i)));
+                 paddings[(i - (4 - len / 2)) * 2 + 1]) == (output->shape(i)))
+	<< "input shape = " << input->shape() << ", ouput shape = " << output->shape() << ", paddings = " << paddings;
       endpoint[i * 2] = paddings[(i - (4 - len / 2)) * 2];
       endpoint[i * 2 + 1] = paddings[(i - (4 - len / 2)) * 2] + input->shape(i);
     }

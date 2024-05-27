@@ -3,9 +3,18 @@ import numpy as np
 
 from hetu.nn.modules.parallel_ds import parallel_data_provider, get_device_index
 
+sin_global = None
+cos_global = None
+
+def generate_cos_sin(seqlen, rotary_dim, dtype):
+    assert rotary_dim % 2 == 0
+    angle = np.random.rand(seqlen * 2, rotary_dim // 2) * 2 * np.pi
+    cos = np.cos(angle).astype(dtype)
+    sin = np.sin(angle).astype(dtype)
+    return cos, sin
 
 # self-attn
-class GPTAttention(ht.nn.Module):
+class LLamaAttention(ht.nn.Module):
     def __init__(self, config, ds_parallel_config, layer_idx, name='attn'):
         super().__init__()
 
@@ -47,12 +56,10 @@ class GPTAttention(ht.nn.Module):
             self.embed_dim,
             self.embed_dim,
             ds_parallel_config['dense'],
+            sp=True,
             bias=self.add_bias,
             name=f'rowp_{name}'
         )
-
-        self.attn_dropout = ht.nn.Dropout(config.attn_pdrop)
-        self.resid_dropout = ht.nn.Dropout(config.resid_pdrop)
 
 
     def _attn(self, query, key_t, value, attention_mask=None):
@@ -88,8 +95,6 @@ class GPTAttention(ht.nn.Module):
             attn_weights = attn_weights + attention_mask
         # softmax
         attn_weights = ht.softmax(attn_weights, 3)
-        # dropout
-        # attn_weights = self.attn_dropout(attn_weights)
         # weight sum, shape=[mbs_times_dp, num_heads, seq_len, head_dim]
         attn_output = ht.bmm(attn_weights, value)
 
@@ -98,20 +103,37 @@ class GPTAttention(ht.nn.Module):
     def forward(
         self,
         hidden_states,
+        mbs_times_dp, # bsz dimension for flash-attn
         attention_mask=None,
     ):
-        mbs_times_dp, seq_len, embed_dim = hidden_states.global_shape
-        
-        # [mbs_times_dp*seq_len, embed_dim]
-        hidden_states = hidden_states.reshape([-1, embed_dim])
-        # print(f'hidden_states.global_shape={hidden_states.global_shape}, hidden_states.shape={hidden_states.shape}, hidden_states.distributed_states={hidden_states.distributed_states}')        
         # column parallel, [mbs_times_dp*seq_len, 3*embed_dim]
         qkv = self.qkv_dense(hidden_states)
-        # print(f'qkv.global_shape={qkv.global_shape}, qkv.shape={qkv.shape}, qkv.distributed_states={qkv.distributed_states}')        
+
+        # flash need bsz dimension!!!
         # [mbs_times_dp, seq_len, num_heads, 3*head_dim]
         qkv = qkv.reshape([mbs_times_dp, -1, self.num_heads, 3 * self.head_dim])
         # q,k,v shape=[mbs_times_dp, seq_len, num_heads, head_dim]
         query, key, value = ht.split(qkv, 3, qkv.ndim - 1)
+
+        mbs_times_dp, seq_len, num_heads, head_dim = query.global_shape
+
+        # apply relative positional encoding (rotary embedding)
+        def apply_rotary_pos_emb(x, _name='q'):
+            global sin_global, cos_global
+            if sin_global == None or cos_global == None:
+                cos_np, sin_np = generate_cos_sin(seq_len, int(0.5*head_dim), np.float32)
+                device_group = self.dense.device_group
+                device_index = get_device_index(device_group)
+                ds = self.dense.ds_map['dup']
+                sin_global = ht.from_numpy_parallel(parallel_data_provider(sin_np, ds, device_index),
+                                                    ds, device_group=device_group, requires_grad=False, name=f'sin{_name}')
+                cos_global = ht.from_numpy_parallel(parallel_data_provider(cos_np, ds, device_index),
+                                                    ds, device_group=device_group, requires_grad=False, name=f'cos{_name}')
+            out = ht.rotary(x, cos_global, sin_global, inplace=True)
+            return out
+
+        #query = apply_rotary_pos_emb(query, _name='q')
+        #key = apply_rotary_pos_emb(key, _name='k')
 
         if self.use_flash_attn:
             attn_output = ht.attn(query, key, value, 0, -1, True)[0]
@@ -132,12 +154,7 @@ class GPTAttention(ht.nn.Module):
         attn_output = attn_output.reshape([-1, self.num_heads * self.head_dim])
         # row parallel, shape=[mbs_times_dp*seq_len, num_heads*head_dim]
         attn_output = self.dense(attn_output)
-        # [mbs_times_dp, seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([mbs_times_dp, -1, self.num_heads * self.head_dim])
-        # dropout
-        # attn_output = self.resid_dropout(attn_output)
 
-        # [mbs_times_dp, seq_len, num_heads*head_dim]
         return attn_output
 
 
@@ -148,9 +165,14 @@ class ParallelMLP(ht.nn.Module):
         self.config = config
         self.add_bias = False
 
+        self.swiglu = True
+        ffn_hidden_size = config.ffn_hidden_size # 2.7*h
+        if self.swiglu:
+            ffn_hidden_size *= 2 # for swiglu: h -> 2 * 2.7*h
+
         self.dense_h_to_4h = ht.nn.HtColumnParallelLinear(
             config.hidden_size,
-            config.ffn_hidden_size,
+            ffn_hidden_size,
             ds_parallel_config['dense_h_to_4h'],
             bias=self.add_bias,
             gather_output=False,
@@ -158,73 +180,69 @@ class ParallelMLP(ht.nn.Module):
             # skip_bias_add=True
         )
 
-        # self.bias_gelu_fusion = bias_gelu_fusion
-        # self.activation_func = ht.nn.NewGeLU() # should be gelu
-
         self.dense_4h_to_h = ht.nn.HtRowParallelLinear(
+            #ffn_hidden_size,
             config.ffn_hidden_size,
             config.hidden_size,
             ds_parallel_config['dense_4h_to_h'],
+            sp=True,
             bias=self.add_bias,
             name=f'rowp_{name}'
             # init_method=output_layer_init_method
         )
 
-        self.dropout = ht.nn.Dropout(config.resid_pdrop)
-
     def forward(self, hidden_states):
-        # [b*seq_len, h] -> [b*seq_len, 4h]
+        # [b*seq_len, h] -> [b*seq_len, 2* 2.7* h]
         intermediate_parallel = self.dense_h_to_4h(hidden_states)
-        # intermediate_parallel = self.activation_func(intermediate_parallel)
-        intermediate_parallel = ht.relu(intermediate_parallel)
+        # fused kernel: x1*sigmoid(x1)*x2
+        intermediate_parallel = ht.swiglu(intermediate_parallel)
 
         # [b*seq_len, 4h] -> [b*seq_len, h]
         output = self.dense_4h_to_h(intermediate_parallel)
-        # output = self.dropout(output)
         return output
 
-class GPTMLP(ht.nn.Module):
+class LLamaMLP(ht.nn.Module):
     def __init__(self, config, ds_parallel_config, name='mlp'):
-        super(GPTMLP, self).__init__()
+        super(LLamaMLP, self).__init__()
         self.config = config
         self.parallel_mlp = ParallelMLP(config, ds_parallel_config, name)
 
     def forward(self, hidden_states):
-        origin_shape = hidden_states.global_shape # [b, seq_len, hidden_size]
-        if len(origin_shape) != 2: # shape adaptor
-            hidden_states = hidden_states.reshape([-1, origin_shape[-1]])
+        # [bsz*seq_len, hidden_size]
         hidden_states = self.parallel_mlp(hidden_states)
-        if len(origin_shape) != 2: # shape adaptor
-            hidden_states = hidden_states.reshape(origin_shape)
         return hidden_states
 
-class GPTBlock(ht.nn.Module):
+class LLamaBlock(ht.nn.Module):
     def __init__(self, config, ds_parallel_config, layer_idx):
         super().__init__()
         self.config = config
         hidden_size = config.hidden_size
 
-        self.ln_1 = ht.nn.HtParallelLayerNorm(hidden_size, ds_parallel_config['layernorm1'], eps=config.layer_norm_epsilon, name=f'ln1_block{layer_idx}')
-        self.attn = GPTAttention(config, ds_parallel_config['attn'], layer_idx=layer_idx, name=f'attn_block{layer_idx}')
-        self.ln_2 = ht.nn.HtParallelLayerNorm(hidden_size, ds_parallel_config['layernorm2'], eps=config.layer_norm_epsilon, name=f'ln2_block{layer_idx}')
-        self.mlp = GPTMLP(config, ds_parallel_config['mlp'], name=f'mlp_block{layer_idx}')
+        # sequence parallel: norm前做scatter(这一部分由row prallel的reduce-scatter完成); norm后做allgather
+        self.rmsnorm_1 = ht.nn.HtParallelLayerNorm(hidden_size, ds_parallel_config['layernorm1'], sp=True, name=f'rmsnorm1_block{layer_idx}')
+        self.attn = LLamaAttention(config, ds_parallel_config['attn'], layer_idx=layer_idx, name=f'attn_block{layer_idx}')
+        self.rmsnorm_2 = ht.nn.HtParallelLayerNorm(hidden_size, ds_parallel_config['layernorm2'], sp=True, name=f'rmsnorm2_block{layer_idx}')
+        self.mlp = LLamaMLP(config, ds_parallel_config['mlp'], name=f'mlp_block{layer_idx}')
 
     def forward(
         self,
         hidden_states,
+        mbs_times_dp,
         attention_mask=None,
     ):
+        # [bsz*seq_len, embed_dim]
         residual = hidden_states
-        hidden_states = self.ln_1(hidden_states)
+        hidden_states = self.rmsnorm_1(hidden_states)
         attn_output = self.attn(
-            hidden_states, # [b, seq_len, hidden_size]
+            hidden_states, # [bsz*seq_len, hidden_size]
+            mbs_times_dp,
             attention_mask=attention_mask, # [b, 1, 1, seq_len]
         )
         # residual connection
         hidden_states = attn_output + residual
 
         residual = hidden_states
-        hidden_states = self.ln_2(hidden_states)
+        hidden_states = self.rmsnorm_2(hidden_states)
         feed_forward_hidden_states = self.mlp(hidden_states)
         # residual connection
         # hidden_states =  feed_forward_hidden_states + residual
@@ -233,25 +251,22 @@ class GPTBlock(ht.nn.Module):
         return hidden_states
 
 
-class GPTModel(ht.nn.Module):
+class LLamaModel(ht.nn.Module):
     def __init__(self, config, ds_parallel_config):
-        super(GPTModel, self).__init__()
+        super(LLamaModel, self).__init__()
         self.config = config
-        self.dtype = ht.float32
 
         self.embed_dim = config.hidden_size
         self.wte = ht.nn.HtVocabParallelEmbedding(config.vocab_size, self.embed_dim, ds_parallel_config['wte'], name='wte')
-        self.wpe = ht.nn.HtParallelEmbedding(config.max_position_embeddings, self.embed_dim, ds_parallel_config['wpe'], name='wpe')
 
-        self.drop = ht.nn.Dropout(config.embd_pdrop)
         blocks = []
         for i in range(config.num_hidden_layers):
             for _, block_config in ds_parallel_config['blocks'].items():
                 if i >= block_config['range'][0] and i <= block_config['range'][1]:
-                    blocks.append(GPTBlock(config, block_config, layer_idx=i))
+                    blocks.append(LLamaBlock(config, block_config, layer_idx=i))
                     break
         self.h = ht.nn.ModuleList(blocks)
-        self.ln_f = ht.nn.HtParallelLayerNorm(self.embed_dim, ds_parallel_config['layernorm_final'], eps=config.layer_norm_epsilon, name='ln_final')
+        self.rmsnorm_f = ht.nn.HtParallelLayerNorm(config.hidden_size, ds_parallel_config['layernorm_final'], sp=True, name='rmsnorm_final')
 
     def forward(
         self,
@@ -268,14 +283,6 @@ class GPTModel(ht.nn.Module):
                 and token_type_ids.distributed_states.check_equal(input_ids.distributed_states), \
                 'token_type_ids global_shape and distributed_states should be equal to input_ids'
 
-        # position_ids: [1, seq_len]
-        position_ids = np.arange(0, seq_len, dtype=np.int64) # pos: [0, 1, 2, ..., seq_len-1]
-        position_ids = np.tile(position_ids, [mbs_times_dp, 1]) # shape: [b, seq_len]
-        # position_ids = ht.from_numpy(position_ids)
-        device_index = get_device_index(self.wpe.device_group)
-        position_ids = ht.from_numpy_parallel(parallel_data_provider(position_ids, input_ids.distributed_states, device_index), 
-                                              input_ids.distributed_states, device_group=self.wpe.device_group, name='position_ids')
-
         # attention_mask: [b, 1, 1, seq_len]
         if attention_mask is not None:
             assert attention_mask.global_shape == input_ids.global_shape \
@@ -288,30 +295,44 @@ class GPTModel(ht.nn.Module):
 
         # embeddding: [b, seq_len, embed_dim]
         inputs_embeds = self.wte(input_ids) # [b, seq_len, embed_dim]
-        position_embeds = self.wpe(position_ids) # [b, seq_len, embed_dim]
-        # todo: fix backward grad tensor reduce bug for add(extension dims)
-        hidden_states = inputs_embeds + position_embeds # [b, seq_len, embed_dim]
+        hidden_states = inputs_embeds # [b, seq_len, embed_dim]
         if token_type_ids is not None:
             token_type_embeds = self.wte(token_type_ids) # [b, seq_len, embed_dim]
             hidden_states = hidden_states + token_type_embeds
-        # dropout
-        # hidden_states = self.drop(hidden_states)
+
+        # [bsz, seq_len, embed_dim] -> [bsz*seq_len, embed_dim]
+        _, _, embed_dim = hidden_states.global_shape
+        hidden_states = hidden_states.reshape([-1, embed_dim])
+
+        # for sequence parallel
+        # todo: this is pretty hacky, find a better way
+        sp = True
+        if sp:
+            ds_input = hidden_states.distributed_states
+            ds_split0 = ht.DistributedStates(ds_input.device_num, {0: ds_input.device_num}, [0])
+            assert ds_input.device_num == ds_input.get_dim(0) * ds_input.get_dim(-1), \
+                'Workaround: sp assume input only split in dimension 0 for dp'
+            if ds_input.get_dim(-1) > 1: # exists dup input for tp
+                # [b*seq_len // tp, embed_dim]
+                hidden_states = ht.comm(hidden_states, ds_split0)
 
         # 12 x multihead self-attn
         for i, block in enumerate(self.h):
             hidden_states = block(
-                hidden_states, # [b, seq_len, embed_dim]
+                hidden_states, # [b*seq_len, embed_dim]
+                mbs_times_dp,
                 attention_mask=attention_mask, # [b, 1, 1, seq_len]
             )
         # layernorm
-        hidden_states = self.ln_f(hidden_states)
+        hidden_states = self.rmsnorm_f(hidden_states)
         return hidden_states
 
-class GPTLMHeadModel(ht.nn.Module):
+# the ds_parallel_config use the same as gpt
+class LLamaLMHeadModel(ht.nn.Module):
 
     def __init__(self, config, ds_parallel_config):
-        super(GPTLMHeadModel, self).__init__()
-        self.transformer = GPTModel(config, ds_parallel_config['gpt'])
+        super(LLamaLMHeadModel, self).__init__()
+        self.transformer = LLamaModel(config, ds_parallel_config['gpt'])
         self.lm_head = ht.nn.HtColumnParallelLinear(
             config.n_embd,
             config.vocab_size,
@@ -320,7 +341,7 @@ class GPTLMHeadModel(ht.nn.Module):
             gather_output=False,
             name='lm_head'
         )
-        self.lm_head.weight = self.transformer.wte.embedding_table # share embedding table
+        # self.lm_head.weight = self.transformer.wte.embedding_table # no share embedding table for llama
         self.config = config
     
     def forward(
@@ -330,31 +351,33 @@ class GPTLMHeadModel(ht.nn.Module):
         token_type_ids=None,
         labels=None
     ):
-        # [b, seq_len, n_embd]
+        mbs_times_dp, _ = input_ids.global_shape
+        # [b, s] -> [b*s, h] -> [b*s//tp, h]
         hidden_states = self.transformer(
             input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
         )
-        # [b, seq_len, n_embd] -> [b, seq_len-1, n_embd]
+
+        # need allgather here: [b*s//tp, h] -> [b*s, h]
+        if not hidden_states.distributed_states.check_equal(self.lm_head.ds_map['split0_dup']):
+            hidden_states = ht.comm(hidden_states, self.lm_head.ds_map['split0_dup'])
+        # [b*s, h] -> [b, s, h]
+        _, hidden_size = hidden_states.global_shape
+        hidden_states = hidden_states.reshape([mbs_times_dp, -1, hidden_size])
+        # [b, s, h] -> [b, s-1, h]
         shift_hidden_states = ht.slice(hidden_states, [0,0,0], [hidden_states.shape[0], hidden_states.shape[1] - 1, hidden_states.shape[2]])
-        _,  _, n_embd = hidden_states.global_shape
-        # [b*(seq_len-1), n_embd]
-        shift_hidden_states = shift_hidden_states.reshape([-1, n_embd])
-        # column parallel, [b*(seq_len-1), n_embd]->[b*(seq_len-1), vocab_size], and splited in vocab dimension
+        # [b*(s-1), h]
+        shift_hidden_states = shift_hidden_states.reshape([-1, hidden_size])
+
+        # column parallel, [b*(s-1), h]->[b*(s-1), vocab_size], and splited in vocab dimension
         shift_lm_logits = self.lm_head(shift_hidden_states)
 
         loss = None
         if labels is not None:
-            # lm_logits: [b, seq_len-1, vocab_size], labels: [b, seq_len-1]
-            # todo: slice op input local shape, should change into global shape
-            # print(f'before slice, shift_logits.shape: {lm_logits.global_shape}, {lm_logits.shape}; shift_labels.shape: {labels.global_shape}, {labels.shape}')
+            # lm_logits: [b*(s-1), vocab_size], labels: [b, s-1]
             shift_labels = ht.slice(labels, [0,1], [labels.shape[0], labels.shape[1] - 1])
-            # print(f'after slice, shift_logits.shape: {shift_logits.global_shape}, shift_labels.shape: {shift_labels.global_shape}')
-            # softmax cross_entropy loss = sum(-log(softmax(vocab[label])))
-            # because of ignored_index, so cannot use auto distributed reduce for mean
-            # need sum over distributed tensor, and divide the not ignored_index num after by hand
-            # print(shift_lm_logits.distributed_states)
+
             if shift_lm_logits.distributed_states.get_dim(1) > 1:
                 # print('use vocab parallel cross entropy')
                 loss = ht.vocab_parallel_cross_entropy(shift_lm_logits,  

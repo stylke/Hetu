@@ -127,7 +127,7 @@ class Device {
     return _multiplex;
   }
 
-  static DeviceProp dprop(int idx) {
+  static cudaDeviceProp dprop(int idx) {
     return _dprops[idx].second;
   }
 
@@ -160,9 +160,9 @@ class Device {
   }
 
  protected: 
-  static std::vector<std::pair<bool, DeviceProp>> _dprops;
+  static std::vector<std::pair<bool, cudaDeviceProp>> _dprops;
 
-  static std::vector<std::pair<bool, DeviceProp>> CUDAInit();
+  static std::vector<std::pair<bool, cudaDeviceProp>> CUDAInit();
 
  private:
   void _init(DeviceType type, DeviceIndex index, const std::string& hostname,

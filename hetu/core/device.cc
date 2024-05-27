@@ -2,14 +2,14 @@
 
 namespace hetu {
 
-std::vector<std::pair<bool, DeviceProp>> Device::CUDAInit() {
-  std::vector<std::pair<bool, DeviceProp>> dprops;
+std::vector<std::pair<bool, cudaDeviceProp>> Device::CUDAInit() {
+  std::vector<std::pair<bool, cudaDeviceProp>> dprops;
   for (int i = 0; i < HT_MAX_DEVICE_INDEX; ++i) {
-    dprops.emplace_back(false, DeviceProp());
+    dprops.emplace_back(false, cudaDeviceProp());
   }
   return dprops;
 }
-std::vector<std::pair<bool, DeviceProp>> Device::_dprops = Device::CUDAInit();
+std::vector<std::pair<bool, cudaDeviceProp>> Device::_dprops = Device::CUDAInit();
 
 std::string DeviceType2Str(const DeviceType& t) {
   switch (t) {

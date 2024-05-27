@@ -1208,6 +1208,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group end";
       ncclGroupEnd();
     }
+    // HT_LOG_INFO << "micro batch[" << micro_batch_id << "] Running op " << op << " (type: " << op->type() << ") mid...";    
     // Note: The usage should be marked inside kernels, 
     // but we still mark here in case we forget to do so in some kernels. 
     NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());

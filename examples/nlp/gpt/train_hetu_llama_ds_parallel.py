@@ -1,7 +1,6 @@
 import os
 import hetu as ht
-from hetu_gpt_ds_parallel_sp import GPTLMHeadModel
-# from hetu_gpt_ds_parallel import GPTLMHeadModel
+from hetu_llama_ds_parallel_sp import LLamaLMHeadModel
 from hetu.nn.modules.parallel_ds import config2ds
 from gpt_config import GPTConfig
 from data_utils import GPTJsonDataset, get_mask_and_position_ids, build_pretraining_data_loader
@@ -79,6 +78,7 @@ def pretrain(args):
                        n_positions=args.seq_length,
                        n_ctx=args.seq_length,
                        n_embd=args.hidden_size,
+                       ffn_hidden_size=args.ffn_hidden_size,
                        n_layer=args.num_hidden_layers, 
                        n_head=args.num_attention_heads, 
                        seq_len=args.seq_length,
@@ -91,15 +91,16 @@ def pretrain(args):
                        use_flash_attn=args.use_flash_attn,
                        )
 
+    print(f'llama config: num_layers = {config.num_hidden_layers}, seq_len = {config.seq_len}, num_heads = {config.num_attention_heads}, hidden_size = {config.hidden_size}, ffn_hidden_size = {config.ffn_hidden_size}')
     # simple check for gpt blocks range
     ranges = []
     for _, block_config in ds_parallel_config['gpt']['blocks'].items():
         ranges.append(block_config['range'])
-    assert ranges[0][0] == 0 and ranges[-1][-1] == config.num_hidden_layers-1, \
+    assert ranges[0][0] == 0 and ranges[-1][1] == config.num_hidden_layers-1, \
         f"gpt blocks range: {ranges} is conflict with num_hidden_layers: {config.num_hidden_layers}!"
 
     # Hetu model definition
-    model = GPTLMHeadModel(config=config, ds_parallel_config=ds_parallel_config)
+    model = LLamaLMHeadModel(config=config, ds_parallel_config=ds_parallel_config)
 
     input_ds, input_device_group = config2ds(ds_parallel_config['input'])
     label_ds, label_device_group = config2ds(ds_parallel_config['label'])
@@ -208,9 +209,8 @@ def pretrain(args):
                 loss_out = results[0].numpy(force=True).mean()
                 print('%s: [Epoch %d] (Iteration %d, consumed_samples = %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step, consumed_samples, loss_out, end_time-start_time))
 
-            
-            if input_device_group.contains(local_device) and step == 1 and dp_rank == 0:
-                os.system('nvidia-smi')
+                if step == 10 and dp_rank == 0:
+                    os.system('nvidia-smi')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -249,6 +249,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--hidden_size", type=int, default=768, help="Hidden size of transformer model",
+    )
+    parser.add_argument(
+        "--ffn_hidden_size", type=int, default=768*2.7, help="Hidden size of ffn",
     )
     parser.add_argument(
         "--num_hidden_layers", type=int, default=12, help="Number of layers"

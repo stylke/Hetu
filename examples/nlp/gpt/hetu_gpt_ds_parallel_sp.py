@@ -47,6 +47,7 @@ class GPTAttention(ht.nn.Module):
             self.embed_dim,
             self.embed_dim,
             ds_parallel_config['dense'],
+            sp=True,
             bias=self.add_bias,
             name=f'rowp_{name}'
         )
@@ -88,8 +89,6 @@ class GPTAttention(ht.nn.Module):
             attn_weights = attn_weights + attention_mask
         # softmax
         attn_weights = ht.softmax(attn_weights, 3)
-        # dropout
-        # attn_weights = self.attn_dropout(attn_weights)
         # weight sum, shape=[mbs_times_dp, num_heads, seq_len, head_dim]
         attn_output = ht.bmm(attn_weights, value)
 
@@ -98,16 +97,13 @@ class GPTAttention(ht.nn.Module):
     def forward(
         self,
         hidden_states,
+        mbs_times_dp, # bsz dimension for flash-attn
         attention_mask=None,
     ):
-        mbs_times_dp, seq_len, embed_dim = hidden_states.global_shape
-        
-        # [mbs_times_dp*seq_len, embed_dim]
-        hidden_states = hidden_states.reshape([-1, embed_dim])
-        # print(f'hidden_states.global_shape={hidden_states.global_shape}, hidden_states.shape={hidden_states.shape}, hidden_states.distributed_states={hidden_states.distributed_states}')        
         # column parallel, [mbs_times_dp*seq_len, 3*embed_dim]
         qkv = self.qkv_dense(hidden_states)
-        # print(f'qkv.global_shape={qkv.global_shape}, qkv.shape={qkv.shape}, qkv.distributed_states={qkv.distributed_states}')        
+
+        # flash need bsz dimension!!!
         # [mbs_times_dp, seq_len, num_heads, 3*head_dim]
         qkv = qkv.reshape([mbs_times_dp, -1, self.num_heads, 3 * self.head_dim])
         # q,k,v shape=[mbs_times_dp, seq_len, num_heads, head_dim]
@@ -132,12 +128,7 @@ class GPTAttention(ht.nn.Module):
         attn_output = attn_output.reshape([-1, self.num_heads * self.head_dim])
         # row parallel, shape=[mbs_times_dp*seq_len, num_heads*head_dim]
         attn_output = self.dense(attn_output)
-        # [mbs_times_dp, seq_len, num_heads*head_dim]
-        attn_output = attn_output.reshape([mbs_times_dp, -1, self.num_heads * self.head_dim])
-        # dropout
-        # attn_output = self.resid_dropout(attn_output)
 
-        # [mbs_times_dp, seq_len, num_heads*head_dim]
         return attn_output
 
 
@@ -165,6 +156,7 @@ class ParallelMLP(ht.nn.Module):
             config.ffn_hidden_size,
             config.hidden_size,
             ds_parallel_config['dense_4h_to_h'],
+            sp=True,
             bias=self.add_bias,
             name=f'rowp_{name}'
             # init_method=output_layer_init_method
@@ -180,7 +172,6 @@ class ParallelMLP(ht.nn.Module):
 
         # [b*seq_len, 4h] -> [b*seq_len, h]
         output = self.dense_4h_to_h(intermediate_parallel)
-        # output = self.dropout(output)
         return output
 
 class GPTMLP(ht.nn.Module):
@@ -190,12 +181,8 @@ class GPTMLP(ht.nn.Module):
         self.parallel_mlp = ParallelMLP(config, ds_parallel_config, name)
 
     def forward(self, hidden_states):
-        origin_shape = hidden_states.global_shape # [b, seq_len, hidden_size]
-        if len(origin_shape) != 2: # shape adaptor
-            hidden_states = hidden_states.reshape([-1, origin_shape[-1]])
+        # [bsz*seq_len, hidden_size]
         hidden_states = self.parallel_mlp(hidden_states)
-        if len(origin_shape) != 2: # shape adaptor
-            hidden_states = hidden_states.reshape(origin_shape)
         return hidden_states
 
 class GPTBlock(ht.nn.Module):
@@ -204,20 +191,24 @@ class GPTBlock(ht.nn.Module):
         self.config = config
         hidden_size = config.hidden_size
 
-        self.ln_1 = ht.nn.HtParallelLayerNorm(hidden_size, ds_parallel_config['layernorm1'], eps=config.layer_norm_epsilon, name=f'ln1_block{layer_idx}')
+        # sequence parallel: layernorm前做scatter(这一部分由row prallel的reduce-scatter完成); layernorm后做allgather
+        self.ln_1 = ht.nn.HtParallelLayerNorm(hidden_size, ds_parallel_config['layernorm1'], sp=True, eps=config.layer_norm_epsilon, name=f'ln1_block{layer_idx}')
         self.attn = GPTAttention(config, ds_parallel_config['attn'], layer_idx=layer_idx, name=f'attn_block{layer_idx}')
-        self.ln_2 = ht.nn.HtParallelLayerNorm(hidden_size, ds_parallel_config['layernorm2'], eps=config.layer_norm_epsilon, name=f'ln2_block{layer_idx}')
+        self.ln_2 = ht.nn.HtParallelLayerNorm(hidden_size, ds_parallel_config['layernorm2'], sp=True, eps=config.layer_norm_epsilon, name=f'ln2_block{layer_idx}')
         self.mlp = GPTMLP(config, ds_parallel_config['mlp'], name=f'mlp_block{layer_idx}')
 
     def forward(
         self,
         hidden_states,
+        mbs_times_dp,
         attention_mask=None,
     ):
+        # [bsz*seq_len, embed_dim]
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
         attn_output = self.attn(
-            hidden_states, # [b, seq_len, hidden_size]
+            hidden_states, # [bsz*seq_len, hidden_size]
+            mbs_times_dp,
             attention_mask=attention_mask, # [b, 1, 1, seq_len]
         )
         # residual connection
@@ -251,7 +242,7 @@ class GPTModel(ht.nn.Module):
                     blocks.append(GPTBlock(config, block_config, layer_idx=i))
                     break
         self.h = ht.nn.ModuleList(blocks)
-        self.ln_f = ht.nn.HtParallelLayerNorm(self.embed_dim, ds_parallel_config['layernorm_final'], eps=config.layer_norm_epsilon, name='ln_final')
+        self.ln_f = ht.nn.HtParallelLayerNorm(self.embed_dim, ds_parallel_config['layernorm_final'], sp=True, eps=config.layer_norm_epsilon, name='ln_final')
 
     def forward(
         self,
@@ -294,13 +285,28 @@ class GPTModel(ht.nn.Module):
         if token_type_ids is not None:
             token_type_embeds = self.wte(token_type_ids) # [b, seq_len, embed_dim]
             hidden_states = hidden_states + token_type_embeds
-        # dropout
-        # hidden_states = self.drop(hidden_states)
+
+        # [bsz, seq_len, embed_dim] -> [bsz*seq_len, embed_dim]
+        _, _, embed_dim = hidden_states.global_shape
+        hidden_states = hidden_states.reshape([-1, embed_dim])
+
+        # for sequence parallel
+        # todo: this is pretty hacky, find a better way
+        sp = True
+        if sp:
+            ds_input = hidden_states.distributed_states
+            ds_split0 = ht.DistributedStates(ds_input.device_num, {0: ds_input.device_num}, [0])
+            assert ds_input.device_num == ds_input.get_dim(0) * ds_input.get_dim(-1), \
+                'Workaround: sp assume input only split in dimension 0 for dp'
+            if ds_input.get_dim(-1) > 1: # exists dup input for tp
+                # [b*seq_len // tp, embed_dim]
+                hidden_states = ht.comm(hidden_states, ds_split0)
 
         # 12 x multihead self-attn
         for i, block in enumerate(self.h):
             hidden_states = block(
-                hidden_states, # [b, seq_len, embed_dim]
+                hidden_states, # [b*seq_len, embed_dim]
+                mbs_times_dp,
                 attention_mask=attention_mask, # [b, 1, 1, seq_len]
             )
         # layernorm
@@ -330,31 +336,34 @@ class GPTLMHeadModel(ht.nn.Module):
         token_type_ids=None,
         labels=None
     ):
-        # [b, seq_len, n_embd]
+        mbs_times_dp, _ = input_ids.global_shape
+        # [b, s] -> [b*s, h] -> [b*s//tp, h]
         hidden_states = self.transformer(
             input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
         )
-        # [b, seq_len, n_embd] -> [b, seq_len-1, n_embd]
+
+        # need allgather here: [b*s//tp, h] -> [b*s, h]
+        if not hidden_states.distributed_states.check_equal(self.lm_head.ds_map['split0_dup']):
+            hidden_states = ht.comm(hidden_states, self.lm_head.ds_map['split0_dup'])
+        # [b*s, h] -> [b, s, h]
+        _, hidden_size = hidden_states.global_shape
+        hidden_states = hidden_states.reshape([mbs_times_dp, -1, hidden_size])
+        # [b, s, h] -> [b, s-1, h]
         shift_hidden_states = ht.slice(hidden_states, [0,0,0], [hidden_states.shape[0], hidden_states.shape[1] - 1, hidden_states.shape[2]])
-        _,  _, n_embd = hidden_states.global_shape
-        # [b*(seq_len-1), n_embd]
-        shift_hidden_states = shift_hidden_states.reshape([-1, n_embd])
-        # column parallel, [b*(seq_len-1), n_embd]->[b*(seq_len-1), vocab_size], and splited in vocab dimension
+        # [b*(s-1), h]
+        shift_hidden_states = shift_hidden_states.reshape([-1, hidden_size])
+
+        # column parallel, [b*(s-1), h]->[b*(s-1), vocab_size], and splited in vocab dimension
         shift_lm_logits = self.lm_head(shift_hidden_states)
 
         loss = None
         if labels is not None:
-            # lm_logits: [b, seq_len-1, vocab_size], labels: [b, seq_len-1]
-            # todo: slice op input local shape, should change into global shape
-            # print(f'before slice, shift_logits.shape: {lm_logits.global_shape}, {lm_logits.shape}; shift_labels.shape: {labels.global_shape}, {labels.shape}')
+            # lm_logits: [b*(s-1), vocab_size], labels: [b, s-1]
             shift_labels = ht.slice(labels, [0,1], [labels.shape[0], labels.shape[1] - 1])
-            # print(f'after slice, shift_logits.shape: {shift_logits.global_shape}, shift_labels.shape: {shift_labels.global_shape}')
-            # softmax cross_entropy loss = sum(-log(softmax(vocab[label])))
-            # because of ignored_index, so cannot use auto distributed reduce for mean
-            # need sum over distributed tensor, and divide the not ignored_index num after by hand
-            # print(shift_lm_logits.distributed_states)
+            print(f'shift_lm_logits shape = {shift_lm_logits.shape}, ds = {shift_lm_logits.distributed_states}; shift_labels shape = {shift_labels.shape}, ds = {shift_labels.distributed_states}')
+
             if shift_lm_logits.distributed_states.get_dim(1) > 1:
                 # print('use vocab parallel cross entropy')
                 loss = ht.vocab_parallel_cross_entropy(shift_lm_logits,  

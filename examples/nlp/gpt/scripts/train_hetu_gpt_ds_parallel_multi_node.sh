@@ -8,6 +8,7 @@ DP=${7:-2}
 TP=${8:-4}
 PP=${9:-2}
 HOSTFILE=${10:-'hostfile_51_52'}
+STEPS=${11:-15}
 NUM_GPUS=$(( $DP * $TP *$PP ))
 
 echo dp=${DP}, tp=${TP}, pp=${PP}, num_gpus=${NUM_GPUS}, hostfile=${HOSTFILE} 
@@ -43,23 +44,27 @@ mkdir -p ${LOG_FOLDER}
 LOG_FILE=${LOG_FOLDER}/gbs${GLOBAL_BATCH_SIZE}_mbs${MICRO_BATCH_SIZE}_dp${DP}_tp${TP}_pp${PP}.log
 echo log will save to ${LOG_FILE}...
 
-ROOT_FOLDER=/data/nolan/develop/bak/ht/hot_switch/gh/Megatron-LM/data
+#ROOT_FOLDER=/data/nolan/develop/bak/ht/hot_switch/gh/Megatron-LM/data
+ROOT_FOLDER=/jizhicfs/hymiezhao/hetu-gh/Hetu-dev/examples/nlp/gpt/data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
 JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json
 MERGE_FILE=${ROOT_FOLDER}/merges.txt
 
-export HETU_HOME="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../../../" && pwd )"
-export LD_LIBRARY_PATH="${HETU_HOME}/build/lib:${LD_LIBRARY_PATH}"
+export PATH=/jizhicfs/hymiezhao/miniconda3/envs/hetu-gh2/bin:$PATH
+#export HETU_HOME="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../../../" && pwd )"
+export HETU_HOME=/jizhicfs/hymiezhao/hetu-gh/Hetu-dev
+export LD_LIBRARY_PATH="${HETU_HOME}/build/lib:${HETU_HOME}/build/hetu/third_party/cutlass/install:${LD_LIBRARY_PATH}"
 export PYTHONPATH="${HETU_HOME}/python_refactor:${HETU_HOME}/build/lib:${PYTHONPATH}"
+
+source /jizhicfs/hymiezhao/hetu-gh/Hetu-dev/init.sh
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NCCL_NVLS_ENABLE=0
-export NCCL_DEBUG=WARN
-export NCCL_SOCKET_IFNAME=bond0
-export GLOO_SOCKET_IFNAME=bond0
+export NCCL_SOCKET_IFNAME=bond1
+export GLOO_SOCKET_IFNAME=bond1
 export NCCL_IB_DISABLE=0
-export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_11
+export NCCL_IB_HCA=mlx5
 export NCCL_NET_GDR_READ=1
 export NCCL_IB_GID_INDEX=3
 export NCCL_NET_GDR_LEVEL=2
@@ -67,16 +72,19 @@ export NCCL_IB_QPS_PER_CONNECTION=4
 export NCCL_IB_TC=160
 export NCCL_IB_TIMEOUT=22
 export NCCL_PXN_DISABLE=0
+export NCCL_SOCKET_NTHREADS=8
+
+export UCX_TLS=dc_x,self,sm
 
 export NCCL_DEBUG=VERSION
 export HETU_INTERNAL_LOG_LEVEL=WARN
 mpirun --allow-run-as-root -np 16 \
 --hostfile $HOSTFILE \
--x LD_LIBRARY_PATH -x PYTHONPATH -x CUDA_DEVICE_MAX_CONNECTIONS -x NCCL_NVLS_ENABLE -x NCCL_DEBUG \
+-x HETU_INTERNAL_LOG_LEVEL -x UCX_TLS -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH -x CUDA_DEVICE_MAX_CONNECTIONS -x NCCL_NVLS_ENABLE -x NCCL_DEBUG \
 -x NCCL_SOCKET_IFNAME -x GLOO_SOCKET_IFNAME -x NCCL_IB_DISABLE -x NCCL_IB_HCA -x NCCL_NET_GDR_READ \
 -x NCCL_IB_GID_INDEX -x NCCL_NET_GDR_LEVEL -x NCCL_IB_QPS_PER_CONNECTION -x NCCL_IB_TC -x NCCL_IB_TIMEOUT -x NCCL_PXN_DISABLE \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
-python3 train_hetu_gpt_ds_parallel.py \
+python train_hetu_gpt_ds_parallel.py \
 --ds_parallel_config $DS_PARALLEL_CONFIG \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --micro_batch_size $MICRO_BATCH_SIZE \
@@ -90,7 +98,7 @@ python3 train_hetu_gpt_ds_parallel.py \
 --num_attention_heads $NUM_HEADS \
 --seq_length $SEQ_LEN \
 --epochs 1 \
---steps 100 \
+--steps $STEPS \
 --lr 1e-6 \
 --adam_weight_decay 0.01 \
 --hidden_act relu \

@@ -860,6 +860,29 @@ HTShapeList AllGatherOpImpl::DoInferShape(Operator& op,
   return {gather_shape};  
 }
 
+NDArray AllGatherOpImpl::_buffer_for_allgather;
+// TODO: just workaround for sp test. need to be removed
+NDArrayList AllGatherOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                                       RuntimeContext& runtime_ctx) const {
+  NDArrayList outputs;
+  //if (op->input(0)->producer()->type() == "FusedLayerNormOp" && _buffer_for_allgather.is_defined()) {
+  //   outputs = {_buffer_for_allgather};
+  //} else {
+  //  outputs = DoAllocOutputs(op, inputs, runtime_ctx);
+  //  if (op->input(0)->producer()->type() == "FusedLayerNormOp") {
+  //    _buffer_for_allgather = outputs[0];
+  //  }
+  //}
+  if (_buffer_for_allgather.is_defined()) {
+     outputs = {_buffer_for_allgather};
+  } else {
+    outputs = DoAllocOutputs(op, inputs, runtime_ctx);
+    _buffer_for_allgather = outputs[0];
+  }  
+  DoCompute(op, inputs, outputs, runtime_ctx);
+  return outputs;
+}
+
 void AllGatherOpImpl::DoCompute(Operator& op, 
                                 const NDArrayList& inputs,
                                 NDArrayList& outputs,
@@ -922,18 +945,19 @@ NDArrayList ReduceScatterOpImpl::DoCompute(Operator& op,
 
   // if (inplace()) {
   // just inplace here
-  NDArrayMeta meta = inputs.at(0)->meta();
-  HTShape scatter_shape = inputs.at(0)->shape();
-  scatter_shape[0] /= _comm_group.num_devices();
-  meta.set_shape(scatter_shape);
-  // int rank = GetWorldRank();
-  int rank = _comm_group.get_index(op->placement());
-  size_t storage_offset = rank * (inputs.at(0)->numel() / _comm_group.num_devices());
-  NDArray output = NDArray(meta, inputs.at(0)->storage(), inputs.at(0)->storage_offset() + storage_offset);
-  outputs.emplace_back(output);
+  // NDArrayMeta meta = inputs.at(0)->meta();
+  // HTShape scatter_shape = inputs.at(0)->shape();
+  // scatter_shape[0] /= _comm_group.num_devices();
+  // meta.set_shape(scatter_shape);
+  // // int rank = GetWorldRank();
+  // int rank = _comm_group.get_index(op->placement());
+  // size_t storage_offset = rank * (inputs.at(0)->numel() / _comm_group.num_devices());
+  // NDArray output = NDArray(meta, inputs.at(0)->storage(), inputs.at(0)->storage_offset() + storage_offset);
+  // outputs.emplace_back(output);
   // }
   // else {
-  //   outputs = DoAllocOutputs(op, inputs, ctx);
+  // no inplace for reduce-scatter
+  outputs = DoAllocOutputs(op, inputs, ctx);
   // }
   
   // HT_LOG_INFO << "comm group " << _comm_group

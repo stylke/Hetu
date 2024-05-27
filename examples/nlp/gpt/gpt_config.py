@@ -5,6 +5,7 @@ class GPTConfig(object):
         n_positions=1024,
         n_ctx=1024,
         n_embd=768,
+        ffn_hidden_size=-1,
         n_layer=12,
         n_head=12,
         n_inner=None,
@@ -62,7 +63,10 @@ class GPTConfig(object):
         self.num_micro_batches = num_micro_batches
         self.dp = dp
         self.hidden_size = self.n_embd
-        self.ffn_hidden_size = 4*self.n_embd
+        if ffn_hidden_size == -1:
+            self.ffn_hidden_size = 4*self.n_embd
+        else:
+            self.ffn_hidden_size = ffn_hidden_size
         self.max_position_embeddings = self.n_positions
         self.num_attention_heads = self.n_head
         self.num_hidden_layers = self.n_layer

@@ -357,6 +357,25 @@ NDArray NDArray::gelu(const NDArray& input, StreamIndex stream_id,
   return out;
 }
 
+NDArray NDArray::swiglu(const NDArray& input, StreamIndex stream_id,
+                        NDArray& output){
+  Stream stream(input->device(), stream_id);
+ 
+  if(output.is_defined()){
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Swiglu, input, output, stream);
+    return output; 
+  } else {
+    HTShape shape = input->shape();
+    shape.back() /= 2;
+    NDArray out = NDArray::empty(shape, input->device(), 
+                      input->dtype(), stream_id, input->dynamic_shape());
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                  hetu::impl::Swiglu, input, out, stream);
+    return out;
+  }
+}
+
 NDArray NDArray::tanh(const NDArray& input, StreamIndex stream_id,
                       NDArray& output) {
   NDArray out = output.is_defined() ? output : NDArray::empty_like(input);

@@ -1,6 +1,6 @@
 #include "cutlass/numeric_types.h"
-#include "flash.h"
-#include "static_switch.h"
+#include "flash_attn/flash.h"
+#include "flash_attn/static_switch.h"
 #include "hetu/core/ndarray.h"
 #include "hetu/core/memory_pool.h"
 #include "hetu/impl/stream/CUDAStream.h"

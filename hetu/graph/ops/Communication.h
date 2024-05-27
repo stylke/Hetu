@@ -549,11 +549,15 @@ class AllGatherOpImpl final : public OpInterface {
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override;  
 
+  NDArrayList DoCompute(Operator& op, const NDArrayList& inputs,
+                        RuntimeContext& runtime_ctx) const override;
+  
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
 
  protected:
   DeviceGroup _comm_group;
+  static NDArray _buffer_for_allgather; // workaround for allgather activation when use sp
 };
 
 Tensor MakeAllGatherOp(Tensor input, DeviceGroup comm_group,
