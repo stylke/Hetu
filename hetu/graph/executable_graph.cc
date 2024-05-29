@@ -1020,9 +1020,10 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       continue;
     }
     // just convert fp32 -> bf16, fp16 in micro batch 0
-    // though it is actually put in runtime_skipped already
+    // though most of it is actually put in runtime_skipped already
+    // but some of it (rotary sin or cos, mask...) is not in runtime_skipped
     if (op->num_outputs() > 0 && dtype_transfer_tensor.find(op->output(0)->id()) != dtype_transfer_tensor.end() && micro_batch_id > 0) {
-      HT_RUNTIME_ERROR << "unreachable";
+      // HT_RUNTIME_ERROR << "unreachable";
       continue;
     }
     // in pipeline(shared_weight_p2p not empty), shared weight p2p ops only execute in micro batch 0
@@ -1239,13 +1240,15 @@ void ExecutableGraph::GetExecEnvs() {
   char* env = std::getenv("HETU_STRAGGLER");
   if (env != nullptr) {
     if (std::string(env) == "ANALYSIS") {
-      _is_analysis_straggler = true;
+      _straggler_flag = 1;
+    } else if (std::string(env) == "EXP") {
+      _straggler_flag = 2;
     } else {
       HT_RUNTIME_ERROR << "Unknown hetu straggler level: " + std::string(env);
     }
   } else {
     // 默认不分析straggler
-    _is_analysis_straggler = false;
+    _straggler_flag = 0;
   }
 
   env = std::getenv("HETU_STRAGGLER_LOG_FILE");
@@ -2056,7 +2059,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // ********************** Run Level Check Point **********************
 
   bool is_analysis_perf = false;
-  if (is_analysis_perf || _is_analysis_straggler) {
+  if (is_analysis_perf || _straggler_flag) {
     if (_used_ranks.size() >= 2) {
       auto& mpi_comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(_used_ranks);
       mpi_comm_group->Barrier(true);
@@ -2089,7 +2092,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   }
 
   // get op execute time, sort and analysis
-  if (is_analysis_perf || _is_analysis_straggler) {
+  if (is_analysis_perf || _straggler_flag) {
     TIK(free);
     runtime_ctx_list.clear();
     tensor2data_list.clear();
@@ -2186,7 +2189,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "other time: " << other_time << " ms" << std::endl
                   << out.str();
     }
-    if (_is_analysis_straggler) {
+    if (_straggler_flag) {
       HT_LOG_WARN << local_device << ": " 
                   << "\ntotal run time: " << COST_MSEC(run) << " ms, "
                   << "compute time: " << compute_time << " ms, "
@@ -2198,11 +2201,21 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms" << std::endl;
       if (_straggler_log_file_path != "") {
-        ofstream_sync file(_straggler_log_file_path, std::ios_base::app);
-        if (file.is_open()) {
-          file << compute_time << std::endl;
-        } else {
-          HT_RUNTIME_ERROR << "Error opening the file";
+        if (_straggler_flag == 1) {
+          ofstream_sync file(_straggler_log_file_path, std::ios_base::app);
+          if (file.is_open()) {
+            file << compute_time << std::endl;
+          } else {
+            HT_RUNTIME_ERROR << "Error opening the file";
+          }
+        } else if (_straggler_flag == 2) {
+          ofstream_sync file(_straggler_log_file_path + "_" + std::to_string(hetu::impl::comm::GetWorldRank()), std::ios_base::app);
+          if (file.is_open()) {
+            file << "total run time: " << COST_MSEC(run) << " ms" << std::endl;
+            file << "compute time: " << compute_time << " ms" << std::endl;
+          } else {
+            HT_RUNTIME_ERROR << "Error opening the file";
+          }
         }
       }
     }

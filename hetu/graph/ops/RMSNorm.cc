@@ -126,10 +126,16 @@ void RMSNormOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs
     output->set_distributed_states(inputs.at(0)->get_distributed_states()); 
 }
 
+void RMSNormOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
+                                      TensorList& outputs, const OpMeta& op_meta) const {
+  for (auto output : outputs)
+    output->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
+}
+
 void RMSNormGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                       NDArrayList& outputs, RuntimeContext& ctx) const {
   for (auto input : op->inputs()) {
-    HT_LOG_INFO << "rms gradient input " << input << ", ds = " << input->get_distributed_states().ds_info() << ", shape = " << input->shape()
+    HT_LOG_TRACE << "rms gradient input " << input << ", ds = " << input->get_distributed_states().ds_info() << ", shape = " << input->shape()
       << ", producer = " << input->producer(); 
   }
   const NDArray dz = input_indexs(0) >= 0 ? inputs.at(input_indexs(0)) : NDArray();
@@ -183,17 +189,27 @@ void RMSNormGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList&
     keepdims[d] = false;
   }
   DistributedStates ds_gamma_scale = ReduceOpImpl::StatesForDistributedReduce(inputs.at(0), axes, keepdims);
-  //HT_LOG_INFO << "ds_output_grad = " << ds_output_grad.ds_info() << ", ds_gamma_scale = " << ds_gamma_scale.ds_info() << ", output size = " << outputs.size() << ", indx2 = " << output_indexs(2);
+  //HT_LOG_TRACE << "ds_output_grad = " << ds_output_grad.ds_info() << ", ds_gamma_scale = " << ds_gamma_scale.ds_info() << ", output size = " << outputs.size() << ", indx2 = " << output_indexs(2);
   outputs.at(0)->set_distributed_states(ds_output_grad);
   outputs.at(output_indexs(2))->set_distributed_states(ds_gamma_scale);
   outputs.at(output_indexs(3))->set_distributed_states(ds_gamma_scale);
-  //HT_LOG_INFO << "RMSNormGradientOpImpl do gradient end";
+  //HT_LOG_TRACE << "RMSNormGradientOpImpl do gradient end";
+}
+
+void RMSNormGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
+                                              TensorList& outputs, const OpMeta& op_meta) const {
+  HT_ASSERT(inputs_hetero_dim.at(0) >= 0)
+    << "Currently not support complex hetero dim deducing"
+    << ", the hetero dim should be spilt and reduced to partial";
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
+  outputs.at(1)->cur_ds_union().set_hetero_dim(-2);
+  outputs.at(2)->cur_ds_union().set_hetero_dim(-2);
 }
 
 HTShapeList RMSNormGradientOpImpl::DoInferShape(Operator& op, 
                                                 const HTShapeList& input_shapes, 
                                                 RuntimeContext& ctx) const {
-  HT_LOG_INFO << "GradInferShape";
+  HT_LOG_TRACE << "GradInferShape";
   HTShapeList out_shapes = {};
   HTShape dz = input_indexs(0) >= 0 ? input_shapes.at(input_indexs(0)) : HTShape();
   HTShape dx_ = input_indexs(1) >= 0 ? input_shapes.at(input_indexs(1)) : HTShape();
@@ -221,7 +237,7 @@ HTShapeList RMSNormGradientOpImpl::DoInferShape(Operator& op,
   if (output_indexs(4) >= 0) {
     out_shapes.emplace_back(colscale_);
   }
-  HT_LOG_INFO << "GradInferShape-end";
+  HT_LOG_TRACE << "GradInferShape-end";
   return out_shapes;
 }
 
@@ -278,18 +294,18 @@ TensorList MakeRMSNormGradientOp(Tensor dz, Tensor dx_, Tensor x, Tensor x0_,
                                  Tensor z_subset_, const float dropout_p, const float rowscale_const,
                                  const int64_t x0_numrows, const bool has_residual,
                                  bool is_rms_norm, OpMeta op_meta) {
-  HT_LOG_INFO << dz;
-  HT_LOG_INFO << dx_;
-  HT_LOG_INFO << x;
-  HT_LOG_INFO << x0_;
-  HT_LOG_INFO << dmask_;
-  HT_LOG_INFO << mu;
-  HT_LOG_INFO << rsigma;
-  HT_LOG_INFO << gamma;
-  HT_LOG_INFO << rowscale_;
-  HT_LOG_INFO << colscale_;
-  HT_LOG_INFO << x0_subset_;
-  HT_LOG_INFO << z_subset_;
+  HT_LOG_TRACE << dz;
+  HT_LOG_TRACE << dx_;
+  HT_LOG_TRACE << x;
+  HT_LOG_TRACE << x0_;
+  HT_LOG_TRACE << dmask_;
+  HT_LOG_TRACE << mu;
+  HT_LOG_TRACE << rsigma;
+  HT_LOG_TRACE << gamma;
+  HT_LOG_TRACE << rowscale_;
+  HT_LOG_TRACE << colscale_;
+  HT_LOG_TRACE << x0_subset_;
+  HT_LOG_TRACE << z_subset_;
   std::vector<int> output_indexs(5, -1);
   int ptr = 0;
   output_indexs[0] = ptr++;
@@ -301,12 +317,12 @@ TensorList MakeRMSNormGradientOp(Tensor dz, Tensor dx_, Tensor x, Tensor x0_,
   if (colscale_.is_defined()) {
     output_indexs[4] = ptr++;
   }
-  HT_LOG_INFO << "U1";
+  HT_LOG_TRACE << "U1";
   TensorList inputs = {std::move(dz), std::move(dx_), std::move(x), std::move(x0_),
                        std::move(dmask_), std::move(mu), std::move(rsigma), std::move(gamma),
                        std::move(rowscale_), std::move(colscale_), std::move(x0_subset_), std::move(z_subset_)};
   TensorList inputs_ = {};
-  HT_LOG_INFO << "U2";
+  HT_LOG_TRACE << "U2";
   std::vector<int> input_indexs(12, -1);
   ptr = 0;
   for (int i = 0; i < inputs.size(); ++i) {
@@ -315,7 +331,7 @@ TensorList MakeRMSNormGradientOp(Tensor dz, Tensor dx_, Tensor x, Tensor x0_,
       inputs_.emplace_back(inputs[i]);
     }
   }
-   HT_LOG_INFO << "U3";
+   HT_LOG_TRACE << "U3";
   return Graph::MakeOp(
          std::make_shared<RMSNormGradientOpImpl>(dropout_p, rowscale_const, x0_numrows, 
                                                  has_residual, is_rms_norm, input_indexs,

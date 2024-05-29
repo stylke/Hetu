@@ -2,7 +2,7 @@ import os
 import signal
 import math
 import hetu as ht
-from hetu_gpt_multi_ds_parallel_symbolic_sp import GPTLMHeadModel
+from hetu_llama_multi_ds_parallel_symbolic_sp import LLamaLMHeadModel
 from hetu.nn.modules.parallel_multi_ds import config2ds
 from gpt_config import GPTConfig
 from data_utils import GPTJsonDataset, get_mask_and_position_ids, build_pretraining_data_loader
@@ -166,7 +166,7 @@ def pretrain(args):
         f"gpt blocks range: {ranges} is conflict with num_hidden_layers: {config.num_hidden_layers}!"
 
     # Hetu model definition
-    model = GPTLMHeadModel(config=config, ds_parallel_configs=ds_parallel_configs)
+    model = LLamaLMHeadModel(config=config, ds_parallel_configs=ds_parallel_configs)
     
     input_ds_hierarchy, input_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'input')
     label_ds_hierarchy, label_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'label')
@@ -259,7 +259,12 @@ def pretrain(args):
         num_micro_batches = global_batch_size // mbs_times_dp
         
         # heterogenous tp
-        rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
+        rank_to_device_mapping = {}
+        if args.rank_to_device_mapping == "":
+            for idx in range(all_devices.num_devices):
+                rank_to_device_mapping[idx] = idx
+        else:   
+            rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
         unused_rank_list = ast.literal_eval(args.unused_rank)
         for unused_rank in unused_rank_list:
             if rank_to_device_mapping[unused_rank] == all_devices.get_index(local_device):
@@ -286,15 +291,15 @@ def pretrain(args):
                 micro_batch_size = global_batch_size // num_micro_batches - int(global_batch_size // num_micro_batches / batch_ratio)
             '''
             # adjust num_micro_batches
-            '''
-            normal_micro_batches = args.normal_micro_batches
-            if hetero_pipeline_num == 0:
-                num_micro_batches = global_batch_size // micro_batch_size - normal_micro_batches * (dp_size - 1)
-                assert num_micro_batches > 0, f"straggler num_micro_batches should > 0, but find it is {num_micro_batches}"
+            if args.normal_micro_batches != -1:
+                normal_micro_batches = args.normal_micro_batches
+                if hetero_pipeline_num == 0:
+                    num_micro_batches = global_batch_size // micro_batch_size - normal_micro_batches * (dp_size - 1)
+                    assert num_micro_batches > 0, f"straggler num_micro_batches should > 0, but find it is {num_micro_batches}"
+                else:
+                    num_micro_batches = normal_micro_batches
             else:
-                num_micro_batches = normal_micro_batches
-            '''
-            num_micro_batches = ast.literal_eval(args.micro_batch_num_list)[hetero_pipeline_num]
+                num_micro_batches = ast.literal_eval(args.micro_batch_num_list)[hetero_pipeline_num]
             # re-assign
             gbs_per_dp = micro_batch_size * num_micro_batches
             mbs_times_dp = micro_batch_size * dp_size
@@ -452,13 +457,16 @@ if __name__ == '__main__':
         "--hetero_data", action="store_true", help="use heterogenous data for each heterogenous pipeline."
     )
     parser.add_argument(
+        "--normal_micro_batches", type=int, default=-1, help='homo micro batch num.'
+    )
+    parser.add_argument(
         "--micro_batch_num_list", type=str, help='micro batch num list.'
     )
     parser.add_argument(
-        "--rank_to_device_mapping", type=str, help='rank to device mapping.'
+        "--rank_to_device_mapping", type=str, default="", help='rank to device mapping.'
     )
     parser.add_argument(
-        "--unused_rank", type=str, help='unused rank.'
+        "--unused_rank", type=str, default="[]", help='unused rank.'
     )
     parser.add_argument(
         "--run_straggler_experiment", action="store_true", help="run heterogenous pipeline experiment."

@@ -244,7 +244,7 @@ class ExecutableGraph : public Graph {
   std::unordered_map<TensorId, std::unique_ptr<Event>> _run_grad_events; // 注意这里的TensorId是未substitue comm op后的grad
 
   // profile相关
-  bool _is_analysis_straggler;
+  int32_t _straggler_flag;
   std::string _straggler_log_file_path;
   MEMORY_PROFILE_LEVEL _memory_profile_level;
   std::string _memory_log_file_path;

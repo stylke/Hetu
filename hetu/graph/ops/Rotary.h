@@ -49,6 +49,9 @@ class RotaryOpImpl final : public OpInterface {
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;
 
+  void DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
+                         TensorList& outputs, const OpMeta& op_meta) const override;  
+
  public:
   bool operator==(const OpInterface& rhs) const override {
     if (OpInterface::operator==(rhs)) {
@@ -98,6 +101,9 @@ class RotaryGradientOpImpl final : public OpInterface {
 
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                       const OpMeta& op_meta) const override;
+
+  void DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
+                         TensorList& outputs, const OpMeta& op_meta) const override;  
 
  public:
   bool operator==(const OpInterface& rhs) const override {

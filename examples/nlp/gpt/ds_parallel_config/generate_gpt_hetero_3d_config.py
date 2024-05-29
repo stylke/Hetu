@@ -144,7 +144,7 @@ if __name__ == '__main__':
         '--hetero_layers', type=str, help='heterogenous layers list.'
     )
     parser.add_argument(
-        '--rank_to_device_mapping', type=str, default="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}", help='device to rank mapping.'
+        '--rank_to_device_mapping', type=str, default="", help='device to rank mapping.'
     )
     parser.add_argument(
         '--unused_rank', type=str, default="[]", help='unused rank list.'
@@ -166,7 +166,14 @@ if __name__ == '__main__':
         
     assert args.dp * args.tp * args.pp == args.num_gpus, \
             f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
-    ds_parallel_config = generate_gpt_3d_config(ast.literal_eval(args.rank_to_device_mapping), ast.literal_eval(args.unused_rank), hetero_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+     
+    rank_to_device_mapping = {}       
+    if args.rank_to_device_mapping == "":
+        for idx in range(args.num_gpus):
+            rank_to_device_mapping[idx] = idx
+    else:
+        rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
+    ds_parallel_config = generate_gpt_3d_config(rank_to_device_mapping, ast.literal_eval(args.unused_rank), hetero_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
     save_folder = './ds_parallel_config/hetero'
     if args.file_name == "":
         file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'

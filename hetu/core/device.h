@@ -187,7 +187,7 @@ class Device {
       _dprops[_index].first = true;
       cudaDeviceProp dprop;
       cudaGetDeviceProperties(&dprop, _index);
-      _dprops[_index].second = DeviceProp(dprop);
+      _dprops[_index].second = std::move(dprop);
     }
   }
 

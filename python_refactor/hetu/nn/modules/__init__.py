@@ -38,5 +38,5 @@ __all__ = [
     # parallel_ds
     'HtParallelRMSNorm', 'HtParallelLayerNorm', 'HtParallelEmbedding', 'HtVocabParallelEmbedding', 'HtColumnParallelLinear', 'HtRowParallelLinear',
     # parallel_multi_ds
-    'HtMultiParallelLayerNorm', 'HtMultiParallelEmbedding', 'HtMultiVocabParallelEmbedding', 'HtMultiColumnParallelLinear', 'HtMultiRowParallelLinear',
+    'HtMultiParallelRMSNorm', 'HtMultiParallelLayerNorm', 'HtMultiParallelEmbedding', 'HtMultiVocabParallelEmbedding', 'HtMultiColumnParallelLinear', 'HtMultiRowParallelLinear',
 ]

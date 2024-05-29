@@ -68,6 +68,11 @@ void RotaryOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   return outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
 }
 
+void RotaryOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
+                                     TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
+}
+
 NDArrayList RotaryGradientOpImpl::DoCompute(Operator& op,
                                             const NDArrayList& inputs,
                                             RuntimeContext& ctx) const {
@@ -120,6 +125,11 @@ HTShapeList RotaryGradientOpImpl::DoInferShape(Operator& op,
 void RotaryGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                           const OpMeta& op_meta) const {
   return outputs.at(0)->set_distributed_states(inputs.at(0)->get_distributed_states());
+}
+
+void RotaryGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
+                                             TensorList& outputs, const OpMeta& op_meta) const {
+  outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }
 
 Tensor MakeRotaryOp(Tensor x, Tensor cos, Tensor sin,

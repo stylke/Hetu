@@ -9,6 +9,7 @@ __all__ = [
     'HtMultiParallelEmbedding',
     'HtMultiVocabParallelEmbedding',
     'HtMultiParallelLayerNorm',
+    'HtMultiParallelRMSNorm',
 ]
 
 def parallel_data_provider(global_data, ds_union, device_group_index, device_index):
@@ -97,6 +98,53 @@ def config2ds(config):
         ds_list.append(ds)
         dg_list.append(dg)
     return hetu.DistributedStatesUnion(ds_list, hetero_dim), dg_list
+
+class HtMultiParallelRMSNorm(Module):
+    def __init__(self, normalized_shape, multi_ds_parallel_config, sp=False, dtype=hetu.float32, name='rmsnorm'):
+        super(HtMultiParallelRMSNorm, self).__init__()
+        if isinstance(normalized_shape, numbers.Integral):
+            # mypy error: incompatible types in assignment
+            normalized_shape = [normalized_shape]  # type: ignore[assignment]
+        self.normalized_shape = list(normalized_shape)  # type: ignore[arg-type]
+        self.sp = sp
+        self.name = name
+        self.ds_union_map = {'dup': [], 'split0': []}
+        self.device_index = []
+        self.device_group_unions = []
+        for ds_parallel_config in multi_ds_parallel_config:
+            ds_union_dup, device_group_union = config2ds(ds_parallel_config)
+            self.device_group_unions.append(device_group_union)
+            hetero_size = len(device_group_union)
+            hetero_dim = ds_union_dup.hetero_dim
+            assert hetero_dim == -1 or hetero_dim == -3, "ParallelLayerNorm only support hetero on dup"
+            device_group_index, device_index = get_local_index(device_group_union)
+            self.device_index.append(device_index)
+            ds_list_split0 = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {0: device_group_union[i].num_devices * hetero_size}, [0])
+                for i in range(hetero_size)] # for sp data
+            ds_union_split0 = hetu.DistributedStatesUnion(ds_list_split0, 0 if hetero_dim != -3 else -3)
+            self.ds_union_map['dup'].append(ds_union_dup)
+            self.ds_union_map['split0'].append(ds_union_split0)
+            
+        self.weight = hetu.parallel_parameter(eval(f'hetu.ones_initializer()'), 
+                                              self.normalized_shape, self.ds_union_map['dup'], 
+                                              self.device_index, dtype=dtype, requires_grad=True, 
+                                              device_group_hierarchy=self.device_group_unions, name=f'{name}_weight')
+
+    def forward(self, input_p):
+        if self.sp:
+            assert input_p.check_ds_hierarchy_equal(self.ds_union_map['split0']), \
+                f'for sequence parallel, layernorm {self.name} need input fully sharded in dimension 0 for each element in the union, but found {input_p.ds_hierarchy}'
+            # do sequence parallel layernorm: [bsz * seq_len // tp, hidden_size]
+            # print(f'in sp, ln input shape = {input_p.shape}')
+            output_rms = hetu.rms_norm(input_p, None, self.weight, None, is_rms_norm=True, \
+                                       device_group_hierarchy=self.device_group_unions, name=self.name + '_sp')[0]
+            # allgather will be auto done in later column parallel
+        else:
+            # [bsz * seq_len, hidden_size]
+            # print(f'in no-sp, ln input shape = {input_p.shape}')
+            output_rms = hetu.rms_norm(input_p, None, self.weight, None, is_rms_norm=True, \
+                                       device_group_hierarchy=self.device_group_unions, name=self.name)[0]
+        return output_rms   
 
 class HtMultiParallelLayerNorm(Module):
     def __init__(self, normalized_shape, multi_ds_parallel_config, sp=False, eps=1e-5, dtype=hetu.float32, name='ln'):
