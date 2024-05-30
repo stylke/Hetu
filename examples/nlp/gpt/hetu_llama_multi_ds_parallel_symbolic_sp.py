@@ -164,8 +164,8 @@ class LLamaAttention(ht.nn.Module):
             out = ht.rotary(x, cos_global, sin_global, inplace=True)
             return out
         
-        query = apply_rotary_pos_emb(query, _name='q')
-        key = apply_rotary_pos_emb(key, _name='k')
+        # query = apply_rotary_pos_emb(query, _name='q')
+        # key = apply_rotary_pos_emb(key, _name='k')
         
         if self.use_flash_attn:
             attn_output = ht.attn(query, key, value, 0, -1, True)[0]
@@ -269,9 +269,9 @@ class LLamaBlock(ht.nn.Module):
         hidden_size = config.hidden_size
 
         # sequence parallel: layernorm前做reduce-scatter(这一部分由row prallel的reduce-scatter完成); layernorm后做allgather
-        self.rmsnorm_1 = ht.nn.HtMultiParallelRMSNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm1', layer_idx), sp=True, name=f'rmsnorm1_block{layer_idx}')
+        self.rmsnorm_1 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm1', layer_idx), sp=True, name=f'rmsnorm1_block{layer_idx}')
         self.attn = LLamaAttention(config, ds_parallel_configs, layer_idx=layer_idx, name=f'attn_block{layer_idx}')
-        self.rmsnorm_2 = ht.nn.HtMultiParallelRMSNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm2', layer_idx), sp=True, name=f'rmsnorm2_block{layer_idx}')
+        self.rmsnorm_2 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm2', layer_idx), sp=True, name=f'rmsnorm2_block{layer_idx}')
         self.mlp = LLamaMLP(config, ds_parallel_configs, layer_idx=layer_idx, name=f'mlp_block{layer_idx}')
 
     def forward(
@@ -321,7 +321,7 @@ class LLamaModel(ht.nn.Module):
             #         blocks.append(GPTBlock(config, block_config, layer_idx=i))
             #         break
         self.h = ht.nn.ModuleList(blocks)
-        self.rmsnorm_f = ht.nn.HtMultiParallelRMSNorm(self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm_final'), sp=True, name='rmsnorm_final')
+        self.rmsnorm_f = ht.nn.HtMultiParallelLayerNorm(self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm_final'), sp=True, name='rmsnorm_final')
 
     def forward(
         self,

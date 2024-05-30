@@ -12,6 +12,7 @@ PP=${9:-4}
 HOSTFILE=${10:-'hostfile0123'}
 HETERO_LAYER=${11:-2}
 NUM_MICRO_BATCH=${12:-512} # should equal to GLOBAL_BATCH_SIZE / MICRO_BATCH_SIZE
+FFN_HIDDEN_SIZE=${13:-17920}
 
 NNODES=$(cat ${HOSTFILE} | wc -l)
 NUM_GPUS_PER_NODE=$( cat $HOSTFILE | head -n 1 | awk -F 'slots=' '{print $2}' )
@@ -47,14 +48,14 @@ export HETU_SWITCH_PROFILE=INFO
 export HETU_INTERNAL_LOG_LEVEL=WARN
 export HETU_STRAGGLER=EXP
 
-export NCCL_DEBUG=WARN
-export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7
-export NCCL_IB_GID_INDEX=3
+export HETU_MAX_SPLIT_SIZE_MB=200
+export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=20
 
 OTHER_LAYER=$(((NUM_LAYERS - HETERO_LAYER) / (PP - 1)))
 
 # 生成hetero脚本
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
+    --num_layers $NUM_LAYERS \
     --num_gpus $WORLD_SIZE \
     --dp $DP \
     --tp $TP \
@@ -85,7 +86,7 @@ for i in $(seq 128 $NUM_MICRO_BATCH); do
         -x NCCL_IB_TC=160 -x NCCL_PXN_DISABLE=0 \
         -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
         -x HETU_MAX_SPLIT_SIZE_MB -x HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB \
-        -x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL -x HETU_STRAGGLER -x HETU_MEMORY_PROFILE \
+        -x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL -x HETU_STRAGGLER \
         --output-filename logs/ds_parallel --merge-stderr-to-stdout \
         python lhy_hetero_pack_or_pad.py \
             --num_strategy=2 \
@@ -98,6 +99,7 @@ for i in $(seq 128 $NUM_MICRO_BATCH); do
             --merge_file $MERGE_FILE \
             --vocab_size 30592 \
             --hidden_size $HIDDEN_SIZE \
+	    --ffn_hidden_size $FFN_HIDDEN_SIZE \
             --num_hidden_layers $NUM_LAYERS \
             --num_attention_heads $NUM_HEADS \
             --seq_length $SEQ_LEN \

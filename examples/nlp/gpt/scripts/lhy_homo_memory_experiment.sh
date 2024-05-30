@@ -75,7 +75,7 @@ while [ $num -le $MAX_NUM_LAYERS ]; do
         -x NCCL_IB_TC=160 -x NCCL_PXN_DISABLE=0 \
         -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
         -x HETU_MAX_SPLIT_SIZE_MB -x HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB \
-        -x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL -x HETU_STRAGGLER -x HETU_MEMORY_PROFILE \
+        -x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL -x HETU_MEMORY_PROFILE \
         --output-filename logs/ds_parallel --merge-stderr-to-stdout \
     python lhy_hetero_pack_or_pad.py \
     --num_strategy=1 \

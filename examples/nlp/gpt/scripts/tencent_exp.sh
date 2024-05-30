@@ -2,33 +2,37 @@
 
 # bash scripts/hot_switch_multi.sh 7b two bf16 greedy host01
 
-MODEL_SIZE=${1:-'7b'}
+MODEL_SIZE=${1:-'32b'}
 SWITCH=${2:-0}
-HOSTFILE=${3:-'hostfile01'}
-SEQ_LEN=${4:-1024}
-GLOBAL_BATCH_SIZE=${5:-256}
-MICRO_BATCH_SIZE=${6:-4}
-DP=${7:-2}
-TP=${7:-4}
-PP=${7:-2}
+HOSTFILE=${3:-'hostfile0123'}
+SEQ_LEN=${4:-2048}
+GLOBAL_BATCH_SIZE=${5:-512}
+MICRO_BATCH_SIZE=${6:-1}
+DP=${7:-4}
+TP=${7:-2}
+PP=${7:-4}
 HETERO=true
 
 if [ "${MODEL_SIZE}" = "7b" ]; then
     NUM_LAYERS=32
     HIDDEN_SIZE=4096
+    FFN_HIDDEN_SIZE=11008
     NUM_HEADS=32
 elif [ "${MODEL_SIZE}" = "13b" ]; then
     NUM_LAYERS=40
     HIDDEN_SIZE=5120
+    FFN_HIDDEN_SIZE=13824
     NUM_HEADS=40
 elif [ "${MODEL_SIZE}" = "30b" ]; then
     # actually 30b = 12*num_layers*hidden_size^2
     NUM_LAYERS=60
     HIDDEN_SIZE=6528 #6672
+    FFN_HIDDEN_SIZE=17920
     NUM_HEADS=48 # should be divided by tp32... so 48 will cause error!!!
 elif [ "${MODEL_SIZE}" = "32b" ]; then
     NUM_LAYERS=60
     HIDDEN_SIZE=6656 #6672
+    FFN_HIDDEN_SIZE=17920
     NUM_HEADS=64
 else
     echo the model should be 7b/13b/30b for test.
@@ -46,9 +50,15 @@ BEFORE_UNUSED_RANK="[0,1]"
 BEFORE_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:4,5:5,6:6,7:7,8:0,9:1,10:10,11:11,12:12,13:13,14:14,15:15}"
 # BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
 
+BEFORE_LAYERS_NUM_LIST="15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15"
+BEFORE_MICRO_BATCH_NUM_LIST="[128,128,128,128]"
+BEFORE_UNUSED_RANK="[]"
+# AFTER_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
+BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15,16:16,17:17,18:18,19:19,20:20,21:21,22:22,23:23,24:24,25:25,26:26,27:27,28:28,29:29,30:30,31:31}"
+
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --num_layers $NUM_LAYERS \
-    --num_gpus 16 \
+    --num_gpus $WORLD_SIZE \
     --dp $DP \
     --tp $TP \
     --pp $PP \
@@ -59,21 +69,23 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --file_name "before.json"
 
 # after
-AFTER_LAYERS_NUM_LIST="2,30,20,12"
-AFTER_MICRO_BATCH_NUM_LIST="[20,44]"
-AFTER_UNUSED_RANK="[0,2,3,6,7,9,11]"
+AFTER_LAYERS_NUM_LIST="15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15"
+AFTER_MICRO_BATCH_NUM_LIST="[128,128,128,128]"
+AFTER_UNUSED_RANK="[]"
 # AFTER_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
-AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
+AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15,16:16,17:17,18:18,19:19,20:20,21:21,22:22,23:23,24:24,25:25,26:26,27:27,28:28,29:29,30:30,31:31}"
 
+'''
 AFTER_LAYERS_NUM_LIST="32,0,20,12"
 AFTER_MICRO_BATCH_NUM_LIST="[20,44]"
 AFTER_UNUSED_RANK="[0,1,6,7,8,9,10,11]"
 # AFTER_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
 AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
+'''
 
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --num_layers $NUM_LAYERS \
-    --num_gpus 16 \
+    --num_gpus $WORLD_SIZE \
     --dp $DP \
     --tp $TP \
     --pp $PP \
@@ -82,6 +94,14 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --rank_to_device_mapping $AFTER_RANK_TO_DEVICE_MAPPING \
     --unused_rank $AFTER_UNUSED_RANK \
     --file_name "after.json"
+
+python ./ds_parallel_config/generate_gpt_3d_config.py \
+    --num_layers $NUM_LAYERS \
+    --num_gpus $WORLD_SIZE \
+    --dp $DP \
+    --tp $TP \
+    --pp $PP \
+    --zero 
 
 ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
@@ -144,7 +164,8 @@ if [ "${SWITCH}" = 1 ]; then
         --merge_file $MERGE_FILE \
         --vocab_size 30592 \
         --hidden_size $HIDDEN_SIZE \
-        --num_hidden_layers $NUM_LAYERS \
+        --ffn_hidden_size $FFN_HIDDEN_SIZE \
+	--num_hidden_layers $NUM_LAYERS \
         --num_attention_heads $NUM_HEADS \
         --seq_length $SEQ_LEN \
         --epochs 4 \
@@ -184,7 +205,7 @@ else
         --output-filename logs/ds_parallel --merge-stderr-to-stdout \
         python lhy_hetero_pack_or_pad.py \
         --num_strategy=2 \
-        --ds_parallel_config ds_parallel_config/hetero/before.json,ds_parallel_config/hetero/after.json \
+        --ds_parallel_config ds_parallel_config/hetero/before.json,ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json \
         --global_batch_size $GLOBAL_BATCH_SIZE \
         --micro_batch_size $MICRO_BATCH_SIZE \
         --json_file $JSON_FILE \
@@ -193,6 +214,7 @@ else
         --merge_file $MERGE_FILE \
         --vocab_size 30592 \
         --hidden_size $HIDDEN_SIZE \
+	--ffn_hidden_size $FFN_HIDDEN_SIZE \
         --num_hidden_layers $NUM_LAYERS \
         --num_attention_heads $NUM_HEADS \
         --seq_length $SEQ_LEN \
