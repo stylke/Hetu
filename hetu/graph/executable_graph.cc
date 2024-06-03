@@ -1151,7 +1151,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
       event->Record(Stream(op->placement(), kP2PStream));
       event->Block(Stream(op->placement(), kComputingStream));
-      event->Block(Stream(op->placement(), kOptimizerStream));
+      // event->Block(Stream(op->placement(), kOptimizerStream));
       _p2p_events.emplace_back(std::move(event));
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group end";
     }
@@ -1897,7 +1897,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
     event->Record(Stream(local_device, kP2PStream));
     event->Block(Stream(local_device, kComputingStream));
-    event->Block(Stream(local_device, kOptimizerStream));
+    // event->Block(Stream(local_device, kOptimizerStream));
     _p2p_events.emplace_back(std::move(event));
   }
   HT_LOG_DEBUG << local_device << ": 3. compute[end]";
@@ -2155,7 +2155,11 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           out << "; inputs = " << op->inputs();
         }
         if (op->stream_index() == kComputingStream) {
-          compute_time += op_time.second * 1.0 / 1e6;
+          if (is_optimizer_update_op(op)) {
+            optimizer_time += op_time.second * 1.0 / 1e6;
+          } else {
+            compute_time += op_time.second * 1.0 / 1e6;
+          }
         } else if (op->stream_index() == kP2PStream) {
           tp_p2p_time += op_time.second * 1.0 / 1e6;
         } else if (op->stream_index() == kCollectiveStream) {
@@ -2166,8 +2170,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           }
         } else if (op->stream_index() == kBlockingStream) {
           blocking_time += op_time.second * 1.0 / 1e6;
-        } else if (op->stream_index() == kOptimizerStream) {
-          optimizer_time += op_time.second * 1.0 / 1e6;
         } else {
           other_time += op_time.second * 1.0 / 1e6;
         }        

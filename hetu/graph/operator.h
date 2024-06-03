@@ -1048,8 +1048,6 @@ inline StreamIndex get_suggested_stream_index(const Operator& op) {
     return kP2PStream;
   } else if (is_all_to_all_op(op)) {
     return kCollectiveStream;
-  } else if (is_optimizer_update_op(op)) {
-    return kOptimizerStream;
   } else {
     return kComputingStream;
   }
