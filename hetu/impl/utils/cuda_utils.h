@@ -26,7 +26,7 @@ DECLARE_HT_EXCEPTION(nccl_error);
 #define HT_WARP_SIZE (32)
 
 #define CUDA_CALL(f)                                                           \
-  for (cudaError_t status = (f); status != cudaSuccess; status = cudaSuccess)  \
+  for (cudaError_t status = (f); status != cudaSuccess && status != cudaErrorCudartUnloading; status = cudaSuccess)  \
   __HT_FATAL_SILENT(hetu::cuda::cuda_error)                                    \
     << "Cuda call " << #f << " failed: " << cudaGetErrorString(status)
 #define NCCL_CALL(f)                                                           \

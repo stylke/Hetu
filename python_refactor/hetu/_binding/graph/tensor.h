@@ -28,6 +28,8 @@ PyObject* PyTensor_New(Tensor&& tensor, bool return_none_if_undefined = true);
 PyObject* PyTensorList_New(TensorList&& tensors,
                            bool return_none_if_undefined = true);
 
+PyObject* PyDict_FromStateDict(StateDict map);
+
 void AddPyTensorTypeToModule(py::module_& module);
 
 /******************************************************

@@ -104,7 +104,8 @@ def pretrain(args):
     model = GPTLMHeadModel(config=config, ds_parallel_config=ds_parallel_config)
     model = ht.nn.LoRAModel(model, 8, qtype=config.dqtype, lora_alpha = 1)
 
-    load_model(model, "./checkpoint/temp", config=config, local_device=local_device)
+    print("begin load.")
+    # load_model(model, "./checkpoint/temp3", config=config, local_device=local_device)
     print("Load end.")
 
     input_ds, input_device_group = config2ds(ds_parallel_config['input'])
@@ -119,7 +120,7 @@ def pretrain(args):
         
     input_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=input_ds, device_group=input_device_group, name='input_ids')
     token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=input_ds, device_group=input_device_group, name='token_type_ids')
-    attention_mask = ht.parallel_placeholder(config.lora_dtype, global_shape=[micro_batch_size, config.seq_len], ds=input_ds, device_group=input_device_group, name='attention_mask')
+    attention_mask = ht.parallel_placeholder(config.dqtype, global_shape=[micro_batch_size, config.seq_len], ds=input_ds, device_group=input_device_group, name='attention_mask')
     masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[micro_batch_size, config.seq_len], ds=label_ds, device_group=label_device_group, name='masked_lm_labels')
 
     print(f'{local_device}: build model begin...')
@@ -184,7 +185,7 @@ def pretrain(args):
                 # return
     print("Finish Finetune")
     # save_checkpoint(model, "./checkpoint/temp2", config=config, local_device=local_device)
-    save_model(model, "./checkpoint/temp4", config=config, local_device=local_device, save_dtype=ht.nfloat4, only_lora=True)
+    # save_model(model, "./checkpoint/temp4", config=config, local_device=local_device, save_dtype=ht.nfloat4, only_lora=True)
     # save_model(model, "./checkpoint/temp3", config=config, local_device=local_device, only_lora=True)
 
 if __name__ == '__main__':

@@ -45,6 +45,10 @@ Tensor::~Tensor() {
   _ptr = nullptr;
 }
 
+void TensorDef::addconsumer(Operator& op) {
+  _consumers.push_back(std::ref(op));
+}
+
 void TensorDef::AddConsumer(Operator& op) {
   _consumers.push_back(std::ref(op));
 }

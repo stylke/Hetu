@@ -373,6 +373,9 @@ class OpInterface : public shared_ptr_target {
   virtual NDArrayList DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                                      RuntimeContext& runtime_ctx) const;
 
+  NDArrayList DoAllocOutputs(Operator& op, const NDArrayList& inputs,
+                             RuntimeContext& runtime_ctx, const Device& device) const;
+
   virtual NDArray DoAllocOutput(Operator& op, const NDArrayList& inputs,
                                 size_t idx, RuntimeContext& runtime_ctx) const;
 
@@ -686,6 +689,10 @@ class OpDef : public shared_ptr_target {
 
   void add_in_dep_linker(Tensor in_dep) {
     _extra_in_dep_linkers.push_back(in_dep);
+  }
+
+  void add_out_dep_linker(Tensor out_dep) {
+    _extra_out_dep_linkers.push_back(out_dep);
   }
 
   const Tensor& out_dep_linker() const noexcept {
@@ -1007,6 +1014,7 @@ static const uint64_t INPLACE_OP = 1ul << 17;
 static const uint64_t COMM_SPLIT_OP = 1ul << 19;
 static const uint64_t COMM_OP = 1ul << 20;
 static const uint64_t UNKNOWN_OP = 1ul << 21;
+static const uint64_t FUSED_GROUP_OP = 1ul << 53;
 static const uint64_t CONCAT_OP = 1ul << 54;
 static const uint64_t CONTIGUOUS_OP = 1ul << 55;
 static const uint64_t DATA_TRANSFER_OP = 1ul << 56;
@@ -1053,7 +1061,7 @@ DECLARE_OP_INDICATOR_CHECKER(grad_reduce, ALL_REDUCE_OP | REDUCE_SCATTER_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm_split, COMM_SPLIT_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm, COMM_OP)
 DECLARE_OP_INDICATOR_CHECKER(unknown, UNKNOWN_OP)
-DECLARE_OP_INDICATOR_CHECKER(communucation,
+DECLARE_OP_INDICATOR_CHECKER(communication,
                              PEER_TO_PEER_SEND_OP | PEER_TO_PEER_RECV_OP |
                                ALL_TO_ALL_OP | ALL_REDUCE_OP |
                                ALL_GATHER_OP | REDUCE_SCATTER_OP |

@@ -1,0 +1,277 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "io.grpc.examples.hetu";
+option java_outer_classname = "HetuProto";
+option objc_class_prefix = "Hetu";
+
+package hetu;
+
+service DeviceController {
+  // Sends a greeting
+
+  rpc Connect (ConnectRequest) returns (ConnectReply) {}
+
+  rpc GetRank (RankRequest) returns (RankReply) {}
+
+  rpc CommitHostName (CommitHostNameRequest) returns (CommitHostNameReply) {}
+
+  rpc GetHostName (GetHostNameRequest) returns (GetHostNameReply) {}
+
+  rpc CommitDeviceInfo (CommitDeviceInfoRequest) returns (CommitDeviceInfoReply) {}
+
+  rpc GetDeviceInfo (GetDeviceInfoRequest) returns (GetDeviceInfoReply) {}
+
+  rpc CommitNcclId (CommitNcclIdRequest) returns (CommitNcclIdReply) {}
+
+  rpc GetNcclId (GetNcclIdRequest) returns (GetNcclIdReply) {}
+
+  rpc Exit (ExitRequest) returns (ExitReply) {}
+
+  rpc PutDouble (PutDoubleRequest) returns (PutDoubleReply) {}
+
+  rpc GetDouble (GetDoubleRequest) returns (GetDoubleReply) {}
+
+  rpc RemoveDouble (RemoveDoubleRequest) returns (RemoveDoubleReply) {}  
+
+  rpc PutInt (PutIntRequest) returns (PutIntReply) {}
+
+  rpc GetInt (GetIntRequest) returns (GetIntReply) {}
+
+  rpc RemoveInt (RemoveIntRequest) returns (RemoveIntReply) {}
+
+  rpc PutString (PutStringRequest) returns (PutStringReply) {}
+
+  rpc GetString (GetStringRequest) returns (GetStringReply) {}
+
+  rpc RemoveString (RemoveStringRequest) returns (RemoveStringReply) {}
+
+  rpc PutBytes (PutBytesRequest) returns (PutBytesReply) {}
+
+  rpc GetBytes (GetBytesRequest) returns (GetBytesReply) {}
+
+  rpc RemoveBytes (RemoveBytesRequest) returns (RemoveBytesReply) {}
+
+  rpc PutJson (PutJsonRequest) returns (PutJsonReply) {}
+
+  rpc GetJson (GetJsonRequest) returns (GetJsonReply) {}
+
+  rpc RemoveJson (RemoveJsonRequest) returns (RemoveJsonReply) {}
+
+  rpc Barrier (BarrierRequest) returns (BarrierReply) {}
+}
+
+message ConnectRequest {
+  string hostname = 1;
+}
+
+message ConnectReply {
+  int32 status = 1;
+}
+
+message RankRequest {
+  string name = 1;
+}
+
+message RankReply {
+  int32 rank = 1;
+}
+
+message CommitHostNameRequest {
+  string hostname = 1;
+  int32 rank = 2;
+}
+
+message CommitHostNameReply {
+  int32 status = 1;
+}
+
+message GetHostNameRequest {
+  int32 rank = 1;
+}
+
+message GetHostNameReply {
+  string hostname = 1;
+}
+
+message CommitDeviceInfoRequest {
+  int32 type = 1;
+  int32 index = 2;
+  int32 multiplex = 3; 
+  int32 rank = 4; 
+}
+
+message CommitDeviceInfoReply {
+  int32 status = 1;
+}
+
+message GetDeviceInfoRequest {
+  int32 rank = 1;
+}
+
+message GetDeviceInfoReply {
+  int32 type = 1;
+  int32 index = 2;
+  int32 multiplex = 3;  
+}
+
+message CommitNcclIdRequest {
+  bytes nccl_id = 1;
+  repeated int32 world_rank = 2;
+  int32 stream_id = 3;
+}
+
+message CommitNcclIdReply {
+  int32 status = 1;
+}
+
+message GetNcclIdRequest {
+  repeated int32 world_rank = 1;
+  int32 stream_id = 2;
+}
+
+message GetNcclIdReply {
+  bytes nccl_id = 1; 
+}
+
+message ExitRequest {
+  int32 rank = 1;
+}
+
+message ExitReply {
+  int32 status = 1; 
+}
+
+message PutDoubleRequest {
+  string key = 1;
+  double value = 2;
+}
+
+message PutDoubleReply {
+  int32 status = 1;
+}
+
+message GetDoubleRequest {
+  string key = 1;
+}
+
+message GetDoubleReply {
+  double value = 1; 
+}
+
+message RemoveDoubleRequest {
+  string key = 1;
+}
+
+message RemoveDoubleReply {
+  string message = 1; 
+}
+
+message PutIntRequest {
+  string key = 1;
+  int64 value = 2;
+}
+
+message PutIntReply {
+  int32 status = 1;
+}
+
+message GetIntRequest {
+  string key = 1;
+}
+
+message GetIntReply {
+  int64 value = 1; 
+}
+
+message RemoveIntRequest {
+  string key = 1;
+}
+
+message RemoveIntReply {
+  string message = 1; 
+}
+
+message PutStringRequest {
+  string key = 1;
+  string value = 2;
+}
+
+message PutStringReply {
+  int32 status = 1;
+}
+
+message GetStringRequest {
+  string key = 1;
+}
+
+message GetStringReply {
+  string value = 1; 
+}
+
+message RemoveStringRequest {
+  string key = 1;
+}
+
+message RemoveStringReply {
+  string message = 1; 
+}
+
+message PutBytesRequest {
+  string key = 1;
+  bytes value = 2;
+}
+
+message PutBytesReply {
+  int32 status = 1;
+}
+
+message GetBytesRequest {
+  bytes key = 1;
+}
+
+message GetBytesReply {
+  string value = 1; 
+}
+
+message RemoveBytesRequest {
+  bytes key = 1;
+}
+
+message RemoveBytesReply {
+  string message = 1; 
+}
+
+message PutJsonRequest {
+  string key = 1;
+  string value = 2;
+}
+
+message PutJsonReply {
+  int32 status = 1;
+}
+
+message GetJsonRequest {
+  string key = 1;
+}
+
+message GetJsonReply {
+  string value = 1; 
+}
+
+message RemoveJsonRequest {
+  string key = 1;
+}
+
+message RemoveJsonReply {
+  string message = 1; 
+}
+
+message BarrierRequest {
+  int32 rank = 1;
+  repeated int32 world_rank = 2;
+}
+
+message BarrierReply {
+  int32 status = 1; 
+}

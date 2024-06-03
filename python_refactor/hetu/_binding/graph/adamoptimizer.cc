@@ -112,6 +112,21 @@ PyObject* PyAdamOptimizer_minimize(PyAdamOptimizer* self, PyObject* args, PyObje
   HT_PY_FUNC_END
 }
 
+PyObject* PyAdamOptimizer_get_states(PyAdamOptimizer* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "get_states(Tensor var)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    return PyDict_FromStateDict(self->optimizer.GetStates(parsed_args.get_tensor_optional(0)));
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
 // NOLINTNEXTLINE
 PyGetSetDef PyAdamOptimizer_properties[] = {
   {PY_GET_SET_DEF_NAME("learning_rate"), (getter) PyAdamOptimizer_learning_rate, nullptr, nullptr, nullptr}, 
@@ -164,6 +179,7 @@ std::vector<PyMethodDef> InitAdamOptimizerPyMethodDefs() {
   std::vector<PyMethodDef> ret = {{nullptr}};
   AddPyMethodDefs(ret, {
     {"minimize", (PyCFunction) PyAdamOptimizer_minimize, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"get_states", (PyCFunction) PyAdamOptimizer_get_states, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     // {"makestates", (PyCFunction) PyAdamOptimizer_makestates, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     // {"zerograd", (PyCFunction) PyAdamOptimizer_zerograd, METH_NOARGS, nullptr }, 
     // {"step", (PyCFunction) PyAdamOptimizer_step, METH_NOARGS, nullptr },

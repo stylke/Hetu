@@ -13,8 +13,7 @@ find_path(CUTLASS_INCLUDE_DIR
           NAMES cutlass/cutlass.h
           HINTS
           ${CUTLASS_ROOT}
-          ${CUTLASS_ROOT}/include
-          REQUIRED)
+          ${CUTLASS_ROOT}/include)
 find_library ( CUTLASS_LIBRARY 
                NAMES cutlass HINTS 
                ${CUTLASS_ROOT}

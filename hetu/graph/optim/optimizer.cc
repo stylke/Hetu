@@ -19,6 +19,11 @@ Tensor Optimizer::Minimize(const Tensor& loss, const TensorList& var_list,
   return ApplyGradients(filtered_grads_and_vars, name);
 }
 
+StateDict Optimizer::GetStates(const Tensor& var) {
+  HT_ASSERT(state_dict.find(var->id()) != state_dict.end());
+  return state_dict[var->id()];
+}
+
 Tensor Optimizer::ApplyGradients(const GradAndVarList& grads_and_vars,
                                  const OpName& name, const Tensor& infinite_count) {
   TensorList updated_params;
@@ -44,11 +49,16 @@ Tensor Optimizer::MakeStates(const Tensor& variable, const Tensor& grad, const O
   //   << "Diastributed States for varibale " << variable << " must be valid!";  
 
   Tensor states = MakeParallelVariableOp(ZerosInitializer(), grad->global_shape(),
-                                         multi_ds_grad, {0}, grad->dtype(), false,
+                                         multi_ds_grad, {0}, grad->dtype(), false, {},
                                          OpMeta()
                                           .set_device_groups(producer->device_groups())
                                           .set_eager_device(producer->eager_device())
                                           .set_name(variable->name() + "_" + state_name));  
+  
+  if (state_dict.find(variable->id()) == state_dict.end()) {
+    state_dict[variable->id()] = {};
+  }
+  state_dict[variable->id()][state_name] = states;
 
   return std::move(states);
 }
@@ -97,13 +107,23 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
                           .set_name("Update_" + var->name())
                           .set_is_deduce_states(false); // update op needn't deduce states
   HTShape step_shape = {1};
+  DistributedStates var_ds = var->get_distributed_states();
+  std::vector<int32_t> step_order = {-1};
+  std::unordered_map<int32_t, int32_t> step_states;
+  step_states[-1] = var_ds.get_device_num();
+  DistributedStates step_ds(var_ds.get_device_num(), step_states, step_order, var_ds.zero());
   Tensor step = MakeVariableOp(OnesInitializer(), step_shape, kInt64,
-                                false, var->get_distributed_states(), 
+                                false, step_ds, 
                                 OpMeta()
                                   .set_device_groups(var->producer()->device_groups())
                                   .set_eager_device(kCPU)
                                   .set_name(var->name() + "_step")
+                                  .set_is_deduce_states(false)
                                   .set_is_step(true));
+  if (state_dict.find(var->id()) == state_dict.end()) {
+    state_dict[var->id()] = {};
+  }
+  state_dict[var->id()]["step"] = step;
   // variable: dup in dp group, grad: reduce-scatter in dp group, mean & variance: same as grad
   return MakeAdamOp(var, grad, MakeStates(var, grad, "mean"),
                     MakeStates(var, grad, "variance"),

@@ -2,6 +2,8 @@ import os
 import hetu as ht
 from hetu_gpt_ds_parallel import GPTLMHeadModel
 from hetu.nn.modules.parallel_ds import config2ds
+from hetu.utils.checkpoint import load_file, save_file, temp_load, temp_save,\
+                                  temp_load_split, temp_save_split,load_model, save_model, save_checkpoint
 from gpt_config import GPTConfig
 from data_utils import GPTJsonDataset, get_mask_and_position_ids, build_pretraining_data_loader
 import numpy as np
@@ -14,7 +16,7 @@ from queue import Queue
 local_device = None
 all_devices = None
 
-def distributed_init(use_multi_node: bool = False):
+def distributed_init(args, use_multi_node: bool = False):
     if use_multi_node:
         hostname = socket.gethostname()
         if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
@@ -25,9 +27,10 @@ def distributed_init(use_multi_node: bool = False):
            raise ValueError(f"Unknown hostname: {hostname}")
 
     global local_device, all_devices
-    ht.init_comm_group(8)
+    ht.init_comm_group(args.ngpus, server_address=args.server_addr+":"+args.server_port)
     local_device = ht.local_device()
     all_devices = ht.global_device_group()
+    # print(local_device, os.environ['HETU_LOCAL_HOSTNAME'])
     if local_device.index == 0:
         print(f'local_device: {local_device}, all_devices: {all_devices}')
 
@@ -141,6 +144,14 @@ def pretrain(args):
     train_dataset = train_dataset_provider(args)
     print(f'{local_device}: build dataset end...')
 
+    load_st = time.time()
+    # temp_load(model, opt, "./checkpoint/temp3", config=config, local_device=local_device)
+    # load_model(model, "./checkpoint/temp2", config=config, local_device=local_device)
+    # temp_load_split(model, opt, "./checkpoint/temp3", config=config, local_device=local_device)
+    load_ed = time.time()
+    print("Checkpoint Loaded.")
+    print('%s: Load_Time = %.4f'%(local_device, load_ed - load_st))
+
     # return
     # device in same dp_group will read the same batch data, idx=-1 means no need to read data
     dup_group_idx, dup_group_num = -1, -1
@@ -215,6 +226,13 @@ def pretrain(args):
 
                 if step == 10 and dp_rank == 0:
                     os.system('nvidia-smi')
+    
+    save_st = time.time()
+    # save_model(model, "./checkpoint/temp", config=config, local_device=local_device, save_dtype=ht.float32)
+    # temp_save(model, opt, "./checkpoint/temp3", config=config, local_device=local_device, save_dtype=ht.float32)
+    save_ed = time.time()
+    print("Checkpoint Saved.")
+    print('%s: Save_Time = %.4f'%(local_device, save_ed - save_st))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -291,8 +309,20 @@ if __name__ == '__main__':
     parser.add_argument(
         "--bf16", action="store_true", help="Use bfloat16."
     )
+    parser.add_argument(
+        "--server_addr", type=str, default='127.0.0.1', help="server's address"
+    )
+    parser.add_argument(
+        "--server_port", type=str, default='50051', help="server's port"
+    ) 
+    parser.add_argument(
+        "--ngpus", type=int, default=8, help="num of gpus"
+    ) 
+    parser.add_argument(
+        "--rank", type=int, default=0, help="the rank of process"
+    ) 
     args = parser.parse_args()
-    distributed_init(args.use_multi_node)
+    distributed_init(args, args.use_multi_node)
     with ht.graph("define_and_run"):
         if args.bf16:
             precision = "ht.bfloat16"

@@ -72,7 +72,7 @@ class NCCLCommunicationGroupDef : public CommunicationGroupDef {
   }
 
  protected:
-  static void CreateNCCLUniqueId(const std::vector<int>& world_ranks,
+  static void CreateNCCLUniqueId(const std::vector<int>& world_ranks, const Stream& stream,
                                  ncclUniqueId& id);
 
   ncclUniqueId _unique_id;

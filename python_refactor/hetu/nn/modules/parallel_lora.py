@@ -77,29 +77,31 @@ class LoRAParallelLayerNorm(HtParallelLayerNorm):
             if (self.weight.id not in map_absmax):
                 parameter_dict = {"tensor_id": self.weight.id, "blocksize": blocksize}
                 self.weight_absmax = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
-                                                             [absmax_size,], ds, device_index, 
+                                                             [absmax_size,], [ds], [device_index], 
                                                              dtype=hetu.float32, requires_grad=False,
                                                              parameter_dict = parameter_dict, 
-                                                             device_group=self.device_group, name=f'{name}_weight_absmax')
+                                                             device_groups=[self.device_group], 
+                                                             name=f'{name}_weight_absmax')
                 map_absmax[self.weight.id] = self.weight_absmax
             else:
                 self.weight_absmax = map_absmax[self.weight.id]
-            # self.weight.add_in_dep_linker(self.weight_absmax)
+            self.weight.add_in_dep_linker(self.weight_absmax)
             if (self.bias.id not in map_absmax):
                 parameter_dict = {"tensor_id": self.bias.id, "blocksize": blocksize}
                 self.bias_absmax = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
-                                                            [absmax_size,], ds, device_index, 
+                                                            [absmax_size,], [ds], [device_index], 
                                                             dtype=hetu.float32, requires_grad=False, 
                                                             parameter_dict = parameter_dict,
-                                                            device_group=self.device_group, name=f'{name}_bias_absmax')
+                                                            device_groups=[self.device_group], 
+                                                            name=f'{name}_bias_absmax')
                 map_absmax[self.bias.id] = self.bias_absmax
             else:
                 self.bias_absmax = map_absmax[self.bias.id]
-            # self.bias.add_in_dep_linker(self.bias_absmax)
+            self.bias.add_in_dep_linker(self.bias_absmax)
 
     def forward(self, input_p):
         return hetu.layer_norm(input_p, self.weight, self.bias, self.normalized_shape, 
-                               self.eps, device_group=self.device_group, name=self.name)[0]
+                               self.eps, device_groups=[self.device_group], name=self.name)[0]
 
 class LoRAParallelEmbedding(HtParallelEmbedding):
     def __init__(self, ori_model, rank, blocksize = 64, qtype = hetu.bfloat16,
@@ -117,14 +119,16 @@ class LoRAParallelEmbedding(HtParallelEmbedding):
             if (self.embedding_table.id not in map_absmax):
                 parameter_dict = {"tensor_id": self.embedding_table.id, "blocksize": blocksize}
                 self.embedding_table_absmax = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
-                                                                      [absmax_size,], ds_dup, 
-                                                                      get_device_index(self.device_group),
+                                                                      [absmax_size,], [ds_dup], 
+                                                                      [get_device_index(self.device_group)],
                                                                       dtype=hetu.float32, requires_grad=False, 
                                                                       parameter_dict = parameter_dict,
-                                                                      device_group=self.device_group, name=f'{name}_table_absmax')
+                                                                      device_groups=[self.device_group], 
+                                                                      name=f'{name}_table_absmax')
                 map_absmax[self.embedding_table.id] = self.embedding_table_absmax
             else:
                 self.embedding_table_absmax = map_absmax[self.embedding_table.id]
+            self.embedding_table.add_in_dep_linker(self.embedding_table_absmax)
     
     def forward(self, input_p):
         return HtParallelEmbedding.forward(self, input_p)
@@ -145,15 +149,16 @@ class LoRAVocabParallelEmbedding(HtVocabParallelEmbedding):
             if (self.embedding_table.id not in map_absmax):
                 parameter_dict = {"tensor_id": self.embedding_table.id, "blocksize": blocksize}
                 self.embedding_table_absmax = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
-                                                                      [absmax_size,], self.ds_map['dup'], 
-                                                                      get_device_index(self.device_group),
+                                                                      [absmax_size,], [self.ds_map['dup']], 
+                                                                      [get_device_index(self.device_group)],
                                                                       dtype=hetu.float32, requires_grad=False, 
                                                                       parameter_dict = parameter_dict,
-                                                                      device_group=self.device_group, name=f'{name}_table_absmax')
+                                                                      device_groups=[self.device_group], 
+                                                                      name=f'{name}_table_absmax')
                 map_absmax[self.embedding_table.id] = self.embedding_table_absmax
             else:
                 self.embedding_table_absmax = map_absmax[self.embedding_table.id]
-            # self.embedding_table.add_in_dep_linker(self.embedding_table)
+            self.embedding_table.add_in_dep_linker(self.embedding_table_absmax)
                 
         self.lora_alpha = lora_alpha
         self.blocksize = blocksize
@@ -199,16 +204,16 @@ class LoRAColumnParallelLinear(HtColumnParallelLinear):
             if (self.weight.id not in map_absmax):
                 parameter_dict = {"tensor_id": self.weight.id, "blocksize": blocksize}
                 self.weight_absmax = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
-                                                             [absmax_size], self.ds_map['dup'], 
-                                                             get_device_index(self.device_group), 
+                                                             [absmax_size], [self.ds_map['dup']], 
+                                                             [get_device_index(self.device_group)], 
                                                              dtype=hetu.float32, requires_grad=False, 
                                                              parameter_dict = parameter_dict,
-                                                             device_group=self.device_group, 
+                                                             device_groups=[self.device_group], 
                                                              name=f'{name}_weight_absmax')
                 map_absmax[self.weight.id] = self.weight_absmax
             else:
                 self.weight_absmax = map_absmax[self.weight.id]
-            # self.weight.add_in_dep_linker(self.weight_absmax)
+            self.weight.add_in_dep_linker(self.weight_absmax)
 
         lora_dtype = self.dtype
         if (lora_dtype == hetu.float4) or (lora_dtype == hetu.nfloat4):
@@ -230,16 +235,16 @@ class LoRAColumnParallelLinear(HtColumnParallelLinear):
                 if (self.bias.id not in map_absmax):
                     parameter_dict = {"tensor_id": self.bias.id, "blocksize": blocksize}
                     self.bias_absmax = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
-                                                               [absmax_size], self.ds_map['dup'], 
-                                                               get_device_index(self.device_group),
+                                                               [absmax_size], [self.ds_map['dup']], 
+                                                               [get_device_index(self.device_group)],
                                                                dtype=hetu.float32, requires_grad=False,
                                                                parameter_dict = parameter_dict, 
-                                                               device_group=self.device_group, 
+                                                               device_groups=[self.device_group], 
                                                                name=f'{name}_bias_absmax')
                     map_absmax[self.bias.id] = self.bias_absmax
                 else:
                     self.bias_absmax = map_absmax[self.bias.id]
-                # self.bias.add_in_dep_linker(self.bias_absmax)
+                self.bias.add_in_dep_linker(self.bias_absmax)
       
     def forward(self, input_p):
         output = HtColumnParallelLinear.forward(self, input_p)  
@@ -278,16 +283,16 @@ class LoRARowParallelLinear(HtRowParallelLinear):
             if (self.weight.id not in map_absmax):
                 parameter_dict = {"tensor_id": self.weight.id, "blocksize": blocksize}
                 self.weight_absmax = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
-                                                             [absmax_size], self.ds_map['dup'],
-                                                             get_device_index(self.device_group), 
+                                                             [absmax_size], [self.ds_map['dup']],
+                                                             [get_device_index(self.device_group)], 
                                                              dtype=hetu.float32, requires_grad=False, 
                                                              parameter_dict = parameter_dict,
-                                                             device_group=self.device_group, 
+                                                             device_groups=[self.device_group], 
                                                              name=f'{name}_weight_absmax')
                 map_absmax[self.weight.id] = self.weight_absmax
             else:
                 self.weight_absmax = map_absmax[self.weight.id]
-            # self.weight.add_in_dep_linker(self.weight_absmax)
+            self.weight.add_in_dep_linker(self.weight_absmax)
         
         self.lora_alpha = lora_alpha
         self.blocksize = blocksize
@@ -322,15 +327,16 @@ class LoRARowParallelLinear(HtRowParallelLinear):
                 if (self.bias.id not in map_absmax):
                     parameter_dict = {"tensor_id": self.bias.id, "blocksize": blocksize}
                     self.bias_absmax = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
-                                                               [absmax_size], self.ds_map['dup'],
-                                                               get_device_index(self.device_group), 
+                                                               [absmax_size], [self.ds_map['dup']],
+                                                               [get_device_index(self.device_group)], 
                                                                dtype=hetu.float32, requires_grad=False,
                                                                parameter_dict = parameter_dict,
-                                                               device_group=self.device_group, name=f'{name}_bias_absmax')
+                                                               device_groups=[self.device_group], 
+                                                               name=f'{name}_bias_absmax')
                     map_absmax[self.bias.id] = self.bias_absmax
                 else:
                     self.bias_absmax = map_absmax[self.bias.id]
-                # self.bias.add_in_dep_linker(self.bias_absmax)
+                self.bias.add_in_dep_linker(self.bias_absmax)
 
     def forward(self, input_p):
         output = HtRowParallelLinear.forward(self, input_p)  
@@ -366,17 +372,17 @@ class LoRAModel(Module):
                                                     blocksize = self.blocksize, 
                                                     qtype = self.qtype,
                                                     map_absmax = self.id_to_absmax)
-            # if isinstance(model_, hetu.nn.HtColumnParallelLinear):
-            #     parent_key = ".".join(key.split(".")[:-1])
-            #     alpha = 0
-            #     if "attn" in parent_key:
-            #         alpha = self.lora_alpha
-            #     parent_model_ = model.find_module(parent_key)
-            #     lora_model_ = LoRAColumnParallelLinear(model_, self.rank, 
-            #                                            blocksize = self.blocksize, 
-            #                                            lora_alpha = alpha, 
-            #                                            qtype = self.qtype,
-            #                                            map_absmax = self.id_to_absmax)
+            if isinstance(model_, hetu.nn.HtColumnParallelLinear):
+                parent_key = ".".join(key.split(".")[:-1])
+                alpha = 0
+                if "attn" in parent_key:
+                    alpha = self.lora_alpha
+                parent_model_ = model.find_module(parent_key)
+                lora_model_ = LoRAColumnParallelLinear(model_, self.rank, 
+                                                       blocksize = self.blocksize, 
+                                                       lora_alpha = alpha, 
+                                                       qtype = self.qtype,
+                                                       map_absmax = self.id_to_absmax)
             if isinstance(model_, hetu.nn.HtRowParallelLinear):
                 parent_key = ".".join(key.split(".")[:-1])
                 alpha = 0

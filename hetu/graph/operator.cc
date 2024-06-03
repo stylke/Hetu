@@ -176,6 +176,59 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
   return outputs;
 }
 
+NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
+                                        RuntimeContext& runtime_ctx, const Device& device) const {
+  NDArrayList outputs;
+  auto output_size = op->num_outputs();
+  if (output_size > 0) {
+    outputs.reserve(output_size);
+    // 动态图
+    // 无runtime_ctx
+    // 现推output_shapes
+    if (runtime_ctx.shape_plan().empty()) {
+      HTShapeList input_shapes;
+      input_shapes.reserve(op->num_inputs());
+      for (auto& input : inputs) {
+        input_shapes.push_back(input->shape());
+      }
+      auto output_shapes = DoInferShape(op, input_shapes, runtime_ctx);
+      for (size_t i = 0; i < output_size; i++) {
+        outputs.push_back(NDArray::empty(output_shapes[i],
+                          device,
+                          op->output(i)->dtype(),
+                          op->instantiation_ctx().stream_index));
+      }
+    }
+    // 静态图
+    // 有runtime_ctx
+    // output_shapes全部提前设置好
+    // 部分output的allocation也会设置好
+    else {
+      for (size_t i = 0; i < output_size; i++) {
+        // question: will tensor shape != NDArray shape happen in any situation
+        auto output_id = op->output(i)->id();
+        // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": get runtime shape for " << op->output(i);
+        const auto& output_shape = runtime_ctx.get_runtime_shape(output_id);
+        HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
+          << " output " << i << " shape = " << output_shape << " ds = " << op->output(i)->get_distributed_states().ds_info();
+        if (runtime_ctx.has_runtime_allocation(output_id)) {
+          outputs.push_back(runtime_ctx.get_runtime_allocation(output_id));
+        } 
+        // alloc on-the-fly
+        // 后续要改成memory plan
+        else {
+          outputs.push_back(NDArray::empty(output_shape,
+                            device,
+                            op->output(i)->dtype(),
+                            op->instantiation_ctx().stream_index));
+        }
+      }
+    }
+  }
+  return outputs;
+}
+
+
 NDArray OpInterface::DoAllocOutput(Operator& op, const NDArrayList& inputs,
                                    size_t idx, RuntimeContext& runtime_ctx) const {
   auto output_size = op->num_outputs();

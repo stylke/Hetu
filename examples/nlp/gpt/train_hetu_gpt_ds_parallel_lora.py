@@ -2,7 +2,8 @@ import os
 import hetu as ht
 from hetu_gpt_ds_parallel_lora import GPTLMHeadModel
 from hetu.nn.modules.parallel_ds import config2ds
-from hetu.utils.checkpoint import load_file, save_file, load_model, save_model, save_checkpoint
+from hetu.utils.checkpoint import load_file, save_file, temp_load, temp_save,\
+                                  temp_load_split, temp_save_split, load_model, save_model, save_checkpoint
 from gpt_config import GPTConfig
 from load_data import DataLoaderForGPT
 import numpy as np
@@ -132,9 +133,18 @@ def pretrain(args):
     opt = ht.AdamOptimizer(lr=args.lr)
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
+    
+    load_st = time.time()
+    # temp_load(model, opt, "./checkpoint/temp", config=config, local_device=local_device)
+    # temp_load_split(model, opt, "./checkpoint/temp3", config=config, local_device=local_device)
+    # load_model(model, "./checkpoint/temp2", config=config, local_device=local_device)
+    load_ed = time.time()
+    print("Checkpoint Loaded.")
+    print('%s: Load_Time = %.4f'%(local_device, load_ed - load_st))
 
     # return
     # device in same dp_group will read the same batch data
+    print(input_device_group)
     if input_device_group.contains(local_device):
         local_device_idx = input_device_group.get_index(local_device)
         dup_group_idx = input_ds.get_dup_group_index(local_device_idx)
@@ -181,8 +191,12 @@ def pretrain(args):
                     total_time += (end_time-start_time)
                 # return
     print('%s: Avg_Time = %.4f'%(local_device, total_time / (global_step_num - 1)))
-    save_model(model, "./checkpoint/temp3", config=config, local_device=local_device, save_dtype=ht.nfloat4)
+    save_st = time.time()
+    # save_model(model, "./checkpoint/temp2", config=config, local_device=local_device, save_dtype=ht.float32)
+    # temp_save(model, opt, "./checkpoint/temp", config=config, local_device=local_device, save_dtype=ht.float32)
+    save_ed = time.time()
     print("Checkpoint Saved.")
+    print('%s: Save_Time = %.4f'%(local_device, save_ed - save_st))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

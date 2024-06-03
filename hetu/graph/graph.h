@@ -30,6 +30,21 @@ enum class RunLevel : int8_t {
   TOPO
 };
 
+// only use for kernel fusion.
+struct SubGraph {
+  // ops in group. the last one is an additional "output" Op
+  std::vector<OpType> topo;
+  // src of the op inputs. pair.first->producer.idx, pair.second->idx in producer's outputs.
+  std::vector<std::vector<std::pair<int64_t, int64_t>>> fetches;
+  int64_t num_inputs;
+  std::vector<std::vector<int64_t>> input_idx;
+  int64_t num_outputs;
+  std::vector<std::vector<int64_t>> output_idx;
+  std::vector<FusedParam> param_info;
+  std::vector<NDArrayMeta> meta_list;
+  std::vector<DistributedStates> ds_list;
+};
+
 std::string GraphType2Str(GraphType);
 std::ostream& operator<<(std::ostream&, GraphType);
 
@@ -66,7 +81,8 @@ class Graph {
 
   virtual NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                           const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
-                          const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE, const double grad_scale = 1) {}                          
+                          const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE,
+                          bool save_checkpoint = false, const double grad_scale = 1) {}                          
 
   GraphId id() const noexcept {
     return _id;
@@ -602,7 +618,8 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
     auto& op = op_ref.get();
     auto op_in_degrees = (stop_at && stop_at(op)) ? 0 : op->in_degrees();
     if (op_in_degrees != op->in_degrees()) {
-      HT_LOG_DEBUG << "make topo: " << op << " is forced to be stopped";
+      HT_LOG_DEBUG << "make topo: " << op << " is forced to be stopped "
+      << op_in_degrees << " " << op->in_degrees();
     }
     in_degrees[op->id()] = op_in_degrees;
     if (op_in_degrees == 0) {
@@ -619,8 +636,8 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
 
   // iteratively find the topo order
   while (!topo_queue.empty()) {
-    auto& op_ref = topo_queue.front();
-    topo_queue.pop_front();
+    auto& op_ref = topo_queue.back();
+    topo_queue.pop_back();
     ret.push_back(op_ref);
     Operator::for_each_output_tensor(op_ref.get(), [&](Tensor& tensor) {
       // Place inplace ops after other ops
@@ -661,23 +678,30 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
         });
       }
       // Step 3. Check extra_edges and decrease in_degrees of inplace ops.
+      OpRefList dfs_list;
       Tensor::for_each_consumer(tensor, [&](Operator& consumer_op) {
         if (in_degrees.find(consumer_op->id()) == in_degrees.end())
           return;
         if ((--in_degrees[consumer_op->id()]) == 0) {
-          topo_queue.push_back(std::ref(consumer_op));
+          // topo_queue.push_back(std::ref(consumer_op));
+          dfs_list.push_back(std::ref(consumer_op));
           if (has_extra_edge && !is_inplace_op(std::ref(consumer_op))) {
             for (auto inplace_id : extra_edges[consumer_op->id()]) {
               if (--in_degrees[inplace_id] == 0) {
                 auto inplace_op = std::find_if(inplace_ops.begin(), inplace_ops.end(),
                   [&](const OpRef& op_ref) { return op_ref.get()->id() == inplace_id; });
+                // if (inplace_op != inplace_ops.end())
+                //   topo_queue.push_back(*inplace_op);
                 if (inplace_op != inplace_ops.end())
-                  topo_queue.push_back(*inplace_op);
+                  dfs_list.push_back(*inplace_op);
               }
             }
           }
         }
       });
+      for (auto it = dfs_list.rbegin(); it != dfs_list.rend(); ++it) {
+        topo_queue.push_back(*it);
+      }
     });
   }
 

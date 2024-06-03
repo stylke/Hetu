@@ -206,10 +206,14 @@ class ExecutableGraph : public Graph {
   std::vector<std::unique_ptr<Event>> _p2p_events;
 
   // switch相关
-  std::shared_ptr<ParamBuffer> _origin_param_buffer;
-  std::shared_ptr<ParamBuffer> _transfer_param_buffer;
+  std::shared_ptr<ParamBuffer> _origin_param_buffer; // deprecated
+  std::shared_ptr<ParamBuffer> _transfer_param_buffer; // deprecated
   std::shared_ptr<ParamBuffer> _current_grad_buffer; // deprecated
-  std::shared_ptr<ParamBuffer> _accumulate_grad_buffer;
+  std::shared_ptr<ParamBuffer> _accumulate_grad_buffer; // deprecated
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _origin_param_buffers;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _transfer_param_buffers;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _current_grad_buffers;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _accumulate_grad_buffers;
   Tensor2TensorMap _transfer_map; // origin param到transfer param的映射
   Tensor2TensorMap _grad_map; // origin param到未substitue comm op前的grad的映射
   Tensor2TensorMap _grad_grad_map; // 未substitue comm op前的grad到substitue comm op后的grad的映射

@@ -30,11 +30,14 @@ NDArrayList ParallelVariableOpImpl::DoAllocOutputs(Operator& op,
     << "ParallelVariableOp: when use initializer, local_idx "
     << "must be assigned when local_device is in pipeline device_group!";
 
+  // if (!OpInterface::DoInstantiate(op, placement, stream_id))
+  //   return false;
+
   if (_init != nullptr) {
     int32_t dup_group_idx = ds.get_dup_group_index(local_idx);
     // support 100 different duplicate group to set different seed
     uint64_t seed = 2023 + op->id() * 100 + dup_group_idx;
-    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " << op << " inits by initializer.";
+    // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": " << op << " inits by initializer.";
     // TODO: reset variable data also need parallel version
     Graph::AllocVariableData(op->output(0), *_init, seed, _global_shape);
   } else {
@@ -105,7 +108,8 @@ Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data,
 
 Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape, 
                               const DistributedStatesList& multi_ds, std::vector<int64_t> local_idx,
-                              DataType dtype, bool requires_grad, OpMeta op_meta) {
+                              DataType dtype, bool requires_grad, 
+                              ParameterDict parameter_dict, OpMeta op_meta) {                  
   // init local_idx vector
   if (local_idx.size() == 1) {
     local_idx.resize(multi_ds.size(), local_idx[0]);
@@ -115,7 +119,7 @@ Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape,
   }
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
                            init, std::move(global_shape), multi_ds, 
-                           std::move(local_idx), dtype, requires_grad),
+                           std::move(local_idx), dtype, requires_grad, parameter_dict),
                            TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
   // assign multi ds for variable
   auto& graph = out->graph();
@@ -134,11 +138,12 @@ Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape,
 Tensor MakeParallelVariableOp(NDArray provided_data, 
                               const DistributedStatesList& multi_ds, 
                               bool copy_provided_data, DataType dtype, 
-                              bool requires_grad, OpMeta op_meta) {
+                              bool requires_grad, ParameterDict parameter_dict,
+                              OpMeta op_meta) {
   // auto placement_group = op_meta.device_group;
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
                            provided_data, copy_provided_data, 
-                           multi_ds, dtype, requires_grad),
+                           multi_ds, dtype, requires_grad, parameter_dict),
                            TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
   // assign multi ds for variable
   auto& graph = out->graph();
@@ -157,10 +162,11 @@ Tensor MakeParallelVariableOp(NDArray provided_data,
 Tensor MakeParallelVariableOp(NDArrayList multi_provided_data, 
                               DistributedStatesList multi_ds, 
                               bool copy_provided_data, DataType dtype, 
-                              bool requires_grad, OpMeta op_meta) {
+                              bool requires_grad, ParameterDict parameter_dict, 
+                              OpMeta op_meta) {
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
                            std::move(multi_provided_data), copy_provided_data, 
-                           std::move(multi_ds), dtype, requires_grad),
+                           std::move(multi_ds), dtype, requires_grad, parameter_dict),
                            TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
   // assign multi ds for variable
   auto& graph = out->graph();
@@ -178,9 +184,10 @@ Tensor MakeParallelVariableOp(NDArrayList multi_provided_data,
 
 Tensor MakeParallelParameterOp(const Initializer& init, HTShape global_shape, 
                                const DistributedStatesList& multi_ds, std::vector<int64_t> local_idx,
-                               DataType dtype, bool requires_grad, OpMeta op_meta) {
+                               DataType dtype, bool requires_grad, 
+                               ParameterDict parameter_dict, OpMeta op_meta) {
   auto out = MakeParallelVariableOp(init, std::move(global_shape), multi_ds, std::move(local_idx), 
-                                    dtype, requires_grad, std::move(op_meta));
+                                    dtype, requires_grad, parameter_dict, std::move(op_meta));
   Graph::MarkAsParameter(out);
   return out;                                    
 }
@@ -188,9 +195,10 @@ Tensor MakeParallelParameterOp(const Initializer& init, HTShape global_shape,
 Tensor MakeParallelParameterOp(NDArray provided_data, 
                                const DistributedStatesList& multi_ds, 
                                bool copy_provided_data, DataType dtype, 
-                               bool requires_grad, OpMeta op_meta) {    
+                               bool requires_grad, ParameterDict parameter_dict,
+                               OpMeta op_meta) {    
   auto out = MakeParallelVariableOp(std::move(provided_data), multi_ds, copy_provided_data, 
-                                    dtype, requires_grad, std::move(op_meta));
+                                    dtype, requires_grad, parameter_dict, std::move(op_meta));
   Graph::MarkAsParameter(out);
   return out;
 }
@@ -198,9 +206,11 @@ Tensor MakeParallelParameterOp(NDArray provided_data,
 Tensor MakeParallelParameterOp(NDArrayList multi_provided_data, 
                                DistributedStatesList multi_ds, 
                                bool copy_provided_data, DataType dtype, 
-                               bool requires_grad, OpMeta op_meta) {    
+                               bool requires_grad, ParameterDict parameter_dict, 
+                               OpMeta op_meta) {    
   auto out = MakeParallelVariableOp(std::move(multi_provided_data), std::move(multi_ds), 
-                                    copy_provided_data, dtype, requires_grad, std::move(op_meta));
+                                    copy_provided_data, dtype, requires_grad, 
+                                    parameter_dict, std::move(op_meta));
   Graph::MarkAsParameter(out);
   return out;
 }

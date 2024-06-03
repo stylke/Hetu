@@ -349,6 +349,8 @@ class TensorDef : public shared_ptr_target {
     set_HTShape_to_SyShape(_meta.shape, _symbolic_shape);
   }
 
+  void addconsumer(Operator& op);
+
  protected:
   void AddConsumer(Operator& op);
 

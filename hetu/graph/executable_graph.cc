@@ -1,14 +1,6 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/switch_exec_graph.h"
-#include "hetu/graph/ops/data_transfer.h"
-#include "hetu/graph/ops/group.h"
-#include "hetu/graph/ops/Split.h"
-#include "hetu/graph/ops/sum.h"
-#include "hetu/graph/ops/Concatenate.h"
-#include "hetu/graph/ops/Communication.h"
-#include "hetu/graph/ops/Contiguous.h"
-#include "hetu/graph/ops/Arithmetics.h"
-#include "hetu/graph/ops/Loss.h"
+#include "hetu/graph/ops/op_headers.h"
 #include "hetu/graph/autocast/autocast.h"
 #include "hetu/graph/recompute/recompute.h"
 #include "hetu/graph/offload/activation_cpu_offload.h"
@@ -19,6 +11,7 @@
 #include "hetu/core/symbol.h"
 #include "nccl.h"
 #include <ctime>
+#include "hetu/impl/communication/comm_group.h"
 
 namespace hetu {
 namespace graph {
@@ -77,15 +70,16 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
   HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": alloc exec variable " << tensor;
   // TODO: check meta is valid & maybe we can use non-blocking stream?
   if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()) {
-    HT_ASSERT(_origin_param_buffer->HasTensor(tensor))
+    HT_ASSERT(_origin_param_buffers.find(tensor->dtype()) != _origin_param_buffers.end() &&
+              _origin_param_buffers[tensor->dtype()]->HasTensor(tensor))
       << "Cannot find param " << tensor << " in the origin param buffer";
     // alloc on-the-fly
-    if (!_origin_param_buffer->IsAllocated()) {
-      _origin_param_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
+    if (!_origin_param_buffers[tensor->dtype()]->IsAllocated()) {
+      _origin_param_buffers[tensor->dtype()]->Alloc(Stream(tensor->placement(), kBlockingStream));
     }
     _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
-                                            _origin_param_buffer->AsStorage(), 
-                                            _origin_param_buffer->GetElementOffest(tensor));
+                                            _origin_param_buffers[tensor->dtype()]->AsStorage(), 
+                                            _origin_param_buffers[tensor->dtype()]->GetElementOffest(tensor));
   } else {
     // 另外一些是variable但不是parameter的正常走mempool
     // 分配的是碎片化的显存
@@ -128,25 +122,30 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
   // 4、grad (just alloc)
   auto local_device = hetu::impl::comm::GetLocalDevice();
   // ---------- param ----------
-  if (!_transfer_param_buffer->IsEmpty() && !_transfer_param_buffer->IsAllocated()) {
-    // alloc transfer param
-    _transfer_param_buffer->Alloc(Stream(local_device, kBlockingStream));
-    HT_LOG_DEBUG << local_device << ": alloc transfer param buffer "
-      << ", the size is " << _transfer_param_buffer->size();
+  for (auto it = _transfer_param_buffers.begin();
+       it != _transfer_param_buffers.end(); ++it) {
+    if (!it->second->IsEmpty() && !it->second->IsAllocated()) {
+      // alloc transfer param
+      it->second->Alloc(Stream(local_device, kBlockingStream));
+      HT_LOG_DEBUG << local_device << ": alloc transfer param buffer "
+        << ", the size is " << it->second->size();
+    }
   }
   for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
     auto& op = op_ref.get();
     if (is_variable_op(op)) {
       // 是param且存在data transfer的情况需要单独处理
       // 因为有可能是热切换过来的而不需要再计算
-      if (_parameter_ops.find(op->id()) != _parameter_ops.end() && !_transfer_param_buffer->IsEmpty()) {
+      if (_parameter_ops.find(op->id()) != _parameter_ops.end() && 
+          _transfer_param_buffers.find(op->output(0)->dtype()) != _transfer_param_buffers.end() &&
+          !_transfer_param_buffers[op->output(0)->dtype()]->IsEmpty()) {
         auto it = _transfer_map.find(op->output(0)->id());
         HT_ASSERT(it != _transfer_map.end())
-          << "The transfer map does not consist of " << op->output(0);
+          << "The transfer map does not consist of " << op->output(0) << " " << op->output(0)->dtype();
         auto& transfer_param = it->second;
         auto transfer_param_data = NDArray(transfer_param->meta(),
-                                          _transfer_param_buffer->AsStorage(), 
-                                          _transfer_param_buffer->GetElementOffest(transfer_param));
+                                  _transfer_param_buffers[op->output(0)->dtype()]->AsStorage(), 
+                                  _transfer_param_buffers[op->output(0)->dtype()]->GetElementOffest(transfer_param));
         // 添加runtime allocation
         for (auto& runtime_ctx : runtime_ctx_list) {
           runtime_ctx.add_runtime_allocation(transfer_param->id(), transfer_param_data);
@@ -188,37 +187,44 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
   // ---------- grad ----------
   if (_run_level == RunLevel::GRAD || _run_level == RunLevel::UPDATE) {
     if (_use_current_grad_buffer) {
-      if (!_current_grad_buffer->IsEmpty() && !_current_grad_buffer->IsAllocated()) {
-        // alloc grad
-        _current_grad_buffer->Alloc(Stream(local_device, kBlockingStream));
-        HT_LOG_DEBUG << local_device << ": alloc current grad buffer "
-          << ", the size is " << _current_grad_buffer->size();
-      }
-      for (const auto& current_grad : _current_grad_buffer->tensor_list()) {
-        auto current_grad_data = NDArray(current_grad->meta(),
-                                         _current_grad_buffer->AsStorage(), 
-                                         _current_grad_buffer->GetElementOffest(current_grad));
-        // 添加runtime allocation
-        for (auto& runtime_ctx : runtime_ctx_list) {
-          auto it = _grad_grad_map.find(current_grad->id());
-          HT_ASSERT(it != _grad_grad_map.end())
-            << "cannot find the mapping of " << current_grad << " in the grad grad map";
-          runtime_ctx.add_runtime_allocation(it->second->id(), current_grad_data);
+      for (auto it_ = _current_grad_buffers.begin();
+          it_ != _current_grad_buffers.end(); ++it_) {
+        if (!it_->second->IsEmpty() && !it_->second->IsAllocated()) {
+          // alloc transfer param
+          it_->second->Alloc(Stream(local_device, kBlockingStream));
+          HT_LOG_DEBUG << local_device << ": alloc current grad buffer "
+            << ", the size is " << it_->second->size();
         }
-        // 注意与param不同的是
-        // 这里不能添加runtime skipped
-        // 因为grad还是要计算的
+        for (const auto& current_grad : it_->second->tensor_list()) {
+          auto current_grad_data = NDArray(current_grad->meta(),
+                                          it_->second->AsStorage(), 
+                                          it_->second->GetElementOffest(current_grad));
+          // 添加runtime allocation
+          for (auto& runtime_ctx : runtime_ctx_list) {
+            auto it = _grad_grad_map.find(current_grad->id());
+            HT_ASSERT(it != _grad_grad_map.end())
+              << "cannot find the mapping of " << current_grad << " in the grad grad map";
+            runtime_ctx.add_runtime_allocation(it->second->id(), current_grad_data);
+          }
+          // 注意与param不同的是
+          // 这里不能添加runtime skipped
+          // 因为grad还是要计算的
+        }
       }
     }
     // 使用accumulate_grad_buffer
     // 初始全为0
     else {
-      if (_run_level == RunLevel::GRAD 
-          && !_accumulate_grad_buffer->IsEmpty() 
-          && !_accumulate_grad_buffer->IsAllocated()) {
-        _accumulate_grad_buffer->Alloc(Stream(local_device, kBlockingStream));
-        auto accumulate_grad_buffer_data = _accumulate_grad_buffer->AsNDArray();
-        NDArray::zeros_(accumulate_grad_buffer_data, kBlockingStream);
+      if (_run_level == RunLevel::GRAD) {
+        for (auto it = _accumulate_grad_buffers.begin();
+             it != _accumulate_grad_buffers.end(); ++it) {
+          if (!it->second->IsEmpty() && !it->second->IsAllocated()) {
+            it->second->Alloc(Stream(local_device, kBlockingStream));
+            HT_LOG_DEBUG << "accumulate_grad_buffer alloc.";
+            auto accumulate_grad_buffer_data = it->second->AsNDArray();
+            NDArray::zeros_(accumulate_grad_buffer_data, kBlockingStream);
+          }
+        }
       }
     }
   }
@@ -1191,10 +1197,10 @@ ExecutableGraph::GenerateGpipeSchedule(
 std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
 ExecutableGraph::GeneratePipedreamFlushSchedule(
   size_t num_stages, size_t num_micro_batches, bool is_inference) {
-  HT_ASSERT(num_micro_batches >= num_stages)
-    << "num_micro_batches must bigger than num_stages in pipedream-flush"
-    << ", but find num_micro_batches = " << num_micro_batches
-    << " and num_stages = " << num_stages;
+  // HT_ASSERT(num_micro_batches >= num_stages)
+  //   << "num_micro_batches must bigger than num_stages in pipedream-flush"
+  //   << ", but find num_micro_batches = " << num_micro_batches
+  //   << " and num_stages = " << num_stages;
   std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>> schedule;
   // inference time: for only forward
   if (is_inference) {
@@ -1251,6 +1257,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     return is_shared_weight || is_shared_weight_grad;
   };
 
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
     HT_ASSERT(!is_placeholder_op(op) && !is_variable_op(op))
@@ -1303,9 +1311,10 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
           auto& grad_in_buffer = it->second;
           HT_ASSERT(tensor2data.find(grad->id()) != tensor2data.end());
           auto current_grad_data = tensor2data[grad->id()];
+          HT_ASSERT(_accumulate_grad_buffers.find(grad->dtype()) != _accumulate_grad_buffers.end());
           auto accumulate_grad_data = NDArray(grad->meta(), 
-                                              _accumulate_grad_buffer->AsStorage(), 
-                                              _accumulate_grad_buffer->GetElementOffest(grad_in_buffer));
+                                              _accumulate_grad_buffers[grad->dtype()]->AsStorage(), 
+                                              _accumulate_grad_buffers[grad->dtype()]->GetElementOffest(grad_in_buffer));
           auto grad_stream = grad_op->instantiation_ctx().stream(); 
           if (_grad_scale != 1) {
             NDArray::mul(current_grad_data,
@@ -1335,7 +1344,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       else if (_run_level == RunLevel::UPDATE) {
         // 如果有累积梯度那么此时要加上
         // 这里的逻辑和上面的正好反过来
-        if (_accumulate_grad_buffer->IsAllocated()) {
+        if (_accumulate_grad_buffers.find(op->input(1)->dtype()) != _accumulate_grad_buffers.end() &&
+            _accumulate_grad_buffers[op->input(1)->dtype()]->IsAllocated()) {
           auto& grad = op->input(1);
           auto& grad_op = grad->producer();
           auto it = _reversed_grad_grad_map.find(grad->id());
@@ -1345,8 +1355,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
           HT_ASSERT(tensor2data.find(grad->id()) != tensor2data.end());
           auto current_grad_data = tensor2data[grad->id()];
           auto accumulate_grad_data = NDArray(grad->meta(), 
-                                              _accumulate_grad_buffer->AsStorage(), 
-                                              _accumulate_grad_buffer->GetElementOffest(grad_in_buffer));
+                                              _accumulate_grad_buffers[op->input(1)->dtype()]->AsStorage(), 
+                                              _accumulate_grad_buffers[op->input(1)->dtype()]->GetElementOffest(grad_in_buffer));
           auto grad_stream = Stream(grad_op->placement(),
                                     grad_op->instantiation_ctx().stream_index);
           if (_grad_scale != 1) {
@@ -2117,41 +2127,43 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (_use_current_grad_buffer) {
       // 在define graph中自动切换accumulate_grad_buffer
       // 然后将当前的current_grad_buffer加到当前的accumulate_grad_buffer后清空即可
-      if (!_current_grad_buffer->IsEmpty() && !_accumulate_grad_buffer->IsEmpty()) {
-        if (!_accumulate_grad_buffer->IsAllocated()) {
-          // 说明是第一次算grad，之前没有累积grad
-          // 直接bind即可
-          _accumulate_grad_buffer->Bind(_current_grad_buffer->AsStorage());
-        } else {
-          // 用kBlockingStream集中对整个buffer进行一次add
-          // 相比于算出来某一个grad后进行局部的async的add
-          // 虽然并发程度降低，但是写法上会简单许多
-          auto current_grad_buffer_data = _current_grad_buffer->AsNDArray();
-          auto accumulate_grad_buffer_data = _accumulate_grad_buffer->AsNDArray();
-          if (_grad_scale != 1) {
-            NDArray::mul(current_grad_buffer_data,
-                         _grad_scale,
+      for (auto it = _current_grad_buffers.begin();
+           it != _current_grad_buffers.end(); ++it) {
+        if (!it->second->IsEmpty() &&
+            _accumulate_grad_buffers.find(it->first) != _accumulate_grad_buffers.end() &&
+            !_accumulate_grad_buffers[it->first]->IsEmpty()) {
+          DataType dtype = it->first;
+          if (!_accumulate_grad_buffers[dtype]->IsAllocated()) {
+            // 说明是第一次算grad，之前没有累积grad
+            // 直接bind即可
+            _accumulate_grad_buffers[dtype]->Bind(_current_grad_buffers[dtype]->AsStorage());
+          } else {
+            // 用kBlockingStream集中对整个buffer进行一次add
+            // 相比于算出来某一个grad后进行局部的async的add
+            // 虽然并发程度降低，但是写法上会简单许多
+            auto current_grad_buffer_data = _current_grad_buffers[dtype]->AsNDArray();
+            auto accumulate_grad_buffer_data = _accumulate_grad_buffers[dtype]->AsNDArray();
+            if (_grad_scale != 1) {
+              NDArray::mul(current_grad_buffer_data,
+                          _grad_scale,
+                          kBlockingStream,
+                          current_grad_buffer_data);
+            }
+            // 如果有一些累计梯度是switch过来的
+            // 那么我们这里进行实际的sync
+            for(const auto& event_it : _switch_grad_events) {
+              event_it.second->Sync();
+            } 
+            // 当前的计算的梯度也需要sync
+            for(const auto& event_it : _run_grad_events) {
+              event_it.second->Sync();
+            } 
+            NDArray::add(current_grad_buffer_data, 
+                         accumulate_grad_buffer_data, 
                          kBlockingStream,
-                         current_grad_buffer_data);
-          }
-          // 如果有一些累计梯度是switch过来的
-          // 那么我们这里进行实际的sync
-          for(const auto& event_it : _switch_grad_events) {
-            event_it.second->Sync();
-          } 
-          // 当前的计算的梯度也需要sync
-          for(const auto& event_it : _run_grad_events) {
-            event_it.second->Sync();
-          } 
-          NDArray::add(current_grad_buffer_data, 
-                       accumulate_grad_buffer_data, 
-                       kBlockingStream,
-                       accumulate_grad_buffer_data);
+                         accumulate_grad_buffer_data);
+          }          
         }
-        // 释放当前grad
-        // 2024.3.3 update
-        // 把current grad buffer的清理放在需要热切换的时候
-        // _current_grad_buffer->Free();
       }
     } 
     // 为节省显存峰值，可以不使用current_grad_buffer
@@ -2167,9 +2179,16 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // 提前进行一些固有map的清空（sync结果前）
   // 这样CPU和GPU可以异步进行
   _run_grad_events.clear();
-  if (!_transfer_param_buffer->IsEmpty()) {
-    HT_ASSERT(_transfer_param_buffer->IsAllocated()) 
+  bool transfer_not_empty = false;
+  for (auto it = _transfer_param_buffers.begin();
+       it != _transfer_param_buffers.end(); ++it) {
+    if (!it->second->IsEmpty()) {
+      HT_ASSERT(it->second->IsAllocated()) 
       << "transfer param buffer should be allocated";
+      transfer_not_empty = true;
+    }
+  }
+  if (transfer_not_empty) {
     for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
       auto& op = op_ref.get();
       if (is_variable_op(op) && _parameter_ops.find(op->id()) != _parameter_ops.end()) {
@@ -2242,14 +2261,20 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // 考虑到单策略alloc和free具有一定耗时
   // 因此把transfer param buffer和current grad buffer的清理放在需要热切换的时候
   if (_run_level == RunLevel::UPDATE) {
-    if (_accumulate_grad_buffer->IsAllocated()) {
-      // 已经对fetches sync过了
-      // 这里直接free即可
-      _accumulate_grad_buffer->Free();
+    for (auto it = _accumulate_grad_buffers.begin();
+           it != _accumulate_grad_buffers.end(); ++it) {
+      if (it->second->IsAllocated()) {
+        // 已经对fetches sync过了
+        // 这里直接free即可
+        it->second->Free();
+      }
     }
     if (_use_current_grad_buffer) {
-      HT_ASSERT(_current_grad_buffer->IsAllocated())
+      for (auto it = _current_grad_buffers.begin();
+           it != _current_grad_buffers.end(); ++it) {
+        HT_ASSERT(it->second->IsAllocated())
         << "current grad buffer should be allocated in RunLevel::UPDATE";
+      }
       // _current_grad_buffer->Free();
     }
     SwitchExecGraph::ProfileMemory(name() + " run UPDATE end");

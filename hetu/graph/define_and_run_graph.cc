@@ -2,6 +2,7 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/switch_exec_graph.h"
 #include "hetu/graph/ops/variable.h"
+#include "hetu/graph/ops/Quantization.h"
 #include "hetu/graph/ops/optimizer_update.h"
 #include "hetu/graph/autocast/autocast.h"
 #include "hetu/impl/communication/comm_group.h"
@@ -251,6 +252,7 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
     // 设置placeholder（也有可能是中间的算子——具体要看feed_dict喂的是什么算子）的symbolic shape
     bool handle_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
       auto it = feed_dict.find(tensor->id());
+      HT_LOG_INFO << op << " " << tensor->id() << " " << feed_dict;
       if (it != feed_dict.end()) {
         if (tensor->symbolic() && is_SyShape_leaf(tensor->symbolic_shape())) {
           tensor->set_symbolic_shape(feed_dict_shape[tensor->id()]);
@@ -262,7 +264,8 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
       }
       return false;
     });
-    if (handle_feed_dict_op) {
+    HT_LOG_DEBUG << op << " " << handle_feed_dict_op;
+    if (handle_feed_dict_op || is_placeholder_op(op)) {
       continue;
     }
     HTShapeList input_shapes;
@@ -270,7 +273,8 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
     for (const auto& input : op->inputs()) {
       auto it = shape_plan.find(input->id());
       HT_ASSERT(it != shape_plan.end()) 
-        << "Something wrong, can't find the input shape from the current shape plan!";
+        << "Something wrong, can't find the input shape from the current shape plan!"
+        << "op:" << op;
       input_shapes.push_back(it->second);
     }
     HTShapeList output_shapes = op->InferShape(input_shapes, runtime_ctx);
@@ -350,16 +354,24 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   auto exec_graph_num = _exec_graph_plan_pool.size();
   Tensor2ShapeMap exec_shape_plan;
   Op2OpMap op_to_exec_op_mapping;
+  Tensor2TensorMap dequantization_tensor_map;
+  std::unordered_map<int64_t, int64_t> dequantization_blocksize_map;
   Tensor2TensorMap tensor_to_exec_tensor_mapping;
   auto origin_param_buffer = std::make_shared<ParamBuffer>("origin_param_buffer");
   auto transfer_param_buffer = std::make_shared<ParamBuffer>("transfer_param_buffer");
   auto current_grad_buffer = std::make_shared<ParamBuffer>("current_grad_buffer");
   auto accumulate_grad_buffer = std::make_shared<ParamBuffer>("accumulate_grad_buffer");
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> origin_param_buffers;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> transfer_param_buffers;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> current_grad_buffers;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> accumulate_grad_buffers;
   Tensor2TensorMap transfer_map;
   Tensor2TensorMap grad_map;
     
   exec_shape_plan.reserve(shape_plan.size());
   op_to_exec_op_mapping.reserve(_init_capacity);
+  dequantization_tensor_map.reserve(_init_capacity);
+  dequantization_blocksize_map.reserve(_init_capacity);
   tensor_to_exec_tensor_mapping.reserve(_init_capacity);
 
   // initializations of the exec graph
@@ -429,7 +441,12 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     // 目前只是记录而并不会alloc
     if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
         && exec_tensor->producer()->device_group().contains(local_device)) {
-      origin_param_buffer->AddTensor(exec_tensor);
+      // origin_param_buffer->AddTensor(exec_tensor);
+      if (origin_param_buffers.find(exec_tensor->dtype()) == origin_param_buffers.end()) {
+        origin_param_buffers[exec_tensor->dtype()] = std::make_shared<ParamBuffer>("origin_param_buffer_" + 
+                                                     DataType2Str(exec_tensor->dtype()));
+      }
+      origin_param_buffers[exec_tensor->dtype()]->AddTensor(exec_tensor);
       /*
       exec_tensor->set_placement_group(exec_tensor->producer()->device_group());
       exec_tensor->set_placement(local_device);
@@ -471,29 +488,55 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
             // seems nothing to do
           } else {
             for (int i = 0; i < exec_inputs.size(); ++i) {
-              if ((is_variable_op(exec_inputs[i]->producer()) || is_placeholder_op(exec_inputs[i]->producer())) &&
-                  exec_inputs[i]->dtype() != datatype && 
-                  (exec_inputs[i]->dtype() == DataType::BFLOAT16 ||
-                  exec_inputs[i]->dtype() == DataType::FLOAT16 ||
-                  exec_inputs[i]->dtype() == DataType::FLOAT32 ||
-                  exec_inputs[i]->dtype() == DataType::FLOAT64)) {
-                if (transfer_map.find(exec_inputs[i]->id()) != transfer_map.end()) {
-                  HT_LOG_TRACE << "Map " << &transfer_map << " reuse: " << exec_inputs[i]->id() << " -> " << transfer_map[exec_inputs[i]->id()]->id();
-                  exec_inputs[i] = transfer_map[exec_inputs[i]->id()];
-                } else {
-                  auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
-                                  {exec_inputs[i]}, OpMeta().set(exec_inputs[i]->producer()->op_meta()).set_name(exec_inputs[i]->producer()->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
-                  HT_LOG_TRACE << "Map " << &transfer_map << " insert: " << exec_inputs[i]->id() << " -> " << exec_op->output(0)->id();
-                  // we have to set the exec shape plan manually before the initialization of the plan
+              if ((is_variable_op(exec_inputs[i]->producer()) || 
+                   is_placeholder_op(exec_inputs[i]->producer())) &&
+                   exec_inputs[i]->dtype() != datatype) {
+                if ((exec_inputs[i]->dtype() == DataType::FLOAT4 ||
+                    exec_inputs[i]->dtype() == DataType::NFLOAT4) &&
+                    op->type() != "DeQuantizationOp") {
+                  int64_t tensor_id = op->input(i)->id();
+                  HT_ASSERT(dequantization_tensor_map.find(tensor_id) != dequantization_tensor_map.end()) 
+                  << "TensorId:" << tensor_id << " " << i << " " << op->input(i)->producer()->type()
+                  << " " << op->input(i)->producer()->op_meta() << "\n" << op->input(1)->producer()->op_meta().name
+                  << " " << op->input(1)->producer()->id();
+                  HT_ASSERT(dequantization_blocksize_map.find(tensor_id) != dequantization_blocksize_map.end());
+                  int blocksize = dequantization_blocksize_map[tensor_id];
+                  Tensor absmax = dequantization_tensor_map[tensor_id];
+                  auto& exec_op = Graph::MakeOp(std::make_shared<DeQuantizationOpImpl>(datatype, blocksize),
+                                  {exec_inputs[i], absmax}, OpMeta().set(op->op_meta()), *exec_graph);
+                  HT_LOG_DEBUG << "Map" << &transfer_map << "Insert:" << exec_inputs[i]->id() << "->" << exec_op->output(0)->id();
                   exec_shape_plan[exec_op->output(0)->id()] = exec_op->output(0)->shape();
                   exec_graph->_record_exec_tensors.emplace_back(exec_op->output(0));
                   exec_op->output(0)->set_multi_distributed_states(op->input(i)->multi_distributed_states()); // walkaround: set here by hand
-                  if (_parameter_ops.find(op->input(i)->producer()->id()) != _parameter_ops.end()
-                      && exec_inputs[i]->producer()->device_group().contains(local_device)) {
-                    transfer_param_buffer->AddTensor(exec_op->output(0));
-                  }
-                  transfer_map[exec_inputs[i]->id()] = exec_op->output(0);
                   exec_inputs[i] = exec_op->output(0);
+                }
+                else if (exec_inputs[i]->dtype() == DataType::BFLOAT16 ||
+                  exec_inputs[i]->dtype() == DataType::FLOAT16 ||
+                  exec_inputs[i]->dtype() == DataType::FLOAT32 ||
+                  exec_inputs[i]->dtype() == DataType::FLOAT64) {
+                  if (transfer_map.find(exec_inputs[i]->id()) != transfer_map.end()) {
+                    HT_LOG_TRACE << "Map " << &transfer_map << " reuse: " << exec_inputs[i]->id() << " -> " << transfer_map[exec_inputs[i]->id()]->id();
+                    exec_inputs[i] = transfer_map[exec_inputs[i]->id()];
+                  } else {
+                    auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
+                                    {exec_inputs[i]}, OpMeta().set(exec_inputs[i]->producer()->op_meta()).set_name(exec_inputs[i]->producer()->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
+                    HT_LOG_TRACE << "Map " << &transfer_map << " insert: " << exec_inputs[i]->id() << " -> " << exec_op->output(0)->id();
+                    // we have to set the exec shape plan manually before the initialization of the plan
+                    exec_shape_plan[exec_op->output(0)->id()] = exec_op->output(0)->shape();
+                    exec_graph->_record_exec_tensors.emplace_back(exec_op->output(0));
+                    exec_op->output(0)->set_multi_distributed_states(op->input(i)->multi_distributed_states()); // walkaround: set here by hand
+                    if (_parameter_ops.find(op->input(i)->producer()->id()) != _parameter_ops.end()
+                        && exec_inputs[i]->producer()->device_group().contains(local_device)) {
+                      // transfer_param_buffer->AddTensor(exec_op->output(0));
+                      if (transfer_param_buffers.find(exec_op->input(0)->dtype()) == transfer_param_buffers.end()) {
+                        transfer_param_buffers[exec_op->input(0)->dtype()] = std::make_shared<ParamBuffer>("transfer_param_buffer_" + 
+                                                                             DataType2Str(exec_op->input(0)->dtype()));
+                      }
+                      transfer_param_buffers[exec_op->input(0)->dtype()]->AddTensor(exec_op->output(0));
+                    }
+                    transfer_map[exec_inputs[i]->id()] = exec_op->output(0);
+                    exec_inputs[i] = exec_op->output(0);
+                  }
                 }
               }
             }
@@ -515,6 +558,20 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     // 3、标记parameter并给即将创建的exec graph预先设置ParamBuffer
     // 4、给grad设置placement和buffer
     op_to_exec_op_mapping[op->id()] = exec_op;
+    if (is_variable_op(op)) {
+      // TODO:now only support parallel variable op
+      if (op->type() == "VariableOp") {}
+      else {
+        auto parameter_dict = reinterpret_cast<ParallelVariableOpImpl&>(op->body()).get_parameter_dict();
+        if (parameter_dict.find("tensor_id") != parameter_dict.end() &&
+            parameter_dict.find("blocksize") != parameter_dict.end()) {
+          int64_t tensor_id = parameter_dict["tensor_id"];
+          int64_t blocksize = parameter_dict["blocksize"];
+          dequantization_tensor_map[tensor_id] = exec_op->output(0);
+          dequantization_blocksize_map[tensor_id] = blocksize;
+        }
+      }
+    }
     Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
     if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
       Graph::MarkAsParameter(exec_op);
@@ -536,8 +593,16 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       // 热切换接口需要提前设置一些grad的信息
       exec_grad->producer()->set_device_groups(exec_param->producer()->device_groups());
       if (exec_grad->producer()->device_group().contains(local_device)) {
-        current_grad_buffer->AddTensor(exec_grad);
-        accumulate_grad_buffer->AddTensor(exec_grad);
+        if (current_grad_buffers.find(exec_grad->dtype()) == current_grad_buffers.end()) {
+          current_grad_buffers[exec_grad->dtype()] = std::make_shared<ParamBuffer>("current_grad_buffer_" + 
+                                                                                    DataType2Str(exec_grad->dtype()));
+        }
+        current_grad_buffers[exec_grad->dtype()]->AddTensor(exec_grad);
+        if (accumulate_grad_buffers.find(exec_grad->dtype()) == accumulate_grad_buffers.end()) {
+          accumulate_grad_buffers[exec_grad->dtype()] = std::make_shared<ParamBuffer>("accumulate_grad_buffer_" + 
+                                                                                      DataType2Str(exec_grad->dtype()));
+        }
+        accumulate_grad_buffers[exec_grad->dtype()]->AddTensor(exec_grad);
         exec_grad->set_placement_group(exec_param->producer()->device_group());
         exec_grad->set_placement(local_device);
         HT_LOG_TRACE << "local grad " << exec_grad << " ds states = " << exec_grad->get_distributed_states().get_states() 
@@ -565,6 +630,10 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   exec_graph->_transfer_param_buffer = std::move(transfer_param_buffer);
   exec_graph->_current_grad_buffer = std::move(current_grad_buffer);
   exec_graph->_accumulate_grad_buffer = std::move(accumulate_grad_buffer);
+  exec_graph->_origin_param_buffers = std::move(origin_param_buffers);
+  exec_graph->_transfer_param_buffers = std::move(transfer_param_buffers);
+  exec_graph->_current_grad_buffers = std::move(current_grad_buffers);
+  exec_graph->_accumulate_grad_buffers = std::move(accumulate_grad_buffers);
   exec_graph->_transfer_map = std::move(transfer_map);
   exec_graph->_grad_map = std::move(grad_map);
   
@@ -597,7 +666,8 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
 // 即允许feed_dict的shape（包括batch_size以及seq_len等）可变
 NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches,
                                    const FeedDict& feed_dict, const int num_micro_batches,
-                                   const int cur_strategy_id, RunLevel run_level, const double grad_scale) {
+                                   const int cur_strategy_id, RunLevel run_level,
+                                   bool save_checkpoint, const double grad_scale) {
   _run_level = run_level;
   CUR_STRATEGY_ID = static_cast<size_t>(cur_strategy_id);
   auto local_device = hetu::impl::comm::GetLocalDevice(); // only for debug use
@@ -626,7 +696,23 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       exec_plan_matched = false;
     }
     // 再看fetch匹配不
+    if (fetches.size() < exec_graph_plan.fetches.size()) {
+      exec_plan_matched = false;
+    }
+    // HT_LOG_INFO << i << "\n" << fetches << "\n" << exec_graph_plan.fetches
+    // << " " << exec_graph_plan.global_topo.size();
     for (const auto& fetch : fetches) {
+      bool find_fetch = false;
+      for (auto it = exec_graph_plan.fetches.begin(); it != exec_graph_plan.fetches.end(); ++it) {
+        if ((*it)->id() == fetch->id()) {
+          find_fetch = true;
+          break;
+        }
+      }
+      if (find_fetch == false) {
+        exec_plan_matched = false;
+        break;
+      }
       if (std::find(exec_graph_plan.fetches.begin(), exec_graph_plan.fetches.end(), fetch) == exec_graph_plan.fetches.end()) {
         HT_LOG_TRACE << local_device << ": exec_graph_plan fetches are " << exec_graph_plan.fetches 
           << " and the mismatch fetch is " << fetch;
@@ -660,6 +746,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     OpRefList global_topo = Graph::TopoSort(fetches, -1, is_feed_dict_op);
     HT_LOG_DEBUG << local_device << ": global topo of define graph is " << global_topo;
     // Instantiate会将新的exec_graph_plan加入pool中
+    HT_LOG_DEBUG << global_topo;
     Instantiate(std::move(global_topo), std::move(shape_plan));
     // 补上fetches（其在instantiate中不需要用到，但是plan需要进行记录）
     auto& new_plan = _exec_graph_plan_pool.back();
@@ -709,12 +796,15 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   }
 
   // 需要切换exec graph
+  if (save_checkpoint) // 存储param时不需要热切换
+    _is_active = false;
   if (!_is_active || _active_exec_plan != next_active_exec_plan) {
     HT_LOG_DEBUG << local_device << ": [Graph Plan] Context switch to the new exec plan begin...";
     // 热切换
     if (_is_active) {
       auto key = std::make_pair(_active_exec_plan, next_active_exec_plan);
       if (_param_switcher_pool.find(key) == _param_switcher_pool.end()) {
+        HT_LOG_DEBUG << "NOT_FIND:" << _active_exec_plan << " " << next_active_exec_plan << "\n";
         _param_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan);
         _grad_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan);
       }
@@ -767,10 +857,13 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 如果旧的exec graph没开AMP
       // 或者是刚刚进行了update（使得transfer param是空的）
       // 那么只能切换origin param buffer
-      if (old_exec_graph->_transfer_param_buffer->IsEmpty()
-          || (old_exec_graph->_run_level == RunLevel::UPDATE
-              && param_switch_level == SWITCH_LEVEL::EXEC)) {
-        param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
+      for (auto it = old_exec_graph->_transfer_param_buffers.begin(); 
+           it != old_exec_graph->_transfer_param_buffers.end(); ++it) {
+        if (it->second->IsEmpty() || 
+            (old_exec_graph->_run_level == RunLevel::UPDATE && 
+            param_switch_level == SWITCH_LEVEL::EXEC)) {
+          param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
+        }
       }
       // 3、----- buffer释放 -----
       // 如果旧的exec graph是grad
@@ -779,24 +872,33 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 那么热切换需要释放之前的transfer param buffer和current grad buffer
       if (old_exec_graph->_run_level == RunLevel::GRAD) {
         if (old_exec_graph->_use_current_grad_buffer) {
-          if (!old_exec_graph->_current_grad_buffer->IsEmpty()) {
-            HT_ASSERT(old_exec_graph->_current_grad_buffer->IsAllocated())
-              << "old exec graph with RunLevel::GRAD should have allocated the current grad buffer";
-            old_exec_graph->_current_grad_buffer->Free();
+          for (auto it = old_exec_graph->_current_grad_buffers.begin(); 
+             it != old_exec_graph->_current_grad_buffers.end(); ++it) {
+            if (it->second->IsEmpty()) {
+              HT_ASSERT(it->second->IsAllocated())
+                << "old exec graph with RunLevel::UPDATE should have allocated the current grad buffer";
+              it->second->Free();
+            }
           }
         }
       }
       if (old_exec_graph->_run_level == RunLevel::UPDATE) {
-        if (!old_exec_graph->_transfer_param_buffer->IsEmpty()) {
-          HT_ASSERT(old_exec_graph->_transfer_param_buffer->IsAllocated())
-            << "old exec graph with RunLevel::UPDATE should have allocated the transfer param buffer";
-          old_exec_graph->_transfer_param_buffer->Free();
+        for (auto it = old_exec_graph->_transfer_param_buffers.begin(); 
+             it != old_exec_graph->_transfer_param_buffers.end(); ++it) {
+          if (it->second->IsEmpty()) {
+            HT_ASSERT(it->second->IsAllocated())
+              << "old exec graph with RunLevel::UPDATE should have allocated the transfer param buffer";
+            it->second->Free();
+          }
         }
         if (old_exec_graph->_use_current_grad_buffer) {
-          if (!old_exec_graph->_current_grad_buffer->IsEmpty()) {
-            HT_ASSERT(old_exec_graph->_current_grad_buffer->IsAllocated())
-              << "old exec graph with RunLevel::UPDATE should have allocated the current grad buffer";
-            old_exec_graph->_current_grad_buffer->Free();
+          for (auto it = old_exec_graph->_current_grad_buffers.begin(); 
+             it != old_exec_graph->_current_grad_buffers.end(); ++it) {
+            if (it->second->IsEmpty()) {
+              HT_ASSERT(it->second->IsAllocated())
+                << "old exec graph with RunLevel::UPDATE should have allocated the current grad buffer";
+              it->second->Free();
+            }
           }
         }
       }

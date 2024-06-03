@@ -142,11 +142,14 @@ NCCLCommunicationGroupDef::NCCLCommunicationGroupDef(
     << "Failed to get rank and/or size. "
     << "(Got rank " << _rank << " and size " << _size << ".)";
 
-  CreateNCCLUniqueId(_world_ranks, _unique_id);
+  CreateNCCLUniqueId(_world_ranks, stream, _unique_id);
   {
     hetu::cuda::CUDADeviceGuard guard(_stream.device_index());
     {
       NCCLGroupGuard group_guard(false);
+      std::string unique_id;
+      unique_id.resize(sizeof(ncclUniqueId));
+      memcpy(unique_id.data(), &_unique_id, sizeof(ncclUniqueId));
       NCCL_CALL(ncclCommInitRank(&_comm, _size, _unique_id, _rank));
     }
   }
@@ -644,7 +647,7 @@ void NCCLCommunicationGroupDef::Sync() {
 }
 
 void NCCLCommunicationGroupDef::CreateNCCLUniqueId(
-  const std::vector<int>& world_ranks, ncclUniqueId& id) {
+  const std::vector<int>& world_ranks, const Stream& stream, ncclUniqueId& id) {
   // Currently we rely on MPI to synchronize the ncclUniqueId.
   // It may be replaced with a distributed memcache in the future.
   auto mpi_comm_group = MPICommunicationGroup::GetOrCreate(world_ranks);
@@ -654,13 +657,15 @@ void NCCLCommunicationGroupDef::CreateNCCLUniqueId(
   int broadcaster = mpi_comm_group->group_to_world_rank(0);
   if (mpi_comm_group->rank() == 0) {
     NCCL_CALL(ncclGetUniqueId(&id));
-    memcpy(id_arr->raw_data_ptr(), &id, sizeof(ncclUniqueId));
-    mpi_comm_group->Broadcast(id_arr, broadcaster);
-    mpi_comm_group->Sync();
+    auto world_rank = mpi_comm_group->world_ranks();
+    std::string nccl_id;
+    nccl_id.resize(sizeof(ncclUniqueId));
+    memcpy(nccl_id.data(), &id, sizeof(ncclUniqueId));
+    CommitNcclId(nccl_id, world_rank, stream.stream_index());
   } else {
-    mpi_comm_group->Broadcast(id_arr, broadcaster);
-    mpi_comm_group->Sync();
-    memcpy(&id, id_arr->raw_data_ptr(), sizeof(ncclUniqueId));
+    auto world_rank = mpi_comm_group->world_ranks();
+    std::string nccl_id = GetNcclId(world_rank, stream.stream_index());
+    memcpy(&id, nccl_id.data(), sizeof(ncclUniqueId));
   }
 }
 

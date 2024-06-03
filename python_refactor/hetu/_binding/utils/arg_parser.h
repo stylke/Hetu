@@ -56,13 +56,15 @@ enum class ArgType : uint8_t {
   OPERATOR,
   OPERATOR_LIST,
   FEED_DICT,
+  PARAMETER_DICT,
+  STATE_DICT,
   DISTRIBUTED_STATES,
   DISTRIBUTED_STATES_LIST,
   INT_SYMBOL,
   SYMBOLIC_SHAPE,
   INITIALIZER,
   SGDOPTIMIZER,
-  ADAMOPTIMIZER
+  ADAMOPTIMIZER,
 };
 
 std::string ArgType2Str(ArgType);
@@ -390,6 +392,22 @@ class ParsedPyArgs {
 
   inline FeedDict get_feed_dict_or_empty(size_t i) const {
     return has(i) ? get_feed_dict(i) : FeedDict();
+  }
+
+  inline ParameterDict get_parameter_dict(size_t i) const {
+    return ParameterDict_FromPyObject(_args[i]);
+  }
+
+  inline ParameterDict get_parameter_dict_or_empty(size_t i) const {
+    return has(i) ? get_parameter_dict(i) : ParameterDict();
+  }
+
+  inline StateDict get_state_dict(size_t i) const {
+    return StateDict_FromPyObject(_args[i]);
+  }
+
+  inline StateDict get_state_dict_or_empty(size_t i) const {
+    return has(i) ? get_state_dict(i) : StateDict();
   }
 
   inline SGDOptimizer get_sgdoptimizer(size_t i) const {

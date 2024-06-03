@@ -51,11 +51,12 @@ PyTypeObject* PyCommGroup_Type = &PyCommGroup_Type_obj;
 // TODO: update init params
 PyObject* CommGroup_Init(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
-  static PyArgParser parser({"init_comm_group(int device_num=8, List[int] device_idxs=[])"});
-  auto parsed_args = parser.parse(args, nullptr);
+  static PyArgParser parser({"init_comm_group(int device_num=8, List[int] device_idxs=[], std::string server_address=\"127.0.0.1:50051\")"});
+  auto parsed_args = parser.parse(args, kwargs);
   int device_num = parsed_args.get_int64_or_default(0);
   std::vector<int64_t> device_idxs = parsed_args.get_int64_list_or_default(1);
-  return PyDevice_New(hetu::impl::comm::SetUpDeviceMappingAndAssignLocalDeviceOnce({{kCUDA, device_num}}, device_idxs));
+  std::string server_address = parsed_args.get_string_or_default(2);
+  return PyDevice_New(hetu::impl::comm::SetUpDeviceMappingAndAssignLocalDeviceOnce({{kCUDA, device_num}}, device_idxs, server_address));
   HT_PY_FUNC_END
 }
 

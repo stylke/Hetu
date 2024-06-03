@@ -95,8 +95,11 @@ static void WarmUpComm(const std::unordered_set<Device>& comm_set) {
   HT_LOG_DEBUG << "all-to-all warm up for " << comm_set
     << ", whose ranks after sort = " << ranks;
   auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, Stream(local_device, kSwitchCollectiveStream));
-  auto data = NDArray::empty({comm_set.size()}, local_device, kFloat32, kSwitchCollectiveStream);
-  comm_group->AlltoAll(data, data);
+  HT_LOG_DEBUG << "comm set size:" << comm_set.size();
+  if (comm_set.size() > 0) {
+    auto data = NDArray::empty({comm_set.size()}, local_device, kFloat32, kSwitchCollectiveStream);
+    comm_group->AlltoAll(data, data);
+  }
 }
 
 // 2024.1.20 deprecated: 对于那些concat的是所有本地slice的仍然需要buffer（因为现在所有param都做成buffer了）
@@ -806,7 +809,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
       // TODO: save the param back to the cpu
       HT_LOG_DEBUG << local_device << ": param " << define_param << " is only in the before graph";
       auto& before_param = before_it->second;
-      HT_RUNTIME_ERROR << "NotImplementedError";
+      // HT_RUNTIME_ERROR << "NotImplementedError";
     } 
     // 只在后头的图里
     else if (!is_before_active && is_after_active) {
@@ -1214,39 +1217,60 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     });
   };
   // 获取切换前后param的buffer
-  std::shared_ptr<ParamBuffer> before_param_buffer;
-  std::shared_ptr<ParamBuffer> after_param_buffer;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> before_param_buffers;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> after_param_buffers;
   if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
-    before_param_buffer = _switch_graph_pair.first->_origin_param_buffer;
-    after_param_buffer = _switch_graph_pair.second->_origin_param_buffer;
+    before_param_buffers = _switch_graph_pair.first->_origin_param_buffers;
+    after_param_buffers = _switch_graph_pair.second->_origin_param_buffers;
   } else if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
-    before_param_buffer = _switch_graph_pair.first->_transfer_param_buffer;
-    after_param_buffer = _switch_graph_pair.second->_transfer_param_buffer;
+    before_param_buffers = _switch_graph_pair.first->_transfer_param_buffers;
+    after_param_buffers = _switch_graph_pair.second->_transfer_param_buffers;
   } else if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD) {
-    before_param_buffer = _switch_graph_pair.first->_current_grad_buffer;
-    after_param_buffer = _switch_graph_pair.second->_current_grad_buffer;
+    before_param_buffers = _switch_graph_pair.first->_current_grad_buffers;
+    after_param_buffers = _switch_graph_pair.second->_current_grad_buffers;
   } else if (switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
-    before_param_buffer = _switch_graph_pair.first->_accumulate_grad_buffer;
-    after_param_buffer = _switch_graph_pair.second->_accumulate_grad_buffer;
+    before_param_buffers = _switch_graph_pair.first->_accumulate_grad_buffers;
+    after_param_buffers = _switch_graph_pair.second->_accumulate_grad_buffers;
   } else {
     HT_RUNTIME_ERROR << "NotImplementedError";
   }
   if (switch_level != SWITCH_LEVEL::TOPO) {
-    HT_ASSERT(before_param_buffer->IsAllocated() && !after_param_buffer->IsAllocated())
-      << "wrong allocation state for buffers"
-      << ", before param buffer alloc state is " << before_param_buffer->IsAllocated()
-      << " and after param buffer alloc state is " << after_param_buffer->IsAllocated();
-    HT_ASSERT(!before_param_buffer->IsEmpty() && !after_param_buffer->IsEmpty())
-      << "wrong empty state for buffers";
-    // 为grad分配_preserved_data
-    // 因为要对齐热切换的接口
-    if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD
-        || switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
-      for (const auto& before_param : before_param_buffer->tensor_list()) {
-        auto before_param_data = NDArray(before_param->meta(),
-                                         before_param_buffer->AsStorage(), 
-                                         before_param_buffer->GetElementOffest(before_param));
-        _switch_graph_pair.first->_preserved_data[before_param->id()] = before_param_data;
+    // HT_ASSERT(before_param_buffer->IsAllocated() && !after_param_buffer->IsAllocated())
+    //   << "wrong allocation state for buffers"
+    //   << ", before param buffer alloc state is " << before_param_buffer->IsAllocated()
+    //   << " and after param buffer alloc state is " << after_param_buffer->IsAllocated();
+    // // HT_ASSERT(!before_param_buffer->IsEmpty() && !after_param_buffer->IsEmpty())
+    // //   << "wrong empty state for buffers"
+    // //   << ",before_param_buffer's empty state:" << before_param_buffer->IsEmpty()
+    // //   << ",after_param_buffer's empty state:" << after_param_buffer->IsEmpty();
+    // // 为grad分配_preserved_data
+    // // 因为要对齐热切换的接口
+    // if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD
+    //     || switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
+    //   for (const auto& before_param : before_param_buffer->tensor_list()) {
+    //     auto before_param_data = NDArray(before_param->meta(),
+    //                                      before_param_buffer->AsStorage(), 
+    //                                      before_param_buffer->GetElementOffest(before_param));
+    //     _switch_graph_pair.first->_preserved_data[before_param->id()] = before_param_data;
+    //   }
+    // }
+    for (auto it = before_param_buffers.begin();
+         it != before_param_buffers.end(); ++it) {
+      auto dtype = it->second->dtype();
+      HT_ASSERT(before_param_buffers[dtype]->IsAllocated() && !after_param_buffers[dtype]->IsAllocated())
+        << "wrong allocation state for buffers"
+        << ", before param buffer alloc state is " << before_param_buffers[dtype]->IsAllocated()
+        << " and after param buffer alloc state is " << after_param_buffers[dtype]->IsAllocated();
+      // 为grad分配_preserved_data
+      // 因为要对齐热切换的接口
+      if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD
+          || switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
+        for (const auto& before_param : before_param_buffers[dtype]->tensor_list()) {
+          auto before_param_data = NDArray(before_param->meta(),
+                                           before_param_buffers[dtype]->AsStorage(), 
+                                           before_param_buffers[dtype]->GetElementOffest(before_param));
+          _switch_graph_pair.first->_preserved_data[before_param->id()] = before_param_data;
+        }
       }
     }
   }
@@ -1392,7 +1416,11 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   // 释放before param buffer
   // 此时并不会真正free，因为还有_preserved_data
   // 只是交出所有权
-  before_param_buffer->Free(); 
+  // before_param_buffer->Free(); 
+  for (auto it = before_param_buffers.begin();
+       it != before_param_buffers.end(); ++it) {
+    it->second->Free();
+  }
   // 分配send的buffer
   for (auto& kv : _send_buffers) {
     auto& send_to_device = kv.first;
@@ -1458,6 +1486,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
         // TODO: 目前可能显存溢出，之后应该考虑在溢出时扫描mempool中的free_event
         // 目前kSwitchComputingStream的concat_buffer的显存只能确保可以重用send_buffer释放出的显存
         _concat_buffer->Alloc(Stream(local_device, kSwitchComputingStream));
+        HT_LOG_DEBUG << "concat_buffer alloc.";
       }
       auto& output = op->output(0);
       auto output_data = NDArray(output->meta(), _concat_buffer->AsStorage(), _concat_buffer->GetElementOffest(output));
@@ -1538,9 +1567,15 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     << "comm feed dict should be empty now"
     << ", but it turns out to be " << _comm_feed_dict;
   for (auto& kv : _switch_graph_pair.first->_preserved_data) {
-    HT_ASSERT(!before_param_buffer->HasTensor(kv.first))
-      << "before graph preserved data is not cleaned up, still remains " << before_param_buffer->GetTensor(kv.first)
+    HT_ASSERT(before_param_buffers.find(kv.second->dtype()) != before_param_buffers.end())
+    << "before_param_buffers doesn't include dtype:" << kv.second->dtype();
+    HT_ASSERT(!before_param_buffers[kv.second->dtype()]->HasTensor(kv.first))
+      << "before graph preserved data is not cleaned up, still remains " 
+      << before_param_buffers[kv.second->dtype()]->GetTensor(kv.first)
       << ", which will cause the failure of releasing the before graph buffer";
+    // HT_ASSERT(!before_param_buffer->HasTensor(kv.first))
+    //   << "before graph preserved data is not cleaned up, still remains " << before_param_buffer->GetTensor(kv.first)
+    //   << ", which will cause the failure of releasing the before graph buffer";
   }
   // 清空tensor2data
   tensor2data.clear();
@@ -1557,7 +1592,10 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
   if (_use_concat_buffer) {
     // HT_LOG_INFO << local_device << ": after_param_buffer tensor list is " << after_param_buffer->_tensor_list;
     // HT_LOG_INFO << local_device << ": conat_buffer tensor list is " << _concat_buffer->_tensor_list;
-    after_param_buffer->Bind(_concat_buffer->AsStorage());
+    HT_ASSERT(after_param_buffers.find(_concat_buffer->dtype()) != after_param_buffers.end())
+    << "after_param_buffers doesn't include dtype:" << _concat_buffer->dtype();
+    after_param_buffers[_concat_buffer->dtype()]->Bind(_concat_buffer->AsStorage());
+    // after_param_buffer->Bind(_concat_buffer->AsStorage());
     _concat_buffer->Free();
   }
   // 已在处理feed_dict时自动清除

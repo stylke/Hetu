@@ -77,7 +77,7 @@ class GPTAttention(ht.nn.Module):
                                                                     device_group=self.qkv_dense.device_group, name='causal_mask')
         mask = ht.from_numpy_parallel(parallel_data_provider(np.full(attn_weights.global_shape, self.masked_value, dtype=np.float32),
                                                              attn_weights.distributed_states, device_index), 
-                                                             self.config.lora_dtype, attn_weights.distributed_states, requires_grad=False,
+                                                             self.config.dqtype, attn_weights.distributed_states, requires_grad=False,
                                                              device_group=self.qkv_dense.device_group, name='mask')
         attn_weights = ht.where(causal_mask, attn_weights, mask)
         if attention_mask is not None:
