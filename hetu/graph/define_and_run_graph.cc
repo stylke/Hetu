@@ -1033,6 +1033,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 目前已修改成async版本
       // 如果要改成非async的
       // 更改环境变量HETU_SWITCH_PROFILE低于TIME即可
+      // TODO: 实现CPU上的Switch（例如AdamOp的step，其目前并不在buffer中）
       _param_switcher_pool[key]->SwitchParams(param_switch_mode, param_switch_level, "switch params and opt-states");
       if (!(grad_switch_level == SWITCH_LEVEL::TOPO && !_need_grad_switch_topo)) {
         _grad_switcher_pool[key]->SwitchParams(grad_switch_mode, grad_switch_level, "switch grads");

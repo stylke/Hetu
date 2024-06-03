@@ -4,6 +4,7 @@ NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
+FFN_HIDDEN_SIZE=${7:-11008}
 
 SWITCH=0
 
@@ -170,6 +171,7 @@ else
         --merge_file $MERGE_FILE \
         --vocab_size 30592 \
         --hidden_size $HIDDEN_SIZE \
+        --ffn_hidden_size $FFN_HIDDEN_SIZE \
         --num_hidden_layers $NUM_LAYERS \
         --num_attention_heads $NUM_HEADS \
         --seq_length $SEQ_LEN \

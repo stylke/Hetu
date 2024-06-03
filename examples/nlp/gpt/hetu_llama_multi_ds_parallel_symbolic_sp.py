@@ -406,7 +406,7 @@ class LLamaLMHeadModel(ht.nn.Module):
         # share embedding table
         # we manually add comm op here
         # because we don't know if it is a P2P or a BatchedIsendIrecv in hetero settings
-        self.lm_head.weight = ht.comm(self.transformer.wte.embedding_table, self.lm_head.ds_union_map['dup_split0'], self.lm_head.device_group_unions, name="share_weight_comm") 
+        # self.lm_head.weight = ht.comm(self.transformer.wte.embedding_table, self.lm_head.ds_union_map['dup_split0'], self.lm_head.device_group_unions, name="share_weight_comm") 
         self.config = config
     
     def forward(

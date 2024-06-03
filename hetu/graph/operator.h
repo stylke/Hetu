@@ -475,7 +475,7 @@ class OpDef : public shared_ptr_target {
       input_shapes.push_back(input->shape());
     }
     HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
-      << ", the input shapes are " << input_shapes;
+      << ", the inputs are " << this->inputs() << " and the input shapes are " << input_shapes;
     */
     // precision debug
     /*
