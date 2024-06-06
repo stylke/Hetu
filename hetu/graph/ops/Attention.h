@@ -44,6 +44,10 @@ class AttentionOpImpl final : public OpInterface {
   DoInferMeta(const TensorList& inputs) const override {
     std::vector<NDArrayMeta> out_metas = {};
     NDArrayMeta base = inputs.at(0)->meta();
+    // workaround
+    // force ndarray meta to be contiguous
+    // here set shape will refresh the stride and make it contiguouse
+    base.set_shape(base.shape);
     out_metas.emplace_back(base);
     const int batch_size = inputs.at(0)->shape(0);
     const int seqlen_q = inputs.at(0)->shape(1);

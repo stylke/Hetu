@@ -310,7 +310,7 @@ class LLamaModel(ht.nn.Module):
 
         self.embed_dim = config.hidden_size
         self.wte = ht.nn.HtMultiVocabParallelEmbedding(config.vocab_size, self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'wte'), name='wte')
-        self.wpe = ht.nn.HtMultiParallelEmbedding(config.max_position_embeddings, self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'wpe'), name='wpe')
+        # self.wpe = ht.nn.HtMultiParallelEmbedding(config.max_position_embeddings, self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'wpe'), name='wpe')
 
         self.drop = ht.nn.Dropout(config.embd_pdrop)
         blocks = []
@@ -349,9 +349,10 @@ class LLamaModel(ht.nn.Module):
 
         # embeddding: [b, seq_len, embed_dim]
         inputs_embeds = self.wte(input_ids) # [b, seq_len, embed_dim]
-        position_embeds = self.wpe(position_ids) # [b, seq_len, embed_dim]
+        # position_embeds = self.wpe(position_ids) # [b, seq_len, embed_dim]
         # todo: fix backward grad tensor reduce bug for add(extension dims)
-        hidden_states = inputs_embeds + position_embeds # [b, seq_len, embed_dim]
+        # hidden_states = inputs_embeds + position_embeds # [b, seq_len, embed_dim]
+        hidden_states = inputs_embeds
         if token_type_ids is not None:
             token_type_embeds = self.wte(token_type_ids) # [b, seq_len, embed_dim]
             hidden_states = hidden_states + token_type_embeds

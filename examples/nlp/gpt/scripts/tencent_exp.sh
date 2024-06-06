@@ -120,7 +120,7 @@ export HETU_SWITCH_ALGORITHM=NEW_GREEDY
 export HETU_SWITCH_PROFILE=TIME
 export HETU_INTERNAL_LOG_LEVEL=INFO
 export HETU_STRAGGLER=ANALYSIS
-export HETU_MEMORY_PROFILE=MICRO_BATCH
+export HETU_MEMORY_PROFILE=WARN
 
 export HETU_MAX_SPLIT_SIZE_MB=200
 export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=20
@@ -165,7 +165,7 @@ if [ "${SWITCH}" = 1 ]; then
         --vocab_size 30592 \
         --hidden_size $HIDDEN_SIZE \
         --ffn_hidden_size $FFN_HIDDEN_SIZE \
-	--num_hidden_layers $NUM_LAYERS \
+	    --num_hidden_layers $NUM_LAYERS \
         --num_attention_heads $NUM_HEADS \
         --seq_length $SEQ_LEN \
         --epochs 4 \
@@ -205,7 +205,7 @@ else
         --output-filename logs/ds_parallel --merge-stderr-to-stdout \
         python lhy_hetero_pack_or_pad.py \
         --num_strategy=2 \
-        --ds_parallel_config ds_parallel_config/hetero/before.json,ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json \
+        --ds_parallel_config ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json,ds_parallel_config/hetero/before.json \
         --global_batch_size $GLOBAL_BATCH_SIZE \
         --micro_batch_size $MICRO_BATCH_SIZE \
         --json_file $JSON_FILE \
@@ -214,7 +214,7 @@ else
         --merge_file $MERGE_FILE \
         --vocab_size 30592 \
         --hidden_size $HIDDEN_SIZE \
-	--ffn_hidden_size $FFN_HIDDEN_SIZE \
+	    --ffn_hidden_size $FFN_HIDDEN_SIZE \
         --num_hidden_layers $NUM_LAYERS \
         --num_attention_heads $NUM_HEADS \
         --seq_length $SEQ_LEN \

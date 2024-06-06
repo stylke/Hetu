@@ -261,7 +261,7 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
     // 分配的是碎片化的显存
     // mempool debug use
     HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": on-the-fly alloc variable " << tensor
-      << " shape = " << tensor->shape();
+      << ", shape = " << tensor->shape() << ", placement = " << tensor->placement();
     _preserved_data[tensor->id()] = NDArray::empty(tensor->shape(), 
                                                    tensor->placement(), 
                                                    tensor->dtype(), 
@@ -583,6 +583,9 @@ void ExecutableGraph::InsertContiguousOp(const OpRefList& topo_order) {
             Tensor contig_input = MakeContiguousOp(
               input, OpMeta().set_name(input->name() + "_contig")
                              .set_is_deduce_states(false));
+            HT_LOG_TRACE << "Insert contiguous op for " << input
+              << ", shape is " << input->shape()
+              << ", stride is " << input->stride();
             RecordExecTensor(contig_input);
             auto& contig_op = contig_input->producer();
             contig_op->MapToParallelDevices(input_op->placement_group_union());

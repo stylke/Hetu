@@ -179,8 +179,8 @@ def pretrain(args):
         
     # todo: assign multi dg_hierarchy, and instantiate only one placement_group
     input_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='input_ids')
-    position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='position_ids')
-    token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='token_type_ids')
+    # position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='position_ids')
+    # token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='token_type_ids')
     # attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='attention_mask')
     masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=label_ds_hierarchy, device_group_hierarchy=label_dg_hierarchy, name='masked_lm_labels')
 
@@ -189,9 +189,9 @@ def pretrain(args):
 
     # print(f'{local_device}: build model begin...')
     loss = model(input_ids=input_ids,
-                 position_ids=position_ids,
+                 # position_ids=position_ids,
                  # attention_mask=attention_mask,
-                 token_type_ids=token_type_ids,
+                 # token_type_ids=token_type_ids,
                  labels=masked_lm_labels)
     # print(f'{local_device}: build model end...')
 
@@ -337,16 +337,16 @@ def pretrain(args):
 
                 feed_dict = {
                     input_ids: tokens.astype(np.int64),
-                    position_ids: _position_ids.astype(np.int64), 
-                    token_type_ids: _token_type_ids.astype(np.int64),
+                    # position_ids: _position_ids.astype(np.int64), 
+                    # token_type_ids: _token_type_ids.astype(np.int64),
                     # attention_mask: _attention_mask.astype(np.int64),
                     masked_lm_labels: labels.astype(np.int64),
                 }
             else: # fake data; feed_dict={} will cause segment fault?
                 feed_dict = {
                     input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
-                    position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64), 
-                    token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    # position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64), 
+                    # token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
                     # attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
                     masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
                 }
