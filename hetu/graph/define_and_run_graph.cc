@@ -576,6 +576,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     // 4)、assign ds_hierarchy
     // just copy it from define graph
     exec_tensor->set_ds_hierarchy(tensor->ds_hierarchy());
+    // HT_LOG_WARN << exec_tensor << " ds " << exec_tensor->cur_ds_union().ds_union_info();
     // 5)、assign add on inits
     auto it = _add_on_inits.find(tensor->id());
     if (_run_level != RunLevel::TOPO && it != _add_on_inits.end()) {

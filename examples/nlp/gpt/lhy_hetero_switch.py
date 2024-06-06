@@ -147,6 +147,7 @@ def pretrain(args):
                        n_positions=args.seq_length,
                        n_ctx=args.seq_length,
                        n_embd=args.hidden_size,
+                       ffn_hidden_size=args.ffn_hidden_size,
                        n_layer=args.num_hidden_layers, 
                        n_head=args.num_attention_heads, 
                        seq_len=args.seq_length,
@@ -527,6 +528,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--hidden_size", type=int, default=768, help="Hidden size of transformer model",
+    )
+    parser.add_argument(
+        "--ffn_hidden_size", type=int, default=-1, help="FFN hidden size of transformer model",
     )
     parser.add_argument(
         "--num_hidden_layers", type=int, default=12, help="Number of layers"

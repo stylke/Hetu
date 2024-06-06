@@ -751,7 +751,11 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         all_reduce_op->MapToParallelDevices(info.src_group_union);
         all_reduce_op->Instantiate(local_device, kCollectiveStream);
         result = all_reduce_output;
-        HT_LOG_DEBUG << local_device << ": substitute comm_op to all_reduce_op: " << comm_group;        
+        HT_LOG_DEBUG << local_device << ": substitute comm_op to all_reduce_op: " << comm_group; 
+        /*   
+        HT_LOG_WARN << local_device << ": " << all_reduce_output << " src ds " << info.src_ds_union.ds_union_info()
+          << ", and dst ds is " << info.dst_ds_union.ds_union_info(); 
+        */
         determine_flag = true;
         local_comm_flag = true;
       } 
@@ -2142,7 +2146,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     double other_time = 0;
     std::ostringstream out;
     out << "Op Execute Time: ";
-    int print_num = 30;
+    int print_num = 10000;
     for (auto& op_time : op_execute_time) {
       if (op_time.first >= 0) {
         auto op = _op_indexing[op_time.first];
@@ -2167,8 +2171,20 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           tp_p2p_time += op_time.second * 1.0 / 1e6;
         } else if (op->stream_index() == kCollectiveStream) {
           if (is_optimizer_update_op(op->output(0)->consumer(0))) {
+            /*
+            HT_LOG_WARN << op << " is dp grad reduce op"
+              << ", input ds is " << op->input(0)->cur_ds_union().ds_union_info()
+              << ", output ds is " << op->output(0)->cur_ds_union().ds_union_info();
+            */
             dp_grad_reduce_time += op_time.second * 1.0 / 1e6;
-          } else {
+          } 
+          // TODO: consider two continuous grad op
+          else {
+            /*
+            HT_LOG_WARN << op << " is tp collective op"
+              << ", input ds is " << op->input(0)->cur_ds_union().ds_union_info()
+              << ", output ds is " << op->output(0)->cur_ds_union().ds_union_info();
+            */
             tp_collective_time += op_time.second * 1.0 / 1e6;
           }
         } else if (op->stream_index() == kBlockingStream) {

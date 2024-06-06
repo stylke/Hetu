@@ -1,11 +1,11 @@
 NUM_LAYERS=${1:-32}
-HIDDEN_SIZE=${2:-512}
+HIDDEN_SIZE=${2:-4096}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
-FFN_HIDDEN_SIZE=${7:-2752}
-# FFN_HIDDEN_SIZE=${7:-11008}
+# FFN_HIDDEN_SIZE=${7:-2752}
+FFN_HIDDEN_SIZE=${7:-11008}
 
 SWITCH=0
 
@@ -87,7 +87,7 @@ export HETU_SWITCH_ALGORITHM=NEW_GREEDY
 export HETU_SWITCH_PROFILE=TIME
 export HETU_INTERNAL_LOG_LEVEL=INFO
 export HETU_STRAGGLER=ANALYSIS
-export HETU_MEMORY_PROFILE=MICRO_BATCH
+export HETU_MEMORY_PROFILE=WARN
 
 export HETU_MAX_SPLIT_SIZE_MB=200
 export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=20
@@ -122,6 +122,7 @@ if [ "${HETERO}" = false ]; then
         --merge_file $MERGE_FILE \
         --vocab_size 30592 \
         --hidden_size $HIDDEN_SIZE \
+        --ffn_hidden_size $FFN_HIDDEN_SIZE \
         --num_hidden_layers $NUM_LAYERS \
         --num_attention_heads $NUM_HEADS \
         --seq_length $SEQ_LEN \

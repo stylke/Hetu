@@ -376,7 +376,25 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
               // std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
               std::pair<std::vector<int32_t>, int32_t> src2dst;
               // zero
-              if (is_variable_op(op->input(i)->producer()) && op->input(i)->get_distributed_states().zero()) {
+              bool is_dp_reduce = false;
+              bool is_zero = false;
+              // 正常的grad
+              if (is_variable_op(op->input(i)->producer())) {
+                is_dp_reduce = true;
+                is_zero = op->input(i)->get_distributed_states().zero();
+              } 
+              // share weight
+              // TODO: comm op后续要支持变成一个p2p和一个reduce
+              // 这样的话如果is_comm_op(op->input(i)->producer()
+              // 那么可以全部交给这个comm op进行处理
+              if (is_comm_op(op->input(i)->producer())
+                  && is_variable_op(op->input(i)->producer()->input(0)->producer())) {
+                is_dp_reduce = true;
+                is_zero = op->input(i)->producer()->input(0)->get_distributed_states().zero();
+              }
+              // 去除partial
+              // zero情形
+              if (is_dp_reduce && is_zero) {
                 // attention: the result tensor was dp grouped split0, not really split0!
                 // so should do allgather still within the same dp group later! 
                 src2dst = {{-2}, 0}; // reduce-scatter
@@ -400,33 +418,41 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
                 HT_ASSERT(dst_ds_union.hetero_dim() == 0 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM)
                   << "hetero dim in the union should be consistent";
               } 
-              // 非zero
+              // 非zero情形
               else {
                 src2dst = {{-2}, -1}; // allreduce
                 // 1、sync the gradients for dp
-                if (grad_inputs[i]->cur_ds_union().hetero_dim() == -2) {
-                  HT_ASSERT(dst_ds_union.hetero_dim() == -1 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM)
-                    << "hetero dim in the union should be consistent";
-                  dst_ds_union.set_hetero_dim(-1);
-                } 
+                if (is_dp_reduce) {
+                  if (grad_inputs[i]->cur_ds_union().hetero_dim() == -2) {
+                    HT_ASSERT(dst_ds_union.hetero_dim() == -1 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM)
+                      << "hetero dim in the union should be consistent";
+                    dst_ds_union.set_hetero_dim(-1);
+                  } else {
+                    HT_ASSERT(grad_inputs[i]->cur_ds_union().hetero_dim() == NULL_HETERO_DIM)
+                      << "only support grad hetero on -2 or 0 when zero is off"
+                      << ", but " << grad_inputs[i] << " cur ds union is " 
+                      << grad_inputs[i]->cur_ds_union().ds_union_info();
+                  }
+                }
                 // 2、tp/sp reduce
-                else if (grad_inputs[i]->cur_ds_union().hetero_dim() == 0) {
-                  HT_ASSERT(dst_ds_union.hetero_dim() == 0 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM)
-                    << "hetero dim in the union should be consistent";
-                  dst_ds_union.set_hetero_dim(0);
+                else {
                   // sp会显式地在正向传播时插入all gather
                   // 因此这里不需要做reduce
                   // 交给之后comm op的DoGradient去自动处理
                   if (is_comm_op(op->input(i)->producer())) {
-                    dst_ds_union.add(ds_grad);
                     continue;
                   }
-                }
-                else {
-                  HT_ASSERT(grad_inputs[i]->cur_ds_union().hetero_dim() == NULL_HETERO_DIM)
-                    << "only support grad hetero on -2 or 0 when zero is off"
-                    << ", but " << grad_inputs[i] << " cur ds union is " 
-                    << grad_inputs[i]->cur_ds_union().ds_union_info();
+                  if (grad_inputs[i]->cur_ds_union().hetero_dim() == 0) {
+                    HT_ASSERT(dst_ds_union.hetero_dim() == 0 || dst_ds_union.hetero_dim() == NULL_HETERO_DIM)
+                      << "hetero dim in the union should be consistent";
+                    dst_ds_union.set_hetero_dim(0);
+                  }
+                  else {
+                    HT_ASSERT(grad_inputs[i]->cur_ds_union().hetero_dim() == NULL_HETERO_DIM)
+                      << "only support grad hetero on -2 or 0 when zero is off"
+                      << ", but " << grad_inputs[i] << " cur ds union is " 
+                      << grad_inputs[i]->cur_ds_union().ds_union_info();
+                  }
                 }
               }
               std::unordered_map<int32_t, int32_t> res_states = ds_grad.combine_states(src2dst);

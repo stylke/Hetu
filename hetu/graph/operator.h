@@ -1025,6 +1025,8 @@ DECLARE_OP_INDICATOR_CHECKER(communucation,
                              PEER_TO_PEER_SEND_OP | PEER_TO_PEER_RECV_OP |
                              ALL_TO_ALL_OP | ALL_REDUCE_OP |
                              ALL_GATHER_OP | REDUCE_SCATTER_OP |
+                             SPLIT_ALL_REDUCE_OP | SPLIT_REDUCE_SCATTER_OP |
+                             SPLIT_ALL_GATHER_OP |
                              BROADCAST_OP | REDUCE_OP |
                              P2P_OP | BATCHED_ISEND_IRECV_OP |
                              GATHER_OP | SCATTER_OP)
@@ -1046,7 +1048,7 @@ inline StreamIndex get_suggested_stream_index(const Operator& op) {
     return kD2HStream;
   } else if (is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) {
     return kP2PStream;
-  } else if (is_all_to_all_op(op)) {
+  } else if (is_communucation_op(op)) {
     return kCollectiveStream;
   } else {
     return kComputingStream;

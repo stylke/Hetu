@@ -613,6 +613,11 @@ TensorList CommOpImpl::DoGradient(Operator& op,
   graph.CUR_HETERO_ID = 0;
   graph.USE_HETERO_ID = false;
   Tensor grad_input = MakeCommOp(grad_output, dst_ds_hierarchy, OpMeta().set_name("grad_" + op->name()));
+  /*
+  HT_LOG_WARN << grad_input << " ds input " << input->ds_hierarchy().get(0).ds_union_info()
+    << " and ds output " << output->ds_hierarchy().get(0).ds_union_info()
+    << " and ds grad output " << grad_output->ds_hierarchy().get(0).ds_union_info();
+  */
   return {grad_input};
 }
 

@@ -758,7 +758,7 @@ Tensor MakeSplitAllReduceOp(Tensor input, std::vector<DeviceGroupList> comm_grou
 class SplitReduceScatterOpImpl final : public OpInterface {
  public:
   SplitReduceScatterOpImpl(std::vector<DeviceGroupList> comm_groups_list, size_t split_num, ReductionType red_type = kSUM, bool inplace = false)
-  : OpInterface(quote(SplitAllReduceOp)), _comm_groups_list(comm_groups_list), _split_num(split_num), _red_type(red_type), _inplace(inplace) {
+  : OpInterface(quote(SplitReduceScatterOp)), _comm_groups_list(comm_groups_list), _split_num(split_num), _red_type(red_type), _inplace(inplace) {
     for (auto& comm_groups : _comm_groups_list) {
       for (auto& comm_group : comm_groups) {
         HT_ASSERT(comm_group.num_devices() >= 2)
