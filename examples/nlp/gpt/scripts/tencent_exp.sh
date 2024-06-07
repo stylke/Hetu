@@ -5,7 +5,7 @@
 MODEL_SIZE=${1:-'32b'}
 SWITCH=${2:-0}
 HOSTFILE=${3:-'hostfile0123'}
-SEQ_LEN=${4:-2048}
+SEQ_LEN=${4:-4096}
 GLOBAL_BATCH_SIZE=${5:-512}
 MICRO_BATCH_SIZE=${6:-1}
 DP=${7:-4}
@@ -205,7 +205,7 @@ else
         --output-filename logs/ds_parallel --merge-stderr-to-stdout \
         python lhy_hetero_pack_or_pad.py \
         --num_strategy=2 \
-        --ds_parallel_config ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json,ds_parallel_config/hetero/before.json \
+        --ds_parallel_config ds_parallel_config/hetero/before.json,ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json \
         --global_batch_size $GLOBAL_BATCH_SIZE \
         --micro_batch_size $MICRO_BATCH_SIZE \
         --json_file $JSON_FILE \

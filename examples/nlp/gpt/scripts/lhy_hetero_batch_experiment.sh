@@ -3,12 +3,12 @@
 NUM_LAYERS=${1:-60}
 HIDDEN_SIZE=${2:-6656}
 NUM_HEADS=${3:-64}
-SEQ_LEN=${4:-4096}
+SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-512}
 MICRO_BATCH_SIZE=${6:-1}
 DP=${7:-4}
-TP=${8:-2}
-PP=${9:-4}
+TP=${8:-4}
+PP=${9:-2}
 HOSTFILE=${10:-'hostfile0123'}
 HETERO_LAYER=${11:-2}
 NUM_MICRO_BATCH=${12:-512} # should equal to GLOBAL_BATCH_SIZE / MICRO_BATCH_SIZE
@@ -61,7 +61,7 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --tp $TP \
     --pp $PP \
     --zero \
-    --hetero_layers $HETERO_LAYER,$OTHER_LAYER,$OTHER_LAYER,$OTHER_LAYER,15,15,15,15,15,15,15,15,15,15,15,15 \
+    --hetero_layers $HETERO_LAYER,$OTHER_LAYER,30,30,30,30,30,30 \
     --file_name "exp.json"
 
 for i in $(seq 128 $NUM_MICRO_BATCH); do
@@ -99,7 +99,7 @@ for i in $(seq 128 $NUM_MICRO_BATCH); do
             --merge_file $MERGE_FILE \
             --vocab_size 30592 \
             --hidden_size $HIDDEN_SIZE \
-	    --ffn_hidden_size $FFN_HIDDEN_SIZE \
+      	    --ffn_hidden_size $FFN_HIDDEN_SIZE \
             --num_hidden_layers $NUM_LAYERS \
             --num_attention_heads $NUM_HEADS \
             --seq_length $SEQ_LEN \

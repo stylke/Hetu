@@ -10,6 +10,7 @@ DP=${7:-4}
 TP=${8:-2}
 PP=${9:-4}
 HOSTFILE=${10:-'hostfile0123'}
+FFN_HIDDEN_SIZE=${11:-17920}
 
 ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
@@ -88,6 +89,7 @@ while [ $num -le $MAX_NUM_LAYERS ]; do
     --merge_file $MERGE_FILE \
     --vocab_size 30592 \
     --hidden_size $HIDDEN_SIZE \
+    --ffn_hidden_size $FFN_HIDDEN_SIZE \
     --num_hidden_layers $NUM_LAYERS \
     --num_attention_heads $NUM_HEADS \
     --seq_length $SEQ_LEN \

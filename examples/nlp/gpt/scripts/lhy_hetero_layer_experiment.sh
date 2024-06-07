@@ -3,12 +3,12 @@
 NUM_LAYERS=${1:-60}
 HIDDEN_SIZE=${2:-6656}
 NUM_HEADS=${3:-64}
-SEQ_LEN=${4:-4096}
+SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-512}
 MICRO_BATCH_SIZE=${6:-1}
 DP=${7:-4}
-TP=${8:-2}
-PP=${9:-4}
+TP=${8:-4}
+PP=${9:-2}
 HOSTFILE=${10:-'hostfile0123'}
 FFN_HIDDEN_SIZE=${11:-17920}
 
@@ -52,6 +52,9 @@ for i in $(seq 1 $((NUM_LAYERS - 1))); do
     other_sum=$(($NUM_LAYERS - $i))
     if (( other_sum % (PP - 1) == 0 )); then
         other_i=$((other_sum / (PP - 1)))
+        if (( other_i < i )); then
+            continue
+        fi
     else
         continue
     fi
@@ -63,7 +66,7 @@ for i in $(seq 1 $((NUM_LAYERS - 1))); do
         --tp $TP \
         --pp $PP \
         --zero \
-        --hetero_layers $i,$other_i,$other_i,$other_i,15,15,15,15,15,15,15,15,15,15,15,15 \
+        --hetero_layers $i,$other_i,30,30,30,30,30,30 \
         --file_name "exp.json"
     # 运行
     echo "split straggler layer $i begin..."

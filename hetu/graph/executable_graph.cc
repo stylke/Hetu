@@ -2230,7 +2230,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             HT_RUNTIME_ERROR << "Error opening the file";
           }
         } else if (_straggler_flag == 2) {
-          ofstream_sync file(_straggler_log_file_path + "_" + std::to_string(hetu::impl::comm::GetWorldRank()), std::ios_base::app);
+          ofstream_sync file(_straggler_log_file_path + "_" + std::to_string(hetu::impl::comm::GetWorldRank()) + ".txt", std::ios_base::app);
           if (file.is_open()) {
             file << "total run time: " << COST_MSEC(run) << " ms" << std::endl;
             file << "compute time: " << compute_time << " ms" << std::endl;

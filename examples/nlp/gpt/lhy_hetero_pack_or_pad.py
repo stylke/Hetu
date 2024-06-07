@@ -352,7 +352,7 @@ def pretrain(args):
                 }
             # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
             start_time = time.time()
-            if args.run_straggler_experiment and step == 5:
+            if args.run_straggler_experiment and step == 2:
                 os.environ['HETU_STRAGGLER_LOG_FILE'] = args.straggler_file
             if args.run_memory_experiment and step == 0:
                 os.environ['HETU_MEMORY_LOG_FILE'] = args.memory_file
@@ -367,7 +367,7 @@ def pretrain(args):
             except RuntimeError as e:
                 print(e)
                 os.killpg(0, signal.SIGTERM)
-            if (args.run_straggler_experiment and step == 5) or (args.run_memory_experiment and step == 0):
+            if (args.run_straggler_experiment and step == 2) or (args.run_memory_experiment and step == 0):
                 if 'HETU_MEMORY_LOG_FILE' in os.environ:
                     del os.environ['HETU_MEMORY_LOG_FILE'] 
                 if 'HETU_STRAGGLER_LOG_FILE' in os.environ:
