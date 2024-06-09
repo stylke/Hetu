@@ -298,7 +298,7 @@ def serve(arr, port):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--port", type=str, default='50051', help="server's port"
+        "--port", type=str, default='23457', help="server's port"
     )
     server_args = parser.parse_args()
     logging.basicConfig()

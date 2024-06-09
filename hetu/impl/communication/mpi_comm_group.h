@@ -116,6 +116,14 @@ class MPICommunicationGroup final
   }
 };
 
+int GetMPIWorldRank();
+int GetMPIWorldSize();
+int GetMPIGroupRank(const std::vector<int>& world_ranks);
+void MPISetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device);
+Device MPISetUpDeviceMappingAndAssignLocalDeviceOnce(
+  const std::map<DeviceType, int>& resources = {{kCUDA, 8}},
+  const std::vector<int64_t>& device_idxs = {});
+
 } // namespace comm
 } // namespace impl
 } // namespace hetu

@@ -1,7 +1,6 @@
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/stream/CPUStream.h"
 #include "hetu/impl/utils/ndarray_utils.h"
-#include "hetu/impl/communication/rpc_client.h"
 #include <numeric>
 #include <mutex>
 
@@ -71,7 +70,6 @@ inline int to_num_bytes(DataType dtype) {
 static std::once_flag mpi_init_flag;
 static int mpi_world_rank = -1;
 static int mpi_world_size = -1;
-static std::string global_server_address;
 static std::mutex mpi_call_mutex;
 static std::mutex mpi_create_group_mutex;
 static std::vector<std::map<std::vector<int>, MPICommunicationGroup>>
@@ -81,7 +79,6 @@ static std::vector<std::once_flag>
 // The worldwide groups would be excessively accessed. Cache them here.
 static std::vector<MPICommunicationGroup>
   worldwide_mpi_comm_groups((HT_NUM_STREAMS_PER_DEVICE) + 1);
-static DeviceClient local_client;
 
 } // namespace
 
@@ -95,25 +92,25 @@ struct MPICallGuard {
 static void MPI_Init_Once() {
   std::call_once(mpi_init_flag, []() {
     // init mpi
-    HT_LOG_INFO << "HTSVTR:\n" << global_server_address;
-    DeviceClient tmp_client(
-                 grpc::CreateChannel(global_server_address, grpc::InsecureChannelCredentials()));
-    tmp_client.Connect(Device::GetLocalHostname());
-    std::vector<int> all_ranks(mpi_world_size);
-    std::iota(all_ranks.begin(), all_ranks.end(), 0);
-    HT_LOG_INFO << "alrank:" << all_ranks;
-    tmp_client.Barrier(0, all_ranks);
-    int rank = tmp_client.GetRank(Device::GetLocalHostname());
-    HT_LOG_DEBUG << "GETRANK:" << rank;
-    HT_LOG_INFO << Device::GetLocalHostname();
-    mpi_world_rank = rank;
-    local_client = std::move(tmp_client);
+    int32_t mpi_provided;
+    MPI_CALL(
+      MPI_Init_thread(nullptr, nullptr, MPI_THREAD_SERIALIZED, &mpi_provided));
+    HT_ASSERT(mpi_provided >= MPI_THREAD_SERIALIZED)
+      << "The installed MPI cannot support MPI_THREAD_SERIALIZED.";
+    // get world rank and size
+    MPI_CALL(MPI_Comm_rank(MPI_COMM_WORLD, &mpi_world_rank));
+    MPI_CALL(MPI_Comm_size(MPI_COMM_WORLD, &mpi_world_size));
+    HT_ASSERT(mpi_world_rank >= 0 && mpi_world_rank < mpi_world_size)
+      << "Failed to get the world rank and/or size. "
+      << "(Got rank " << mpi_world_rank << " and size " << mpi_world_size
+      << ".)";
     // register exit handler
     HT_ASSERT(std::atexit([]() {
+                MPICallGuard guard;
                 HT_LOG_DEBUG << "Destructing MPI comm groups...";
                 mpi_comm_groups.clear();
                 worldwide_mpi_comm_groups.clear();
-                local_client.Exit(mpi_world_rank);
+                MPI_CALL(MPI_Finalize());
                 HT_LOG_DEBUG << "Destructed MPI comm groups";
               }) == 0)
       << "Failed to register the exit function for MPI.";
@@ -135,19 +132,51 @@ MPICommunicationGroupDef::MPICommunicationGroupDef(
     << ".";
 
   {
-    // MPICallGuard mpi_guard;
-    HT_LOG_DEBUG << "MPI:" << _world_ranks.size() << " " << static_cast<size_t>(mpi_world_size);
+    MPICallGuard mpi_guard;
 
     if (_world_ranks.size() == static_cast<size_t>(mpi_world_size)) {
       // communication group for the world
-      _rank = mpi_world_rank; 
-      _size = mpi_world_size;
-      HT_LOG_DEBUG << mpi_world_rank << " " << mpi_world_size;
+      MPI_CALL(MPI_Comm_dup(MPI_COMM_WORLD, &_comm));
+      HT_ASSERT(_comm != MPI_COMM_NULL) << "Failed to duplicate communicator.";
+      MPI_CALL(MPI_Comm_rank(_comm, &_rank));
+      MPI_CALL(MPI_Comm_size(_comm, &_size));
+      HT_ASSERT(_rank == mpi_world_rank && _size == mpi_world_size)
+        << "Failed to get the rank and/or size of duplicated MPI_COMM_WORLD. "
+        << "(Got rank " << _rank << " and size " << _size << ".)";
     } else {
       // communication group for the provided ranks
-      HT_ASSERT(std::find(_world_ranks.begin(), _world_ranks.end(), mpi_world_rank) !=  _world_ranks.end());
-      _rank = std::find(_world_ranks.begin(), _world_ranks.end(), mpi_world_rank) - _world_ranks.begin();
-      _size = _world_ranks.size();
+      HT_ASSERT(std::find(_world_ranks.begin(), _world_ranks.end(),
+                          mpi_world_rank) != _world_ranks.end())
+        << "The current rank " << mpi_world_rank
+        << " is not included in the group " << _world_ranks << ".";
+      MPI_Group world_group, small_group;
+      MPI_CALL(MPI_Comm_group(MPI_COMM_WORLD, &world_group));
+      MPI_CALL(MPI_Group_incl(world_group, _world_ranks.size(),
+                              _world_ranks.data(), &small_group));
+      const int max_attempts = 10;
+      int num_attemps = 0;
+      while (true) {
+        auto status =
+          MPI_Comm_create_group(MPI_COMM_WORLD, small_group, 0, &_comm);
+        if (status == MPI_SUCCESS) {
+          HT_LOG_TRACE << "MPI_Comm_create succeeded for " << _world_ranks;
+          HT_ASSERT(_comm != MPI_COMM_NULL) << "Failed to create communicator.";
+          break;
+        } else if (++num_attemps < max_attempts) {
+          HT_LOG_WARN << "MPI_Comm_create failed for " << num_attemps
+                      << " attempt(s), retrying...";
+          continue;
+        } else {
+          HT_RUNTIME_ERROR
+            << "MPI_Comm_create failed for " << num_attemps
+            << " attempt(s), which reaches the maximum number of attempts.";
+        }
+      }
+      MPI_CALL(MPI_Group_free(&world_group));
+      MPI_CALL(MPI_Group_free(&small_group));
+      HT_ASSERT(_comm != MPI_COMM_NULL) << "Failed to create communicator.";
+      MPI_CALL(MPI_Comm_rank(_comm, &_rank));
+      MPI_CALL(MPI_Comm_size(_comm, &_size));
       HT_ASSERT(static_cast<size_t>(_size) == _world_ranks.size())
         << "Group sizes mismatch: " << _size << " vs. " << _world_ranks.size()
         << ".";
@@ -170,7 +199,6 @@ MPICommunicationGroupDef::~MPICommunicationGroupDef() {
 
 void MPICommunicationGroupDef::Broadcast(NDArray& data, int broadcaster) {
   HT_ASSERT_CPU_DEVICE(data);
-  HT_LOG_INFO << "BCAST:" << data;
   void* buf = data->raw_data_ptr();
   auto numel = data->numel();
   auto mpi_dtype = to_MPI_Datatype(data->dtype());
@@ -513,7 +541,8 @@ void MPICommunicationGroupDef::BatchedISendIRecv(
 void MPICommunicationGroupDef::Barrier(bool sync) {
   _latest_future = CPUStream(_stream).EnqueueTask(
     [this]() {
-      local_client.Barrier(GetWorldRank(), world_ranks()); 
+      MPICallGuard mpi_guard;
+      MPI_CALL(MPI_Barrier(_comm));
     },
     "MPI Barrier Wait");
   if (sync)
@@ -543,14 +572,12 @@ MPICommunicationGroup::GetOrCreate(const std::vector<int>& world_ranks,
     << "must be a CPU stream. Got " << stream << ".";
   // Note: stream id could be -1, we shall shift it by one when accessing
   int stream_id = static_cast<int>(stream.stream_index());
-  HT_LOG_DEBUG << "GET_OR_CREATE:" << world_ranks << " " << mpi_world_rank << " " << mpi_world_size << " " << stream;
 
   MPI_Init_Once();
 
   HT_ASSERT(world_ranks.empty() ||
             CommunicationGroupDef::IsRanksValid(world_ranks))
     << "Invalid world ranks: " << world_ranks;
-  HT_LOG_DEBUG << "INIT:" << world_ranks << " " << mpi_world_size;
   if (world_ranks.empty() ||
       static_cast<int>(world_ranks.size()) == mpi_world_size) {
     if (!worldwide_mpi_comm_groups[stream_id + 1].is_defined()) {
@@ -559,7 +586,6 @@ MPICommunicationGroup::GetOrCreate(const std::vector<int>& world_ranks,
       if (!worldwide_mpi_comm_groups[stream_id + 1].is_defined()) {
         std::vector<int> all_world_ranks(mpi_world_size);
         std::iota(all_world_ranks.begin(), all_world_ranks.end(), 0);
-        HT_LOG_DEBUG << "AL_RK:" << all_world_ranks;
         worldwide_mpi_comm_groups[stream_id + 1] =
           MPICommunicationGroup(all_world_ranks, stream);
         mpi_comm_groups[stream_id + 1].insert(
@@ -568,9 +594,9 @@ MPICommunicationGroup::GetOrCreate(const std::vector<int>& world_ranks,
     }
     return worldwide_mpi_comm_groups[stream_id + 1];
   } else {
-    HT_ASSERT(GetGroupRank(world_ranks) != -1)
+    HT_ASSERT(GetMPIGroupRank(world_ranks) != -1)
       << "Cannot get comm group " << world_ranks << " on rank "
-      << GetWorldRank() << ".";
+      << GetMPIWorldRank() << ".";
     auto it = mpi_comm_groups[stream_id + 1].find(world_ranks);
     if (it == mpi_comm_groups[stream_id + 1].end()) {
       std::unique_lock<std::mutex> lock(mpi_create_group_mutex);
@@ -605,89 +631,18 @@ MPICommunicationGroup::GetOrCreateWorldwide(const Stream& stream) {
     return GetOrCreate({});
 }
 
-int GetWorldRank() {
+int GetMPIWorldRank() {
   MPI_Init_Once();
   return mpi_world_rank;
 }
 
-int GetWorldSize() {
+int GetMPIWorldSize() {
   MPI_Init_Once();
   return mpi_world_size;
 }
 
-void CommitNcclId(std::string nccl_id, const std::vector<int>& world_ranks, int stream_id) {
-  MPI_Init_Once();
-  local_client.CommitNcclId(nccl_id, world_ranks, stream_id);
-}
-
-std::string GetNcclId(const std::vector<int>& world_ranks, int stream_id) {
-  MPI_Init_Once();
-  return local_client.GetNcclId(world_ranks, stream_id);
-}
-
-void PutDouble(const std::string& key, double value) {
-  local_client.PutDouble(key, value);
-}
-
-double GetDouble(const std::string& key) {
-  return local_client.GetDouble(key);
-}
-
-std::string RemoveDouble(const std::string& key) {
-  return local_client.RemoveDouble(key);
-}
-
-
-void PutInt(const std::string& key, int64_t value) {
-  local_client.PutInt(key, value);
-}
-
-int64_t GetInt(const std::string& key) {
-  return local_client.GetInt(key);
-}
-
-std::string RemoveInt(const std::string& key) {
-  return local_client.RemoveInt(key);
-}
-
-void PutString(const std::string& key, const std::string& value) {
-  local_client.PutString(key, value);
-}
-
-std::string GetString(const std::string& key) {
-  return local_client.GetString(key);
-}
-
-std::string RemoveString(const std::string& key) {
-  return local_client.RemoveString(key);
-}
-
-void PutBytes(const std::string& key, const std::string& value) {
-  local_client.PutBytes(key, value);
-}
-
-std::string GetBytes(const std::string& key) {
-  return local_client.GetBytes(key);
-}
-
-std::string RemoveBytes(const std::string& key) {
-  return local_client.RemoveBytes(key);
-}
-
-void PutJson(const std::string& key, const json& value) {
-  local_client.PutJson(key, value);
-}
-
-json GetJson(const std::string& key) {
-  return local_client.GetJson(key);
-}
-
-std::string RemoveJson(const std::string& key) {
-  return local_client.RemoveJson(key);
-}
-
-int GetGroupRank(const std::vector<int>& world_ranks) {
-  int my_world_rank = GetWorldRank();
+int GetMPIGroupRank(const std::vector<int>& world_ranks) {
+  int my_world_rank = GetMPIWorldRank();
   auto it = std::find(world_ranks.begin(), world_ranks.end(), my_world_rank);
   return it != world_ranks.end() ? std::distance(world_ranks.begin(), it) : -1;
 }
@@ -700,39 +655,58 @@ namespace {
 static std::once_flag device_mapping_init_flag;
 std::unordered_map<Device, int> device_to_rank_mapping;
 std::vector<Device> rank_to_device_mapping;
-std::unordered_map<Device, DeviceClient> device_to_clients;
-std::vector<DeviceClient> rank_to_clients;
 DeviceGroup global_device_group;
 
 std::vector<std::string> AllGatherHostnames(MPICommunicationGroup& comm) {
+  // Walkaround: communication groups handle ndarrays only
+  NDArray local_arr = NDArray::empty({1, 1 + HT_MAX_HOSTNAME_LENGTH}, kCPU,
+                                     kUInt8, kBlockingStream);
+  NDArray gathered_arr = NDArray::empty(
+    {comm->size(), 1 + HT_MAX_HOSTNAME_LENGTH}, kCPU, kUInt8, kBlockingStream);
+  auto* local_ptr = local_arr->data_ptr<uint8_t>();
   std::string local_hostname = Device::GetLocalHostname();
-  local_client.CommitHostName(local_hostname, mpi_world_rank); 
+  local_ptr[0] = static_cast<uint8_t>(local_hostname.length());
+  if (!local_hostname.empty())
+    local_hostname.copy(reinterpret_cast<char*>(local_ptr + 1),
+                        local_hostname.length());
+  comm->AllGather(local_arr, gathered_arr);
+  comm->Sync();
+
   std::vector<std::string> hostnames;
   hostnames.reserve(comm->size());
+  auto rank_arrs = NDArray::split(gathered_arr, comm->size(), 0);
   for (int rank = 0; rank < comm->size(); rank++) {
-    std::string rank_hostname = local_client.GetHostName(rank);
-    hostnames.emplace_back(rank_hostname);
+    auto* rank_ptr = rank_arrs[rank]->data_ptr<uint8_t>();
+    size_t len = static_cast<size_t>(rank_ptr[0]);
+    hostnames.emplace_back(reinterpret_cast<char*>(rank_ptr + 1), len);
   }
-  HT_LOG_INFO << "RPC:" << local_hostname << " " << hostnames;
   return hostnames;
 }
 
-void SetUpDeviceMappingWithAssignedLocalDevice(const Device& local_device) {
+void MPISetUpDeviceMappingWithAssignedLocalDevice(const Device& local_device) {
   HT_ASSERT(local_device.local()) << "Device is not local: " << local_device;
   auto& comm = MPICommunicationGroup::GetOrCreateWorldwide();
   auto hostnames = AllGatherHostnames(comm);
   // Walkaround: communication groups handle ndarrays only
-  auto world_size = GetWorldSize();
+  auto world_size = GetMPIWorldSize();
+  NDArray local_arr = NDArray::empty({1, 3}, kCPU, kInt8, kBlockingStream);
+  NDArray gathered_arr =
+    NDArray::empty({comm->size(), 3}, kCPU, kInt8, kBlockingStream);
+  auto* local_ptr = local_arr->data_ptr<int8_t>();
+  local_ptr[0] = static_cast<int8_t>(local_device.type());
+  local_ptr[1] = static_cast<int8_t>(local_device.index());
+  local_ptr[2] = static_cast<int8_t>(local_device.multiplex());
+  comm->AllGather(local_arr, gathered_arr);
+  comm->Sync();
 
   device_to_rank_mapping.reserve(world_size);
   rank_to_device_mapping.reserve(world_size);
-  local_client.CommitDeviceInfo(static_cast<int>(local_device.type()), local_device.index(), 
-                                local_device.multiplex(), mpi_world_rank);
+  auto rank_arrs = NDArray::split(gathered_arr, world_size, 0);
   for (int rank = 0; rank < world_size; rank++) {
-    DeviceInfoReply reply = local_client.GetDeviceInfo(rank);
-    Device rank_device(static_cast<DeviceType>(reply.type),
-                       reply.index, hostnames[rank],
-                       reply.multiplex);
+    auto* rank_ptr = rank_arrs[rank]->data_ptr<int8_t>();
+    Device rank_device(static_cast<DeviceType>(rank_ptr[0]),
+                       static_cast<DeviceIndex>(rank_ptr[1]), hostnames[rank],
+                       static_cast<uint8_t>(rank_ptr[2]));
     HT_LOG_DEBUG << "Device of rank[" << rank << "]: " << rank_device;
     HT_ASSERT(device_to_rank_mapping.find(rank_device) ==
                 device_to_rank_mapping.end() ||
@@ -745,13 +719,12 @@ void SetUpDeviceMappingWithAssignedLocalDevice(const Device& local_device) {
   HT_LOG_DEBUG << "Global devices: " << global_device_group;
 }
 
-void SetUpDeviceMappingAndAssignLocalDevice(
+void MPISetUpDeviceMappingAndAssignLocalDevice(
   const std::map<DeviceType, int>& resources,
   const std::vector<int64_t>& device_idxs) {
   auto& comm = MPICommunicationGroup::GetOrCreateWorldwide();
   auto hostnames = AllGatherHostnames(comm);
   auto local_hostname = Device::GetLocalHostname();
-  HT_LOG_DEBUG << hostnames;
   HT_ASSERT(hostnames[comm->rank()] == local_hostname)
     << "Local hostname mismatched after gathering: " << hostnames[comm->rank()]
     << " vs. " << local_hostname;
@@ -761,7 +734,7 @@ void SetUpDeviceMappingAndAssignLocalDevice(
       local_rank++;
   HT_LOG_DEBUG << "local host = " << local_hostname << ", rank = " << comm->rank() 
                << ", all hosts = " << hostnames << ", world ranks = " << comm->world_ranks()
-               << ", world size = " << GetWorldSize() << ", local rank = " << local_rank;
+               << ", world size = " << GetMPIWorldSize() << ", local rank = " << local_rank;
   Device local_device;
   if (resources.find(kCUDA) == resources.end() || resources.at(kCUDA) == 0) {
     // Question: do we need to set the multiplex field for CPU?
@@ -772,77 +745,73 @@ void SetUpDeviceMappingAndAssignLocalDevice(
     auto multiplex = local_rank / resources.at(kCUDA);
     local_device = Device(kCUDA, device_id, local_hostname, multiplex);
   }
-  SetUpDeviceMappingWithAssignedLocalDevice(local_device);
+  MPISetUpDeviceMappingWithAssignedLocalDevice(local_device);
 }
 
 } // namespace
 
-void SetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device) {
+void MPISetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device) {
   if (!device_to_rank_mapping.empty()) {
     HT_LOG_WARN << "Device mapping has been set up.";
     return;
   }
   std::call_once(device_mapping_init_flag,
-                 SetUpDeviceMappingWithAssignedLocalDevice, local_device);
+                 MPISetUpDeviceMappingWithAssignedLocalDevice, local_device);
 }
 
-Device SetUpDeviceMappingAndAssignLocalDeviceOnce(
+Device MPISetUpDeviceMappingAndAssignLocalDeviceOnce(
   const std::map<DeviceType, int>& resources,
-  const std::vector<int64_t>& device_idxs,
-  const std::string server_address) {
-  mpi_world_size = resources.find(kCUDA)->second;
-  HT_LOG_INFO << server_address;
-  global_server_address = server_address;
+  const std::vector<int64_t>& device_idxs) {
   if (!device_to_rank_mapping.empty()) {
     HT_LOG_WARN << "Device mapping has been set up.";
-    return rank_to_device_mapping[GetWorldRank()];
+    return rank_to_device_mapping[GetMPIWorldRank()];
   }
   std::call_once(device_mapping_init_flag,
-                 SetUpDeviceMappingAndAssignLocalDevice, resources, device_idxs);
-  return rank_to_device_mapping[GetWorldRank()];
+                 MPISetUpDeviceMappingAndAssignLocalDevice, resources, device_idxs);
+  return rank_to_device_mapping[GetMPIWorldRank()];
 }
 
-bool IsGlobalDeviceGroupReady() {
-  return !global_device_group.empty();
-}
+// bool IsGlobalDeviceGroupReady() {
+//   return !global_device_group.empty();
+// }
 
-const DeviceGroup& GetGlobalDeviceGroup() {
-  HT_ASSERT(!device_to_rank_mapping.empty())
-    << "Please set up the device mapping in advance.";
-  return global_device_group;
-}
+// const DeviceGroup& GetGlobalDeviceGroup() {
+//   HT_ASSERT(!device_to_rank_mapping.empty())
+//     << "Please set up the device mapping in advance.";
+//   return global_device_group;
+// }
 
-const Device& GetLocalDevice() {
-  if (rank_to_device_mapping.empty())
-    return Device();
-  HT_ASSERT(!rank_to_device_mapping.empty())
-    << "Please set up the device mapping in advance.";
-  return rank_to_device_mapping.at(GetWorldRank());
-}
+// const Device& GetLocalDevice() {
+//   if (rank_to_device_mapping.empty())
+//     return Device();
+//   HT_ASSERT(!rank_to_device_mapping.empty())
+//     << "Please set up the device mapping in advance.";
+//   return rank_to_device_mapping.at(GetMPIWorldRank());
+// }
 
-int GetRankOfLocalHost() {
-  int world_rank = GetWorldRank(), local_rank = 0;
-  for (int i = 0; i < world_rank; i++)
-    if (rank_to_device_mapping[i].local())
-      local_rank++;
-  return local_rank;
-}
+// int GetRankOfLocalHost() {
+//   int world_rank = GetMPIWorldRank(), local_rank = 0;
+//   for (int i = 0; i < world_rank; i++)
+//     if (rank_to_device_mapping[i].local())
+//       local_rank++;
+//   return local_rank;
+// }
 
-int DeviceToWorldRank(const Device& device) {
-  auto it = device_to_rank_mapping.find(device);
-  HT_ASSERT(it != device_to_rank_mapping.end())
-    << "Cannot find device " << device << ".";
-  return it->second;
-}
+// int DeviceToWorldRank(const Device& device) {
+//   auto it = device_to_rank_mapping.find(device);
+//   HT_ASSERT(it != device_to_rank_mapping.end())
+//     << "Cannot find device " << device << ".";
+//   return it->second;
+// }
 
-std::vector<int> DeviceGroupToWorldRanks(const DeviceGroup& device_group) {
-  std::vector<int> ranks;
-  ranks.reserve(device_group.num_devices());
-  for (const auto& device : device_group.devices())
-    ranks.push_back(DeviceToWorldRank(device));
-  std::sort(ranks.begin(), ranks.end());
-  return ranks;
-}
+// std::vector<int> DeviceGroupToWorldRanks(const DeviceGroup& device_group) {
+//   std::vector<int> ranks;
+//   ranks.reserve(device_group.num_devices());
+//   for (const auto& device : device_group.devices())
+//     ranks.push_back(DeviceToWorldRank(device));
+//   std::sort(ranks.begin(), ranks.end());
+//   return ranks;
+// }
 
 } // namespace comm
 } // namespace impl

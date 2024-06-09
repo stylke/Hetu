@@ -650,21 +650,17 @@ void NCCLCommunicationGroupDef::CreateNCCLUniqueId(
   const std::vector<int>& world_ranks, const Stream& stream, ncclUniqueId& id) {
   // Currently we rely on MPI to synchronize the ncclUniqueId.
   // It may be replaced with a distributed memcache in the future.
-  auto mpi_comm_group = MPICommunicationGroup::GetOrCreate(world_ranks);
   // Walkaround: communication groups handle ndarrays only
   NDArray id_arr = NDArray::empty({sizeof(ncclUniqueId)}, Device(kCPU), kUInt8,
                                   kBlockingStream);
-  int broadcaster = mpi_comm_group->group_to_world_rank(0);
-  if (mpi_comm_group->rank() == 0) {
+  if (GetWorldRank() == world_ranks[0]) {
     NCCL_CALL(ncclGetUniqueId(&id));
-    auto world_rank = mpi_comm_group->world_ranks();
     std::string nccl_id;
     nccl_id.resize(sizeof(ncclUniqueId));
     memcpy(nccl_id.data(), &id, sizeof(ncclUniqueId));
-    CommitNcclId(nccl_id, world_rank, stream.stream_index());
+    GetLocalClient()->CommitNcclId(nccl_id, world_ranks, stream.stream_index());
   } else {
-    auto world_rank = mpi_comm_group->world_ranks();
-    std::string nccl_id = GetNcclId(world_rank, stream.stream_index());
+    std::string nccl_id = GetLocalClient()->GetNcclId(world_ranks, stream.stream_index());
     memcpy(&id, nccl_id.data(), sizeof(ncclUniqueId));
   }
 }

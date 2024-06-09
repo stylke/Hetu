@@ -85,7 +85,6 @@ class LoRAParallelLayerNorm(HtParallelLayerNorm):
                 map_absmax[self.weight.id] = self.weight_absmax
             else:
                 self.weight_absmax = map_absmax[self.weight.id]
-            self.weight.add_in_dep_linker(self.weight_absmax)
             if (self.bias.id not in map_absmax):
                 parameter_dict = {"tensor_id": self.bias.id, "blocksize": blocksize}
                 self.bias_absmax = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
@@ -97,7 +96,6 @@ class LoRAParallelLayerNorm(HtParallelLayerNorm):
                 map_absmax[self.bias.id] = self.bias_absmax
             else:
                 self.bias_absmax = map_absmax[self.bias.id]
-            self.bias.add_in_dep_linker(self.bias_absmax)
 
     def forward(self, input_p):
         return hetu.layer_norm(input_p, self.weight, self.bias, self.normalized_shape, 
@@ -128,7 +126,6 @@ class LoRAParallelEmbedding(HtParallelEmbedding):
                 map_absmax[self.embedding_table.id] = self.embedding_table_absmax
             else:
                 self.embedding_table_absmax = map_absmax[self.embedding_table.id]
-            self.embedding_table.add_in_dep_linker(self.embedding_table_absmax)
     
     def forward(self, input_p):
         return HtParallelEmbedding.forward(self, input_p)
@@ -158,7 +155,6 @@ class LoRAVocabParallelEmbedding(HtVocabParallelEmbedding):
                 map_absmax[self.embedding_table.id] = self.embedding_table_absmax
             else:
                 self.embedding_table_absmax = map_absmax[self.embedding_table.id]
-            self.embedding_table.add_in_dep_linker(self.embedding_table_absmax)
                 
         self.lora_alpha = lora_alpha
         self.blocksize = blocksize
@@ -213,7 +209,6 @@ class LoRAColumnParallelLinear(HtColumnParallelLinear):
                 map_absmax[self.weight.id] = self.weight_absmax
             else:
                 self.weight_absmax = map_absmax[self.weight.id]
-            self.weight.add_in_dep_linker(self.weight_absmax)
 
         lora_dtype = self.dtype
         if (lora_dtype == hetu.float4) or (lora_dtype == hetu.nfloat4):
@@ -244,7 +239,6 @@ class LoRAColumnParallelLinear(HtColumnParallelLinear):
                     map_absmax[self.bias.id] = self.bias_absmax
                 else:
                     self.bias_absmax = map_absmax[self.bias.id]
-                self.bias.add_in_dep_linker(self.bias_absmax)
       
     def forward(self, input_p):
         output = HtColumnParallelLinear.forward(self, input_p)  
@@ -292,7 +286,6 @@ class LoRARowParallelLinear(HtRowParallelLinear):
                 map_absmax[self.weight.id] = self.weight_absmax
             else:
                 self.weight_absmax = map_absmax[self.weight.id]
-            self.weight.add_in_dep_linker(self.weight_absmax)
         
         self.lora_alpha = lora_alpha
         self.blocksize = blocksize
@@ -336,7 +329,6 @@ class LoRARowParallelLinear(HtRowParallelLinear):
                     map_absmax[self.bias.id] = self.bias_absmax
                 else:
                     self.bias_absmax = map_absmax[self.bias.id]
-                self.bias.add_in_dep_linker(self.bias_absmax)
 
     def forward(self, input_p):
         output = HtRowParallelLinear.forward(self, input_p)  

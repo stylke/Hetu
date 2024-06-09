@@ -561,26 +561,6 @@ PyObject* PyTensor_set_requires_grad(PyTensor* self, PyObject* args, PyObject* k
   HT_PY_FUNC_END
 }
 
-PyObject* PyTensor_add_in_dep_linker(PyTensor* self, PyObject* args, PyObject* kwargs) {
-  HT_PY_FUNC_BEGIN
-  static PyArgParser parser({
-    "add_in_dep_linker(Tensor in_dep)"
-  });
-  auto parsed_args = parser.parse(args, kwargs);
-  if (parsed_args.signature_index() == 0) {
-    Tensor in_dep = parsed_args.get_tensor(0);
-    Operator& origin_op = self->tensor->producer();
-    origin_op->add_in_dep_linker(in_dep);
-    in_dep->addconsumer(origin_op);
-    Operator& absmax_op = in_dep->producer();
-    absmax_op->add_out_dep_linker(self->tensor);
-  } else {
-    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
-    __builtin_unreachable();
-  }
-  Py_RETURN_NONE;
-  HT_PY_FUNC_END
-}
 
 // NOLINTNEXTLINE
 PyGetSetDef PyTensor_properties[] = {
@@ -663,7 +643,6 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
     {"symbolic", (PyCFunction) PyTensor_symbolic, METH_NOARGS, nullptr }, 
     {"set_requires_grad", (PyCFunction) PyTensor_set_requires_grad, METH_VARARGS | METH_KEYWORDS, nullptr },
-    {"add_in_dep_linker", (PyCFunction) PyTensor_add_in_dep_linker, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"is_contiguous", (PyCFunction) PyTensor_is_contiguous, METH_NOARGS, nullptr },
     {"_make_subclass", (PyCFunction) PyTensor_make_subclass, METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"_make_recompute", (PyCFunction) PyTensor_make_recompute, METH_VARARGS | METH_KEYWORDS, nullptr },

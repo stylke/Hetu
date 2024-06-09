@@ -1944,7 +1944,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
     if (ranks.size() >= 2) {
       std::sort(ranks.begin(), ranks.end());
-      auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(ranks);
+      // hetu::impl::comm::Barrier(ranks);
+      auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, local_device);
       comm_group->Barrier(true);
     }
   }
@@ -2283,8 +2284,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   bool is_analysis_perf = false;
   if (is_analysis_perf || is_analysis_straggler) {
-    auto& comm_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+    auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreateWorldwide(local_device);
     comm_group->Barrier(true);
+    // hetu::impl::comm::Barrier(hetu::impl::comm::GetWorldRanks());
   }
   TOK(run);
   HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)

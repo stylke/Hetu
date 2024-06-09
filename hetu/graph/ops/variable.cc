@@ -120,7 +120,8 @@ Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape,
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
                            init, std::move(global_shape), multi_ds, 
                            std::move(local_idx), dtype, requires_grad, parameter_dict),
-                           TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
+                           TensorList(), std::move(op_meta.set_is_deduce_states(false)
+                           .set_parameter_dict(parameter_dict)))->output(0);
   // assign multi ds for variable
   auto& graph = out->graph();
   for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
@@ -144,7 +145,8 @@ Tensor MakeParallelVariableOp(NDArray provided_data,
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
                            provided_data, copy_provided_data, 
                            multi_ds, dtype, requires_grad, parameter_dict),
-                           TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
+                           TensorList(), std::move(op_meta.set_is_deduce_states(false)
+                           .set_parameter_dict(parameter_dict)))->output(0);
   // assign multi ds for variable
   auto& graph = out->graph();
   for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {
@@ -167,7 +169,8 @@ Tensor MakeParallelVariableOp(NDArrayList multi_provided_data,
   auto out = Graph::MakeOp(std::make_shared<ParallelVariableOpImpl>(
                            std::move(multi_provided_data), copy_provided_data, 
                            std::move(multi_ds), dtype, requires_grad, parameter_dict),
-                           TensorList(), std::move(op_meta.set_is_deduce_states(false)))->output(0);
+                           TensorList(), std::move(op_meta.set_is_deduce_states(false)
+                           .set_parameter_dict(parameter_dict)))->output(0);
   // assign multi ds for variable
   auto& graph = out->graph();
   for (size_t cur_strategy_id = 0; cur_strategy_id < graph.NUM_STRATEGY; cur_strategy_id++) {

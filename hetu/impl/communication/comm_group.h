@@ -4,6 +4,7 @@
 #include "hetu/utils/shared_ptr_wrapper.h"
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
+#include "hetu/impl/communication/rpc_client_impl.h"
 #include "hetu/utils/json/json.hpp"
 
 using json = nlohmann::json;
@@ -215,29 +216,14 @@ using CommunicationGroup = CommGroupWrapper<CommunicationGroupDef>;
 // since we rely on MPI to get the world rank and size now.
 int GetWorldRank();
 int GetWorldSize();
+std::vector<int> GetWorldRanks();
 int GetGroupRank(const std::vector<int>& world_ranks);
-void CommitNcclId(std::string nccl_id, const std::vector<int>& world_ranks, int stream_id);
-std::string GetNcclId(const std::vector<int>& world_ranks, int stream_id);
-void PutDouble(const std::string& key, double value);
-double GetDouble(const std::string& key);
-std::string RemoveDouble(const std::string& key);
-void PutInt(const std::string& key, int64_t value);
-int64_t GetInt(const std::string& key);
-std::string RemoveInt(const std::string& key);
-void PutString(const std::string& key, const std::string& value);
-std::string GetString(const std::string& key);
-std::string RemoveString(const std::string& key);
-void PutBytes(const std::string& key, const std::string& value);
-std::string GetBytes(const std::string& key);
-std::string RemoveBytes(const std::string& key);
-void PutJson(const std::string& key, const json& value);
-json GetJson(const std::string& key);
-std::string RemoveJson(const std::string& key);
+std::shared_ptr<DeviceClientImpl> GetLocalClient();
 void SetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device);
 Device SetUpDeviceMappingAndAssignLocalDeviceOnce(
   const std::map<DeviceType, int>& resources = {{kCUDA, 8}},
   const std::vector<int64_t>& device_idxs = {},
-  const std::string server_address = "127.0.0.1:50051");
+  const std::string server_address = "127.0.0.1:23457");
 bool IsGlobalDeviceGroupReady();
 const DeviceGroup& GetGlobalDeviceGroup();
 const Device& GetLocalDevice();

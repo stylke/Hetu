@@ -12,8 +12,16 @@ def pssh(args):
         hostnames = ['localhost'] * args.ngpus
     else:
         host_info = read_yaml(args.hosts)
+        max_restart_times = host_info['max_restart_times']
+        heartbeat_interval = float(host_info['heartbeat_interval'])
         for host in host_info['hosts']:
-            hostnames.append(host['addr'])
+            print(host)
+            addr = str(host['addr'])
+            initial_workers = int(host['initial_workers'])
+            min_workers = int(host['min_workers'])
+            max_workers = int(host['max_workers'])
+            for i in range(initial_workers):
+                hostnames.append(addr)
     print("HostNames:", hostnames)
     client = ParallelSSHClient(hostnames)
     train_command = args.command
@@ -30,8 +38,8 @@ def pssh(args):
     for host_out in output:
         for line in host_out.stderr:
             print(line)
-        for line in host_out.stdout:
-            print(line)
+        # for line in host_out.stdout:
+        #     print(line)
         exit_code = host_out.exit_code
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -42,7 +50,7 @@ if __name__ == '__main__':
         "--server_addr", type=str, default='127.0.0.1', help="server's address"
     )
     parser.add_argument(
-        "--server_port", type=str, default='50051', help="server's port"
+        "--server_port", type=str, default='23457', help="server's port"
     )
     parser.add_argument(
         "--ngpus", type=int, default=8, help="num gpus"

@@ -97,6 +97,16 @@ class OpMeta {
     return *this;
   }
 
+  inline OpMeta& set_parameter_dict(ParameterDict param_dict) {
+    parameter_dict = param_dict;
+    return *this;
+  }
+
+  bool need_dequantization() {
+    return parameter_dict.find("tensor_id") != parameter_dict.end()
+        && parameter_dict.find("blocksize") != parameter_dict.end();
+  }
+
   inline OpMeta& set(const OpMeta& other) {
     operator=(other);
     return *this;
@@ -133,6 +143,7 @@ class OpMeta {
   bool is_offload{false}; // for offload D2H op only
   bool is_deduce_states{true};  
   bool is_step{false};
+  ParameterDict parameter_dict;
 };
 
 std::ostream& operator<<(std::ostream&, const OpMeta&);
@@ -689,10 +700,6 @@ class OpDef : public shared_ptr_target {
 
   void add_in_dep_linker(Tensor in_dep) {
     _extra_in_dep_linkers.push_back(in_dep);
-  }
-
-  void add_out_dep_linker(Tensor out_dep) {
-    _extra_out_dep_linkers.push_back(out_dep);
   }
 
   const Tensor& out_dep_linker() const noexcept {

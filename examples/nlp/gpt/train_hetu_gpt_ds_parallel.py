@@ -313,7 +313,7 @@ if __name__ == '__main__':
         "--server_addr", type=str, default='127.0.0.1', help="server's address"
     )
     parser.add_argument(
-        "--server_port", type=str, default='50051', help="server's port"
+        "--server_port", type=str, default='23457', help="server's port"
     ) 
     parser.add_argument(
         "--ngpus", type=int, default=8, help="num of gpus"

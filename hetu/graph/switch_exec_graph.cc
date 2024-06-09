@@ -1368,20 +1368,20 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     if (!_comm_set.empty()) {
       std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
       DeviceGroup mpi_device_group{mpi_devices};
-      auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
+      auto& mpi_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
       mpi_group->Barrier(true);
       HT_LOG_DEBUG << local_device << ": params switch comm set = " << mpi_device_group;
     }
     */
-    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
-    mpi_group->Barrier(true);
+    auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreateWorldwide(local_device);
+    comm_group->Barrier(true);
     if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
       ProfileMemory("switch exec graph begin");
     }
     if (_profile_level <= SWITCH_PROFILE_LEVEL::NVLINK) {
       ProfileNvlinkStart();
     }
-    mpi_group->Barrier(true);
+    comm_group->Barrier(true);
   }
   
   // 启动！
@@ -1622,12 +1622,12 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_
     if (!_comm_set.empty()) {
       std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
       DeviceGroup mpi_device_group{mpi_devices};
-      auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
+      auto& mpi_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
       mpi_group->Barrier(true);
     }
     */
-    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
-    mpi_group->Barrier(true);
+    auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreateWorldwide(local_device);
+    comm_group->Barrier(true);
     std::string log_prefix = (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM ||switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) ?
                              "param" : "grad";
     HT_LOG_INFO << local_device << ": " << log_prefix << " switch running time = " << COST_MSEC(switch_params_running) << " ms";

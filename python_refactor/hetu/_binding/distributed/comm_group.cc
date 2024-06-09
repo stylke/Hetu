@@ -51,7 +51,7 @@ PyTypeObject* PyCommGroup_Type = &PyCommGroup_Type_obj;
 // TODO: update init params
 PyObject* CommGroup_Init(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
-  static PyArgParser parser({"init_comm_group(int device_num=8, List[int] device_idxs=[], std::string server_address=\"127.0.0.1:50051\")"});
+  static PyArgParser parser({"init_comm_group(int device_num=8, List[int] device_idxs=[], std::string server_address=\"127.0.0.1:23457\")"});
   auto parsed_args = parser.parse(args, kwargs);
   int device_num = parsed_args.get_int64_or_default(0);
   std::vector<int64_t> device_idxs = parsed_args.get_int64_list_or_default(1);

@@ -30,20 +30,6 @@ enum class RunLevel : int8_t {
   TOPO
 };
 
-// only use for kernel fusion.
-struct SubGraph {
-  // ops in group. the last one is an additional "output" Op
-  std::vector<OpType> topo;
-  // src of the op inputs. pair.first->producer.idx, pair.second->idx in producer's outputs.
-  std::vector<std::vector<std::pair<int64_t, int64_t>>> fetches;
-  int64_t num_inputs;
-  std::vector<std::vector<int64_t>> input_idx;
-  int64_t num_outputs;
-  std::vector<std::vector<int64_t>> output_idx;
-  std::vector<FusedParam> param_info;
-  std::vector<NDArrayMeta> meta_list;
-  std::vector<DistributedStates> ds_list;
-};
 
 std::string GraphType2Str(GraphType);
 std::ostream& operator<<(std::ostream&, GraphType);
@@ -280,6 +266,8 @@ class Graph {
   std::unordered_set<OpId> _parameter_ops;
   std::unordered_set<OpId> _source_ops;
   std::unordered_set<OpId> _sink_ops;
+  std::unordered_map<OpId, OpId> _paramter_to_absmax;
+  std::unordered_map<OpId, int64_t> _paramter_to_blocksize;
   
   std::unordered_map<OpId, uint32_t> _op_out_degrees;
   Tensor2NDArrayMap _preserved_data;

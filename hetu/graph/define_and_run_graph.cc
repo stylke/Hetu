@@ -25,6 +25,11 @@ Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   op_meta = op_meta.set_is_recompute(Recompute::enabled())
                    .set_is_cpu_offload(ActivationCPUOffload::enabled());
   auto& op = MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
+  if (op->op_meta().need_dequantization()) {
+    OpId param_id = op->op_meta().parameter_dict["tensor_id"];
+    _paramter_to_absmax[param_id] = op->id();
+    _paramter_to_blocksize[param_id] = op->op_meta().parameter_dict["blocksize"];
+  }
   // record the ops that have an explicit device group setting
   // which will then used to deduce the pp stages
   if (op->device_groups().size() == NUM_STRATEGY) {
@@ -456,7 +461,18 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   };
 
   HT_LOG_DEBUG << "Instantiating a " << type() << " graph with global topo " << global_topo;
+  OpRefList deq_global_topo;
+  
   for (auto& op_ref : global_topo) {
+    auto& op = op_ref.get();
+    if (op->num_outputs() > 0 && _paramter_to_absmax.find(op->output(0)->id()) != _paramter_to_absmax.end()) {
+      int64_t absmax_id = _paramter_to_absmax[op->output(0)->id()];
+      deq_global_topo.push_back(std::ref(GetOp(absmax_id)));
+    }
+    deq_global_topo.push_back(op_ref);
+  }
+
+  for (auto& op_ref : deq_global_topo) {
     auto& op = op_ref.get();
     HT_LOG_TRACE << "Creating an executable version of op " << op << " begin...";
 
@@ -569,6 +585,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
           int64_t blocksize = parameter_dict["blocksize"];
           dequantization_tensor_map[tensor_id] = exec_op->output(0);
           dequantization_blocksize_map[tensor_id] = blocksize;
+          HT_LOG_INFO << "INSERT:" << tensor_id << " " << op->id();
         }
       }
     }
@@ -614,7 +631,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   }
 
   // assign fw_op_id map
-  for (auto& op_ref : global_topo) {
+  for (auto& op_ref : deq_global_topo) {
     auto& op = op_ref.get();
     auto& exec_op = op_to_exec_op_mapping[op->id()];
     if (op->fw_op_id() != -1) {
@@ -641,7 +658,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   _exec_graph_plan_pool.emplace_back(std::move(exec_graph), 
                                      std::move(op_to_exec_op_mapping),
                                      std::move(tensor_to_exec_tensor_mapping),
-                                     std::move(global_topo),
+                                     std::move(deq_global_topo),
                                      std::vector<Tensor2ShapeMap>{std::move(shape_plan)},
                                      CUR_STRATEGY_ID);
 
