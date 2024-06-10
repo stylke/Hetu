@@ -27,7 +27,12 @@ class TrainerCtxs(Args):
         self.normal_mbn: int = kwargs["normal_mbn"]
         self.normal_compute_time: int = kwargs["normal_compute_time"]
         self.memory_k: List[float] = kwargs["memory_k"]
-        self.memory_d: List[float] = kwargs["memory_d"]
+        self.memory_embedding: float = kwargs["memory_embedding"]
+        self.memory_extra: float = kwargs["memory_extra"]
+        # bias细分为embedding和extra
+        # embedding是只有第一个stage和最后一个stage具有的异构层
+        # extra是各种cuda/nccl ctx等额外显存占用
+        # self.memory_d: List[float] = kwargs["memory_d"]
         self.memory_bound: float = kwargs["memory_bound"]
         self.memory_safe_gap: float = kwargs["memory_safe_gap"]
         self.straggler_threshold: float = kwargs["straggler_threshold"]
@@ -54,6 +59,7 @@ class TrainerStrategyArgs(Args):
         self.unused_rank_list: List[int] = kwargs["unused_rank_list"]
         self.hetero_data: bool = kwargs["hetero_data"]
         self.hetero_layers: List[List[int]] = kwargs["hetero_layers"]
+        self.hetero_stages: List[int] = kwargs["hetero_stages"]
         self.hetero_micro_batch_num_list: List[int] = kwargs["hetero_micro_batch_num_list"]
         
 class TrainerCommArgs(Args):

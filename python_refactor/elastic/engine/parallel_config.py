@@ -2,7 +2,14 @@ import json
 import hetu
 from queue import Queue
 
-def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, hetero_stages, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+    
+    accumulate_val = 0
+    accumulate_hetero_stages = [0,]
+    for val in hetero_stages:
+        accumulate_val += val
+        accumulate_hetero_stages.append(accumulate_val)
+    
     if dp == 1:
         zero = False
     num_devices_per_stage = num_gpus // pp
@@ -21,10 +28,10 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, n
                 if block_id < cnt:
                     break
                 device_group_num += 1
-            devices = range(device_group_num * num_devices_per_stage + tp * pipeline_id, 
-                            device_group_num * num_devices_per_stage + tp * (pipeline_id + 1))
-            hybrid_tp_degree.append(len([device for device in devices if device not in unused_rank]))
-            hybrid_device_group.append([rank_to_device_mapping[device] for device in devices if device not in unused_rank])
+            ranks = range(device_group_num * tp + accumulate_hetero_stages[pipeline_id] * tp, 
+                          (device_group_num + 1) * tp + accumulate_hetero_stages[pipeline_id] * tp)
+            hybrid_tp_degree.append(len([rank for rank in ranks if rank not in unused_rank]))
+            hybrid_device_group.append([rank_to_device_mapping[rank] for rank in ranks if rank not in unused_rank])
         tp_union_list.append(hybrid_tp_degree)
         dg_union_list.append(hybrid_device_group)
 

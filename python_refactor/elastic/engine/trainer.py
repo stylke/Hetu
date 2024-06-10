@@ -235,8 +235,17 @@ class Trainer:
                 else:
                     # 还不是straggler
                     # 通过compute stream上的profile信息进行分析
-                    straggler_pipeline = rank_idx % (strategy_args.dp * strategy_args.tp) // strategy_args.tp
-                    straggler_stage = rank_idx // (strategy_args.dp * strategy_args.tp)
+                    straggler_pipeline = 0
+                    straggler_stage = 0
+                    accumulate_ranks = 0
+                    for i, stage_num in enumerate(strategy_args.hetero_stages):
+                        if accumulate_ranks + stage_num * strategy_args.tp > rank_idx:
+                            straggler_pipeline = i
+                            straggler_stage = (rank_idx - accumulate_ranks) // strategy_args.tp
+                            break
+                        accumulate_ranks += stage_num * strategy_args.tp
+                    # straggler_pipeline = rank_idx % (strategy_args.dp * strategy_args.tp) // strategy_args.tp
+                    # straggler_stage = rank_idx // (strategy_args.dp * strategy_args.tp)
                     straggler_layers = strategy_args.hetero_layers[straggler_pipeline][straggler_stage]
                     straggler_mbn = strategy_args.hetero_micro_batch_num_list[straggler_pipeline]
                     curr_tp = 0
@@ -317,6 +326,7 @@ class Trainer:
             unused_rank_list=args.unused_rank_list,
             hetero_data=args.hetero_data,
             hetero_layers=args.hetero_layers,
+            hetero_stages=args.hetero_stages,
             hetero_micro_batch_num_list=args.hetero_micro_batch_num_list
         )
         input_ds_hierarchy, input_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'input')
@@ -503,7 +513,20 @@ class Trainer:
                         assert False, "rank_to_device_mapping has duplicate keys"
                     curr_rank_id = rank_id
             assert curr_rank_id != -1, f"can't find device {comm_args.all_devices.get_index(comm_args.local_device)} in rank_to_device_mapping"
-            hetero_pipeline_num = curr_rank_id % (dp_size * strategy_args.tp) // strategy_args.tp
+            # hetero_pipeline_num = curr_rank_id % (dp_size * strategy_args.tp) // strategy_args.tp
+            # 找到所属的pipeline num
+            accumulate_ranks = 0
+            hetero_pipeline_num = -1
+            for i, stage_num in enumerate(strategy_args.hetero_stages):
+                accumulate_ranks += stage_num * strategy_args.tp
+                if accumulate_ranks > curr_rank_id:
+                    hetero_pipeline_num = i
+                    break
+            if hetero_pipeline_num == -1:
+                # 说明是没有被用到的靠后的rank
+                # 随便给一个pipeline编号即可
+                assert is_unused or is_suspended, "can't figure out pipeline num"
+                hetero_pipeline_num = 0
             num_micro_batches = strategy_args.hetero_micro_batch_num_list[hetero_pipeline_num]
             # re-assign
             gbs_per_dp = args.micro_batch_size * num_micro_batches

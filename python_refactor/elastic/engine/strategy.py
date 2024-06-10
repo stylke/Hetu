@@ -1,6 +1,7 @@
 import math
 import heapq
 import pulp
+import time
 from typing import List, Dict, Any
 from pulp import LpProblem, LpMinimize, LpVariable, LpStatus, lpSum
 from .utils import Args, TrainerCtxs, TrainerStrategyArgs
@@ -112,8 +113,14 @@ class StrategyModel:
     def make_plans(self):
         if self.strategies != None and self.ds_parallel_configs != None:
             return self.strategies, self.ds_parallel_configs
-        all_tp_groups, new_suspended_devices, new_unused_devices = self.sovle_tp_arrangments()
+        # all_tp_groups, new_suspended_devices, new_unused_devices = self.solve_tp_arrangments()
+        # support hetero pipeline stages
+        clock = time.time()
+        all_tp_groups, new_suspended_devices, new_unused_devices = self.solve_tp_arrangments_new()
+        print("solve tp arrangement time =", time.time() - clock)
+        clock = time.time()
         pipelines_list, l_values_list, m_values_list = self.enumerate_pp_pattern(all_tp_groups)
+        print("solve pp arrangement time =", time.time() - clock)
         total_strategy_num = len(pipelines_list)
         self.strategies = []
         self.ds_parallel_configs = []
@@ -122,9 +129,11 @@ class StrategyModel:
             suspended_rank_list = []
             unused_rank_list = []
             pipelines = pipelines_list[strategy_id]
-            for stage_idx in range(self.pp):
-                for pipeline_idx in range(self.dp):
-                    start_rank_idx = stage_idx * self.tp * self.dp + pipeline_idx * self.tp
+            hetero_stages = [len(pipelines[pipeline_idx]) for pipeline_idx in range(len(pipelines))]
+            base_rank_idx = 0
+            for pipeline_idx in range(self.dp):
+                for stage_idx in range(hetero_stages[pipeline_idx]):
+                    start_rank_idx = base_rank_idx + stage_idx * self.tp
                     for rank_idx in range(start_rank_idx, start_rank_idx + self.tp):
                         tp_size = len(pipelines[pipeline_idx][stage_idx].devices)
                         if rank_idx - start_rank_idx < tp_size:
@@ -140,6 +149,7 @@ class StrategyModel:
                                 unused_rank_list.append(rank_idx)
                             else:
                                 assert False, "unreachable"
+                base_rank_idx += hetero_stages[pipeline_idx] * self.tp
             strategy = TrainerStrategyArgs(
                 dp=self.dp,
                 tp=self.tp,
@@ -150,6 +160,7 @@ class StrategyModel:
                 unused_rank_list=unused_rank_list,
                 hetero_data=True,
                 hetero_layers=l_values_list[strategy_id],
+                hetero_stages=hetero_stages,
                 hetero_micro_batch_num_list=m_values_list[strategy_id]
             )
             ds_parallel_config = config_spread_zero(
@@ -157,6 +168,7 @@ class StrategyModel:
                     rank_to_device_mapping, 
                     suspended_rank_list + unused_rank_list, 
                     l_values_list[strategy_id], 
+                    hetero_stages,
                     self.pp * self.ctxs.normal_layers, 
                     self.dp * self.tp * self.pp, 
                     self.dp, 
@@ -168,8 +180,120 @@ class StrategyModel:
             self.strategies.append(strategy)
             self.ds_parallel_configs.append(ds_parallel_config)
         return self.strategies, self.ds_parallel_configs
-        
-    def sovle_tp_arrangments(self):
+    
+    # support tp group num != dp * pp
+    def solve_tp_arrangments_new(self):
+        available_devices_sr = self.used_devices_sr.copy()
+        # 为了减少策略的频繁更换
+        # 只有当suspended devices重新变回非straggler时
+        # 我们才考虑将其纳入新的候选devices中
+        available_devices_sr.update(
+            {device_idx: sr for device_idx, sr in self.suspended_devices_sr.items() if sr < self.ctxs.straggler_threshold}
+        )
+        new_suspended_devices = [device_idx for device_idx, sr in self.suspended_devices_sr.items() if sr >= self.ctxs.straggler_threshold]
+        # print(f"available_devices_sr = {available_devices_sr}")
+        all_tp_groups = []
+        # 对于所有node
+        for node_idx in range(self.all_nodes_num):
+            node_available_devices_num = 0
+            node_devices_num = DEVICES_PER_NODE
+            node_devices_range = range(node_idx * node_devices_num, (node_idx + 1) * node_devices_num)
+            # 要么全在unused devices中
+            # 要么一个都不在
+            is_unused = [int(device_idx in self.unused_devices) for device_idx in node_devices_range]
+            node_unused_num = sum(is_unused)
+            assert node_unused_num == 0 or node_unused_num == node_devices_num, \
+                "now only support all-or-nothing unused ranks in a typical node"
+            if node_unused_num == node_devices_num:
+                continue
+            for device_idx in node_devices_range:
+                if device_idx not in available_devices_sr:
+                    continue
+                node_available_devices_num += 1
+            node_max_homo_devices_num = node_devices_num - self.tp
+            assert node_available_devices_num > node_max_homo_devices_num, \
+                f"{node_available_devices_num} <= {node_max_homo_devices_num}: unused ranks currently shouldn't be larger than tp - 1"
+            node_available_devices_sr = {k: v for k, v in available_devices_sr.items() if k in node_devices_range}
+            # 非straggler按照device的序号升序排列
+            # straggler按照sr升序排
+            node_available_devices_sr = sorted(
+                node_available_devices_sr.items(), 
+                key=lambda x: x[0] if x[1] < self.ctxs.straggler_threshold else x[1] * node_devices_num, 
+            )
+            print("node_available_devices_sr =", node_available_devices_sr)
+            hetero_tp_max = 1
+            while hetero_tp_max <= node_available_devices_num - node_max_homo_devices_num:
+                hetero_tp_max *= 2
+            hetero_tp_max = hetero_tp_max // 2
+            # 寻找最优的hetero tp split方式
+            begin_hetero_tp = hetero_tp_max
+            start_idx = node_max_homo_devices_num - 1
+            best_hetero_tp_R_val = 0
+            best_hetero_tp_list = None
+            while begin_hetero_tp >= 1:
+                idx = start_idx
+                hetero_tp = begin_hetero_tp
+                hetero_tp_R_val = 0
+                hetero_tp_list = []
+                while hetero_tp >= 1:
+                    idx = idx + hetero_tp
+                    if idx > node_available_devices_num - 1:
+                        break
+                    hetero_tp_list.append(hetero_tp)
+                    relative_hetero_idx = int(math.log2(self.tp // hetero_tp))
+                    alpha = self.ctxs.hetero_tp_alpha[relative_hetero_idx]
+                    weight = self.ctxs.hetero_tp_weight[relative_hetero_idx]
+                    sr = node_available_devices_sr[idx][1]
+                    hetero_tp_R_val += 1 / (alpha * sr * weight)
+                    hetero_tp = hetero_tp // 2
+                if hetero_tp_R_val > best_hetero_tp_R_val:
+                    best_hetero_tp_R_val = hetero_tp_R_val
+                    best_hetero_tp_list = hetero_tp_list
+                begin_hetero_tp = begin_hetero_tp // 2
+            final_used_devices = node_devices_num - self.tp + sum(best_hetero_tp_list)
+            # print("final_used_devices =", final_used_devices, "best hetero tp list =", best_hetero_tp_list)
+            # 常规tp组
+            for tp_idx in range(node_max_homo_devices_num // self.tp):
+                tp_devices = []
+                tp_sr = []
+                for idx in range(tp_idx * self.tp, (tp_idx + 1) * self.tp):
+                    tp_devices.append(node_available_devices_sr[idx][0])
+                    tp_sr.append(node_available_devices_sr[idx][1])
+                all_tp_groups.append(
+                    TPGroup(
+                        self.ctxs, 
+                        node_idx, 
+                        self.tp, 
+                        tp_devices, 
+                        tp_sr
+                    )
+                ) 
+            # 异构tp组
+            start_hetero_idx = node_max_homo_devices_num
+            for hetero_tp in best_hetero_tp_list:
+                end_hetero_idx = start_hetero_idx + hetero_tp
+                tp_devices = []
+                tp_sr = []
+                for idx in range(start_hetero_idx, end_hetero_idx):
+                    tp_devices.append(node_available_devices_sr[idx][0])
+                    tp_sr.append(node_available_devices_sr[idx][1])
+                all_tp_groups.append(
+                    TPGroup(
+                        self.ctxs, 
+                        node_idx, 
+                        self.tp, 
+                        tp_devices, 
+                        tp_sr
+                    )
+                )   
+                start_hetero_idx = end_hetero_idx
+            # 求解新的suspended devices
+            for idx in range(final_used_devices, node_available_devices_num):
+                new_suspended_devices.append(node_available_devices_sr[idx][0])
+        return all_tp_groups, new_suspended_devices, self.unused_devices
+      
+    # deprecated 
+    def solve_tp_arrangments(self):
         available_devices_sr = self.used_devices_sr.copy()
         # 为了减少策略的频繁更换
         # 只有当suspended devices重新变回非straggler时
@@ -292,6 +416,25 @@ class StrategyModel:
             normal_tp_groups_mapping[node_idx].sort(
                 key=lambda x: max(x.devices)
             )
+            
+        # step 0
+        # workaround
+        # 非必要不异构stage数目
+        hetero_stages_plans = []
+        if self.dp * self.pp == len(all_tp_groups):
+            hetero_stages = [self.pp for _ in range(self.dp)]
+            hetero_stages_plans.append(hetero_stages)
+        else:
+            # heuristic
+            # 目前只提供两套策略
+            # 第一个是尽量让stage数平均
+            # 第二个是形成一个特别长的pipeline
+            base_stages = len(all_tp_groups) // self.dp
+            remain_stages = len(all_tp_groups) - self.dp * base_stages
+            hetero_stages_plan_1 = [base_stages + remain_stages if idx == 0 else base_stages for idx in range(self.dp)]
+            hetero_stages_plans.append(hetero_stages_plan_1)
+            hetero_stages_plan_2 = [base_stages + 1 if idx < remain_stages else base_stages for idx in range(self.dp)]
+            hetero_stages_plans.append(hetero_stages_plan_2)
         
         # step 1
         # 先把straggler tp group的位置枚举出来
@@ -308,7 +451,7 @@ class StrategyModel:
         # 每个pipeline内部straggler tp group都放在前头的stage并从大到小排
         # 且要对pipeline permuation不变的进行剪枝
         # 否则搜索空间会溢出
-        def dfs(pipeline_idx):
+        def dfs(hetero_stages_plan_idx, pipeline_idx):
             nonlocal all_pipelines_template, pipelines
             if pipeline_idx == self.dp:
                 all_pipelines_template.append(pipelines.copy())
@@ -321,7 +464,8 @@ class StrategyModel:
             ):
                 nonlocal pipeline, pipeline_straggler_tp_group_num, \
                     pipelines, pipelines_straggler_tp_group_num, \
-                    visited_straggler_tp_group, visited_normal_tp_group_num
+                    visited_straggler_tp_group, visited_normal_tp_group_num, \
+                    hetero_stages_plans
                 # 减枝
                 # 靠后的pipeline不能比靠前的pipeline有更多的straggler tp group
                 # 如果数目相等则靠后的pipeline开头的straggler tp group的sr要小于等于前者
@@ -331,15 +475,18 @@ class StrategyModel:
                     if pipeline[0].sr > pipelines[pipeline_idx - 1][0].sr:
                         return
                 # 搜完一条pipeline接着搜下一条
-                if stage_idx == self.pp:
+                if stage_idx == hetero_stages_plans[hetero_stages_plan_idx][pipeline_idx]:
                     # 目前不支持整条pipeline都unused
                     # 即减少了dp维度
+                    # 2024.6.9 Update
+                    # 目前unused属性deprecated
+                    # 通过hetero_stages_plans来控制pipeline长度
                     if pipeline[-1] != None and pipeline[-1].unused == True:
                         return
                     pipelines.append(pipeline.copy())
                     pipelines_straggler_tp_group_num.append(pipeline_straggler_tp_group_num)
                     # print(f"dfs pipeline {pipeline_idx} finished, visited_normal_tp_group_num = {visited_normal_tp_group_num}")
-                    dfs(pipeline_idx + 1)  
+                    dfs(hetero_stages_plan_idx, pipeline_idx + 1)  
                     pipelines.pop()
                     pipelines_straggler_tp_group_num.pop()
                     return 
@@ -366,8 +513,9 @@ class StrategyModel:
                 pipeline.pop()
             # 从stage 0开始搜该条pipeline
             pipeline_dfs(0, 0) 
-        # 从pipeline 0开始搜
-        dfs(0)    
+        for hetero_stages_plan_idx in range(len(hetero_stages_plans)):
+            # 对于所有hetero stages plan都从pipeline 0开始搜一遍
+            dfs(hetero_stages_plan_idx, 0)    
         
         # step 2
         # 先筛选一波
@@ -425,11 +573,14 @@ class StrategyModel:
             # 第一遍pass
             # 先尽量减少跨机grad reduce
             # 把能填的None填了
-            for stage_id in range(self.pp):
+            max_hetero_stages = len(pipelines_template[0])
+            for stage_id in range(max_hetero_stages):
                 if pipelines_template[0][stage_id] == None:
                     continue
                 suggested_node_idx = pipelines_template[0][stage_id].node_idx
                 for pipeline_id in range(self.dp):
+                    if stage_id >= len(pipelines_template[pipeline_id]):
+                        continue
                     if pipelines_template[pipeline_id][stage_id] == None:
                         curr_num = visited_normal_tp_group_num_mapping[suggested_node_idx]
                         if curr_num < total_normal_tp_group_num_mapping[suggested_node_idx]:
@@ -438,8 +589,10 @@ class StrategyModel:
             # step 3.2
             # 第二遍pass
             # 把剩下的None按顺序填了
-            for stage_id in range(self.pp):
+            for stage_id in range(max_hetero_stages):
                  for pipeline_id in range(self.dp):
+                    if stage_id >= len(pipelines_template[pipeline_id]):
+                        continue
                     if pipelines_template[pipeline_id][stage_id] == None:
                         replace_none = False
                         for node_idx in range(self.all_nodes_num):
@@ -458,15 +611,20 @@ class StrategyModel:
         self, 
         y_values: List[List[float]], 
         hetero_values: List[List[float]],
-        is_unused: List[List[bool]]
+        is_unused: List[List[bool]],
+        only_adjust_batch: bool = False
     ):    
+        clock = time.time()
+        
         # 第一个整数线性规划问题
         dp = self.dp
         pp = self.pp
         L = self.pp * self.ctxs.normal_layers
         C = self.ctxs.memory_bound - self.ctxs.memory_safe_gap
         k_values = self.ctxs.memory_k
-        d_values = self.ctxs.memory_d
+        embedding_value = self.ctxs.memory_embedding
+        extra_value = self.ctxs.memory_extra
+        # d_values = self.ctxs.memory_d
         # 最优解的值
         o_values = [] 
         l_values = []
@@ -476,43 +634,59 @@ class StrategyModel:
         m_values = [] 
         
         pulp.LpSolverDefault.msg = 0
-        # 求解第一个整数线性规划问题
-        for i in range(dp):
-            # 定义整数线性规划问题
-            model = LpProblem(name="Integer_Linear_Programming_Problem_1", sense=LpMinimize)
-            # 变量
-            l_vars = [LpVariable(f"l_{i}_{j}", lowBound=0, cat="Integer") for j in range(pp)]
-            max_y_times_l = LpVariable("max_y_times_l", lowBound=0, cat="Continuous")  # 最大值变量
-            # 添加目标函数
-            model += max_y_times_l
-            # 约束条件
-            model += lpSum(l_vars) == L
-            for j in range(pp):
-                if is_unused[i][j]:
-                    model += l_vars[j] == 0
-                else:
-                    model += max_y_times_l >= y_values[i][j] * l_vars[j]
-                    model += k_values[j] * l_vars[j] + d_values[j] <= C / hetero_values[i][j]
-            # 求解问题
-            model.solve()
-            if LpStatus[model.status] != 'Optimal':
-                print("No solution")
-                return False, None, None, None
-            # 打印结果
-            # print(f"Q1, num = {i}, Optimal Objective Value:", model.objective.value())
-            o_values.append(model.objective.value())
-            l_i_values = []
-            for var in model.variables():
-                # print(var.name, "=", var.varValue)
-                if 'l_' in var.name:
-                    l_i_values.append(int(var.varValue))
-            l_values.append(l_i_values)
+        if only_adjust_batch:
+            for i in range(dp):
+                l_i_values = []
+                max_y_times_l = 0
+                hetero_stages = len(y_values[i])
+                for j in range(hetero_stages):
+                    if j == hetero_stages - 1:
+                        l = L - (hetero_stages - 1) * (L // hetero_stages)
+                    else:
+                        l = L // hetero_stages
+                    l_i_values.append(l)
+                    max_y_times_l = max(max_y_times_l, y_values[i][j] * l)
+                l_values.append(l_i_values)
+                o_values.append(max_y_times_l)
+        else:
+            # 求解第一个整数线性规划问题
+            for i in range(dp):
+                hetero_stages = len(y_values[i])
+                # 定义整数线性规划问题
+                model = LpProblem(name="Integer_Linear_Programming_Problem_1", sense=LpMinimize)
+                # 变量
+                l_vars = [LpVariable(f"l_{i}_{j}", lowBound=0, cat="Integer") for j in range(hetero_stages)]
+                max_y_times_l = LpVariable("max_y_times_l", lowBound=0, cat="Continuous")  # 最大值变量
+                # 添加目标函数
+                model += max_y_times_l
+                # 约束条件
+                model += lpSum(l_vars) == L
+                for j in range(hetero_stages):
+                    if is_unused[i][j]:
+                        model += l_vars[j] == 0
+                    else:
+                        model += max_y_times_l >= y_values[i][j] * l_vars[j]
+                        model += (k_values[-(hetero_stages - j)] * l_vars[j] + (embedding_value if j == 0 or j == hetero_stages - 1 else 0)) * hetero_values[i][j] + extra_value <= C
+                # 求解问题
+                model.solve()
+                if LpStatus[model.status] != 'Optimal':
+                    print("No solution")
+                    return False, None, None, None
+                # 打印结果
+                # print(f"Q1, num = {i}, Optimal Objective Value:", model.objective.value())
+                o_values.append(model.objective.value())
+                l_i_values = []
+                for var in model.variables():
+                    # print(var.name, "=", var.varValue)
+                    if 'l_' in var.name:
+                        l_i_values.append(int(var.varValue))
+                l_values.append(l_i_values)
             
         # 求解第二个整数线性规划问题
         # 定义整数线性规划问题
         model = LpProblem(name="Integer_Linear_Programming_Problem_2", sense=LpMinimize)
         # 变量
-        m_vars = [LpVariable(f"m_{i}", lowBound=pp, cat="Integer") for i in range(dp)]
+        m_vars = [LpVariable(f"m_{i}", lowBound=0, cat="Integer") for i in range(dp)]
         max_o_times_m = LpVariable("max_o_times_m", lowBound=0, cat="Continuous")  # 最大值变量
         # 添加目标函数
         model += max_o_times_m
@@ -520,7 +694,7 @@ class StrategyModel:
         model += lpSum(m_vars) == B_div_b
         for i in range(dp):
             model += max_o_times_m >= o_values[i] * m_vars[i]
-            model += m_vars[i] >= pp
+            model += m_vars[i] >= len(y_values[i])
         # 求解问题
         model.solve()
         if LpStatus[model.status] != 'Optimal':
@@ -535,7 +709,8 @@ class StrategyModel:
 
         print("objective =", model.objective.value()) 
         print("l_values =", l_values)  
-        print("m_values =", m_values)  
+        print("m_values =", m_values) 
+        print("time elapse =", time.time() - clock) 
         return True, model.objective.value(), l_values, m_values
                 
                         

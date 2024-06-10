@@ -1461,6 +1461,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       OpRefList recv_op_list;
       OpRefList compute_op_list;
       OpRefList update_op_list;
+      OpRefList final_update_op_list;
       OpRefList share_weight_recv_op_list;
       OpRefList share_weight_grad_recv_op_list;
       // todo: assume pp stages = [0,1,2,3]->[4,5,6,7], then 0 send pre-half of wte to 4, 1 send last-half of wte to 5; 
@@ -1501,9 +1502,9 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                        && is_optimizer_update_op(op_ref.get()->output(0)->consumer(0))) {
               update_op_list.push_back(op_ref);
             } else if (is_optimizer_update_op(op_ref)) {
-              update_op_list.push_back(op_ref);
+              final_update_op_list.push_back(op_ref);
             } else if (is_group_op(op_ref)) {
-              update_op_list.push_back(op_ref);
+              final_update_op_list.push_back(op_ref);
             } else {
               compute_op_list.push_back(op_ref);
             }
@@ -1517,6 +1518,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       _local_topo.insert(_local_topo.end(), send_op_list.begin(), send_op_list.end());
       // move allreduce/reduce-scatter & udpate & group op after pipeline p2p, to make p2p & allreduce/reduce-scatter overlap
       _local_topo.insert(_local_topo.end(), update_op_list.begin(), update_op_list.end());
+      _local_topo.insert(_local_topo.end(), final_update_op_list.begin(), final_update_op_list.end());
     };
     get_local_topo(fw_topo, local_fw_topo, local_placeholder_variable_ops);
     get_local_topo(bw_topo, local_bw_topo, local_placeholder_variable_ops); 

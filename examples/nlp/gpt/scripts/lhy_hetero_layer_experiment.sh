@@ -35,7 +35,7 @@ NNODES=$(cat ${HOSTFILE} | wc -l)
 NUM_GPUS_PER_NODE=$( cat $HOSTFILE | head -n 1 | awk -F 'slots=' '{print $2}' )
 WORLD_SIZE=$(( ${NNODES} * ${NUM_GPUS_PER_NODE} ))
 
-file="experiments/straggler/dp4tp2pp4/hetero_layer"
+file="experiments/straggler/dp${DP}tp${TP}pp${PP}/hetero_layer"
 
 for i in $(seq 0 $WORLD_SIZE); do
     dir=$(dirname "${file}_${i}.txt")

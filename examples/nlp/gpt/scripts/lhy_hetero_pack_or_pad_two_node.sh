@@ -1,11 +1,12 @@
 NUM_LAYERS=${1:-32}
-HIDDEN_SIZE=${2:-4096}
+HIDDEN_SIZE=${2:-512}
+# HIDDEN_SIZE=${2:-4096}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
-# FFN_HIDDEN_SIZE=${7:-2752}
-FFN_HIDDEN_SIZE=${7:-11008}
+FFN_HIDDEN_SIZE=${7:-2752}
+# FFN_HIDDEN_SIZE=${7:-11008}
 
 SWITCH=0
 
@@ -58,6 +59,17 @@ HETERO=true
 LAYERS_NUM_LIST="8,8,8,8,8,8,8,8"
 MICRO_BATCH_NUM_LIST="[32,32]"
 UNUSED_RANK="[]"
+# RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
+RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
+
+DP=4
+TP=2
+PP=2
+HETERO=true
+LAYERS_NUM_LIST="16,16,16,16,16,16,16,16"
+STAGES_NUM_LIST="[2,2,2,2]"
+MICRO_BATCH_NUM_LIST="[16,16,16,16]"
+UNUSED_RANK="[0]"
 # RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
 RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
 
@@ -153,6 +165,7 @@ else
         --pp $PP \
         --zero \
         --hetero_layers $LAYERS_NUM_LIST \
+        --hetero_stages $STAGES_NUM_LIST \
         --rank_to_device_mapping $RANK_TO_DEVICE_MAPPING \
         --unused_rank $UNUSED_RANK
     mpirun --allow-run-as-root -np 16 \
@@ -188,6 +201,7 @@ else
         --use_two_node \
         --switch $SWITCH \
         --hetero_stage_gpus $TP \
+        --hetero_stages $STAGES_NUM_LIST \
         --hetero_pipeline \
         --hetero_data \
         --micro_batch_num_list $MICRO_BATCH_NUM_LIST \

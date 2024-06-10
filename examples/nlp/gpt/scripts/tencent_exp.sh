@@ -51,10 +51,11 @@ BEFORE_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:4,5:5,6:6,7:7,8:0,9:1,10:10,11
 # BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
 
 BEFORE_LAYERS_NUM_LIST="15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15"
+BEFORE_STAGES_NUM_LIST="[4,4,4,4]"
 BEFORE_MICRO_BATCH_NUM_LIST="[128,128,128,128]"
 BEFORE_UNUSED_RANK="[]"
 # AFTER_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
-BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15,16:16,17:17,18:18,19:19,20:20,21:21,22:22,23:23,24:24,25:25,26:26,27:27,28:28,29:29,30:30,31:31}"
+BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:8,3:9,4:16,5:17,6:24,7:25,8:2,9:3,10:10,11:11,12:18,13:19,14:26,15:27,16:4,17:5,18:12,19:13,20:20,21:21,22:28,23:29,24:6,25:7,26:14,27:15,28:22,29:23,30:30,31:31}"
 
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --num_layers $NUM_LAYERS \
@@ -64,16 +65,18 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --pp $PP \
     --zero \
     --hetero_layers $BEFORE_LAYERS_NUM_LIST \
+    --hetero_stages $BEFORE_STAGES_NUM_LIST \
     --rank_to_device_mapping $BEFORE_RANK_TO_DEVICE_MAPPING \
     --unused_rank $BEFORE_UNUSED_RANK \
     --file_name "before.json"
 
 # after
 AFTER_LAYERS_NUM_LIST="15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15"
+AFTER_STAGES_NUM_LIST="[4,4,4,4]"
 AFTER_MICRO_BATCH_NUM_LIST="[128,128,128,128]"
 AFTER_UNUSED_RANK="[]"
 # AFTER_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
-AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15,16:16,17:17,18:18,19:19,20:20,21:21,22:22,23:23,24:24,25:25,26:26,27:27,28:28,29:29,30:30,31:31}"
+AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:8,3:9,4:16,5:17,6:24,7:25,8:2,9:3,10:10,11:11,12:18,13:19,14:26,15:27,16:4,17:5,18:12,19:13,20:20,21:21,22:28,23:29,24:6,25:7,26:14,27:15,28:22,29:23,30:30,31:31}"
 
 '''
 AFTER_LAYERS_NUM_LIST="32,0,20,12"
@@ -91,6 +94,7 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --pp $PP \
     --zero \
     --hetero_layers $AFTER_LAYERS_NUM_LIST \
+    --hetero_stages $AFTER_STAGES_NUM_LIST \
     --rank_to_device_mapping $AFTER_RANK_TO_DEVICE_MAPPING \
     --unused_rank $AFTER_UNUSED_RANK \
     --file_name "after.json"
@@ -205,7 +209,7 @@ else
         --output-filename logs/ds_parallel --merge-stderr-to-stdout \
         python lhy_hetero_pack_or_pad.py \
         --num_strategy=2 \
-        --ds_parallel_config ds_parallel_config/hetero/before.json,ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json \
+        --ds_parallel_config ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json,ds_parallel_config/hetero/after.json \
         --global_batch_size $GLOBAL_BATCH_SIZE \
         --micro_batch_size $MICRO_BATCH_SIZE \
         --json_file $JSON_FILE \
@@ -229,6 +233,7 @@ else
         --use_two_node \
         --switch $SWITCH \
         --hetero_stage_gpus $TP \
+        --hetero_stages $AFTER_STAGES_NUM_LIST \
         --hetero_pipeline \
         --hetero_data \
         --micro_batch_num_list $AFTER_MICRO_BATCH_NUM_LIST \

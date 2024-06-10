@@ -80,7 +80,9 @@ def pretrain(args):
     hetero_tp_weight = [1.0, 1.0, 1.0, 1.0]
     normal_compute_time = 4000.0
     memory_k = [2934, 2483, 2024, 1567]
-    memory_d = [5939, 4558, 4474, 5527]
+    memory_embedding = 1200.0
+    memory_extra = 4500.0
+    # memory_d = [5939, 4558, 4474, 5527]
     memory_bound = 40536.0
     memory_safe_gap = 4096.0
     straggler_threshold = 1.2
@@ -94,7 +96,9 @@ def pretrain(args):
         normal_mbn=args.global_batch_size // args.micro_batch_size // args.dp,
         normal_compute_time=normal_compute_time,
         memory_k=memory_k,
-        memory_d=memory_d,
+        memory_embedding=memory_embedding,
+        memory_extra=memory_extra,
+        # memory_d=memory_d,
         memory_bound=memory_bound,
         memory_safe_gap=memory_safe_gap,
         straggler_threshold=straggler_threshold,
@@ -126,6 +130,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--hetero_layers", type=str, help='hetero layers list.'
+    )
+    parser.add_argument(
+        "--hetero_stages", type=str, default="[]", help='hetero stages list.'
     )
     parser.add_argument(
         "--micro_batch_num_list", type=str, help='micro batch num list.'
@@ -246,6 +253,10 @@ if __name__ == '__main__':
     args.suspended_rank_list = ast.literal_eval(args.unused_rank)
     args.unused_rank_list = []
     args.hetero_layers = ast.literal_eval(args.hetero_layers)
+    if args.hetero_stages == "[]":
+        args.hetero_stages = [args.pp for _ in range(args.dp)]
+    else:
+        args.hetero_stages = ast.literal_eval(args.hetero_stages)
     args.micro_batch_num_list = ast.literal_eval(args.micro_batch_num_list)
     args.hetero_micro_batch_num_list = args.micro_batch_num_list
     distributed_init(args.use_two_node)         
