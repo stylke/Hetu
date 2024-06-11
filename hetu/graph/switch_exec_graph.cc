@@ -201,7 +201,7 @@ void ParamBuffer::Alloc(const Stream& stream,
   } else {
     if (use_caching_mempool) {
       if (!hetu::impl::AllocAfterFreeFromCUDACache(local_device, _raw_ptr, _buffer_size)) {
-        HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) when trying to allocate " << _name
+        HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) when trying to allocate " << _name << " param buffer"
           << ", though releasing some data space from the caching mempool";
       }
     } else {
@@ -245,7 +245,7 @@ void ParamBuffer::Alloc(const Stream& stream,
   // Use BorrowDataSpace
   if (use_caching_mempool) {
     if (!hetu::impl::AllocAfterFreeFromCUDACache(local_device, _raw_ptr, _buffer_size)) {
-      HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) when trying to allocate " << _name
+      HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) when trying to allocate " << _name << " param buffer"
         << ", though releasing some data space from the caching mempool";
     }
   } else {
@@ -274,7 +274,7 @@ void ParamBuffer::Alloc(const Stream& stream,
       if (status != cudaSuccess) {
         HT_RUNTIME_ERROR << "cudaFree failed: " << cudaGetErrorString(status);
       }
-      HT_LOG_DEBUG << local_device << ": " << _name << " param buffer free end";  
+      HT_LOG_INFO << local_device << ": " << _name << " param buffer free end";  
       TOK(free_time);
       _free_time = COST_MSEC(free_time);
     }));
@@ -1509,7 +1509,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     // 结束对准备工作的profile
     if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
       TOK(switch_params_making);
-      HT_LOG_INFO << local_device << ": " << switch_name << " making graph & plan time = " << COST_MSEC(switch_params_making) << " ms";
+      HT_LOG_WARN << local_device << ": " << switch_name << " making graph & plan time = " << COST_MSEC(switch_params_making) << " ms";
     }
   }
 
@@ -1810,7 +1810,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
       auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
       mpi_group->Barrier(true);
     }
-    HT_LOG_INFO << local_device << ": " << switch_name << " running time = " << COST_MSEC(switch_params_running) << " ms";
+    HT_LOG_WARN << local_device << ": " << switch_name << " running time = " << COST_MSEC(switch_params_running) << " ms";
     char* switch_log_file = std::getenv("HETU_SWITCH_LOG_FILE");
     if (switch_log_file != nullptr && hetu::impl::comm::GetWorldRank() == 0) {
       std::ofstream file;

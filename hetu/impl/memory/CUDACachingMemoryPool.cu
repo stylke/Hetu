@@ -469,8 +469,9 @@ bool CUDACachingMemoryPool::ReleaseAndAlloc(void*& ptr, size_t request_size) {
   // We only release oversize pointer. If max_split_size_mb is not specified,
   // no pointers will be regarded as oversize.   
   auto& lookup_table = _available_for_all_streams->table;               
-  if (lookup_table.empty())
-    return false;                           
+  if (lookup_table.empty()) {
+    return AllocNewPtr(ptr, request_size); 
+  }                          
   DataPtr tmp_key = {request_size > max_split_size ? request_size : max_split_size, nullptr};
   // Find if there are any ptr larger than request_size
   auto it = lookup_table.lower_bound(tmp_key);
@@ -512,7 +513,7 @@ bool CUDACachingMemoryPool::ReleaseAndAlloc(void*& ptr, size_t request_size) {
         it--;
         continue;
       }
-      return false;
+      return AllocNewPtr(ptr, request_size);
     }
     CudaFree(it->ptr);
     _reserved -= it->size;
@@ -530,7 +531,7 @@ bool CUDACachingMemoryPool::ReleaseAndAlloc(void*& ptr, size_t request_size) {
     // 仍然无法cudaMalloc
     // 那么只能返回false放弃分配
     else {
-      return false;
+      return AllocNewPtr(ptr, request_size);
     }
   }
 }
@@ -620,7 +621,9 @@ bool CUDACachingMemoryPool::WaitUntilAlloc(void*& ptr, size_t request_size) {
             << "The single stream available table shouldn't have any entry now";
         }
       }
-      return false;
+      // 考虑清理nccl context
+      hetu::impl::comm::EmptyNCCLCache();
+      return AllocNewPtr(ptr, request_size); 
     }
   }
 }

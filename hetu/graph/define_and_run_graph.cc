@@ -1019,6 +1019,9 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
             old_exec_graph->_current_grad_buffer->Free();
           }
         }
+        // 显存池当快要OOM时会自动处理
+        // 但目前发现那样会很慢
+        // 因此这里手动清空
         hetu::impl::ProfileAfterEmptyAllCUDACache(local_device);
         hetu::impl::comm::EmptyNCCLCache();
         // GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " after empty cache");
