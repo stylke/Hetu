@@ -1019,6 +1019,9 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
             old_exec_graph->_current_grad_buffer->Free();
           }
         }
+        hetu::impl::ProfileAfterEmptyAllCUDACache(local_device);
+        hetu::impl::comm::EmptyNCCLCache();
+        // GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " after empty cache");
       }
       /*
       for (auto& tensor : _exec_graph_plan_pool[next_active_exec_plan].exec_graph->_transfer_param_buffer->tensor_list()) {

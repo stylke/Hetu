@@ -590,7 +590,7 @@ class StrategyModel:
             # 第二遍pass
             # 把剩下的None按顺序填了
             for stage_id in range(max_hetero_stages):
-                 for pipeline_id in range(self.dp):
+                for pipeline_id in range(self.dp):
                     if stage_id >= len(pipelines_template[pipeline_id]):
                         continue
                     if pipelines_template[pipeline_id][stage_id] == None:

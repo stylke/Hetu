@@ -91,13 +91,16 @@ dp = 4
 tp = 2
 pp = 4
 layers = 60
-mbn = 512
+mbn = 64 # 512
 hetero_tp_alpha = [1.0, 2.0, 4.0, 8.0]
 hetero_tp_weight = [1.0, 1.2, 1.4, 1.6]
 normal_compute_time = 66111.4
 memory_k = [4608.02, 4124.24, 3641.99, 3129.95]
+# memory_k = [3745.47, 3389.63, 3038.79,2693.70]
 memory_embedding = 1200.0
 memory_extra = 5500.0
+# memory_embedding = 1000.0
+# memory_extra = 4600.0
 # memory_d = [6837.36, 5693.32, 5440.25, 6546.01]
 memory_bound = 81252.0
 memory_safe_gap = 2048.0
@@ -115,8 +118,8 @@ hetero_micro_batch_num_list = [128,128,128,128]
 
 # setting 1
 used_devices_sr = {
-    0:155357 / 66111.4,
-    # 0:316734 / 66111.4,
+    # 0:155357 / 66111.4,
+    0:316734 / 66111.4,
     1:1,
     2:1,
     3:1,
@@ -152,9 +155,10 @@ used_devices_sr = {
 suspended_devices_sr = {}
 unused_devices = []
 
+'''
 # setting 2
 used_devices_sr = {
-    8:1,
+    8:2.34,
     9:1,
     10:1,
     11:1,
@@ -181,6 +185,7 @@ used_devices_sr = {
 }
 suspended_devices_sr = {}
 unused_devices = [0,1,2,3,4,5,6,7]
+'''
 
 ctxs = TrainerCtxs(
     bf16=True,

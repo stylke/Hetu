@@ -164,7 +164,7 @@ void ParamBuffer::Alloc(const Stream& stream,
   TIK(alloc_time);
   auto local_device = hetu::impl::comm::GetLocalDevice(); 
   hetu::cuda::CUDADeviceGuard guard(local_device.index());
-  HT_LOG_DEBUG << local_device << ": " << _name << " param buffer"
+  HT_LOG_INFO << local_device << ": " << _name << " param buffer"
     << " will alloc " << (double)_buffer_size / (1024 * 1024) << " MiB";  
 #if defined(NCCL_MAJOR) && defined(NCCL_MINOR) && (NCCL_MAJOR >= 2) && (NCCL_MINOR >= 19) 
   // HT_RUNTIME_ERROR << "NotImplementedError";
@@ -201,8 +201,8 @@ void ParamBuffer::Alloc(const Stream& stream,
   } else {
     if (use_caching_mempool) {
       if (!hetu::impl::AllocAfterFreeFromCUDACache(local_device, _raw_ptr, _buffer_size)) {
-        HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) "
-          << "though releasing some data space from the caching mempool";
+        HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) when trying to allocate " << _name
+          << ", though releasing some data space from the caching mempool";
       }
     } else {
       cudaError_t status;
@@ -230,7 +230,7 @@ void ParamBuffer::Alloc(const Stream& stream,
         if (status != cudaSuccess) {
           HT_RUNTIME_ERROR << "cudaFree failed: " << cudaGetErrorString(status);
         }
-        HT_LOG_DEBUG << local_device << ": " << _name << " param buffer free end";  
+        HT_LOG_INFO << local_device << ": " << _name << " param buffer free end";  
         TOK(free_time);
         _free_time = COST_MSEC(free_time);
       }));
@@ -245,8 +245,8 @@ void ParamBuffer::Alloc(const Stream& stream,
   // Use BorrowDataSpace
   if (use_caching_mempool) {
     if (!hetu::impl::AllocAfterFreeFromCUDACache(local_device, _raw_ptr, _buffer_size)) {
-      HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) "
-        << "though releasing some data space from the caching mempool";
+      HT_RUNTIME_ERROR << "cudaMalloc failed (OOM) when trying to allocate " << _name
+        << ", though releasing some data space from the caching mempool";
     }
   } else {
     cudaError_t status;
