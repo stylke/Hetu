@@ -277,7 +277,24 @@ def pretrain(args):
                         assert False, "rank_to_device_mapping has duplicate keys"
                     curr_rank_id = rank_id
             assert curr_rank_id != -1, f"can't find device {all_devices.get_index(local_device)} in rank_to_device_mapping"
-            hetero_pipeline_num = curr_rank_id % (dp_size * args.hetero_stage_gpus) // args.hetero_stage_gpus
+            if args.hetero_stages == "[]":
+                pp = all_devices.num_devices // dp_size // args.hetero_stage_gpus
+                hetero_stages = [pp for _ in range(dp_size)]
+            else:
+                hetero_stages = ast.literal_eval(args.hetero_stages)
+            accumulate_ranks = 0
+            hetero_pipeline_num = -1
+            for i, stage_num in enumerate(hetero_stages):
+                accumulate_ranks += stage_num * args.hetero_stage_gpus
+                if accumulate_ranks > curr_rank_id:
+                    hetero_pipeline_num = i
+                    break
+            # assert hetero_pipeline_num != -1, "can't figure out pipeline num"
+            # 说明是没有被用到的靠后的rank
+            # 随便给一个pipeline编号即可
+            if hetero_pipeline_num == -1:
+                hetero_pipeline_num = 0
+            # hetero_pipeline_num = curr_rank_id % (dp_size * args.hetero_stage_gpus) // args.hetero_stage_gpus
             # adjust micro_batch_size
             '''
             batch_ratio = 8
@@ -417,6 +434,7 @@ def pretrain(args):
     def test_switch(): 
         consumed_samples = 0 # should be reset when run next epoch
         args.hetero_data = True
+        args.hetero_stages = args.before_hetero_stages
         args.micro_batch_num_list = args.before_micro_batch_num_list
         args.rank_to_device_mapping = args.before_rank_to_device_mapping
         args.unused_rank = args.before_unused_rank
@@ -428,6 +446,7 @@ def pretrain(args):
                                     seq_len = args.seq_length, 
                                     strategy_id = 0, 
                                     run_level = ht.run_level("update"))
+        args.hetero_stages = args.after_hetero_stages
         args.micro_batch_num_list = args.after_micro_batch_num_list
         args.rank_to_device_mapping = args.after_rank_to_device_mapping
         args.unused_rank = args.after_unused_rank
@@ -456,6 +475,12 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--hetero_data", action="store_true", help="use heterogenous data for each heterogenous pipeline."
+    )
+    parser.add_argument(
+        '--before_hetero_stages', type=str, default="[]", help='hetero stages.'
+    )
+    parser.add_argument(
+        '--after_hetero_stages', type=str, default="[]", help='hetero stages.'
     )
     parser.add_argument(
         "--before_micro_batch_num_list", type=str, help='micro batch num list.'

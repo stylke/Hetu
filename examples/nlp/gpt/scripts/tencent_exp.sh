@@ -189,9 +189,11 @@ if [ "${SWITCH}" = 1 ]; then
         --hetero_stage_gpus $TP \
         --hetero_pipeline \
         --hetero_data \
+        --before_hetero_stages $BEFORE_STAGES_NUM_LIST \
         --before_micro_batch_num_list $BEFORE_MICRO_BATCH_NUM_LIST \
         --before_rank_to_device_mapping $BEFORE_RANK_TO_DEVICE_MAPPING \
         --before_unused_rank $BEFORE_UNUSED_RANK \
+        --after_hetero_stages $AFTER_STAGES_NUM_LIST \
         --after_micro_batch_num_list $AFTER_MICRO_BATCH_NUM_LIST \
         --after_rank_to_device_mapping $AFTER_RANK_TO_DEVICE_MAPPING \
         --after_unused_rank $AFTER_UNUSED_RANK \
