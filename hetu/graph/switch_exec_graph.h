@@ -257,6 +257,75 @@ class ParamBuffer {
     size_t _free_time{0};
 };
 
+class ParamBuckets {
+  public:
+    ParamBuckets(const std::string& name = {},
+                 size_t buckets_size = 20):
+      _name(name),
+      _buckets_size(buckets_size) {
+      for (size_t i = 0; i <= _buckets_size; i++) {
+        _buckets.emplace_back(std::make_shared<ParamBuffer>(_name + "_bucket_" + std::to_string(i)));
+      }
+    }
+
+    size_t buckets_size() {
+      return _buckets_size;
+    }
+
+    size_t GetSuggestedBucketId(const Tensor& tensor);
+
+    std::shared_ptr<ParamBuffer> GetBucket(size_t id) {
+      HT_ASSERT(id < _buckets_size)
+        << "id is out of range";
+      return _buckets.at(id);
+    }
+
+    void AddTensor(const Tensor& tensor) {
+      size_t bucket_num = GetSuggestedBucketId(tensor);
+      HT_ASSERT(bucket_num < _buckets_size) 
+        << "id is out of range";
+      _buckets.at(bucket_num)->AddTensor(tensor);
+    }
+
+    bool HasTensor(const Tensor& tensor) {
+      for (const auto& bucket : _buckets) {
+        if (bucket->HasTensor(tensor)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    size_t GetTensorBucketId(const Tensor& tensor) {
+      for (size_t i = 0; i < _buckets_size; i++) {
+        if (_buckets.at(i)->HasTensor(tensor)) {
+          return i;
+        }
+      }
+      HT_RUNTIME_ERROR << "Can't find tensor " << tensor << " in the ParamBuckets " << _name;
+    }
+
+    std::shared_ptr<ParamBuffer> GetTensorBucket(const Tensor& tensor) {
+      for (size_t i = 0; i < _buckets_size; i++) {
+        if (_buckets.at(i)->HasTensor(tensor)) {
+          return _buckets.at(i);
+        }
+      }
+      HT_RUNTIME_ERROR << "Can't find tensor " << tensor << " in the ParamBuckets " << _name;
+    }
+
+    void AllocAll(const Stream& stream) {
+      for (const auto& bucket : _buckets) {
+        bucket->Alloc(stream);
+      }
+    }
+
+  protected:
+    size_t _buckets_size;
+    std::string _name;
+    std::vector<std::shared_ptr<ParamBuffer>> _buckets;
+};
+
 class ParamSlice {
   protected:
     friend class SwitchExecGraph;
@@ -398,17 +467,41 @@ class SwitchExecGraph {
     SwitchExecGraph() {}
     SwitchExecGraph(DefineAndRunGraph* define_graph, 
                     size_t plan_before, 
-                    size_t plan_after):
-      _define_graph(define_graph) {
+                    size_t plan_after,
+                    int32_t bucket_num = -1,
+                    std::unordered_set<Device> comm_set = {}):
+      _define_graph(define_graph),
+      _bucket_num(bucket_num),
+      _comm_set(comm_set) {
       _define_graph_params = define_graph->params();
-      _define_graph_params_and_optvars = define_graph->params_and_opt_vars();
       _switch_plan_pair = std::make_pair(plan_before, plan_after);
       _switch_graph_pair = std::make_pair(define_graph->GetPlan(plan_before).exec_graph, 
                                           define_graph->GetPlan(plan_after).exec_graph);
-      /*
-      _switch_graph_params_pair = std::make_pair(plan_before.exec_graph->params()),
-                                                 plan_after.exec_graph->params());
-      */
+      _define_graph_params_and_optvars = TensorCRefList(); 
+      const auto& define_params_and_opt_vars = define_graph->params_and_opt_vars();
+      if (_bucket_num == -1) {
+        _define_graph_params_and_optvars = define_params_and_opt_vars;
+      } 
+      // 筛选出bucket中含有的param和opt var
+      else {
+        HT_ASSERT(_switch_graph_pair.first->_use_origin_param_and_optimizer_buckets
+                  && _switch_graph_pair.second->_use_origin_param_and_optimizer_buckets)
+          << "_bucket_num can only used when the _use_origin_param_and_optimizer_buckets is turned on";
+        for (const auto& param_and_opt_var_ref : define_params_and_opt_vars) {
+          auto before_it = define_graph->GetPlan(plan_before).tensor_to_exec_tensor_mapping.find(param_and_opt_var_ref.get()->id());
+          auto after_it = define_graph->GetPlan(plan_after).tensor_to_exec_tensor_mapping.find(param_and_opt_var_ref.get()->id());
+          HT_ASSERT(before_it != define_graph->GetPlan(plan_before).tensor_to_exec_tensor_mapping.end()
+                    && after_it != define_graph->GetPlan(plan_after).tensor_to_exec_tensor_mapping.end())
+            << "Cannot find " << param_and_opt_var_ref;
+          size_t before_bucket_id = _switch_graph_pair.first->_origin_param_and_optimizer_buckets->GetSuggestedBucketId(before_it->second);
+          size_t after_bucket_id = _switch_graph_pair.second->_origin_param_and_optimizer_buckets->GetSuggestedBucketId(after_it->second);
+          HT_ASSERT(before_bucket_id == after_bucket_id)
+            << "Currently only support same bucket for same define graph tensor";
+          if (before_bucket_id == _bucket_num) {
+            _define_graph_params_and_optvars.emplace_back(param_and_opt_var_ref);
+          }
+        }
+      }
       char* algorithm_env = std::getenv("HETU_SWITCH_ALGORITHM");
       if (algorithm_env != nullptr) {
         std::string algorithm_level = algorithm_env;
@@ -504,6 +597,7 @@ class SwitchExecGraph {
 
   protected:
     // basic attributes
+    int32_t _bucket_num; // 要切换的bucket编号
     DefineAndRunGraph* _define_graph; // 定义图
     TensorCRefList _define_graph_params; // 定义图的params tensor
     TensorCRefList _define_graph_params_and_optvars; // 定义图的params以及optimizer variables的tensor

@@ -493,6 +493,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   auto origin_param_buffer = std::make_shared<ParamBuffer>("origin_param_buffer");
   auto transfer_param_buffer = std::make_shared<ParamBuffer>("transfer_param_buffer");
   auto origin_param_and_optimizer_buffer = std::make_shared<ParamBuffer>("origin_param_and_optimizer_buffer");
+  auto origin_param_and_optimizer_buckets = std::make_shared<ParamBuckets>("origin_param_and_optimizer_buckets");
   auto current_grad_buffer = std::make_shared<ParamBuffer>("current_grad_buffer");
   auto accumulate_grad_buffer = std::make_shared<ParamBuffer>("accumulate_grad_buffer");
   Tensor2TensorMap transfer_map;
@@ -594,7 +595,8 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     if ((_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
         || _optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end())
         && exec_tensor->producer()->placement_group_union().has(local_device)) {
-      origin_param_and_optimizer_buffer->AddTensor(exec_tensor);
+      origin_param_and_optimizer_buffer->AddTensor(exec_tensor); // deprecates
+      origin_param_and_optimizer_buckets->AddTensor(exec_tensor);
     }
   };
 
@@ -766,6 +768,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   exec_graph->_origin_param_buffer = std::move(origin_param_buffer);
   exec_graph->_transfer_param_buffer = std::move(transfer_param_buffer);
   exec_graph->_origin_param_and_optimizer_buffer = std::move(origin_param_and_optimizer_buffer);
+  exec_graph->_origin_param_and_optimizer_buckets = std::move(origin_param_and_optimizer_buckets);
   exec_graph->_current_grad_buffer = std::move(current_grad_buffer);
   exec_graph->_accumulate_grad_buffer = std::move(accumulate_grad_buffer);
   exec_graph->_transfer_map = std::move(transfer_map);
@@ -933,6 +936,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       }
       // 旧的exec graph
       auto& old_exec_graph = _exec_graph_plan_pool[_active_exec_plan].exec_graph;
+      auto& new_exec_graph = _exec_graph_plan_pool[next_active_exec_plan].exec_graph;
       // 默认的切换状态设置
       auto param_switch_mode = SWITCH_MODE::SWITCH_TRANSFER_PARAM;
       auto grad_switch_mode = SWITCH_MODE::SWITCH_ACCUMULATE_GRAD;
@@ -986,7 +990,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       if (old_exec_graph->_transfer_param_buffer->IsEmpty()
           || (old_exec_graph->_run_level == RunLevel::UPDATE
               && param_switch_level == SWITCH_LEVEL::EXEC)) {
-        if (old_exec_graph->_use_origin_param_and_optimizer_buffer) {
+        if (old_exec_graph->_use_origin_param_and_optimizer_buffer
+            || old_exec_graph->_use_origin_param_and_optimizer_buckets) {
           param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER;
         } else {
           param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
@@ -1041,7 +1046,37 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 如果要改成非async的
       // 更改环境变量HETU_SWITCH_PROFILE低于TIME即可
       // TODO: 实现CPU上的Switch（例如AdamOp的step，其目前并不在buffer中）
-      _param_switcher_pool[key]->SwitchParams(param_switch_mode, param_switch_level, "switch params and opt-states");
+      if (param_switch_mode != SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER
+          || old_exec_graph->_use_origin_param_and_optimizer_buckets == false) {
+        _param_switcher_pool[key]->SwitchParams(param_switch_mode, param_switch_level, "switch params and opt-states");
+      }
+      // 按buckets的顺序进行switch
+      else {
+        size_t buckets_size = old_exec_graph->_origin_param_and_optimizer_buckets->buckets_size();
+        if (_param_and_opt_var_bucket_switcher_pool.find(key) == _param_and_opt_var_bucket_switcher_pool.end()) {
+          // 统一使用全局的通信组
+          // TODO: 后续使用实际参与的所有device
+          std::unordered_set<Device> comm_set = {};
+          const auto& global_device_group = hetu::impl::comm::GetGlobalDeviceGroup();
+          for (const auto& device : global_device_group.devices()) {
+            comm_set.emplace(device);
+          }
+          _param_and_opt_var_bucket_switcher_pool[key] = std::vector<std::shared_ptr<SwitchExecGraph>>();
+          for (int32_t bucket_num = 0; bucket_num < buckets_size; bucket_num++) {
+            _param_and_opt_var_bucket_switcher_pool[key].emplace_back(std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, bucket_num, comm_set));
+          }
+        }
+        auto& global_mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
+        global_mpi_group->Barrier(true);
+        TIK(switch_buckets_time);
+        for (int32_t bucket_num = 0; bucket_num < buckets_size; bucket_num++) {
+          _param_and_opt_var_bucket_switcher_pool[key][bucket_num]->SwitchParams(param_switch_mode, param_switch_level, "switch params and opt-states bucket " + std::to_string(bucket_num));
+        }
+        SynchronizeAllStreams();
+        global_mpi_group->Barrier(true);
+        TOK(switch_buckets_time);
+        HT_LOG_WARN << "switch buckets time = " << COST_MSEC(switch_buckets_time) << " ms";
+      }
       if (!(grad_switch_level == SWITCH_LEVEL::TOPO && !_need_grad_switch_topo)) {
         _grad_switcher_pool[key]->SwitchParams(grad_switch_mode, grad_switch_level, "switch grads");
       }

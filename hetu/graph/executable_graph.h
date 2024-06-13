@@ -221,7 +221,8 @@ class ExecutableGraph : public Graph {
   // switch相关
   std::shared_ptr<ParamBuffer> _origin_param_buffer;
   std::shared_ptr<ParamBuffer> _transfer_param_buffer;
-  std::shared_ptr<ParamBuffer> _origin_param_and_optimizer_buffer; // can't support hetero+zero
+  std::shared_ptr<ParamBuffer> _origin_param_and_optimizer_buffer; // deprecated
+  std::shared_ptr<ParamBuckets> _origin_param_and_optimizer_buckets; 
   std::shared_ptr<ParamBuffer> _current_grad_buffer; // deprecated
   std::shared_ptr<ParamBuffer> _accumulate_grad_buffer;
   Tensor2TensorMap _transfer_map; // origin param到transfer param的映射
@@ -229,7 +230,8 @@ class ExecutableGraph : public Graph {
   Tensor2TensorMap _grad_grad_map; // 未substitue comm op前的grad到substitue comm op后的grad的映射
   Tensor2TensorMap _reversed_grad_grad_map; // substitue comm op后的grad到未substitue comm op前的grad的映射
   bool _use_current_grad_buffer{false};
-  bool _use_origin_param_and_optimizer_buffer{true};
+  bool _use_origin_param_and_optimizer_buffer{false};
+  bool _use_origin_param_and_optimizer_buckets{true};
   double _grad_scale; 
 
   // 记录上一个图的param切换完的event

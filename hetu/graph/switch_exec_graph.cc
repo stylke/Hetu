@@ -315,6 +315,38 @@ void ParamBuffer::Bind(const std::shared_ptr<NDArrayStorage>& storage) {
   HT_LOG_DEBUG << local_device << ": " << _name << " param buffer bind end"; 
 }
 
+size_t ParamBuckets::GetSuggestedBucketId(const Tensor& tensor) {
+  // workaround
+  // 目前通过name来判断是python端的哪个layer
+  // 后续要通过subgraph判断
+  if (tensor->name().find("lm_head") != std::string::npos
+      || tensor->name().find("wte") != std::string::npos
+      || tensor->name().find("wpe") != std::string::npos
+      || tensor->name().find("final") != std::string::npos) {
+    return 0;
+  }
+  std::string sub_str = "block";
+  size_t pos = tensor->name().find(sub_str);
+  HT_ASSERT (pos != std::string::npos) 
+    << "Can't find block num in the tensor name " << tensor->name();
+  size_t next_char_pos = pos + sub_str.length();
+  HT_ASSERT (next_char_pos < tensor->name().length())
+    << "Can't find block num in the tensor name " << tensor->name();
+  std::string layer_num_str = "";
+  while (tensor->name()[next_char_pos] != std::string::npos
+         && tensor->name()[next_char_pos] >= '0' 
+         && tensor->name()[next_char_pos] <= '9') {
+    layer_num_str += tensor->name()[next_char_pos];
+    next_char_pos += 1;
+  }
+  HT_ASSERT(layer_num_str != "")
+    << "Cannot fetch the number after 'block' for " << tensor->name();
+  size_t layer_num = std::stoi(layer_num_str);
+  // 分buckets
+  size_t bucket_num = layer_num % _buckets_size;
+  return bucket_num;
+}
+
 void ParamSlice::AddOwnedSliceInst(const Device& device, const Tensor& tensor) {
   if (!_owned_slice_instances.empty()) {
     const HTShape& shape = _owned_slice_instances[0]->shape();
@@ -923,6 +955,9 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
     comm_graph_name_prefix = "param";
   } else if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER) {
     comm_graph_name_prefix = "param_and_optimizer_variable";
+    if (_bucket_num != -1) {
+      comm_graph_name_prefix += "_bucket_" + std::to_string(_bucket_num);
+    }
   } else if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD
              || switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
     comm_graph_name_prefix = "grad";
@@ -1422,8 +1457,13 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     before_param_buffer = _switch_graph_pair.first->_transfer_param_buffer;
     after_param_buffer = _switch_graph_pair.second->_transfer_param_buffer;
   } else if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER) {
-    before_param_buffer = _switch_graph_pair.first->_origin_param_and_optimizer_buffer;
-    after_param_buffer = _switch_graph_pair.second->_origin_param_and_optimizer_buffer;
+    if (_bucket_num == -1) {
+      before_param_buffer = _switch_graph_pair.first->_origin_param_and_optimizer_buffer;
+      after_param_buffer = _switch_graph_pair.second->_origin_param_and_optimizer_buffer;
+    } else {
+      before_param_buffer = _switch_graph_pair.first->_origin_param_and_optimizer_buckets->GetBucket(_bucket_num);
+      after_param_buffer = _switch_graph_pair.second->_origin_param_and_optimizer_buckets->GetBucket(_bucket_num);
+    }
   } else if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD) {
     before_param_buffer = _switch_graph_pair.first->_current_grad_buffer;
     after_param_buffer = _switch_graph_pair.second->_current_grad_buffer;
@@ -1507,7 +1547,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     // *TODO: 调整topo使得BatchedIsendIrecv靠前
     // 否则有可能concat buffer被先alloc而send buffer还未被释放（会增加显存占用）
     // 结束对准备工作的profile
-    if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
+    if (_profile_level <= SWITCH_PROFILE_LEVEL::TIME) {
       TOK(switch_params_making);
       HT_LOG_WARN << local_device << ": " << switch_name << " making graph & plan time = " << COST_MSEC(switch_params_making) << " ms";
     }
@@ -1529,9 +1569,11 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
                  [&](const Device& device) { return hetu::impl::comm::DeviceToWorldRank(device); });
   std::sort(comm_ranks.begin(), comm_ranks.end());
   auto& comm_nccl_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(comm_ranks, Stream(local_device, kSwitchCollectiveStream));
-  std::call_once(warmup_flags[comm_device_group], 
-                 WarmUpComm, 
-                 _comm_set);
+  if (_bucket_num == -1) {
+    std::call_once(warmup_flags[comm_device_group], 
+                  WarmUpComm, 
+                  _comm_set);
+  }
   // 如果只需要建立topo
   // 此处直接返回即可
   if (switch_level == SWITCH_LEVEL::TOPO) {
@@ -1539,7 +1581,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
   }
 
   // profile时需要先都同步好了
-  if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
+  if (_profile_level <= SWITCH_PROFILE_LEVEL::TIME) {
     // stream同步
     SynchronizeAllStreams(local_device);
     // rank同步
@@ -1794,7 +1836,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
   // 非profile情形下这里不需要同步
   // 下一个exec graph需要某一个param时再进行sync
   
-  if (_profile_level < SWITCH_PROFILE_LEVEL::INFO) {
+  if (_profile_level <= SWITCH_PROFILE_LEVEL::TIME) {
     // stream同步
     TensorList fetches(_comm_results);
     fetches.insert(fetches.end(), _dummy_links.begin(), _dummy_links.end());

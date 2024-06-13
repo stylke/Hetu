@@ -231,20 +231,35 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
   // TODO: check meta is valid & maybe we can use non-blocking stream?
   bool is_param = (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end());
   bool is_optvar = (_optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end());
-  if (_use_origin_param_and_optimizer_buffer && (is_param || is_optvar)) {
-    HT_ASSERT(_origin_param_and_optimizer_buffer->HasTensor(tensor))
-      << "Cannot find param " << tensor << " in the origin param and optimizer buffer";
-    // alloc on-the-fly
-    if (!_origin_param_and_optimizer_buffer->IsAllocated()) {
-      _origin_param_and_optimizer_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
+  if ((_use_origin_param_and_optimizer_buffer || _use_origin_param_and_optimizer_buckets) && (is_param || is_optvar)) {
+    if (_use_origin_param_and_optimizer_buckets) {
+      HT_ASSERT(_origin_param_and_optimizer_buckets->HasTensor(tensor))
+        << "Cannot find param " << tensor << " in the origin param and optimizer buckets";
+      // alloc on-the-fly
+      auto bucket = _origin_param_and_optimizer_buckets->GetTensorBucket(tensor);
+      if (!bucket->IsAllocated()) {
+        bucket->Alloc(Stream(tensor->placement(), kBlockingStream));
+      }
+      _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
+                                              bucket->AsStorage(), 
+                                              bucket->GetElementOffest(tensor));
     }
-    _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
-                                            _origin_param_and_optimizer_buffer->AsStorage(), 
-                                            _origin_param_and_optimizer_buffer->GetElementOffest(tensor));
+    // deprecated: 目前使用buckets
+    else if (_use_origin_param_and_optimizer_buffer) {
+      HT_ASSERT(_origin_param_and_optimizer_buffer->HasTensor(tensor))
+        << "Cannot find param " << tensor << " in the origin param and optimizer buffer";
+      // alloc on-the-fly
+      if (!_origin_param_and_optimizer_buffer->IsAllocated()) {
+        _origin_param_and_optimizer_buffer->Alloc(Stream(tensor->placement(), kBlockingStream));
+      }
+      _preserved_data[tensor->id()] = NDArray(tensor->meta(), 
+                                              _origin_param_and_optimizer_buffer->AsStorage(), 
+                                              _origin_param_and_optimizer_buffer->GetElementOffest(tensor));
+    }
   } 
   // deprecated:
-  // 目前一定会使用origin_param_and_optimizer_buffer
-  else if (!_use_origin_param_and_optimizer_buffer && is_param) {
+  // 目前一定会使用origin_param_and_optimizer_buffer或者buckets
+  else if (!_use_origin_param_and_optimizer_buffer && !_use_origin_param_and_optimizer_buckets && is_param) {
     HT_ASSERT(_origin_param_buffer->HasTensor(tensor))
       << "Cannot find param " << tensor << " in the origin param buffer";
     // alloc on-the-fly

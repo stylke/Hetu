@@ -1,23 +1,24 @@
 NUM_LAYERS=${1:-32}
-HIDDEN_SIZE=${2:-512}
+HIDDEN_SIZE=${2:-4096}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-1024}
-GLOBAL_BATCH_SIZE=${5:-256}
-MICRO_BATCH_SIZE=${6:-4}
-FFN_HIDDEN_SIZE=${7:-2752}
+GLOBAL_BATCH_SIZE=${5:-64}
+MICRO_BATCH_SIZE=${6:-1}
+FFN_HIDDEN_SIZE=${7:-11008}
 
 SWITCH=1
 
 DP=2
-TP=4
-PP=2
+TP=2
+PP=4
 HETERO=true
 
 # before
-BEFORE_LAYERS_NUM_LIST="16,16,8,24"
-BEFORE_MICRO_BATCH_NUM_LIST="[32,32]"
-BEFORE_UNUSED_RANK="[0,1]"
-BEFORE_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:4,5:5,6:6,7:7,8:0,9:1,10:10,11:11,12:12,13:13,14:14,15:15}"
+BEFORE_LAYERS_NUM_LIST="4,4,4,9,11,8,8,8,8"
+BEFORE_STAGES_NUM_LIST="[5,4]"
+BEFORE_MICRO_BATCH_NUM_LIST="[30,34]"
+BEFORE_UNUSED_RANK="[1,3]"
+BEFORE_RANK_TO_DEVICE_MAPPING="{0:8,1:16,2:2,3:17,4:4,5:5,6:6,7:7,8:0,9:1,10:10,11:11,12:12,13:13,14:14,15:15,16:9,17:3}"
 # BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
 
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
@@ -28,22 +29,27 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --pp $PP \
     --zero \
     --hetero_layers $BEFORE_LAYERS_NUM_LIST \
+    --hetero_stages $BEFORE_STAGES_NUM_LIST \
     --rank_to_device_mapping $BEFORE_RANK_TO_DEVICE_MAPPING \
     --unused_rank $BEFORE_UNUSED_RANK \
     --file_name "before.json"
 
 # after
-AFTER_LAYERS_NUM_LIST="2,30,20,12"
-AFTER_MICRO_BATCH_NUM_LIST="[20,44]"
-AFTER_UNUSED_RANK="[0,2,3,6,7,9,11]"
+AFTER_LAYERS_NUM_LIST="8,8,8,8,8,8,8,8"
+AFTER_STAGES_NUM_LIST="[4,4]"
+AFTER_MICRO_BATCH_NUM_LIST="[32,32]"
+AFTER_UNUSED_RANK="[]"
 # AFTER_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
-AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
+AFTER_RANK_TO_DEVICE_MAPPING="{0:3,1:2,2:1,3:0,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
 
+'''
 AFTER_LAYERS_NUM_LIST="32,0,20,12"
+AFTER_STAGES_NUM_LIST="[2,2]"
 AFTER_MICRO_BATCH_NUM_LIST="[20,44]"
 AFTER_UNUSED_RANK="[0,1,6,7,8,9,10,11]"
 # AFTER_RANK_TO_DEVICE_MAPPING="{0:8,1:9,2:2,3:3,4:10,5:11,6:6,7:7,8:0,9:1,10:4,11:5,12:12,13:13,14:14,15:15}"
 AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
+'''
 
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --num_layers $NUM_LAYERS \
@@ -53,6 +59,7 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
     --pp $PP \
     --zero \
     --hetero_layers $AFTER_LAYERS_NUM_LIST \
+    --hetero_stages $AFTER_STAGES_NUM_LIST \
     --rank_to_device_mapping $AFTER_RANK_TO_DEVICE_MAPPING \
     --unused_rank $AFTER_UNUSED_RANK \
     --file_name "after.json"
@@ -69,8 +76,8 @@ LD_LIBRARY_PATH="${HETU_HOME}/build/lib:${LD_LIBRARY_PATH}"
 PYTHONPATH="${HETU_HOME}/python_refactor:${HETU_HOME}/build/lib:${PYTHONPATH}"
 
 export HETU_SWITCH_ALGORITHM=NEW_GREEDY
-export HETU_SWITCH_PROFILE=TIME
-export HETU_INTERNAL_LOG_LEVEL=INFO
+export HETU_SWITCH_PROFILE=INFO
+export HETU_INTERNAL_LOG_LEVEL=WARN
 export HETU_STRAGGLER=ANALYSIS
 export HETU_MEMORY_PROFILE=WARN
 
@@ -117,9 +124,11 @@ if [ "${SWITCH}" = 1 ]; then
         --hetero_stage_gpus $TP \
         --hetero_pipeline \
         --hetero_data \
+        --before_hetero_stages $BEFORE_STAGES_NUM_LIST \
         --before_micro_batch_num_list $BEFORE_MICRO_BATCH_NUM_LIST \
         --before_rank_to_device_mapping $BEFORE_RANK_TO_DEVICE_MAPPING \
         --before_unused_rank $BEFORE_UNUSED_RANK \
+        --after_hetero_stages $AFTER_STAGES_NUM_LIST \
         --after_micro_batch_num_list $AFTER_MICRO_BATCH_NUM_LIST \
         --after_rank_to_device_mapping $AFTER_RANK_TO_DEVICE_MAPPING \
         --after_unused_rank $AFTER_UNUSED_RANK

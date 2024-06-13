@@ -10,6 +10,45 @@ from .parallel_config import generate_gpt_3d_config, config_spread_zero
 DEVICES_PER_NODE = 8
 INF_SR = 10000.0
 
+class LayersProp(Args):
+    def __init__(
+        self,
+        begin_layer_idx: int,
+        end_layer_idx: int,
+        slice_num: int,
+        slices_sum: int
+    ):
+        self.begin_layer_idx = begin_layer_idx
+        self.end_layer_idx = end_layer_idx
+        self.slice_num = slice_num
+        self.slices_sum = slices_sum
+        
+    @staticmethod    
+    def calculate_iou(range1, range2):
+        """
+        计算两个范围的IoU
+        参数:
+        range1 -- 第一个范围，一个元组 (start1, end1)
+        range2 -- 第二个范围，一个元组 (start2, end2)
+        返回:
+        IoU -- 交并比
+        """
+        start1, end1 = range1
+        start2, end2 = range2
+        # 计算交集的起始和结束点
+        intersection_start = max(start1, start2)
+        intersection_end = min(end1, end2)
+        # 计算交集的长度
+        intersection_length = max(0, intersection_end - intersection_start)
+        # 计算两个范围的长度
+        range1_length = end1 - start1
+        range2_length = end2 - start2
+        # 计算并集的长度
+        union_length = range1_length + range2_length - intersection_length
+        # 计算IoU
+        iou = intersection_length / union_length if union_length != 0 else 0 
+        return iou
+
 class TPGroup(Args):
     def __init__(
         self,
@@ -24,7 +63,7 @@ class TPGroup(Args):
         tp_devices_num = len(devices)
         self.node_idx = node_idx
         self.tp = tp
-        self.devices = sorted(devices)
+        self.devices = devices
         self.hetero_ratio = self.tp // tp_devices_num
         self.alpha = ctxs.hetero_tp_alpha[int(math.log2(self.tp // tp_devices_num))]
         self.sr = max(sr) * self.alpha
@@ -61,6 +100,36 @@ class StrategyModel:
         self.tp = old_strategy_args.tp
         self.pp = old_strategy_args.pp
         self.zero = old_strategy_args.zero
+        # 记录每个device当前所具有的layers情况
+        # 后续会用来优化映射
+        # 来减少热切换的代价（主要是显存代价）
+        self.device_to_layers_prop = {}
+        accumulate_ranks = 0
+        for pipeline_idx in range(len(old_strategy_args.hetero_layers)):
+            accumulate_layers = 0
+            for stage_idx in range(len(old_strategy_args.hetero_layers[pipeline_idx])):
+                start_layer_idx = accumulate_layers
+                end_layer_idx = accumulate_layers + old_strategy_args.hetero_layers[pipeline_idx][stage_idx]
+                start_rank_idx = accumulate_ranks
+                end_rank_idx = accumulate_ranks + self.tp
+                tp_devices = []
+                for rank_idx in range(start_rank_idx, end_rank_idx):
+                    assert rank_idx in old_strategy_args.rank_to_device_mapping, f"cannot find rank {rank_idx} in the old mapping"
+                    device_idx = old_strategy_args.rank_to_device_mapping[rank_idx]
+                    if rank_idx not in old_strategy_args.unused_rank_list:
+                        tp_devices.append(device_idx)
+                for slice_num, device_idx in enumerate(tp_devices):
+                    assert device_idx not in self.device_to_layers_prop, f"duplicate device {device_idx}"
+                    self.device_to_layers_prop[device_idx] = LayersProp(
+                        start_layer_idx,
+                        end_layer_idx,
+                        slice_num,
+                        len(tp_devices)
+                    )
+                    # print(device_idx, start_layer_idx, end_layer_idx, slice_num)
+                accumulate_layers += old_strategy_args.hetero_layers[pipeline_idx][stage_idx]
+                accumulate_ranks += self.tp
+            assert accumulate_layers == self.ctxs.normal_layers * self.pp, "layers number mismatches"       
         self.used_devices_sr = used_devices_sr
         self.suspended_devices_sr = suspended_devices_sr
         self.unused_devices = unused_devices
@@ -131,6 +200,10 @@ class StrategyModel:
             pipelines = pipelines_list[strategy_id]
             hetero_stages = [len(pipelines[pipeline_idx]) for pipeline_idx in range(len(pipelines))]
             base_rank_idx = 0
+            total_ranks = sum(hetero_stages) * self.tp
+            dummy_device_idx = self.dp * self.tp * self.pp
+            # 注意总的rank数可能大于总的device数
+            # 引入一些dummy devices占位
             for pipeline_idx in range(self.dp):
                 for stage_idx in range(hetero_stages[pipeline_idx]):
                     start_rank_idx = base_rank_idx + stage_idx * self.tp
@@ -147,6 +220,11 @@ class StrategyModel:
                                 # 随便建立一个映射即可
                                 rank_to_device_mapping[rank_idx] = new_unused_devices[len(unused_rank_list)]
                                 unused_rank_list.append(rank_idx)
+                            elif dummy_device_idx < total_ranks:
+                                # 建立一个dummy映射即可
+                                rank_to_device_mapping[rank_idx] = dummy_device_idx
+                                unused_rank_list.append(rank_idx)
+                                dummy_device_idx += 1
                             else:
                                 assert False, "unreachable"
                 base_rank_idx += hetero_stages[pipeline_idx] * self.tp
@@ -253,12 +331,53 @@ class StrategyModel:
             final_used_devices = node_devices_num - self.tp + sum(best_hetero_tp_list)
             # print("final_used_devices =", final_used_devices, "best hetero tp list =", best_hetero_tp_list)
             # 常规tp组
+            visited_devices = {}
             for tp_idx in range(node_max_homo_devices_num // self.tp):
                 tp_devices = []
                 tp_sr = []
-                for idx in range(tp_idx * self.tp, (tp_idx + 1) * self.tp):
-                    tp_devices.append(node_available_devices_sr[idx][0])
-                    tp_sr.append(node_available_devices_sr[idx][1])
+                slice_num = 0
+                while slice_num < self.tp:
+                    find_flag = False
+                    best_iou = -1
+                    best_idx = 0
+                    for idx in range(node_max_homo_devices_num):
+                        device_idx = node_available_devices_sr[idx][0]
+                        if device_idx not in visited_devices and \
+                                self.device_to_layers_prop[device_idx].slice_num == slice_num and \
+                                self.device_to_layers_prop[device_idx].slices_sum == self.tp:
+                            # 对之后的slice num采用best fit
+                            if slice_num >= 1:
+                                first_slice_begin_l = self.device_to_layers_prop[tp_devices[0]].begin_layer_idx
+                                first_slice_end_l = self.device_to_layers_prop[tp_devices[0]].end_layer_idx
+                                begin_l = self.device_to_layers_prop[device_idx].begin_layer_idx
+                                end_l = self.device_to_layers_prop[device_idx].end_layer_idx
+                                # print(tp_devices[0], first_slice_begin_l, first_slice_end_l)
+                                # print(device_idx, begin_l, end_l)
+                                iou = LayersProp.calculate_iou((begin_l, end_l), (first_slice_begin_l, first_slice_end_l))
+                                if iou > best_iou:
+                                    best_iou = iou
+                                    best_idx = idx
+                                    find_flag = True
+                            else:
+                                visited_devices[device_idx] = True
+                                tp_devices.append(device_idx)
+                                tp_sr.append(node_available_devices_sr[idx][1])
+                                find_flag = True
+                                break
+                    if not find_flag:
+                        for idx in range(node_max_homo_devices_num):
+                            device_idx = node_available_devices_sr[idx][0]
+                            if device_idx not in visited_devices:
+                                visited_devices[device_idx] = True
+                                tp_devices.append(device_idx)
+                                tp_sr.append(node_available_devices_sr[idx][1])
+                                break
+                    # 对之后的slice num采用best fit
+                    elif slice_num >= 1:
+                        visited_devices[node_available_devices_sr[best_idx][0]] = True
+                        tp_devices.append(node_available_devices_sr[best_idx][0])
+                        tp_sr.append(node_available_devices_sr[best_idx][1])
+                    slice_num += 1
                 all_tp_groups.append(
                     TPGroup(
                         self.ctxs, 
@@ -274,6 +393,8 @@ class StrategyModel:
                 end_hetero_idx = start_hetero_idx + hetero_tp
                 tp_devices = []
                 tp_sr = []
+                # TODO: find the best mapping
+                # 这里先按顺序组tp了
                 for idx in range(start_hetero_idx, end_hetero_idx):
                     tp_devices.append(node_available_devices_sr[idx][0])
                     tp_sr.append(node_available_devices_sr[idx][1])
@@ -564,11 +685,18 @@ class StrategyModel:
         # 尽量让跨node的grad reduce尽量少
         # 当不得不存在跨node通信时
         # 尽量让node选取和最慢的straggler一致
-        for pipelines_template in top_k_pipelines_template:
-            visited_normal_tp_group_num_mapping = {
-                node_idx: 0
-                    for node_idx in range(self.all_nodes_num)
-            }
+        for pipelines_template, l_lists in zip(top_k_pipelines_template, top_k_l_values):
+            accumulate_l_lists = []
+            for l_list in l_lists:
+                accumulate_l_list = [0,]
+                accumulate_l = 0
+                for l in l_list:
+                    accumulate_l += l
+                    accumulate_l_list.append(accumulate_l)
+                accumulate_l_lists.append(accumulate_l_list)
+            visited_normal_tp_groups_mapping = [
+                {} for node_idx in range(self.all_nodes_num)
+            ]
             # step 3.1
             # 第一遍pass
             # 先尽量减少跨机grad reduce
@@ -582,10 +710,26 @@ class StrategyModel:
                     if stage_id >= len(pipelines_template[pipeline_id]):
                         continue
                     if pipelines_template[pipeline_id][stage_id] == None:
-                        curr_num = visited_normal_tp_group_num_mapping[suggested_node_idx]
-                        if curr_num < total_normal_tp_group_num_mapping[suggested_node_idx]:
-                            pipelines_template[pipeline_id][stage_id] = normal_tp_groups_mapping[suggested_node_idx][curr_num]
-                            visited_normal_tp_group_num_mapping[suggested_node_idx] += 1
+                        # layers range IoU best fit strategy
+                        begin_l = accumulate_l_lists[pipeline_id][stage_id]
+                        end_l = accumulate_l_lists[pipeline_id][stage_id + 1]
+                        best_iou = -1
+                        best_num = 0
+                        for curr_num in range(total_normal_tp_group_num_mapping[suggested_node_idx]):
+                            if curr_num in visited_normal_tp_groups_mapping[suggested_node_idx]:
+                                continue
+                            tp_group = normal_tp_groups_mapping[suggested_node_idx][curr_num]
+                            iou = 0
+                            for device_idx in tp_group.devices:
+                                old_begin_l = self.device_to_layers_prop[device_idx].begin_layer_idx
+                                old_end_l = self.device_to_layers_prop[device_idx].end_layer_idx
+                                iou += LayersProp.calculate_iou((begin_l, end_l), (old_begin_l, old_end_l))
+                            if iou > best_iou:
+                                best_iou = iou
+                                best_num = curr_num
+                        if best_iou != -1:
+                            pipelines_template[pipeline_id][stage_id] = normal_tp_groups_mapping[suggested_node_idx][best_num]
+                            visited_normal_tp_groups_mapping[suggested_node_idx][best_num] = True
             # step 3.2
             # 第二遍pass
             # 把剩下的None按顺序填了
@@ -595,15 +739,33 @@ class StrategyModel:
                         continue
                     if pipelines_template[pipeline_id][stage_id] == None:
                         replace_none = False
+                        # layers range IoU best fit strategy
+                        begin_l = accumulate_l_lists[pipeline_id][stage_id]
+                        end_l = accumulate_l_lists[pipeline_id][stage_id + 1]
+                        best_iou = -1
+                        best_node_idx = 0
+                        best_num = 0
                         for node_idx in range(self.all_nodes_num):
-                            curr_num = visited_normal_tp_group_num_mapping[node_idx]
-                            if curr_num < total_normal_tp_group_num_mapping[node_idx]:
-                                pipelines_template[pipeline_id][stage_id] = normal_tp_groups_mapping[node_idx][curr_num]
-                                visited_normal_tp_group_num_mapping[node_idx] += 1
-                                replace_none = True
-                                break
+                            for curr_num in range(total_normal_tp_group_num_mapping[node_idx]):
+                                if curr_num in visited_normal_tp_groups_mapping[node_idx]:
+                                    continue
+                                tp_group = normal_tp_groups_mapping[node_idx][curr_num]
+                                iou = 0
+                                for device_idx in tp_group.devices:
+                                    old_begin_l = self.device_to_layers_prop[device_idx].begin_layer_idx
+                                    old_end_l = self.device_to_layers_prop[device_idx].end_layer_idx
+                                    iou += LayersProp.calculate_iou((begin_l, end_l), (old_begin_l, old_end_l))
+                                if iou > best_iou:
+                                    best_iou = iou
+                                    best_node_idx = node_idx
+                                    best_num = curr_num
+                                    replace_none = True
                         assert replace_none == True, "can't find a normal tp group to place here"
-
+                        pipelines_template[pipeline_id][stage_id] = normal_tp_groups_mapping[best_node_idx][best_num]
+                        visited_normal_tp_groups_mapping[best_node_idx][best_num] = True
+                        # print(f"pipeline id {pipeline_id} stage id {stage_id}, normal tp group is {normal_tp_groups_mapping[best_node_idx][best_num]}")
+                        # print(visited_normal_tp_groups_mapping)
+        
         # 最终返回top k个搜索出的策略
         return top_k_pipelines_template, top_k_l_values, top_k_m_values
                                                             
@@ -614,6 +776,7 @@ class StrategyModel:
         is_unused: List[List[bool]],
         only_adjust_batch: bool = False
     ):    
+        # print(y_values, hetero_values, is_unused)
         clock = time.time()
         
         # 第一个整数线性规划问题

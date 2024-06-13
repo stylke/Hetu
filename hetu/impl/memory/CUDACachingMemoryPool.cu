@@ -622,7 +622,7 @@ bool CUDACachingMemoryPool::WaitUntilAlloc(void*& ptr, size_t request_size) {
         }
       }
       // 考虑清理nccl context
-      hetu::impl::comm::EmptyNCCLCache();
+      // hetu::impl::comm::EmptyNCCLCache();
       return AllocNewPtr(ptr, request_size); 
     }
   }

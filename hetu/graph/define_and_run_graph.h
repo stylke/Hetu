@@ -167,6 +167,7 @@ class DefineAndRunGraph : public Graph {
   // therefore each pipeline could be regard as a DeviceGroupList
   std::unordered_map<size_t, Device2PipelineMap> _multi_pipeline_maps;
 
+  std::unordered_map<std::pair<size_t, size_t>, std::vector<std::shared_ptr<SwitchExecGraph>>> _param_and_opt_var_bucket_switcher_pool;
   std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _param_switcher_pool;
   std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _grad_switcher_pool;
   std::vector<ExecGraphPlan> _exec_graph_plan_pool;

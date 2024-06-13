@@ -77,6 +77,7 @@ class ExecutableGraph;
 class SwitchExecGraph;
 
 class ParamBuffer;
+class ParamBuckets;
 
 #define HT_MAX_NUM_MICRO_BATCHES (512)
 } // namespace graph
