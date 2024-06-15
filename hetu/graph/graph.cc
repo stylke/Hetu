@@ -98,8 +98,14 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
 Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta, Graph& graph) {
   Graph::InitOnce();
-  return graph.MakeOpInner(std::move(body), std::move(inputs),
-                           std::move(op_meta));
+  Operator& op = graph.MakeOpInner(std::move(body), std::move(inputs),
+                                   std::move(op_meta));
+  if (graph.get_cur_subgraph_name() != "") {
+    // HT_LOG_INFO << "SubGraph:" << graph.get_cur_subgraph_name() << " add op:" << op;
+    auto subgraph = graph.cur_subgraph(); 
+    subgraph->add_op(op);
+  }
+  return op;
 }
 
 TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
@@ -340,6 +346,13 @@ std::ostream& operator<<(std::ostream& os, GraphType type) {
 std::ostream& operator<<(std::ostream& os, const Graph& graph) {
   os << "graph(name=" << graph.name() << ", id=" << graph.id()
      << ", type=" << graph.type() << ")";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, SubGraph& subgraph) {
+  os << "subgraph(name=" << subgraph.name() << ", type=" << subgraph.subgraph_type()
+     << ", ops=" << subgraph.ops() << ", subgraphs=" << subgraph.subgraph_info().size() << "-"
+     << subgraph.subgraph_info();
   return os;
 }
 

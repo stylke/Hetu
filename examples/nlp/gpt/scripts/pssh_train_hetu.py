@@ -38,8 +38,8 @@ def pssh(args):
     for host_out in output:
         for line in host_out.stderr:
             print(line)
-        # for line in host_out.stdout:
-        #     print(line)
+        for line in host_out.stdout:
+            print(line)
         exit_code = host_out.exit_code
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
