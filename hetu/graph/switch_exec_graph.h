@@ -260,7 +260,7 @@ class ParamBuffer {
 class ParamBuckets {
   public:
     ParamBuckets(const std::string& name = {},
-                 size_t buckets_size = 20):
+                 size_t buckets_size = 10):
       _name(name),
       _buckets_size(buckets_size) {
       for (size_t i = 0; i <= _buckets_size; i++) {

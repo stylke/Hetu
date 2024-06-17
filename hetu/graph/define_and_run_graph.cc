@@ -1066,6 +1066,11 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
             _param_and_opt_var_bucket_switcher_pool[key].emplace_back(std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, bucket_num, comm_set));
           }
         }
+        // tricky part
+        // topo caculation could be "overlapped"
+        for (int32_t bucket_num = 0; bucket_num < buckets_size; bucket_num++) {
+          _param_and_opt_var_bucket_switcher_pool[key][bucket_num]->SwitchParams(param_switch_mode, SWITCH_LEVEL::TOPO, "switch params and opt-states bucket " + std::to_string(bucket_num));
+        }
         auto& global_mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreateWorldwide();
         global_mpi_group->Barrier(true);
         TIK(switch_buckets_time);

@@ -56,21 +56,34 @@ class TPGroup(Args):
         node_idx: int,
         tp: int,
         devices: List[int],
-        sr: List[float],
+        sr_list: List[float],
         unused: bool = False
     ):
-        assert len(devices) == len(sr), "length mismatches"
+        assert len(devices) == len(sr_list), "length mismatches"
         tp_devices_num = len(devices)
+        self.ctxs = ctxs
         self.node_idx = node_idx
         self.tp = tp
         self.devices = devices
+        self.sr_list = sr_list
+        self.unused = unused
+        
         self.hetero_ratio = self.tp // tp_devices_num
         self.alpha = ctxs.hetero_tp_alpha[int(math.log2(self.tp // tp_devices_num))]
-        self.sr = max(sr) * self.alpha
+        self.sr = max(sr_list) * self.alpha
         # 减少搜索空间
         if self.sr < ctxs.straggler_threshold:
             self.sr = 1.0
-        self.unused = unused
+        
+    def copy(self):
+        return TPGroup(
+            self.ctxs,
+            self.node_idx,
+            self.tp,
+            self.devices,
+            self.sr_list,
+            self.unused 
+        )
     
     @staticmethod    
     def print(item) -> float:
@@ -196,6 +209,7 @@ class StrategyModel:
         for strategy_id in range(total_strategy_num):
             rank_to_device_mapping = {}
             suspended_rank_list = []
+            no_layer_rank_list = []
             unused_rank_list = []
             pipelines = pipelines_list[strategy_id]
             hetero_stages = [len(pipelines[pipeline_idx]) for pipeline_idx in range(len(pipelines))]
@@ -210,7 +224,10 @@ class StrategyModel:
                     for rank_idx in range(start_rank_idx, start_rank_idx + self.tp):
                         tp_size = len(pipelines[pipeline_idx][stage_idx].devices)
                         if rank_idx - start_rank_idx < tp_size:
+                            # print(rank_idx, pipeline_idx, stage_idx, pipelines[pipeline_idx][stage_idx])
                             rank_to_device_mapping[rank_idx] = pipelines[pipeline_idx][stage_idx].devices[rank_idx - start_rank_idx]
+                            if l_values_list[strategy_id][pipeline_idx][stage_idx] == 0:
+                                no_layer_rank_list.append(rank_idx)
                         else:
                             if len(suspended_rank_list) < len(new_suspended_devices):
                                 # 随便建立一个映射即可
@@ -228,6 +245,7 @@ class StrategyModel:
                             else:
                                 assert False, "unreachable"
                 base_rank_idx += hetero_stages[pipeline_idx] * self.tp
+            suspended_rank_list = suspended_rank_list + no_layer_rank_list
             strategy = TrainerStrategyArgs(
                 dp=self.dp,
                 tp=self.tp,
@@ -294,40 +312,67 @@ class StrategyModel:
             node_available_devices_sr = {k: v for k, v in available_devices_sr.items() if k in node_devices_range}
             # 非straggler按照device的序号升序排列
             # straggler按照sr升序排
+            # 枚举straggler部分的顺序
             node_available_devices_sr = sorted(
                 node_available_devices_sr.items(), 
                 key=lambda x: x[0] if x[1] < self.ctxs.straggler_threshold else x[1] * node_devices_num, 
             )
-            print("node_available_devices_sr =", node_available_devices_sr)
-            hetero_tp_max = 1
-            while hetero_tp_max <= node_available_devices_num - node_max_homo_devices_num:
-                hetero_tp_max *= 2
-            hetero_tp_max = hetero_tp_max // 2
-            # 寻找最优的hetero tp split方式
-            begin_hetero_tp = hetero_tp_max
-            start_idx = node_max_homo_devices_num - 1
+            straggler_num = len([device_idx for device_idx, sr in node_available_devices_sr if sr >= self.ctxs.straggler_threshold])
             best_hetero_tp_R_val = 0
-            best_hetero_tp_list = None
-            while begin_hetero_tp >= 1:
-                idx = start_idx
-                hetero_tp = begin_hetero_tp
-                hetero_tp_R_val = 0
-                hetero_tp_list = []
-                while hetero_tp >= 1:
-                    idx = idx + hetero_tp
-                    if idx > node_available_devices_num - 1:
-                        break
-                    hetero_tp_list.append(hetero_tp)
-                    relative_hetero_idx = int(math.log2(self.tp // hetero_tp))
-                    alpha = self.ctxs.hetero_tp_alpha[relative_hetero_idx]
-                    weight = self.ctxs.hetero_tp_weight[relative_hetero_idx]
-                    sr = node_available_devices_sr[idx][1]
-                    hetero_tp_R_val += 1 / (alpha * sr * weight)
-                    hetero_tp = hetero_tp // 2
-                if hetero_tp_R_val > best_hetero_tp_R_val:
-                    best_hetero_tp_R_val = hetero_tp_R_val
-                    best_hetero_tp_list = hetero_tp_list
-                begin_hetero_tp = begin_hetero_tp // 2
+            best_hetero_tp_list = []
+            best_node_available_devices_sr = node_available_devices_sr.copy()
+            basic_node_available_devices_sr = node_available_devices_sr.copy()
+            # 找最优的tp划分
+            def find_best_tp_split():
+                nonlocal best_hetero_tp_R_val, best_hetero_tp_list, best_node_available_devices_sr
+                hetero_tp_max = 1
+                while hetero_tp_max <= node_available_devices_num - node_max_homo_devices_num:
+                    hetero_tp_max *= 2
+                hetero_tp_max = hetero_tp_max // 2
+                # 寻找最优的hetero tp split方式
+                begin_hetero_tp = hetero_tp_max
+                start_idx = node_max_homo_devices_num - 1
+                while begin_hetero_tp >= 1:
+                    idx = start_idx
+                    hetero_tp = begin_hetero_tp
+                    hetero_tp_R_val = 0
+                    hetero_tp_list = []
+                    while hetero_tp >= 1:
+                        idx = idx + hetero_tp
+                        if idx > node_available_devices_num - 1:
+                            break
+                        hetero_tp_list.append(hetero_tp)
+                        relative_hetero_idx = int(math.log2(self.tp // hetero_tp))
+                        alpha = self.ctxs.hetero_tp_alpha[relative_hetero_idx]
+                        weight = self.ctxs.hetero_tp_weight[relative_hetero_idx]
+                        sr = max(device_sr[1] for device_sr in node_available_devices_sr[idx - hetero_tp + 1: idx + 1])
+                        hetero_tp_R_val += 1 / (alpha * sr * weight)
+                        hetero_tp = hetero_tp // 2
+                    if hetero_tp_R_val > best_hetero_tp_R_val:
+                        best_hetero_tp_R_val = hetero_tp_R_val
+                        best_hetero_tp_list = hetero_tp_list.copy()
+                        best_node_available_devices_sr = node_available_devices_sr.copy()
+                    begin_hetero_tp = begin_hetero_tp // 2
+            if straggler_num <= 1:
+                find_best_tp_split()
+            else:
+                for straggler_seq_len in range(1, straggler_num):
+                    node_available_devices_sr = basic_node_available_devices_sr.copy()
+                    for enum, index in enumerate(reversed(range(-1, len(node_available_devices_sr) - straggler_num))):
+                        # control tp split to run ablation experiments
+                        '''
+                        if straggler_seq_len != 2 or enum != 3:
+                            if index != -1:
+                                tmp = node_available_devices_sr.pop(index)
+                                node_available_devices_sr.insert(index + straggler_seq_len, tmp)
+                            continue
+                        '''
+                        find_best_tp_split()
+                        print(f"straggler_seq_len {straggler_seq_len} enum {enum}, node_available_devices_sr =", node_available_devices_sr, "and best_hetero_tp_list =", best_hetero_tp_list, "and best_hetero_tp_R_val =", best_hetero_tp_R_val)
+                        if index != -1:
+                            tmp = node_available_devices_sr.pop(index)
+                            node_available_devices_sr.insert(index + straggler_seq_len, tmp)
+            print("best_node_available_devices_sr =", best_node_available_devices_sr, "and best_hetero_tp_list =", best_hetero_tp_list)
             final_used_devices = node_devices_num - self.tp + sum(best_hetero_tp_list)
             # print("final_used_devices =", final_used_devices, "best hetero tp list =", best_hetero_tp_list)
             # 常规tp组
@@ -341,7 +386,7 @@ class StrategyModel:
                     best_iou = -1
                     best_idx = 0
                     for idx in range(node_max_homo_devices_num):
-                        device_idx = node_available_devices_sr[idx][0]
+                        device_idx = best_node_available_devices_sr[idx][0]
                         if device_idx not in visited_devices and \
                                 self.device_to_layers_prop[device_idx].slice_num == slice_num and \
                                 self.device_to_layers_prop[device_idx].slices_sum == self.tp:
@@ -361,22 +406,22 @@ class StrategyModel:
                             else:
                                 visited_devices[device_idx] = True
                                 tp_devices.append(device_idx)
-                                tp_sr.append(node_available_devices_sr[idx][1])
+                                tp_sr.append(best_node_available_devices_sr[idx][1])
                                 find_flag = True
                                 break
                     if not find_flag:
                         for idx in range(node_max_homo_devices_num):
-                            device_idx = node_available_devices_sr[idx][0]
+                            device_idx = best_node_available_devices_sr[idx][0]
                             if device_idx not in visited_devices:
                                 visited_devices[device_idx] = True
                                 tp_devices.append(device_idx)
-                                tp_sr.append(node_available_devices_sr[idx][1])
+                                tp_sr.append(best_node_available_devices_sr[idx][1])
                                 break
                     # 对之后的slice num采用best fit
                     elif slice_num >= 1:
-                        visited_devices[node_available_devices_sr[best_idx][0]] = True
-                        tp_devices.append(node_available_devices_sr[best_idx][0])
-                        tp_sr.append(node_available_devices_sr[best_idx][1])
+                        visited_devices[best_node_available_devices_sr[best_idx][0]] = True
+                        tp_devices.append(best_node_available_devices_sr[best_idx][0])
+                        tp_sr.append(best_node_available_devices_sr[best_idx][1])
                     slice_num += 1
                 all_tp_groups.append(
                     TPGroup(
@@ -396,8 +441,8 @@ class StrategyModel:
                 # TODO: find the best mapping
                 # 这里先按顺序组tp了
                 for idx in range(start_hetero_idx, end_hetero_idx):
-                    tp_devices.append(node_available_devices_sr[idx][0])
-                    tp_sr.append(node_available_devices_sr[idx][1])
+                    tp_devices.append(best_node_available_devices_sr[idx][0])
+                    tp_sr.append(best_node_available_devices_sr[idx][1])
                 all_tp_groups.append(
                     TPGroup(
                         self.ctxs, 
@@ -410,7 +455,7 @@ class StrategyModel:
                 start_hetero_idx = end_hetero_idx
             # 求解新的suspended devices
             for idx in range(final_used_devices, node_available_devices_num):
-                new_suspended_devices.append(node_available_devices_sr[idx][0])
+                new_suspended_devices.append(best_node_available_devices_sr[idx][0])
         return all_tp_groups, new_suspended_devices, self.unused_devices
       
     # deprecated 
@@ -518,7 +563,7 @@ class StrategyModel:
         # 启发式
         # 大部分tp是正常的
         # straggler tp groups按straggler ratio从大到小排
-        Args.print_args_list(all_tp_groups)     
+        # Args.print_args_list(all_tp_groups)     
         straggler_tp_groups = [tp_group for tp_group in all_tp_groups if tp_group.sr > 1.0]
         straggler_tp_groups.sort(
             key=lambda x: x.sr, 
@@ -547,16 +592,36 @@ class StrategyModel:
             hetero_stages_plans.append(hetero_stages)
         else:
             # heuristic
-            # 目前只提供两套策略
-            # 第一个是尽量让stage数平均
-            # 第二个是形成一个特别长的pipeline
+            # 目前策略是尽量让stage数平均
             base_stages = len(all_tp_groups) // self.dp
             remain_stages = len(all_tp_groups) - self.dp * base_stages
+            search_stage_gap = 1
+            '''
             hetero_stages_plan_1 = [base_stages + remain_stages if idx == 0 else base_stages for idx in range(self.dp)]
             hetero_stages_plans.append(hetero_stages_plan_1)
             hetero_stages_plan_2 = [base_stages + 1 if idx < remain_stages else base_stages for idx in range(self.dp)]
             hetero_stages_plans.append(hetero_stages_plan_2)
-        
+            '''
+            hetero_stages_plans = []
+            hetero_stages_plan = []
+            all_stages = 0
+            def search_hetero_stage_plan(pipeline_idx):
+                nonlocal hetero_stages_plans, hetero_stages_plan, all_stages
+                if pipeline_idx == self.dp:
+                    if all_stages == len(all_tp_groups):
+                        hetero_stages_plans.append(hetero_stages_plan.copy())
+                    return
+                for stage_num in range(base_stages - search_stage_gap, base_stages + remain_stages + search_stage_gap + 1):
+                    if pipeline_idx >= 1 and stage_num > hetero_stages_plan[pipeline_idx - 1]:
+                        continue
+                    hetero_stages_plan.append(stage_num)
+                    all_stages += stage_num
+                    search_hetero_stage_plan(pipeline_idx + 1)
+                    hetero_stages_plan.pop()
+                    all_stages -= stage_num
+            search_hetero_stage_plan(0) 
+            print("hetero_stages_plans =", hetero_stages_plans)          
+
         # step 1
         # 先把straggler tp group的位置枚举出来
         # 其余都用None代替
@@ -646,13 +711,12 @@ class StrategyModel:
         objective_list = []
         l_values_list = []
         m_values_list = []
+        legal_pipelines_template = []
         for pipelines_template in all_pipelines_template:
             print_formatted_pipelines_template = [
                 [TPGroup.print(item) for item in pipeline]
                     for pipeline in pipelines_template
             ]
-            print("**********************************************") 
-            print("pipelines_template =", print_formatted_pipelines_template)
             y_values = [
                 [(tp_group.sr if tp_group != None else 1.0) for tp_group in pipeline]
                     for pipeline in pipelines_template
@@ -671,12 +735,40 @@ class StrategyModel:
             objective_list.append(objective)
             l_values_list.append(l_values)
             m_values_list.append(m_values)
+            legal_pipelines_template.append(pipelines_template)
         top_k = min(self.ctxs.top_k, len(objective_list))       
         assert top_k != 0, "no possible strategies"
         top_k_idx = heapq.nsmallest(top_k, range(len(objective_list)), key=lambda i: objective_list[i])
+        top_k_objective = [objective_list[i] for i in top_k_idx]
         top_k_l_values = [l_values_list[i] for i in top_k_idx]
         top_k_m_values = [m_values_list[i] for i in top_k_idx]
-        top_k_pipelines_template = [all_pipelines_template[i] for i in top_k_idx]
+        top_k_pipelines_template = [
+            [
+                [
+                    legal_pipeline_stage_template.copy() if legal_pipeline_stage_template != None else None 
+                        for legal_pipeline_stage_template in legal_pipeline_template
+                ] 
+                for legal_pipeline_template in legal_pipelines_template[i]
+            ] 
+            for i in top_k_idx
+        ]
+        
+        # log
+        for i in range(top_k):
+            print_formatted_pipelines_template = [
+                [TPGroup.print(item) for item in pipeline]
+                    for pipeline in top_k_pipelines_template[i]
+            ]
+            print_formatted_pipelines_template_extra = [
+                [item.devices if item != None else None for item in pipeline]
+                    for pipeline in top_k_pipelines_template[i]
+            ]
+            print("**********************************************") 
+            print("pipelines_template =", print_formatted_pipelines_template)
+            print("pipelines_template_devices =", print_formatted_pipelines_template_extra)
+            print("objective =", top_k_objective[i])
+            print("l_values =", top_k_l_values[i])
+            print("m_values =", top_k_m_values[i])
         
         # step 3
         # 对于top k的pipeline template再依次分配每个normal tp group
@@ -685,7 +777,8 @@ class StrategyModel:
         # 尽量让跨node的grad reduce尽量少
         # 当不得不存在跨node通信时
         # 尽量让node选取和最慢的straggler一致
-        for pipelines_template, l_lists in zip(top_k_pipelines_template, top_k_l_values):
+        for top_idx, (pipelines_template, l_lists) in enumerate(zip(top_k_pipelines_template, top_k_l_values)):
+            # print(top_k_pipelines_template)
             accumulate_l_lists = []
             for l_list in l_lists:
                 accumulate_l_list = [0,]
@@ -694,6 +787,7 @@ class StrategyModel:
                     accumulate_l += l
                     accumulate_l_list.append(accumulate_l)
                 accumulate_l_lists.append(accumulate_l_list)
+            # print(pipelines_template, l_lists, accumulate_l_lists)
             visited_normal_tp_groups_mapping = [
                 {} for node_idx in range(self.all_nodes_num)
             ]
@@ -730,6 +824,7 @@ class StrategyModel:
                         if best_iou != -1:
                             pipelines_template[pipeline_id][stage_id] = normal_tp_groups_mapping[suggested_node_idx][best_num]
                             visited_normal_tp_groups_mapping[suggested_node_idx][best_num] = True
+                            # print(f"pipeline id {pipeline_id} stage id {stage_id}, normal tp group is {normal_tp_groups_mapping[suggested_node_idx][best_num]}")
             # step 3.2
             # 第二遍pass
             # 把剩下的None按顺序填了
@@ -765,6 +860,7 @@ class StrategyModel:
                         visited_normal_tp_groups_mapping[best_node_idx][best_num] = True
                         # print(f"pipeline id {pipeline_id} stage id {stage_id}, normal tp group is {normal_tp_groups_mapping[best_node_idx][best_num]}")
                         # print(visited_normal_tp_groups_mapping)
+            # top_k_pipelines_template[top_idx] = pipelines_template
         
         # 最终返回top k个搜索出的策略
         return top_k_pipelines_template, top_k_l_values, top_k_m_values
@@ -833,7 +929,7 @@ class StrategyModel:
                 # 求解问题
                 model.solve()
                 if LpStatus[model.status] != 'Optimal':
-                    print("No solution")
+                    # print("No solution")
                     return False, None, None, None
                 # 打印结果
                 # print(f"Q1, num = {i}, Optimal Objective Value:", model.objective.value())
@@ -870,10 +966,10 @@ class StrategyModel:
             if 'm_' in var.name:
                 m_values.append(int(var.varValue))
 
-        print("objective =", model.objective.value()) 
-        print("l_values =", l_values)  
-        print("m_values =", m_values) 
-        print("time elapse =", time.time() - clock) 
+        # print("objective =", model.objective.value()) 
+        # print("l_values =", l_values)  
+        # print("m_values =", m_values) 
+        # print("time elapse =", time.time() - clock) 
         return True, model.objective.value(), l_values, m_values
                 
                         
