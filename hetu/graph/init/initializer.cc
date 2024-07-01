@@ -1,5 +1,5 @@
 #include "hetu/graph/init/initializer.h"
-#include "hetu/autograd/ops/kernel_links.h"
+// #include "hetu/autograd/ops/kernel_links.h"
 #include <cmath>
 
 namespace hetu {

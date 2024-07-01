@@ -11,6 +11,7 @@ import json
 import socket
 from queue import Queue
 from collections import deque
+from hetu.utils.checkpoint import load_checkpoint, save_checkpoint, load_checkpoint_from_megatron
 
 local_device = None
 all_devices = None
@@ -101,6 +102,8 @@ def pretrain(args):
     # Hetu model definition
     model = GPTLMHeadModel(config=config, ds_parallel_config=ds_parallel_config)
 
+    
+    
     input_ds, input_device_group = config2ds(ds_parallel_config['input'])
     label_ds, label_device_group = config2ds(ds_parallel_config['label'])
     # print(f'input_ds: {input_ds}, label_ds: {label_ds}')
@@ -131,7 +134,7 @@ def pretrain(args):
     opt = ht.AdamOptimizer(lr=args.lr)
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
-
+    load_checkpoint_from_megatron(model, opt, "/home/pkuhetu/njw1123/hetu_merge_all/model_optim_rng.pt", config, local_device)
     print(f'{local_device}: build dataset begin...')
     train_dataset = train_dataset_provider(args)
     print(f'{local_device}: build dataset end...')
@@ -218,14 +221,19 @@ def pretrain(args):
                     time_last10.popleft()
                 loss_last10.append(loss_out)
                 time_last10.append(end_time-start_time)
+            if input_device_group.contains(local_device) and step == 40 and dp_rank == 0:
+               print(f'{local_device}: cuda mem:')
+               os.system('nvidia-smi')
                 
 
     output_str = ""
     if(len(loss_last10) == 10 and len(time_last10) == 10):
+        print(loss_last10)
         output_str = "%s:\nThe last ten iterations :\nAvg_Loss = %.3f, Avg_Time = %.4f\n" %(local_device, sum(loss_last10) / 10, sum(time_last10) / 10)
     # print("%s: The last ten iterations :\n Avg_Loss = %.3f, Avg_Time = %.4f" %(local_device, sum(loss_last10) / 10, sum(time_last10) / 10))
     if(args.profiler and len(profiler_last10) == 10) :
         graph_view = dict()
+        print(profiler_last10[0]["optype_view"])
         for item in profiler_last10[0]["graph_view"]:
             graph_view[item[0]] = 0
         for record in profiler_last10:
@@ -241,8 +249,11 @@ def pretrain(args):
         output_str += "avg-tp-collective : %.4f\n" %(graph_view["tp-collective"] / 10)
         output_str += "avg-blocking : %.4f\n" %(graph_view["blocking"] / 10)
         output_str += "avg-other : %.4f\n" %(graph_view["other"] / 10)
-    print(output_str, end = "")
-
+    # print(output_str, end = "")
+    # save_checkpoint(model, "./checkpoint/temp", config=config, local_device=local_device)
+    # print(f"device = {local_device}, test weight = {model.state_dict()['transformer.h.5.mlp.parallel_mlp.dense_4h_to_h.weight']}")
+    # print(f'device = {local_device}, save model sucessfully!')
+    return model, opt, config, local_device
 
 
 if __name__ == '__main__':
@@ -336,5 +347,14 @@ if __name__ == '__main__':
             precision = "ht.float32"
         print(f'{local_device}: use precision {precision}')
         with ht.autocast(eval(precision)):            
-            pretrain(args)
+            model, opt, config, local_device = pretrain(args)
             print(f'{local_device}: train hetu ds parallel end...')
+
+    save_path = './checkpoint/'
+    directory = os.path.dirname(save_path)
+
+    # 递归创建目录
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    save_checkpoint(model, opt, save_path, config=config, local_device=local_device)
+    

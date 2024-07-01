@@ -1,6 +1,6 @@
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
-#include "hetu/autograd/ops/kernel_links.h"
+// #include "hetu/autograd/ops/kernel_links.h"
 #include "test_utils.h"
 #include <thread>
 #include <cmath>

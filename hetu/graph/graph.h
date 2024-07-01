@@ -30,8 +30,96 @@ enum class RunLevel : int8_t {
   TOPO
 };
 
+
 std::string GraphType2Str(GraphType);
 std::ostream& operator<<(std::ostream&, GraphType);
+
+class SubGraph {
+  private:
+    OpList _ops;
+    std::vector<std::shared_ptr<SubGraph>> _subgraphs;
+    std::shared_ptr<SubGraph> _parent_graph;
+    std::string _name;
+    std::string _subgraph_type;
+  public:
+    SubGraph() {
+      _parent_graph = nullptr;
+      _subgraphs = {};
+      _ops = {};
+    }
+
+    SubGraph(std::string name) {
+      _name = name;
+      _parent_graph = nullptr;
+      _subgraphs = {};
+      _ops = {};
+    }
+
+    SubGraph(std::string name, std::string subgraph_type) {
+      _name = name;
+      _subgraph_type = subgraph_type;
+      _parent_graph = nullptr;
+      _subgraphs = {};
+      _ops = {};
+    }
+
+    void add_op(Operator& op) {
+      _ops.push_back(op);
+    }
+
+    void add_subgraph(std::shared_ptr<SubGraph> subgraph) {
+      _subgraphs.push_back(subgraph);
+    }
+
+    void set_parent_graph(std::shared_ptr<SubGraph> parent_graph) {
+      _parent_graph = parent_graph;
+    }
+
+    void set_name(std::string name) {
+      _name = name;
+    }
+
+    void set_subgraph_type(std::string subgraph_type) {
+      _subgraph_type = subgraph_type;
+    }
+
+    std::string name() const {
+      return _name;
+    }
+
+    std::shared_ptr<SubGraph> parent_graph() const {
+      return _parent_graph;
+    }
+
+    std::string subgraph_type() const {
+      return _subgraph_type;
+    }
+
+    OpList ops() const {
+      return _ops;
+    }
+
+    OpList& ops() {
+      return _ops;
+    }
+
+    std::vector<std::shared_ptr<SubGraph>> subgraphs() const{
+      return _subgraphs;
+    }
+
+    std::vector<std::string> subgraph_info() {
+      std::vector<std::string> output = {};
+      output.reserve(_subgraphs.size());
+      for (int i = 0; i < _subgraphs.size(); ++i) {
+        output.push_back("name=" + _subgraphs[i]->name() + 
+                         ", type=" + _subgraphs[i]->subgraph_type());
+      }
+      return output;
+    }
+
+};
+
+std::ostream& operator<<(std::ostream&, SubGraph&);
 
 class Graph {
  protected:
@@ -128,6 +216,69 @@ class Graph {
 
   Operator& GetOp(OpId op_id) {
     return _op_indexing[op_id];
+  }
+
+  std::unordered_map<std::string, std::shared_ptr<SubGraph>>& GetAllSubGraphs() {
+    return _subgraphs;
+  }
+  
+
+  std::shared_ptr<SubGraph> GetSubGraph(std::string subgraph_name = "") {
+    // if (subgraph_name == "")
+    //   subgraph_name = get_cur_subgraph_name();
+    // if (_subgraphs.find(subgraph_name) == _subgraphs.end()) {
+    //   _subgraphs[subgraph_name] = std::make_shared<SubGraph>(subgraph_name);
+    // }
+    if(_subgraphs.find(subgraph_name) == _subgraphs.end()){
+      std::cout << subgraph_name << std::endl;
+    }
+    HT_ASSERT(_subgraphs.find(subgraph_name) != _subgraphs.end());
+    return _subgraphs[subgraph_name];
+  }
+
+  std::shared_ptr<SubGraph> MakeSubGraph(std::string subgraph_type = "", 
+                                         std::string name = "", 
+                                         std::string subgraph_name = "") {
+    std::string parent_subgraph_name = get_cur_subgraph_name();
+    if (subgraph_name == "" && name != "")
+      if (parent_subgraph_name == "")
+        subgraph_name = name;
+      else 
+        subgraph_name = parent_subgraph_name + "." + name;
+    if (_subgraphs.find(subgraph_name) == _subgraphs.end()) {
+      _subgraphs[subgraph_name] = std::make_shared<SubGraph>(name, subgraph_type);
+    }
+    if (parent_subgraph_name != "") {
+      HT_ASSERT(_subgraphs.find(parent_subgraph_name) != _subgraphs.end());
+      _subgraphs[subgraph_name]->set_parent_graph(_subgraphs[parent_subgraph_name]);
+      _subgraphs[parent_subgraph_name]->add_subgraph(_subgraphs[subgraph_name]);
+    }
+    return _subgraphs[subgraph_name];
+  }
+
+  void push_subgraph_ctx(std::string name) {
+    _subgraph_ctx.push_back(name);
+  }
+
+  void pop_subgraph_ctx() {
+    _subgraph_ctx.pop_back();
+  }
+
+  std::string get_cur_subgraph_name() {
+    if (_subgraph_ctx.empty())
+      return "";
+    std::string cur_subgraph_name = "";
+    for (int i = 0; i < _subgraph_ctx.size() - 1; ++i) {
+      cur_subgraph_name = cur_subgraph_name + _subgraph_ctx[i] + ".";
+    }
+    cur_subgraph_name += _subgraph_ctx.back();
+    return cur_subgraph_name;
+  }
+
+  std::shared_ptr<SubGraph> cur_subgraph() {
+    std::string cur_subgraph_name = get_cur_subgraph_name();
+    HT_ASSERT(_subgraphs.find(cur_subgraph_name) != _subgraphs.end());
+    return _subgraphs[cur_subgraph_name]; 
   }
 
  protected:
@@ -264,6 +415,10 @@ class Graph {
   std::unordered_set<OpId> _parameter_ops;
   std::unordered_set<OpId> _source_ops;
   std::unordered_set<OpId> _sink_ops;
+  std::unordered_map<OpId, OpId> _paramter_to_absmax;
+  std::unordered_map<OpId, int64_t> _paramter_to_blocksize;
+  std::unordered_map<std::string, std::shared_ptr<SubGraph>> _subgraphs;
+  std::vector<std::string> _subgraph_ctx;
   
   std::unordered_map<OpId, uint32_t> _op_out_degrees;
   Tensor2NDArrayMap _preserved_data;

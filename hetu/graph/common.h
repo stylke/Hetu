@@ -34,6 +34,7 @@ using Op2OpMap = std::unordered_map<OpId, Operator>;
 using Op2OpRefMap = std::unordered_map<OpId, OpRef>;
 using Op2OpCRefMap = std::unordered_map<OpId, OpCRef>;
 
+
 template <typename T>
 struct is_op_list : std::false_type {};
 template <>
@@ -56,6 +57,7 @@ using Tensor2NDArrayMap = std::unordered_map<TensorId, NDArray>;
 using Tensor2IntMap = std::unordered_map<TensorId, int>;
 using Tensor2StringMap = std::unordered_map<TensorId, std::string>;
 using Tensor2ShapeMap = std::unordered_map<TensorId, HTShape>;
+using StateDict = std::unordered_map<OpName, Tensor>;
 
 using GradAndVar = std::pair<Tensor, Tensor>;
 using GradAndVarList = std::vector<GradAndVar>;

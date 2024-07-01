@@ -28,6 +28,8 @@ PyObject* PyTensor_New(Tensor&& tensor, bool return_none_if_undefined = true);
 PyObject* PyTensorList_New(TensorList&& tensors,
                            bool return_none_if_undefined = true);
 
+PyObject* PyDict_FromStateDict(StateDict map);
+
 void AddPyTensorTypeToModule(py::module_& module);
 
 /******************************************************
@@ -41,6 +43,8 @@ inline bool CheckPyTensor(PyObject* obj) {
 inline Tensor Tensor_FromPyObject(PyObject* obj) {
   return reinterpret_cast<PyTensor*>(obj)->tensor;
 }
+
+
 
 inline bool CheckPyTensorList(PyObject* obj) {
   bool is_tuple = PyTuple_Check(obj);

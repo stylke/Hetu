@@ -53,6 +53,8 @@ class Module(object):
         self._recompute = False
         self._output_recompute = False
         self._cpu_offload = False
+        self.module_name = None
+        self.global_name = ""
         with hetu.graph("define_and_run"):
             super().__setattr__("_parameters", OrderedDict())
             super().__setattr__("_modules", OrderedDict())
@@ -192,6 +194,8 @@ class Module(object):
             if _modules is None:
                 raise AttributeError(
                     "Cannot register modules before calling Module.__init__()")
+            value.__setattr__("module_name", name)
+            value.global_name = self.global_name + "." + name 
             self._register_member(name, value, _modules, Module)
     
     def add_module(self, name: str, value: Optional['Module']) -> None:
@@ -299,6 +303,15 @@ class Module(object):
     def __call__(self, *input, **kwargs) -> Any:
         with ExitStack() as stack:
             stack.enter_context(hetu.graph("define_and_run"))
+            if self.module_name is None:
+                print(self.__class__.__name__, "Not Have Module_Name")
+            else:
+                # print(self.__class__.__name__,  "Module_Name:", self.module_name, "Global_name:", self.global_name)
+                stack.enter_context(hetu.subgraph(subgraph_type = self.__class__.__name__, name = self.module_name))
+                
+                
+            # for name, child in self.named_children():
+            #     print("Sub:", name, ",", child)
             stack.enter_context(hetu.recompute() if self._recompute else nullcontext())
             stack.enter_context(hetu.cpu_offload() if self._cpu_offload else nullcontext())
             value = self.forward(*input, **kwargs)
@@ -452,6 +465,7 @@ class Module(object):
             key = prefix + name
             if key in state_dict:
                 param_data = state_dict[key]
+                # print("param_date_type", type(param_data))
                 try:
                     if local_device is None:
                         # Tensor

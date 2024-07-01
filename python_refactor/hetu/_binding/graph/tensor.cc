@@ -49,6 +49,17 @@ inline PyObject* PyTensor_pynew(PyTypeObject* type, PyObject* args,
   return TensorCopyCtor(type, args, kwargs);
 }
 
+PyObject* PyDict_FromStateDict(StateDict map) {
+  PyObject* dict_obj = PyDict_New();
+  for (auto& item : map) {
+    PyObject* key = PyUnicode_FromString(item.first);
+    Tensor val = item.second;
+    PyObject* value = PyTensor_New(std::move(val));
+    PyDict_SetItem(dict_obj, key, value);
+  }
+  return dict_obj;
+}
+
 PyObject* PyTensor_make_subclass(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
