@@ -149,7 +149,7 @@ void DefineAndRunGraph::DeducePipeline(size_t cur_strategy_id) {
       << "device group & ds of " << op << " shouldn't be empty";
     auto num_devices = device_group.num_devices();
     total_pipeline = std::min(total_pipeline, ds.states(-1));
-    if (total_p2pline == -1) {
+    if (total_p2pline == -1) { 
       total_p2pline = num_devices;
     } else {
       HT_ASSERT(total_p2pline == num_devices)
@@ -647,6 +647,56 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       exec_op->set_fw_op_id(op_to_exec_op_mapping[op->fw_op_id()]->id());
     } 
   }
+
+  // assign subgraph
+  std::map< std::shared_ptr<SubGraph>, int > subgraph_exec_op_num;
+  std::function<int(std::shared_ptr<SubGraph>)> get_subgraph_exec_op_num = [&](std::shared_ptr<SubGraph> subgraph) -> int {
+    if(subgraph_exec_op_num.find(subgraph) != subgraph_exec_op_num.end()) return subgraph_exec_op_num[subgraph];
+    subgraph_exec_op_num[subgraph] = 0;
+    for(auto op : subgraph->ops()){
+      if(op_to_exec_op_mapping.find(op->id()) != op_to_exec_op_mapping.end()){
+        subgraph_exec_op_num[subgraph] += 1;
+      }
+    }
+    for(auto child : subgraph->subgraphs()){
+      subgraph_exec_op_num[subgraph] += get_subgraph_exec_op_num(child);
+    }
+    return subgraph_exec_op_num[subgraph];
+  };
+
+
+  for(auto [name, subgraph] : _subgraphs){
+    get_subgraph_exec_op_num(subgraph);
+    
+    if(subgraph_exec_op_num[subgraph] == 0) continue;
+
+    auto exec_subgraph = exec_graph->MakeSubGraph("", "", name);
+    exec_subgraph->set_name(subgraph->name());
+    exec_subgraph->set_subgraph_type(subgraph->subgraph_type());
+    for(auto op : subgraph->ops()){
+      if(op_to_exec_op_mapping.find(op->id()) != op_to_exec_op_mapping.end()){
+        exec_subgraph->add_op(op_to_exec_op_mapping[op->id()]);
+      }
+    }
+  }
+
+  for(auto [name, subgraph] : _subgraphs){
+    if(subgraph_exec_op_num[subgraph] == 0) continue;
+    auto exec_subgraph = exec_graph->GetSubGraph(name);
+    if( subgraph->parent_graph() != nullptr){
+      std::string parant_name = "";
+      auto parant_subgraph = subgraph->parent_graph();
+      while(parant_subgraph != nullptr){
+        if(parant_name == "") parant_name = parant_subgraph->name();
+        else parant_name = parant_subgraph->name() + "." + parant_name;
+        parant_subgraph = parant_subgraph->parent_graph();
+      }
+      auto exec_parant_subgraph = exec_graph->GetSubGraph(parant_name);
+      exec_subgraph->set_parent_graph(exec_parant_subgraph);
+      exec_parant_subgraph->add_subgraph(exec_subgraph);
+    }
+  }
+
   
   // assign initial shape plan
   exec_graph->AddShapePlan(std::move(exec_shape_plan));

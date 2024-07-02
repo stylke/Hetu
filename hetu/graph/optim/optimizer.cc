@@ -24,6 +24,11 @@ StateDict Optimizer::GetStates(const Tensor& var) {
   return state_dict[var->id()];
 }
 
+void Optimizer::SetStates(const Tensor& var, const OpName state_name, const NDArray& value) {
+  HT_ASSERT(state_dict.find(var->id()) != state_dict.end());
+  ResetVariableData(state_dict[var->id()][state_name], value);
+}
+
 Tensor Optimizer::ApplyGradients(const GradAndVarList& grads_and_vars,
                                  const OpName& name, const Tensor& infinite_count) {
   TensorList updated_params;
@@ -54,7 +59,6 @@ Tensor Optimizer::MakeStates(const Tensor& variable, const Tensor& grad, const O
                                           .set_device_groups(producer->device_groups())
                                           .set_eager_device(producer->eager_device())
                                           .set_name(variable->name() + "_" + state_name));  
-  
   if (state_dict.find(variable->id()) == state_dict.end()) {
     state_dict[variable->id()] = {};
   }
@@ -112,7 +116,8 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
   std::unordered_map<int32_t, int32_t> step_states;
   step_states[-1] = var_ds.get_device_num();
   DistributedStates step_ds(var_ds.get_device_num(), step_states, step_order, var_ds.zero());
-  Tensor step = MakeVariableOp(OnesInitializer(), step_shape, kInt64,
+  Tensor step = MakeVariableOp(OnesInitializer(),
+                                step_shape, kInt64,
                                 false, step_ds, 
                                 OpMeta()
                                   .set_device_groups(var->producer()->device_groups())
@@ -133,3 +138,4 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
 
 } // namespace graph
 } // namespace hetu
+

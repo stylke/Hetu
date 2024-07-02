@@ -25,6 +25,8 @@ class Optimizer {
                   const Tensor& grad_loss = {}, const OpName& name = "");
   
   StateDict GetStates(const Tensor& var);
+  
+  void SetStates(const Tensor& var, const OpName state_name, const NDArray& value);
 
   virtual GradAndVarList ComputeGradients(const Tensor& loss,
                                           const TensorList& var_list = {},

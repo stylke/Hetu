@@ -44,6 +44,8 @@ inline Tensor Tensor_FromPyObject(PyObject* obj) {
   return reinterpret_cast<PyTensor*>(obj)->tensor;
 }
 
+
+
 inline bool CheckPyTensorList(PyObject* obj) {
   bool is_tuple = PyTuple_Check(obj);
   if (is_tuple || PyList_Check(obj)) {

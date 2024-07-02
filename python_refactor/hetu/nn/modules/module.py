@@ -469,6 +469,7 @@ class Module(object):
             key = prefix + name
             if key in state_dict:
                 param_data = state_dict[key]
+                # print("param_date_type", type(param_data))
                 try:
                     if local_device is None:
                         # Tensor
