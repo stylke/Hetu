@@ -210,6 +210,7 @@ std::string DeviceClient::GetNcclId(const std::vector<int>& world_rank, int stre
 
 int DeviceClient::Exit(int rank) {
   // Data we are sending to the server.
+  stop();
   ExitRequest request;
   request.set_rank(rank);
 
@@ -644,6 +645,35 @@ int DeviceClient::Barrier(int rank, const std::vector<int>& world_rank) {
     HT_LOG_ERROR << status.error_code() << ": " << status.error_message();
     __builtin_unreachable();
   }
+}
+
+int DeviceClient::HeartBeat(int rank) {
+  // Data we are sending to the server.
+  HeartBeatRequest request;
+  request.set_rank(rank);
+
+  // Container for the data we expect from the server.
+  HeartBeatReply reply;
+
+  // Context for the client. It could be used to convey extra information to
+  // the server and/or tweak certain RPC behaviors.
+  ClientContext context;
+
+  // The actual RPC.
+  Status status = stub_->HeartBeat(&context, request, &reply);
+
+  // Act upon its status.
+  if (status.ok()) {
+    return reply.status();
+  } else {
+    HT_LOG_ERROR << status.error_code() << ": " << status.error_message();
+    __builtin_unreachable();
+  }
+}
+
+void DeviceClient::LaunchHeartBeat(int rank) {
+  _rank = rank;
+  this->start();
 }
 
 } //namespace hetu

@@ -383,6 +383,106 @@ NDArray NDArray::tanh(const NDArray& input, StreamIndex stream_id,
   return out;
 }
 
+NDArray NDArray::elu(const NDArray& input, double alpha, double scale,
+                     StreamIndex stream_id,
+                     NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Elu, input, alpha, scale, out, stream);
+  return out;
+}
+
+NDArray NDArray::hardshrink(const NDArray& input, double lambda,
+                            StreamIndex stream_id,
+                            NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Hardshrink, input, lambda, out, stream);
+  return out;
+}
+
+NDArray NDArray::hardsigmoid(const NDArray& input,
+                             StreamIndex stream_id,
+                             NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Hardsigmoid, input, out, stream);
+  return out;
+}
+
+NDArray NDArray::hardtanh(const NDArray& input, double min_val, double max_val,
+                          StreamIndex stream_id,
+                          NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Hardtanh, input, min_val, max_val, out, stream);
+  return out;
+}
+
+NDArray NDArray::hardswish(const NDArray& input,
+                           StreamIndex stream_id,
+                           NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Hardswish, input, out, stream);
+  return out;
+}
+
+NDArray NDArray::logsigmoid(const NDArray& input,
+                            StreamIndex stream_id,
+                            NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Logsigmoid, input, out, stream);
+  return out;
+}
+
+NDArray NDArray::silu(const NDArray& input,
+                      StreamIndex stream_id,
+                      NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Silu, input, out, stream);
+  return out;
+}
+
+NDArray NDArray::mish(const NDArray& input,
+                      StreamIndex stream_id,
+                      NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Mish, input, out, stream);
+  return out;
+}
+
+NDArray NDArray::softplus(const NDArray& input, double beta, double threshold,
+                          StreamIndex stream_id,
+                          NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Softplus, input, beta, threshold, out, stream);
+  return out;
+}
+
+NDArray NDArray::softshrink(const NDArray& input, double lambda,
+                          StreamIndex stream_id,
+                          NDArray& output) {
+  NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
+  Stream stream(input->device(), stream_id);
+  HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
+                               hetu::impl::Softshrink, input, lambda, out, stream);
+  return out;
+}
+
 NDArray NDArray::exp(const NDArray& input, StreamIndex stream_id,
                      NDArray& output) {
   NDArray out = output.is_defined() ? output : NDArray::empty_like(input);

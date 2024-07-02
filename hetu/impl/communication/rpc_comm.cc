@@ -48,6 +48,7 @@ static void RPC_Init_Once() {
     HT_LOG_DEBUG << "GETRANK:" << rank;
     HT_LOG_INFO << Device::GetLocalHostname();
     rpc_world_rank = rank;
+    local_client->LaunchHeartBeat(rpc_world_rank);
     // register exit handler
     HT_ASSERT(std::atexit([]() {
                 HT_LOG_DEBUG << "Destructing rpc comm groups...";

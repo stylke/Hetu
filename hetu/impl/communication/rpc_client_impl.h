@@ -68,6 +68,10 @@ class DeviceClientImpl {
   virtual std::string RemoveJson(const std::string& key) {}
 
   virtual int Barrier(int rank, const std::vector<int>& world_rank) {}
+
+  virtual int HeartBeat(int rank) {}
+
+  virtual void LaunchHeartBeat(int rank) {};
 };
 
 } //namespace hetu

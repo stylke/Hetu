@@ -567,6 +567,15 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       op->_body, std::move(exec_inputs),
       OpMeta().set(op->op_meta()).set_is_deduce_states(false).set_extra_deps(std::move(exec_in_deps)),
       *exec_graph);
+    
+    std::shared_ptr<SubGraph> define_subgraph = GetSubGraph(op);
+    if (define_subgraph != nullptr) {
+      std::shared_ptr<SubGraph> exec_subgraph = exec_graph->MakeSubGraph(define_subgraph->subgraph_type(),
+                                                                         define_subgraph->name(),
+                                                                         define_subgraph->global_graph_name());
+      exec_graph->AddOpToSubGraph(exec_op, exec_subgraph->global_graph_name(), 
+                                  GetSubGraphType(op));
+    }
 
     // 后处理
     // 1、建立op和exec_op的映射

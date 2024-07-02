@@ -2,6 +2,7 @@
 
 #include "hetu/impl/communication/rpc_client_impl.h"
 #include <grpcpp/grpcpp.h>
+#include <thread>
 #include "hetu/impl/communication/rpc/heturpc.grpc.pb.h"
 
 using json = nlohmann::json;
@@ -14,9 +15,10 @@ namespace hetu {
 
 class DeviceClient : public DeviceClientImpl {
  public:
-  DeviceClient() {}
-  DeviceClient(std::shared_ptr<Channel> channel)
-      : stub_(DeviceController::NewStub(channel)) {}
+  DeviceClient(int64_t time_interval = 5): _time_interval(time_interval) {}
+  DeviceClient(std::shared_ptr<Channel> channel, int64_t time_interval = 5)
+      : stub_(DeviceController::NewStub(channel)), _time_interval(time_interval) {
+  }
 
   int Connect(const std::string& hostname) override;
 
@@ -68,8 +70,35 @@ class DeviceClient : public DeviceClientImpl {
 
   int Barrier(int rank, const std::vector<int>& world_rank) override;
 
+  int HeartBeat(int rank) override;
+
+  void LaunchHeartBeat(int rank) override;
+
  private:
   std::unique_ptr<DeviceController::Stub> stub_;
+  std::thread heartbeatThread;
+  bool running = false;
+  int64_t _time_interval;
+  int64_t _rank;
+
+  void start() {
+    running = true;
+    heartbeatThread = std::thread(&DeviceClient::heartbeatLoop, this);
+  }
+
+  void stop() {
+    running = false;
+    if (heartbeatThread.joinable()) {
+      heartbeatThread.join();
+    }
+  }
+
+  void heartbeatLoop() {
+    while (running) {
+      std::this_thread::sleep_for(std::chrono::seconds(_time_interval));
+      HeartBeat(_rank);
+    }
+  }
 };
 
 } //namespace hetu

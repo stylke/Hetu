@@ -197,3 +197,6 @@ class _SubGraphContext(object):
 
 def subgraph(subgraph_type="", name=""):
     return _SubGraphContext(subgraph_type=subgraph_type, name=name)
+
+def add_to_subgraph(tensor, subgraph_name=""):
+    _hetu_core._internal_context.add_op_to_subgraph(tensor, subgraph_name)

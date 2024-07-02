@@ -67,6 +67,7 @@ DECLARE_KERNEL_CPU_AND_CUDA(BroadcastShapeMul, const NDArray&, double, NDArray&,
                             const HTShape&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Ceil, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(CheckFinite, const NDArray&, NDArray&, const Stream&);
+DECLARE_KERNEL_CPU_AND_CUDA(CheckNumeric, const NDArray&, NDArray&, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(Concat, const NDArray&, const NDArray&, NDArray&,
                             size_t, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ConcatGradient, const NDArray&, NDArray&, size_t,
@@ -370,6 +371,49 @@ DECLARE_KERNEL_CPU_AND_CUDA(AllGather, const NDArray&, NDArray&,
                             const DeviceGroup&, int32_t gather_dim, const Stream&);
 DECLARE_KERNEL_CPU_AND_CUDA(ReduceScatter, const NDArray&, NDArray&, ReductionType,
                             const DeviceGroup&, int32_t scatter_dim, const Stream&);
+
+//other activations
+DECLARE_KERNEL_CUDA(Elu, const NDArray&, double, double, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(EluGradient, const NDArray&, const NDArray&,
+                    double, double, NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(Hardshrink, const NDArray&, double, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(HardshrinkGradient, const NDArray&, const NDArray&,
+                    double, NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(Hardsigmoid, const NDArray&, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(HardsigmoidGradient, const NDArray&, const NDArray&,
+                    NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(Hardtanh, const NDArray&, double, double, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(HardtanhGradient, const NDArray&, const NDArray&,
+                    double, double, NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(Hardswish, const NDArray&, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(HardswishGradient, const NDArray&, const NDArray&,
+                    NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(Logsigmoid, const NDArray&, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(LogsigmoidGradient, const NDArray&, const NDArray&,
+                    NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(Silu, const NDArray&, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(SiluGradient, const NDArray&, const NDArray&,
+                    NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(Mish, const NDArray&, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(MishGradient, const NDArray&, const NDArray&,
+                    NDArray&, const Stream&);
+DECLARE_KERNEL_CUDA(Softplus, const NDArray&, double, double, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(SoftplusGradient, const NDArray&, const NDArray&,
+                    double, double, NDArray&, const Stream&);   
+DECLARE_KERNEL_CUDA(Softshrink, const NDArray&, double, NDArray&,
+                    const Stream&);
+DECLARE_KERNEL_CUDA(SoftshrinkGradient, const NDArray&, const NDArray&,
+                    double, NDArray&, const Stream&);
+               
 /******************************************************
  * Dispatching kernels for operations
  ******************************************************/

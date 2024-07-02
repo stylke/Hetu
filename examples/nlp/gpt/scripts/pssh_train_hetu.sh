@@ -54,7 +54,7 @@ MERGE_FILE=${ROOT_FOLDER}/merges.txt
 export NCCL_DEBUG=VERSION
 export HETU_INTERNAL_LOG_LEVEL=INFO
 
-CMDM="python3 train_hetu_gpt_ds_parallel.py \
+CMDM="HETU_INTERNAL_LOG_LEVEL=WARN python3 train_hetu_gpt_ds_parallel.py \
 --ds_parallel_config ${DS_PARALLEL_CONFIG} \
 --global_batch_size ${GLOBAL_BATCH_SIZE} \
 --micro_batch_size ${MICRO_BATCH_SIZE} \

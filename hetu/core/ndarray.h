@@ -164,6 +164,7 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                             StreamIndex stream_id = DEFAULT_STREAM,
                             NDArray& output = EMPTY);
 
+  // activations
   static NDArray sigmoid(const NDArray& input,
                          StreamIndex stream_id = DEFAULT_STREAM,
                          NDArray& output = EMPTY);
@@ -179,6 +180,46 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
   static NDArray tanh(const NDArray& input,
                       StreamIndex stream_id = DEFAULT_STREAM,
                       NDArray& output = EMPTY);
+  
+  static NDArray elu(const NDArray& input, double alpha, double scale,
+                     StreamIndex stream_id = DEFAULT_STREAM,
+                     NDArray& output = EMPTY);
+  
+  static NDArray hardshrink(const NDArray& input, double lambda,
+                            StreamIndex stream_id = DEFAULT_STREAM,
+                            NDArray& output = EMPTY);
+
+  static NDArray hardsigmoid(const NDArray& input,
+                            StreamIndex stream_id = DEFAULT_STREAM,
+                            NDArray& output = EMPTY);
+
+  static NDArray hardtanh(const NDArray& input, double min_val, double max_val,
+                          StreamIndex stream_id = DEFAULT_STREAM,
+                          NDArray& output = EMPTY);
+
+  static NDArray hardswish(const NDArray& input,
+                           StreamIndex stream_id = DEFAULT_STREAM,
+                           NDArray& output = EMPTY);
+
+  static NDArray logsigmoid(const NDArray& input,
+                            StreamIndex stream_id = DEFAULT_STREAM,
+                            NDArray& output = EMPTY);
+
+  static NDArray silu(const NDArray& input,
+                      StreamIndex stream_id = DEFAULT_STREAM,
+                      NDArray& output = EMPTY);
+
+  static NDArray mish(const NDArray& input,
+                      StreamIndex stream_id = DEFAULT_STREAM,
+                      NDArray& output = EMPTY);
+
+  static NDArray softplus(const NDArray& input, double beta, double threshold,
+                          StreamIndex stream_id = DEFAULT_STREAM,
+                          NDArray& output = EMPTY);
+
+  static NDArray softshrink(const NDArray& input, double lambda,
+                            StreamIndex stream_id = DEFAULT_STREAM,
+                            NDArray& output = EMPTY);                           
 
   static NDArray exp(const NDArray& input,
                      StreamIndex stream_id = DEFAULT_STREAM,

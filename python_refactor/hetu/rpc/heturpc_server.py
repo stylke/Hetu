@@ -15,9 +15,11 @@ MAX_UNFOUND_TIMES = 10000
 
 
 class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
-    def __init__(self, arr) -> None:
+    def __init__(self, arr, exit_arr, last_heartbeat) -> None:
         super().__init__()
         self.arr = arr
+        self.exit_arr = exit_arr
+        self.last_heartbeat = last_heartbeat
         #locks
         self.lock = threading.Lock()
         self.double_lock = threading.Lock()
@@ -70,6 +72,8 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
             else:
                 local_rank += self.local_worldsizes[nodename_]
         print(request.name, " ", local_rank)
+        self.last_heartbeat[int(local_rank)] = time.time()
+        self.arr[0] += 1
         self.lock.release()
         return heturpc_pb2.RankReply(rank=local_rank)
     
@@ -122,12 +126,13 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
 
     def Exit(self, request, context):
         self.lock.acquire()
+        self.exit_arr[request.rank] = 1
         self.exit_nums += 1
         self.lock.release()
         print(self.exit_nums, " ", self.worldsize)
-        while(self.exit_nums != self.worldsize):
-            time.sleep(0.0001)
-        self.arr[0] = 1
+        # while(self.exit_nums != self.worldsize):
+        #     time.sleep(0.0001)
+        # self.exit_arr[request.rank] = 1
         return heturpc_pb2.ExitReply(status=1)
 
     def PutDouble(self, request, context):
@@ -283,12 +288,15 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
         # print("End Barrier:", self.barrier_nums[world_rank], " ", len(world_rank))
         return heturpc_pb2.BarrierReply(status=1)
     
-    def SayHello(self, request, context):
-        return heturpc_pb2.HetuReply(message="Hello, %s!" % request.name)
+    def HeartBeat(self, request, context):
+        self.lock.acquire()
+        self.last_heartbeat[request.rank] = time.time()
+        self.lock.release()
+        return heturpc_pb2.HeartBeatReply(status=1)
 
-def serve(arr, port):
+def serve(arr, exit_arr, last_heartbeat, port):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=32))
-    heturpc_pb2_grpc.add_DeviceControllerServicer_to_server(DeviceController(arr), server)
+    heturpc_pb2_grpc.add_DeviceControllerServicer_to_server(DeviceController(arr, exit_arr, last_heartbeat), server)
     server.add_insecure_port("[::]:" + port)
     server.start()
     print("Server started, listening on " + port)
@@ -302,10 +310,21 @@ if __name__ == "__main__":
     )
     server_args = parser.parse_args()
     logging.basicConfig()
-    arr = multiprocessing.Array("i",[0])
-    p = multiprocessing.Process(target=serve, args=(arr, server_args.port))
+    arr = multiprocessing.Array("i", [0], lock=True)
+    exit_arr = multiprocessing.Array("i", [0] * 32, lock=True)
+    last_heartbeat = multiprocessing.Array("d", [0.0] * 32, lock=True)
+    p = multiprocessing.Process(target=serve, args=(arr, exit_arr, last_heartbeat, server_args.port))
     p.start()
-    while (arr[0] == 0):
-        time.sleep(1)
+    while (arr[0] == 0 or arr[0] > sum(exit_arr)):
+        time.sleep(5)
+        cur_time = time.time()
+        for i in range(arr[0]):
+            interval = cur_time - last_heartbeat[i]
+            if (interval > 10):
+                exit_arr[i] = 1
+        #     print("Interval of Rank ", i, ":", interval, exit_arr[i])
+        # print("Arr0:", arr[0], "SumExit:", sum(exit_arr))
+                
+            
     print("Server Stopped.")
     p.terminate()

@@ -308,6 +308,10 @@ class Module(object):
             else:
                 # print(self.__class__.__name__,  "Module_Name:", self.module_name, "Global_name:", self.global_name)
                 stack.enter_context(hetu.subgraph(subgraph_type = self.__class__.__name__, name = self.module_name))
+                _parameters = self.__dict__.get('_parameters')
+                for key, param in _parameters.items():
+                    print(self.module_name, " ", key, " ", type(param), param)
+                    hetu.add_to_subgraph(param)
                 
                 
             # for name, child in self.named_children():

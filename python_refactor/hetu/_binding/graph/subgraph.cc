@@ -78,7 +78,24 @@ PyObject* PySubGraph_make_new_subgraph(PyObject*, PyObject* args,
       cur_graph.MakeSubGraph(parsed_args.get_string_or_default(0),
                              parsed_args.get_string_or_default(1),
                              parsed_args.get_string_or_default(2))->name());
-    Py_RETURN_NONE;
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
+PyObject* PySubGraph_add_op(PyObject*, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "add_op_to_subgraph(Tensor tensor, std::string subgraph_name=\"\")",
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    // Call `SubGraph::GetSubGraph` to check whether `graph_id` is valid
+    auto& cur_graph = Graph::GetGraph(Graph::cur_graph_ctx());
+    auto tensor = parsed_args.get_tensor(0);
+    return PySubGraph_New(cur_graph.AddOpToSubGraph(tensor->producer(), parsed_args.get_string_or_default(1))->name());
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
@@ -127,6 +144,7 @@ PyMethodDef PySubGraphCtx_methods[] = {
   {"make_new_subgraph", (PyCFunction) PySubGraph_make_new_subgraph, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {"push_subgraph_ctx", (PyCFunction) PyPushSubGraphCtx, METH_VARARGS | METH_KEYWORDS, nullptr},
   {"pop_subgraph_ctx", (PyCFunction) PyPopSubGraphCtx, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"add_op_to_subgraph", (PyCFunction) PySubGraph_add_op, METH_VARARGS | METH_KEYWORDS, nullptr }, 
   {nullptr}
 };
 

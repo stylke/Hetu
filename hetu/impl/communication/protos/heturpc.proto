@@ -59,6 +59,8 @@ service DeviceController {
   rpc RemoveJson (RemoveJsonRequest) returns (RemoveJsonReply) {}
 
   rpc Barrier (BarrierRequest) returns (BarrierReply) {}
+
+  rpc HeartBeat (HeartBeatRequest) returns (HeartBeatReply) {}
 }
 
 message ConnectRequest {
@@ -273,5 +275,13 @@ message BarrierRequest {
 }
 
 message BarrierReply {
+  int32 status = 1; 
+}
+
+message HeartBeatRequest {
+  int32 rank = 1;
+}
+
+message HeartBeatReply {
   int32 status = 1; 
 }
