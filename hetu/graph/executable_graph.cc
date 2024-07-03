@@ -310,16 +310,18 @@ MemoryPlan ExecutableGraph::GenerateMemoryPlan(size_t& memory_size, std::vector<
 
 
   auto& subgraphs = GetAllSubGraphs();
-  std::vector< OpList > block_ops;
-  std::vector< std::string > block_name = {"GPTBlock"};
+  std::vector<OpList> block_ops;
+  std::vector<std::string> block_name = {"GPTBlock"};
   for(auto [name, subgraph] : subgraphs){
-
-    std::function<OpList(std::shared_ptr<SubGraph>)>  get_all_ops = [&](std::shared_ptr<SubGraph> subgraph){
+    std::function<OpList(std::shared_ptr<SubGraph>)> get_all_ops = [&](std::shared_ptr<SubGraph> subgraph){
       OpList ops;
-      for(auto op : subgraph->ops()) ops.push_back(op);
-      for(auto child : subgraph->subgraphs()){
+      for(auto [name, op] : subgraph->ops()) 
+        ops.push_back(op);
+        
+      for(auto [name, child] : subgraph->subgraphs()){
         auto child_ops = get_all_ops(child);
-        for(auto op : child_ops) ops.push_back(op);
+        for(auto op : child_ops) 
+          ops.push_back(op);
       }
       return ops;
     };
@@ -333,7 +335,7 @@ MemoryPlan ExecutableGraph::GenerateMemoryPlan(size_t& memory_size, std::vector<
   if(block_ops.size() <= 0){
     HT_LOG_DEBUG << "The topology graph only supports segmentation using GPTBlock as the block, but don't find the GPTBlock. If you define other types of Blocks, please add the class name to the list above.";
   }
-  std::set< OpId > fw_block_start_op, fw_block_end_op;
+  std::set<OpId> fw_block_start_op, fw_block_end_op;
   for(auto ops : block_ops){
     std::vector<int> in_degree(ops.size(), 0), out_degree(ops.size(), 0);
     for(int i = 0; i < ops.size(); i ++){
@@ -1058,15 +1060,15 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
       HT_LOG_DEBUG << local_device << "==============> substitute comm_op end: " << op << "...";
     }
   }
-  auto& subgraphs = GetAllSubGraphs();
-  for(auto& [name, subgraph] : subgraphs){
-    for(int i = 0; i < subgraph->ops().size(); i ++){
-      auto op = subgraph->ops().at(i);
-      if(old_comm_to_new.find(op->id()) != old_comm_to_new.end()){
-        subgraph->ops()[i] = GetOp(old_comm_to_new[op->id()]);
-      }
-    }
-  }
+  // auto& subgraphs = GetAllSubGraphs();
+  // for(auto& [name, subgraph] : subgraphs){
+  //   for(int i = 0; i < subgraph->ops().size(); i ++){
+  //     auto op = subgraph->ops().at(i);
+  //     if(old_comm_to_new.find(op->id()) != old_comm_to_new.end()){
+  //       subgraph->ops()[i] = GetOp(old_comm_to_new[op->id()]);
+  //     }
+  //   }
+  // }
 }
 
 Tensor ExecutableGraph::CrossReceive(int32_t depth, int32_t& device_index, Operator& comm_op, 

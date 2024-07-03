@@ -337,6 +337,10 @@ class Graph {
     return nullptr;
   }
 
+  std::unordered_map<std::string, std::shared_ptr<SubGraph>>& GetAllSubGraphs() {
+    return _subgraphs;
+  }
+
   SubGraphType GetSubGraphType(Operator& op) {
     HT_ASSERT(_op_to_subgraph_type.find(op->id()) != _op_to_subgraph_type.end());
     return _op_to_subgraph_type[op->id()];

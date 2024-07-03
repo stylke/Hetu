@@ -301,6 +301,27 @@ def serve(arr, exit_arr, last_heartbeat, port):
     server.start()
     print("Server started, listening on " + port)
     server.wait_for_termination()
+    
+def server_launch(port):
+    logging.basicConfig()
+    arr = multiprocessing.Array("i", [0], lock=True)
+    exit_arr = multiprocessing.Array("i", [0] * 32, lock=True)
+    last_heartbeat = multiprocessing.Array("d", [0.0] * 32, lock=True)
+    p = multiprocessing.Process(target=serve, args=(arr, exit_arr, last_heartbeat, port))
+    p.start()
+    while (arr[0] == 0 or arr[0] > sum(exit_arr)):
+        time.sleep(5)
+        cur_time = time.time()
+        for i in range(arr[0]):
+            interval = cur_time - last_heartbeat[i]
+            if (interval > 10):
+                exit_arr[i] = 1
+        #     print("Interval of Rank ", i, ":", interval, exit_arr[i])
+        # print("Arr0:", arr[0], "SumExit:", sum(exit_arr))
+                
+            
+    print("Server Stopped.")
+    p.terminate()
 
 
 if __name__ == "__main__":

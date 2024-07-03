@@ -310,7 +310,7 @@ class Module(object):
                 stack.enter_context(hetu.subgraph(subgraph_type = self.__class__.__name__, name = self.module_name))
                 _parameters = self.__dict__.get('_parameters')
                 for key, param in _parameters.items():
-                    print(self.module_name, " ", key, " ", type(param), param)
+                    # print(self.module_name, " ", key, " ", type(param), param)
                     hetu.add_to_subgraph(param)
                 
                 

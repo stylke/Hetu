@@ -68,7 +68,6 @@ def change_query_key_value_ordering(param, num_splits, num_heads, hidden_size):
 
 
 def load_state_dict(checkpoint_file):
-    
     return torch.load(checkpoint_file, map_location="cpu")
 
 
@@ -187,6 +186,7 @@ def load_checkpoint_from_megatron(model, optim, file, config=None, local_device=
         # 因为会在num_heads这一维度上进行distributed tensor的split切分
         if "qkv_dense" in k and "step" not in k:
             assert config != None, "There should be a config when using qkv_dense."
+            print(k, state_dict["model"][k].shape)
             state_dict["model"][k] = change_query_key_value_ordering(state_dict["model"][k], 
                                                             3, 
                                                             config.num_attention_heads, 
@@ -198,7 +198,7 @@ def load_checkpoint_from_megatron(model, optim, file, config=None, local_device=
             state_dict["model"][k] = state_dict["model"][k].numpy()
 
     # Time to load the checkpoint
-    model.load_state_dict(state_dict["model"], local_device=None)    
+    model.load_state_dict(state_dict["model"], local_device=local_device)    
     
     for name, param in model.named_parameters():
         device_group = param.get_device_group()
@@ -216,6 +216,8 @@ def load_checkpoint_from_megatron(model, optim, file, config=None, local_device=
                 if "step" in state_name:
                     assert [1] == list(opt_param.shape), "global shape mismatched!"
                 else:
-                    assert param.shape == list(opt_param.shape), "global shape mismatched!"
+                    assert param.global_shape == list(opt_param.shape), "global shape mismatched!"
+                    opt_state = optim.get_states(param)[state_name]
+                    opt_param = parallel_data_provider(opt_param, opt_state.distributed_states, device_index)
                 optim.set_states(param, state_name, opt_param)
     return model, optim

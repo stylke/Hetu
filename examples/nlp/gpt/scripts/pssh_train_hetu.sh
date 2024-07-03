@@ -80,4 +80,4 @@ CMDM="HETU_INTERNAL_LOG_LEVEL=WARN python3 train_hetu_gpt_ds_parallel.py \
 --ngpus ${NUM_GPUS} \
 2>&1 | tee ${LOG_FILE}"
 
-python ./scripts/pssh_train_hetu.py --command "$CMDM" --server_port ${SERVER_PORT} --ngpus ${NUM_GPUS}
+python ../../../python_refactor/hetu/rpc/pssh_start.py --command "$CMDM" --server_port ${SERVER_PORT} --ngpus ${NUM_GPUS}

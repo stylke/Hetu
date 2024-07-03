@@ -2,6 +2,9 @@ import os
 import argparse
 import yaml
 from pssh.clients import ParallelSSHClient
+from heturpc_server import server_launch
+import multiprocessing.spawn
+
 def read_yaml(file_path):
     with open(file_path, "r") as f:
         return yaml.safe_load(f)
@@ -59,5 +62,8 @@ if __name__ == '__main__':
         "--hosts", type=str, help="server's port"
     )
     args = parser.parse_args()
-    os.system("python ../../../python_refactor/hetu/rpc/heturpc_server.py --port " + args.server_port + "&")
+    # os.system("python ../../../python_refactor/hetu/rpc/heturpc_server.py --port " + args.server_port + "&")
+    p = multiprocessing.Process(target=server_launch, args=(args.server_port,))
+    p.start()
     pssh(args)
+    p.join()

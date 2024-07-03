@@ -7,6 +7,8 @@ MICRO_BATCH_SIZE=${6:-2}
 DP=${7:-2}
 TP=${8:-2}
 PP=${9:-2}
+SERVER_ADDR=${10:-"127.0.0.1"}
+SERVER_PORT=${11:-"23457"}
 NUM_GPUS=$(( $DP * $TP *$PP ))
 
 echo dp=${DP}, tp=${TP}, pp=${PP}, num_gpus=${NUM_GPUS} 
@@ -51,10 +53,9 @@ MERGE_FILE=${ROOT_FOLDER}/merges.txt
 # ds_parallel_config can use ds_parallel_config/generate_gpt_3d_config.py for auto-generate
 export NCCL_DEBUG=VERSION
 export HETU_INTERNAL_LOG_LEVEL=INFO
-MEGATRON_PATH=/home/pkuhetu/ffc/hetu/time_compare/Megatron-LM
-export PYTHONPATH=$PYTHONPATH:${MEGATRON_PATH}:${MEGATRON_PATH}
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 mpirun  --allow-run-as-root -np 8 \
---output-filename logs/ds_parallel --merge-stderr-to-stdout \
+MEGATRON_PATH=YOUR_MEGATRON_PATH
+CMDM="export PYTHONPATH=$PYTHONPATH:${MEGATRON_PATH}
+HETU_INTERNAL_LOG_LEVEL=WARN CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 python3 train_hetu_gpt_ds_parallel.py \
 --ds_parallel_config $DS_PARALLEL_CONFIG \
 --global_batch_size $GLOBAL_BATCH_SIZE \
@@ -76,4 +77,6 @@ python3 train_hetu_gpt_ds_parallel.py \
 --dropout_prob 0.1 \
 --bf16 \
 --use_flash_attn \
-2>&1 | tee ${LOG_FILE}
+2>&1 | tee ${LOG_FILE}"
+
+python ../../../python_refactor/hetu/rpc/pssh_start.py --command "$CMDM" --server_port ${SERVER_PORT} --ngpus ${NUM_GPUS}
