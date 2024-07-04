@@ -5,6 +5,8 @@ SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
 
+# original parallel strategy
+
 # setting 1
 DP=4
 TP=2
@@ -67,13 +69,13 @@ LD_LIBRARY_PATH="${HETU_HOME}/build/lib:${LD_LIBRARY_PATH}"
 PYTHONPATH="${HETU_HOME}/python_refactor:${HETU_HOME}/build/lib:${PYTHONPATH}"
 
 export HETU_SWITCH_ALGORITHM=NEW_GREEDY
-export HETU_SWITCH_PROFILE=TIME
-export HETU_INTERNAL_LOG_LEVEL=INFO
+export HETU_SWITCH_PROFILE=INFO
+export HETU_INTERNAL_LOG_LEVEL=WARN
 export HETU_STRAGGLER=ANALYSIS
-export HETU_MEMORY_PROFILE=MICRO_BATCH
+export HETU_MEMORY_PROFILE=INFO
 
-export HETU_MAX_SPLIT_SIZE_MB=200
-export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=20
+export HETU_MAX_SPLIT_SIZE_MB=0
+export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=0
 
 export NCCL_DEBUG=WARN
 export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7
@@ -116,7 +118,7 @@ if [ "${HETERO}" = false ]; then
         --dropout_prob 0.1 \
         --bf16 \
         --use_flash_attn \
-        --use_two_node \
+        --zhiyuan \
         --hetero_layers $LAYERS_NUM_LIST \
         --micro_batch_num_list $MICRO_BATCH_NUM_LIST \
         --rank_to_device_mapping $RANK_TO_DEVICE_MAPPING \
@@ -172,7 +174,7 @@ else
         --dropout_prob 0.1 \
         --bf16 \
         --use_flash_attn \
-        --use_two_node \
+        --zhiyuan \
         --hetero_stage_gpus $TP \
         --hetero_pipeline \
         --hetero_data \

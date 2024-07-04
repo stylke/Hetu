@@ -490,6 +490,12 @@ class SwitchExecGraph {
         for (const auto& param_and_opt_var_ref : define_params_and_opt_vars) {
           auto before_it = define_graph->GetPlan(plan_before).tensor_to_exec_tensor_mapping.find(param_and_opt_var_ref.get()->id());
           auto after_it = define_graph->GetPlan(plan_after).tensor_to_exec_tensor_mapping.find(param_and_opt_var_ref.get()->id());
+          // e.g. lm_head_weight in gpt 
+          // defined but not used in exec graph
+          if (before_it == define_graph->GetPlan(plan_before).tensor_to_exec_tensor_mapping.end()
+              && after_it == define_graph->GetPlan(plan_after).tensor_to_exec_tensor_mapping.end()) {
+            continue;
+          }
           HT_ASSERT(before_it != define_graph->GetPlan(plan_before).tensor_to_exec_tensor_mapping.end()
                     && after_it != define_graph->GetPlan(plan_after).tensor_to_exec_tensor_mapping.end())
             << "Cannot find " << param_and_opt_var_ref;

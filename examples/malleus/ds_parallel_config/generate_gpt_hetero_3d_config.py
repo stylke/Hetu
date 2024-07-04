@@ -3,10 +3,9 @@ import json
 import os
 import ast
 
-def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, accumulate_hetero_stages, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
     if dp == 1:
         zero = False
-    num_devices_per_stage = num_gpus // pp
     
     dp_union = [dp for _ in range(dp)]
     tp_union_list = []
@@ -22,10 +21,10 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, n
                 if block_id < cnt:
                     break
                 device_group_num += 1
-            devices = range(device_group_num * num_devices_per_stage + tp * pipeline_id, 
-                            device_group_num * num_devices_per_stage + tp * (pipeline_id + 1))
-            hybrid_tp_degree.append(len([device for device in devices if device not in unused_rank]))
-            hybrid_device_group.append([rank_to_device_mapping[device] for device in devices if device not in unused_rank])
+            ranks = range(device_group_num * tp + accumulate_hetero_stages[pipeline_id] * tp, 
+                          (device_group_num + 1) * tp + accumulate_hetero_stages[pipeline_id] * tp)
+            hybrid_tp_degree.append(len([rank for rank in ranks if rank not in unused_rank]))
+            hybrid_device_group.append([rank_to_device_mapping[rank] for rank in ranks if rank not in unused_rank])
         tp_union_list.append(hybrid_tp_degree)
         dg_union_list.append(hybrid_device_group)
 
@@ -121,7 +120,7 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, n
             }
         }
     return ds_parallel_config
-    
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -144,7 +143,7 @@ if __name__ == '__main__':
         '--hetero_layers', type=str, help='heterogenous layers list.'
     )
     parser.add_argument(
-        '--rank_to_device_mapping', type=str, default="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}", help='device to rank mapping.'
+        '--rank_to_device_mapping', type=str, default="", help='device to rank mapping.'
     )
     parser.add_argument(
         '--unused_rank', type=str, default="[]", help='unused rank list.'
@@ -163,9 +162,23 @@ if __name__ == '__main__':
     for pipeline in hetero_layers:
         assert sum(pipeline) == num_layers, "sum of heterogenous layers of a single pipeline should be equal to the num of total layers"
         
+    hetero_stages = [len(pipeline) for pipeline in hetero_layers]
+    accumulate_val = 0
+    accumulate_hetero_stages = [0,]
+    for val in hetero_stages:
+        accumulate_val += val
+        accumulate_hetero_stages.append(accumulate_val)
+        
+    rank_to_device_mapping = {}       
+    if args.rank_to_device_mapping == "":
+        for idx in range(args.num_gpus):
+            rank_to_device_mapping[idx] = idx
+    else:
+        rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
+        
     assert args.dp * args.tp * args.pp == args.num_gpus, \
             f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
-    ds_parallel_config = generate_gpt_3d_config(ast.literal_eval(args.rank_to_device_mapping), ast.literal_eval(args.unused_rank), hetero_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    ds_parallel_config = generate_gpt_3d_config(rank_to_device_mapping, ast.literal_eval(args.unused_rank), hetero_layers, accumulate_hetero_stages, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
     save_folder = './ds_parallel_config/hetero'
     file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
     if not os.path.exists(save_folder):

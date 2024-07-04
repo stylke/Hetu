@@ -14,7 +14,7 @@ cmake/config.cmake
 .hypothesis/
 examples/nlp/gpt/_cache.pkl
 examples/nlp/gpt/experiments/
-examples/elastic/data/
+examples/malleus/data/
 third_party/nccl/
 
 # Python

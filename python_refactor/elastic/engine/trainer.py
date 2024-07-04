@@ -271,7 +271,7 @@ class Trainer:
         is_cached = False
         if new_strategy_model != self.strategy_model:
             need_switch = True
-        for strategy_model in self.strategy_models_pool:
+        for strategy_model in reversed(self.strategy_models_pool):
             if strategy_model == new_strategy_model:
                 self.strategy_model = strategy_model
                 is_cached = True

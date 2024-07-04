@@ -15,9 +15,12 @@ from elastic.engine.trainer import TrainerCtxs, Trainer
 local_device = None
 all_devices = None
 
-def distributed_init(use_two_node: bool = False):
+def distributed_init(tencent: bool = False, zhiyuan: bool = True):
     
-    if use_two_node:
+    if tencent:
+        hostname = socket.gethostname()
+        os.environ['HETU_LOCAL_HOSTNAME'] = os.environ['LOCAL_HOSTNAME']
+    elif zhiyuan:
         hostname = socket.gethostname()
         if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
             os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
@@ -132,9 +135,6 @@ if __name__ == '__main__':
         "--hetero_layers", type=str, help='hetero layers list.'
     )
     parser.add_argument(
-        "--hetero_stages", type=str, default="[]", help='hetero stages list.'
-    )
-    parser.add_argument(
         "--micro_batch_num_list", type=str, help='micro batch num list.'
     )
     parser.add_argument(
@@ -150,7 +150,10 @@ if __name__ == '__main__':
         "--run_memory_experiment", action="store_true", help="run memory experiment."
     )
     parser.add_argument(
-        "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
+        "--zhiyuan", action="store_true", help="use 2x8 gpus to run script on zhiyuan server."
+    )
+    parser.add_argument(
+        "--tencent", action="store_true", help="use 8x8 gpus to run script on tencent server."
     )
     parser.add_argument(
         "--switch", type=int, default=0, help='switch.'
@@ -253,12 +256,9 @@ if __name__ == '__main__':
     args.suspended_rank_list = ast.literal_eval(args.unused_rank)
     args.unused_rank_list = []
     args.hetero_layers = ast.literal_eval(args.hetero_layers)
-    if args.hetero_stages == "[]":
-        args.hetero_stages = [args.pp for _ in range(args.dp)]
-    else:
-        args.hetero_stages = ast.literal_eval(args.hetero_stages)
+    args.hetero_stages = [len(pipeline) for pipeline in args.hetero_layers]
     args.micro_batch_num_list = ast.literal_eval(args.micro_batch_num_list)
     args.hetero_micro_batch_num_list = args.micro_batch_num_list
-    distributed_init(args.use_two_node)         
+    distributed_init(args.tencent, args.zhiyuan)         
     pretrain(args)
     print(f'{local_device}: train hetu ds parallel end...')
