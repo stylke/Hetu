@@ -63,7 +63,9 @@ pip-delete-this-directory.txt
 
 # grpc
 *_pb2.py
+*_pb2.pyi
 *_pb2_grpc.py
+*_pb2_grpc.pyi
 
 # Codegen
 python_refactor/hetu/_binding/autograd/ops/generated/
