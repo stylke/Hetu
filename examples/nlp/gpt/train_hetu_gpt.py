@@ -16,6 +16,12 @@ def pretrain(args):
 
     num_epochs = args.epochs
     lr = args.lr
+    ht.init_comm_group(1, [7])
+    local_device = ht.local_device()
+    all_devices = ht.global_device_group()
+    print(f"all_devices: {all_devices}")
+    if local_device.index == 0:
+        print(f'local_device: {local_device}, all_devices: {all_devices}')
 
     config = GPTConfig(vocab_size=args.vocab_size, 
                     n_positions=args.seq_length,
@@ -28,7 +34,7 @@ def pretrain(args):
                     embd_pdrop=args.dropout_prob,
                     attn_pdrop=args.dropout_prob,
                     activation_function=args.hidden_act,
-                    batch_size=args.train_batch_size,
+                    global_batch_size=args.train_batch_size,
                     )
 
     # Input data file names definition
@@ -37,27 +43,27 @@ def pretrain(args):
     dataset = args.dataset
     if dataset not in ['wikicorpus_en', 'wiki_books']:
         raise(NotImplementedError)
-    file_dir = '../bert/data/hdf5_lower_case_1_seq_len_128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/%s/'%dataset
+    file_dir = './data/'    
     file_name_format = dataset + '_training_%d.hdf5'
-    train_file_num = 16
+    train_file_num = 1
     train_files = [file_dir + file_name_format%file_id for file_id in range(train_file_num)]
 
     # Hetu model definition
     model = GPTLMHeadModel(config=config)
 
-    input_ids = ht.placeholder(ht.int64, shape=[config.batch_size, 128]) #ht.Variable(name='input_ids', trainable=False)
-    token_type_ids = ht.placeholder(ht.int64, shape=[config.batch_size, 128]) #ht.Variable(name='token_type_ids', trainable=False)
-    attention_mask = ht.placeholder(ht.float32, shape=[config.batch_size, 128]) #ht.Variable(name='attention_mask', trainable=False)
+    input_ids = ht.placeholder(ht.int64, shape=[config.global_batch_size, config.seq_len], device_groups=[all_devices])
+    token_type_ids = ht.placeholder(ht.int64, shape=[config.global_batch_size, config.seq_len], device_groups=[all_devices]) 
+    attention_mask = ht.placeholder(ht.float32, shape=[config.global_batch_size, config.seq_len], device_groups=[all_devices]) 
 
-    masked_lm_labels = ht.placeholder(ht.int64, shape=[config.batch_size, 128]) #ht.Variable(name='masked_lm_labels', trainable=False)
-    next_sentence_label = ht.placeholder(ht.int64, shape=[config.batch_size, 1]) #ht.Variable(name='next_sentence_label', trainable=False)
+    masked_lm_labels = ht.placeholder(ht.int64, shape=[config.global_batch_size, config.seq_len], device_groups=[all_devices]) 
+    next_sentence_label = ht.placeholder(ht.int64, shape=[config.global_batch_size, config.seq_len], device_groups=[all_devices]) 
 
-    loss_position_sum = ht.placeholder(ht.float32, shape=[1]) #ht.Variable(name='loss_position_sum', trainable=False)
+    loss_position_sum = ht.placeholder(ht.float32, shape=[config.global_batch_size, config.seq_len], device_groups=[all_devices]) 
 
-    loss, lm_logits, transformer_output = model(input_ids=input_ids, 
-                                                token_type_ids=token_type_ids, 
-                                                attention_mask=attention_mask, 
-                                                labels=masked_lm_labels)
+    loss, lm_logits = model(input_ids=input_ids, 
+                            token_type_ids=token_type_ids, 
+                            attention_mask=attention_mask, 
+                            labels=masked_lm_labels)
     
     loss_mean = ht.div(loss, loss_position_sum)
 
@@ -76,8 +82,9 @@ def pretrain(args):
     global_step_num = 0
     for ep in range(num_epochs):
         step_num = 0
+        print("Epoch:", ep)
         for train_file in train_files:
-            dataloader = DataLoaderForGPT(train_file, config.batch_size, pred_len)
+            dataloader = DataLoaderForGPT(train_file, config.global_batch_size, pred_len)
             for i in range(dataloader.batch_num):
                 start_time = time.time()
                 batch_data = dataloader.get_batch(i)
@@ -90,14 +97,14 @@ def pretrain(args):
                 #       batch_data['next_sentence_label'].dtype,
                 #       np.array([np.where(batch_data['masked_lm_labels'].reshape(-1)!=-1)[0].shape[0]]).dtype)
                 feed_dict = {
-                    input_ids: batch_data['input_ids'].astype(np.int64).reshape([config.batch_size, 128]),
-                    token_type_ids: batch_data['token_type_ids'].astype(np.int64).reshape([config.batch_size, 128]),
-                    attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([config.batch_size, 128]),
-                    masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([config.batch_size, 128]),
-                    next_sentence_label: batch_data['next_sentence_label'].astype(np.int64).reshape([config.batch_size, 1]),
+                    input_ids: batch_data['input_ids'].astype(np.int64).reshape([config.global_batch_size, 128]),
+                    token_type_ids: batch_data['token_type_ids'].astype(np.int64).reshape([config.global_batch_size, 128]),
+                    attention_mask: batch_data['attention_mask'].astype(np.float32).reshape([config.global_batch_size, 128]),
+                    masked_lm_labels: batch_data['masked_lm_labels'].astype(np.int64).reshape([config.global_batch_size, 128]),
+                    next_sentence_label: batch_data['next_sentence_label'].astype(np.int64).reshape([config.global_batch_size, 1]),
                     loss_position_sum: np.array([np.where(batch_data['masked_lm_labels'].reshape(-1)!=-1)[0].shape[0]]).astype(np.float32),
                 }
-                results = train_op.graph.run([loss_mean, lm_logits, train_op], feed_dict = feed_dict)
+                results = train_op.graph.run(loss_mean, [loss_mean, lm_logits, train_op], feed_dict = feed_dict)
                 loss_out = results[0].numpy(force=True)
                 # print("LABEL:", results[1].numpy(force=True).sum(), " ", loss_out)
                 # print(results[2].numpy(force=True), results[2].numpy(force=True).shape, loss_out)

@@ -762,10 +762,10 @@ void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t
   for (int i = 0; i < num_ax; ++i)
     HT_ASSERT(axes[i] >= 0 && axes[i] < in_arr->ndim());
 
-  int64_t* reduce_axes = (int64_t*) malloc(num_ax * sizeof(int64_t));
-  memcpy(reduce_axes, axes, num_ax * sizeof(int64_t));
-  std::sort(reduce_axes, reduce_axes + num_ax);
-  num_ax = std::unique(reduce_axes, reduce_axes + num_ax) - reduce_axes;
+  HTShape reduce_axes(num_ax);
+  memcpy(reduce_axes.data(), axes, num_ax * sizeof(int64_t));
+  std::sort(reduce_axes.data(), reduce_axes.data() + num_ax);
+  num_ax = std::unique(reduce_axes.data(), reduce_axes.data() + num_ax) - reduce_axes.data();
 
   // Merge contiguous reduce / rest dims
   size_t in_ndim = in_arr->ndim();
@@ -774,7 +774,7 @@ void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t
   HTShape in_merge_shape;
   HTStride in_strides, out_strides;
 
-  setReduceMeta(in_arr, in_ndim, num_ax, reduce_axes, reduce_ndim, merge_ndim,
+  setReduceMeta(in_arr, in_ndim, num_ax, reduce_axes.data(), reduce_ndim, merge_ndim,
                 in_merge_shape, in_strides, out_strides);
   
   auto device_id = in_arr->device().index();
@@ -835,7 +835,6 @@ void launch_reduce_kernel(const NDArray& in_arr, NDArray& out_arr, const int64_t
         cta_buf_ptr, semaphores_ptr, config);
   }
 
-  free(reduce_axes);
   if (config.should_global_reduce()) {
     NDArray::MarkUsedBy({cta_buf_arr, semaphores_arr}, stream);
   }

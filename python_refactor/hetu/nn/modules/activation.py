@@ -24,7 +24,10 @@ class ReLU(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         with hetu.graph("define_and_run"):
-            return hetu.relu(input, self.inplace)
+            if self.inplace:
+                return hetu.relu_(input)
+            else:
+                return hetu.relu(input)
 
 
 class Sigmoid(Module):
@@ -36,7 +39,10 @@ class Sigmoid(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         with hetu.graph("define_and_run"):
-            return hetu.sigmoid(input)
+            if self.inplace:
+                return hetu.sigmoid_(input)
+            else:
+                return hetu.sigmoid(input)
 
 
 class Tanh(Module):
@@ -48,7 +54,10 @@ class Tanh(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         with hetu.graph("define_and_run"):
-            return hetu.tanh(input)
+            if self.inplace:
+                return hetu.tanh_(input)
+            else:
+                return hetu.tanh(input)
 
 
 class LeakyReLU(Module):
@@ -61,7 +70,10 @@ class LeakyReLU(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         with hetu.graph("define_and_run"):
-            return hetu.leakyrelu(input, self.negative_slope, self.inplace)
+            if self.inplace:
+                return hetu.leakyrelu_(input, self.negative_slope)
+            else:
+                return hetu.leakyrelu(input, self.negative_slope)
       
         
 class NewGeLU(Module):

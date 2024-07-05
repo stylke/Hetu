@@ -6,12 +6,62 @@ if(${HETU_COMPILE_CUDA})
   file(GLOB_RECURSE HETU_CU_SRC ${HETU_SRC_DIR}/hetu/*.cu)
   list(APPEND HETU_SRC ${HETU_CU_SRC})
 endif()
-list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/autograd/*")
-list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/execution/*")
 list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/test/*")
-list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/autograd/*")
-list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/execution/*")
 add_library(hetu_C SHARED ${HETU_SRC})
+
+
+set(CMAKE_PREFIX_PATH /home/pkuhetu/Hetu-dev/fused_kernel/.local)
+include(../cmake/grpc.cmake)
+
+get_filename_component(hetu_proto "${HETU_SRC_DIR}/hetu/impl/communication/protos/heturpc.proto" ABSOLUTE)
+get_filename_component(hetu_proto_path "${hetu_proto}" PATH)
+
+# Generated sources
+set(hetu_proto_srcs "${HETU_SRC_DIR}/hetu/impl/communication/rpc/heturpc.pb.cc")
+set(hetu_proto_hdrs "${HETU_SRC_DIR}/hetu/impl/communication/rpc/heturpc.pb.h")
+set(hetu_grpc_srcs "${HETU_SRC_DIR}/hetu/impl/communication/rpc/heturpc.grpc.pb.cc")
+set(hetu_grpc_hdrs "${HETU_SRC_DIR}/hetu/impl/communication/rpc/heturpc.grpc.pb.h")
+add_custom_command(
+      OUTPUT "${hetu_proto_srcs}" "${hetu_proto_hdrs}" "${hetu_grpc_srcs}" "${hetu_grpc_hdrs}"
+      COMMAND ${_PROTOBUF_PROTOC}
+      ARGS --grpc_out "${HETU_SRC_DIR}/hetu/impl/communication/rpc"
+        --cpp_out "${HETU_SRC_DIR}/hetu/impl/communication/rpc"
+        -I "${hetu_proto_path}"
+        --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
+        "${hetu_proto}"
+      DEPENDS "${hetu_proto}")
+
+execute_process(
+  COMMAND python -m grpc_tools.protoc -I./protos --python_out=../../../python_refactor/hetu/rpc/  
+  --pyi_out=../../../python_refactor/hetu/rpc/ --grpc_python_out=../../../python_refactor/hetu/rpc/  ./protos/heturpc.proto
+  WORKING_DIRECTORY ${HETU_SRC_DIR}/hetu/impl/communication
+)
+
+# Include generated *.pb.h files
+include_directories("${CMAKE_CURRENT_BINARY_DIR}")
+
+# hw_grpc_proto
+add_library(hetu_grpc_proto
+  ${hetu_grpc_srcs}
+  ${hetu_grpc_hdrs}
+  ${hetu_proto_srcs}
+  ${hetu_proto_hdrs})
+target_link_libraries(hetu_grpc_proto
+  ${_REFLECTION}
+  ${_GRPC_GRPCPP}
+  ${_PROTOBUF_LIBPROTOBUF})
+message("_REFLECTION:${_REFLECTION}")
+message("_GRPC_GRPCPP:${_GRPC_GRPCPP}")
+message("_PROTOBUF_LIBPROTOBUF:${_PROTOBUF_LIBPROTOBUF}")
+
+target_link_libraries(hetu_C 
+                      PUBLIC hetu_grpc_proto
+                      PUBLIC absl::flags
+                      PUBLIC absl::flags_parse
+                      PUBLIC ${_REFLECTION}
+                      PUBLIC ${_GRPC_GRPCPP}
+                      PUBLIC ${_PROTOBUF_LIBPROTOBUF})
+
 target_include_directories(hetu_C PUBLIC ${HETU_SRC_DIR})
 
 if(${HETU_COMPILE_OMP})
@@ -30,10 +80,16 @@ if(${HETU_COMPILE_CUDNN})
 endif()
 
 if(${HETU_COMPILE_NCCL})
-  # include(${CMAKE_SOURCE_DIR}/cmake/external/nccl.cmake)
-  find_package(NCCL 2.18 REQUIRED)
-  target_link_libraries(hetu_C PUBLIC ${NCCL_LIBRARIES})
-  target_include_directories(hetu_C PUBLIC ${NCCL_INCLUDE_DIRS})
+  find_package(NCCL 2.19)
+  if (NOT NCCL_FOUND)
+    message("nccl 2.19+ not found, preparing...")
+    include(${CMAKE_SOURCE_DIR}/cmake/external/nccl.cmake)
+    target_link_libraries(hetu_C PUBLIC ${NCCL_LIBRARIES_SRC})
+    target_include_directories(hetu_C PUBLIC ${NCCL_INCLUDE_DIRS})
+  else()
+    target_link_libraries(hetu_C PUBLIC ${NCCL_LIBRARIES})
+    target_include_directories(hetu_C PUBLIC ${NCCL_INCLUDE_DIRS})
+  endif()
 endif()
 
 if(${HETU_COMPILE_NVML})
@@ -79,6 +135,12 @@ if(${USE_FLASH_ATTN})
     target_include_directories(hetu_C PUBLIC ${FLASH_INCLUDE_DIR})
   endif()
 endif()
+
+message("preparing bitsandbytes")
+include(${CMAKE_SOURCE_DIR}/cmake/external/bitsandbytes.cmake)
+target_link_libraries(hetu_C PUBLIC ${BNB_LIB_PATH})
+target_include_directories(hetu_C PUBLIC ${BNB_INCLUDE_DIR})
+add_dependencies(hetu_C project_bitsandbytes)
 
 target_compile_options(hetu_C PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
                        -O3;

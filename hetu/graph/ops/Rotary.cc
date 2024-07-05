@@ -35,8 +35,8 @@ void RotaryOpImpl::DoCompute(Operator& op,
     o1 = NDArray::slice(out, begin_pos_x1, rotary_size, op->instantiation_ctx().stream_index);
     o2 = NDArray::slice(out, begin_pos_x2, rotary_size, op->instantiation_ctx().stream_index);
   }
-  NDArray cos_ = NDArray::unsqueeze(NDArray::slice(cos, HTShape{0, 0}, HTShape{x->shape(1), cos->shape(1)}), 1);
-  NDArray sin_ = NDArray::unsqueeze(NDArray::slice(sin, HTShape{0, 0}, HTShape{x->shape(1), sin->shape(1)}), 1);
+  NDArray cos_ = NDArray::unsqueeze(NDArray::slice(cos, HTShape{0, 0}, HTShape{x->shape(1), cos->shape(2)}), 1);
+  NDArray sin_ = NDArray::unsqueeze(NDArray::slice(sin, HTShape{0, 0}, HTShape{x->shape(1), sin->shape(2)}), 1);
   HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
                                hetu::impl::Rotary, x1, x2, cos_, sin_, o1, o2,
                                false, op->instantiation_ctx().stream());
@@ -101,8 +101,8 @@ void RotaryGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, ND
     dx1 = NDArray::slice(dx, begin_pos_x1, rotary_size, op->instantiation_ctx().stream_index);
     dx2 = NDArray::slice(dx, begin_pos_x2, rotary_size, op->instantiation_ctx().stream_index);
   }
-  NDArray cos_ = NDArray::unsqueeze(NDArray::slice(cos, HTShape{0, 0}, HTShape{dout->shape(1), cos->shape(1)}), 1);
-  NDArray sin_ = NDArray::unsqueeze(NDArray::slice(sin, HTShape{0, 0}, HTShape{dout->shape(1), sin->shape(1)}), 1);
+  NDArray cos_ = NDArray::unsqueeze(NDArray::slice(cos, HTShape{0, 0}, HTShape{dout->shape(1), cos->shape(2)}), 1);
+  NDArray sin_ = NDArray::unsqueeze(NDArray::slice(sin, HTShape{0, 0}, HTShape{dout->shape(1), sin->shape(2)}), 1);
   HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
                                hetu::impl::Rotary, dout1, dout2, cos_, sin_, dx1, dx2,
                                true, op->instantiation_ctx().stream());

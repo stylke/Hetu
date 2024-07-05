@@ -61,7 +61,11 @@ class CUDAEvent final : public Event {
 
   ~CUDAEvent() {
     hetu::cuda::CUDADeviceGuard guard(device().index());
-    CudaEventDestroy(_event);
+    cudaError_t err = cudaEventDestroy(_event);
+    if (err != cudaSuccess && err != cudaErrorCudartUnloading) {
+      __HT_FATAL_SILENT(hetu::cuda::cuda_error)
+      << "Cuda call CudaEventDestroy failed: " << cudaGetErrorString(err);
+    }
   }
 
   inline bool IsRecorded() {
@@ -99,6 +103,7 @@ class CUDAEvent final : public Event {
       return 0;
     } else {
       float ms;
+      hetu::cuda::CUDADeviceGuard guard(device().index());
       CudaEventElapsedTime(&ms, e._event, _event);
       return static_cast<int64_t>(ms * 1000000);
     }

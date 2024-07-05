@@ -2,11 +2,14 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/switch_exec_graph.h"
 #include "hetu/graph/ops/variable.h"
+#include "hetu/graph/ops/Quantization.h"
 #include "hetu/graph/ops/optimizer_update.h"
 #include "hetu/graph/autocast/autocast.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
+#include "hetu/graph/recompute/recompute.h"
+#include "hetu/graph/offload/activation_cpu_offload.h"
 #include "hetu/impl/memory/CUDACachingMemoryPool.cuh"
 
 namespace hetu {
@@ -18,8 +21,15 @@ static size_t change_parallel_test_case = 0;
 Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
                                          TensorList inputs, OpMeta op_meta) {
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
-  // HT_LOG_TRACE << name() << " make op: " << op_meta.name;
+  // for optimization passes
+  op_meta = op_meta.set_is_recompute(Recompute::enabled())
+                   .set_is_cpu_offload(ActivationCPUOffload::enabled());
   auto& op = MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
+  if (op->op_meta().need_dequantization()) {
+    OpId param_id = op->op_meta().parameter_dict["tensor_id"];
+    _paramter_to_absmax[param_id] = op->id();
+    _paramter_to_blocksize[param_id] = op->op_meta().parameter_dict["blocksize"];
+  }
   // record the ops that have an explicit device group setting
   // which will then used to deduce the pp stages
   if (op->device_group_hierarchy().size() == NUM_STRATEGY) {
@@ -276,6 +286,7 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
     // 设置placeholder（也有可能是中间的算子——具体要看feed_dict喂的是什么算子）的symbolic shape
     bool handle_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
       auto it = feed_dict.find(tensor->id());
+      HT_LOG_INFO << op << " " << tensor->id() << " " << feed_dict;
       if (it != feed_dict.end()) {
         if (tensor->symbolic() && is_SyShape_leaf(tensor->symbolic_shape())) {
           tensor->set_symbolic_shape(feed_dict_shape[tensor->id()]);
@@ -287,7 +298,8 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
       }
       return false;
     });
-    if (handle_feed_dict_op) {
+    HT_LOG_DEBUG << op << " " << handle_feed_dict_op;
+    if (handle_feed_dict_op || is_placeholder_op(op)) {
       continue;
     }
     HTShapeList input_shapes;
@@ -295,7 +307,8 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
     for (const auto& input : op->inputs()) {
       auto it = shape_plan.find(input->id());
       HT_ASSERT(it != shape_plan.end()) 
-        << "Something wrong, can't find the input shape from the current shape plan!";
+        << "Something wrong, can't find the input shape from the current shape plan!"
+        << "op:" << op;
       input_shapes.push_back(it->second);
     }
     auto it = exec_graph_plan.op_to_exec_op_mapping.find(op->id());
@@ -490,19 +503,40 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   Op2OpMap op_to_exec_op_mapping;
   Op2DGUnionMap op_to_pg_union_mapping;
   Tensor2TensorMap tensor_to_exec_tensor_mapping;
+  /*
   auto origin_param_buffer = std::make_shared<ParamBuffer>("origin_param_buffer");
   auto transfer_param_buffer = std::make_shared<ParamBuffer>("transfer_param_buffer");
   auto origin_param_and_optimizer_buffer = std::make_shared<ParamBuffer>("origin_param_and_optimizer_buffer");
   auto origin_param_and_optimizer_buckets = std::make_shared<ParamBuckets>("origin_param_and_optimizer_buckets");
   auto current_grad_buffer = std::make_shared<ParamBuffer>("current_grad_buffer");
   auto accumulate_grad_buffer = std::make_shared<ParamBuffer>("accumulate_grad_buffer");
+  */
+  // TODO: better compatibility with hot switch and quantization
+  std::unordered_map<DataType, std::shared_ptr<ParamBuckets>> origin_param_and_optimizer_buckets_map;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> transfer_param_buffer_map;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> current_grad_buffer_map;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> accumulate_grad_buffer_map;
   Tensor2TensorMap transfer_map;
   Tensor2TensorMap grad_map;
+  Tensor2TensorMap dequantization_tensor_map;
+  std::unordered_map<int64_t, int64_t> dequantization_blocksize_map;
     
   exec_shape_plan.reserve(shape_plan.size());
   op_to_exec_op_mapping.reserve(_init_capacity);
   op_to_pg_union_mapping.reserve(_init_capacity);
+  dequantization_tensor_map.reserve(_init_capacity);
+  dequantization_blocksize_map.reserve(_init_capacity);
   tensor_to_exec_tensor_mapping.reserve(_init_capacity);
+
+  // 初始化buffer
+  for (int i = 0; i < static_cast<int>(DataType::NUM_DATA_TYPES); i++) {
+    DataType dtype = static_cast<DataType>(i);
+    origin_param_and_optimizer_buckets_map[dtype] = std::make_shared<ParamBuckets>("origin_param_and_optimizer_buffets_" + 
+                                                                                   DataType2Str(dtype));
+    transfer_param_buffer_map[dtype] = std::make_shared<ParamBuffer>("transfer_param_buffer_" + DataType2Str(dtype));
+    current_grad_buffer_map[dtype] = std::make_shared<ParamBuffer>("current_grad_buffer_" + DataType2Str(dtype));
+    accumulate_grad_buffer_map[dtype] = std::make_shared<ParamBuffer>("accumulate_grad_buffer_" + DataType2Str(dtype));
+  }  
 
   // initializations of the exec graph
   auto local_device = hetu::impl::comm::GetLocalDevice();
@@ -555,7 +589,6 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     if (plan_it != shape_plan.end()) {
       // *only feed dict will set_shape
       exec_tensor->set_shape(plan_it->second);
-      // HT_LOG_INFO << "set shape " << plan_it->second << " to " << exec_tensor;
     } else {
       // other shapes will be fixed and just recorded
       shape_plan[tensor->id()] = exec_tensor->shape();
@@ -593,15 +626,28 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       origin_param_buffer->AddTensor(exec_tensor);
     }
     if ((_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
-        || _optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end())
+         || _optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end())
         && exec_tensor->producer()->placement_group_union().has(local_device)) {
-      origin_param_and_optimizer_buffer->AddTensor(exec_tensor); // deprecates
-      origin_param_and_optimizer_buckets->AddTensor(exec_tensor);
+      // origin_param_and_optimizer_buffer->AddTensor(exec_tensor); // deprecates
+      // origin_param_and_optimizer_buckets->AddTensor(exec_tensor);
+      // TODO: better compatibility with hot switch and quantization
+      origin_param_and_optimizer_buckets_map[exec_tensor->dtype()]->AddTensor(exec_tensor);
     }
   };
 
   HT_LOG_DEBUG << "Instantiating a " << type() << " graph with global topo " << global_topo;
+  OpRefList deq_global_topo;
+  
   for (auto& op_ref : global_topo) {
+    auto& op = op_ref.get();
+    if (op->num_outputs() > 0 && _paramter_to_absmax.find(op->output(0)->id()) != _paramter_to_absmax.end()) {
+      int64_t absmax_id = _paramter_to_absmax[op->output(0)->id()];
+      deq_global_topo.push_back(std::ref(GetOp(absmax_id)));
+    }
+    deq_global_topo.push_back(op_ref);
+  }
+
+  for (auto& op_ref : deq_global_topo) {
     auto& op = op_ref.get();
     HT_LOG_TRACE << "Creating an executable version of op " << op << " begin...";
 
@@ -636,32 +682,60 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
           auto optype = op->type();
           if (is_optimizer_update_op(op) || is_host_to_device_op(op) || is_device_to_host_op(op) || is_data_transfer_op(op)) {
             // seems nothing to do
-          } else {
+          }
+          // 这里统一插入特殊的类型转化算子 
+          else {
             for (int i = 0; i < exec_inputs.size(); ++i) {
-              if ((is_variable_op(exec_inputs[i]->producer()) || is_placeholder_op(exec_inputs[i]->producer())) &&
-                  exec_inputs[i]->dtype() != datatype && 
-                  (exec_inputs[i]->dtype() == DataType::BFLOAT16 ||
-                  exec_inputs[i]->dtype() == DataType::FLOAT16 ||
-                  exec_inputs[i]->dtype() == DataType::FLOAT32 ||
-                  exec_inputs[i]->dtype() == DataType::FLOAT64)) {
-                if (transfer_map.find(exec_inputs[i]->id()) != transfer_map.end()) {
-                  HT_LOG_TRACE << "Map " << &transfer_map << " reuse: " << exec_inputs[i]->id() << " -> " << transfer_map[exec_inputs[i]->id()]->id();
-                  exec_inputs[i] = transfer_map[exec_inputs[i]->id()];
-                } else {
-                  auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
-                                  {exec_inputs[i]}, OpMeta().set(exec_inputs[i]->producer()->op_meta()).set_name(exec_inputs[i]->producer()->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
+              if ((is_variable_op(exec_inputs[i]->producer()) 
+                   || is_placeholder_op(exec_inputs[i]->producer())) 
+                  && exec_inputs[i]->dtype() != datatype) {
+                // 插入dequantization op
+                // TODO: need review, may have bugs
+                if ((exec_inputs[i]->dtype() == DataType::FLOAT4 
+                     || exec_inputs[i]->dtype() == DataType::NFLOAT4) 
+                    && op->type() != "DeQuantizationOp") {
+                  int64_t tensor_id = op->input(i)->id();
+                  HT_ASSERT(dequantization_tensor_map.find(tensor_id) != dequantization_tensor_map.end()
+                            && dequantization_blocksize_map.find(tensor_id) != dequantization_blocksize_map.end()) 
+                    << "TensorId: " << tensor_id << " " << i << " " << op->input(i)->producer()->type()
+                    << " " << op->input(i)->producer()->op_meta() << " " << op->input(1)->producer()->op_meta().name
+                    << " " << op->input(1)->producer()->id();
+                  int blocksize = dequantization_blocksize_map[tensor_id];
+                  Tensor absmax = dequantization_tensor_map[tensor_id];
+                  auto& exec_op = Graph::MakeOp(std::make_shared<DeQuantizationOpImpl>(datatype, blocksize),
+                                  {exec_inputs[i], absmax}, OpMeta().set(op->op_meta()), *exec_graph);
                   exec_op->MapToParallelDevices(exec_inputs[i]->placement_group_union());
-                  HT_LOG_TRACE << "Map " << &transfer_map << " insert: " << exec_inputs[i]->id() << " -> " << exec_op->output(0)->id();
                   // we have to set the exec shape plan manually before the initialization of the plan
                   exec_shape_plan[exec_op->output(0)->id()] = exec_op->output(0)->shape();
                   exec_graph->_record_exec_tensors.emplace_back(exec_op->output(0));
                   exec_op->output(0)->set_ds_hierarchy(op->input(i)->ds_hierarchy()); // walkaround: set here by hand
-                  if (_parameter_ops.find(op->input(i)->producer()->id()) != _parameter_ops.end()
-                      && exec_inputs[i]->producer()->placement_group_union().has(local_device)) {
-                    transfer_param_buffer->AddTensor(exec_op->output(0));
-                  }
-                  transfer_map[exec_inputs[i]->id()] = exec_op->output(0);
                   exec_inputs[i] = exec_op->output(0);
+                }
+                // 插入transfer op 
+                else if (exec_inputs[i]->dtype() == DataType::BFLOAT16
+                         || exec_inputs[i]->dtype() == DataType::FLOAT16 
+                         || exec_inputs[i]->dtype() == DataType::FLOAT32 
+                         || exec_inputs[i]->dtype() == DataType::FLOAT64) {
+                  if (transfer_map.find(exec_inputs[i]->id()) != transfer_map.end()) {
+                    HT_LOG_TRACE << "Map " << &transfer_map << " reuse: " << exec_inputs[i]->id() << " -> " << transfer_map[exec_inputs[i]->id()]->id();
+                    exec_inputs[i] = transfer_map[exec_inputs[i]->id()];
+                  } 
+                  // 只需要第一次碰到时候make即可
+                  else {
+                    auto& exec_op = Graph::MakeOp(std::make_shared<DataTransferOpImpl>(datatype, exec_inputs[i]->device()),
+                                    {exec_inputs[i]}, OpMeta().set(exec_inputs[i]->producer()->op_meta()).set_name(exec_inputs[i]->producer()->name() + "_transfer").set_is_deduce_states(false), *exec_graph);
+                    exec_op->MapToParallelDevices(exec_inputs[i]->placement_group_union());
+                    // we have to set the exec shape plan manually before the initialization of the plan
+                    exec_shape_plan[exec_op->output(0)->id()] = exec_op->output(0)->shape();
+                    exec_graph->_record_exec_tensors.emplace_back(exec_op->output(0));
+                    exec_op->output(0)->set_ds_hierarchy(op->input(i)->ds_hierarchy()); // walkaround: set here by hand
+                    if (_parameter_ops.find(op->input(i)->producer()->id()) != _parameter_ops.end()
+                        && exec_inputs[i]->producer()->placement_group_union().has(local_device)) {
+                      transfer_param_buffer_map[exec_op->output(0)->dtype()]->AddTensor(exec_op->output(0));
+                    }
+                    transfer_map[exec_inputs[i]->id()] = exec_op->output(0);
+                    exec_inputs[i] = exec_op->output(0);
+                  }
                 }
               }
             }
@@ -705,6 +779,15 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       */
       exec_graph->CUR_HETERO_ID = 0;
     }
+    
+    std::shared_ptr<SubGraph> define_subgraph = GetSubGraph(op);
+    if (define_subgraph != nullptr) {
+      std::shared_ptr<SubGraph> exec_subgraph = exec_graph->MakeSubGraph(define_subgraph->subgraph_type(),
+                                                                         define_subgraph->name(),
+                                                                         define_subgraph->global_graph_name());
+      exec_graph->AddOpToSubGraph(exec_op, exec_subgraph->global_graph_name(), 
+                                  GetSubGraphType(op));
+    }
 
     // 后处理
     // 1、建立op和exec_op的映射
@@ -718,6 +801,22 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     if (is_comm_op(exec_op))
       HT_LOG_WARN << exec_op << " placement group is " << pg_union;
     */
+    // TODO: need review, may have bugs
+    if (is_variable_op(op)) {
+      // TODO: now only support parallel variable op
+      if (op->type() == "VariableOp") {}
+      else {
+        auto parameter_dict = dynamic_cast<ParallelVariableOpImpl&>(op->body()).get_parameter_dict();
+        if (parameter_dict.find("tensor_id") != parameter_dict.end() &&
+            parameter_dict.find("blocksize") != parameter_dict.end()) {
+          int64_t tensor_id = parameter_dict["tensor_id"];
+          int64_t blocksize = parameter_dict["blocksize"];
+          dequantization_tensor_map[tensor_id] = exec_op->output(0);
+          dequantization_blocksize_map[tensor_id] = blocksize;
+          HT_LOG_INFO << "INSERT: " << tensor_id << " " << op->id();
+        }
+      }
+    }
     Operator::for_each_output_tensor_pair(op, exec_op, handle_exec_output);
     if (_parameter_ops.find(op->id()) != _parameter_ops.end()) {
       Graph::MarkAsParameter(exec_op);
@@ -742,8 +841,11 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       // 热切换接口需要提前设置一些grad的信息
       exec_grad->producer()->set_device_group_hierarchy(exec_param->producer()->device_group_hierarchy());
       if (exec_grad->producer()->placement_group_union().has(local_device)) {
-        current_grad_buffer->AddTensor(exec_grad);
-        accumulate_grad_buffer->AddTensor(exec_grad);
+        // current_grad_buffer->AddTensor(exec_grad);
+        // accumulate_grad_buffer->AddTensor(exec_grad);
+        // TODO: better compatibility with hot switch and quantization
+        current_grad_buffer_map[exec_grad->dtype()]->AddTensor(exec_grad);
+        accumulate_grad_buffer_map[exec_grad->dtype()]->AddTensor(exec_grad);
         exec_grad->set_placement(local_device);
         HT_LOG_TRACE << "local grad " << exec_grad << " ds union = " << exec_grad->cur_ds_union().ds_union_info();
       }
@@ -753,24 +855,31 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   }
 
   // assign fw_op_id map
-  for (auto& op_ref : global_topo) {
+  for (auto& op_ref : deq_global_topo) {
     auto& op = op_ref.get();
     auto& exec_op = op_to_exec_op_mapping[op->id()];
     if (op->fw_op_id() != -1) {
       exec_op->set_fw_op_id(op_to_exec_op_mapping[op->fw_op_id()]->id());
     } 
   }
-  
+
   // assign initial shape plan
   exec_graph->AddShapePlan(std::move(exec_shape_plan));
 
   // assign param buffer, grad buffer and transfer map
+  /*
   exec_graph->_origin_param_buffer = std::move(origin_param_buffer);
   exec_graph->_transfer_param_buffer = std::move(transfer_param_buffer);
   exec_graph->_origin_param_and_optimizer_buffer = std::move(origin_param_and_optimizer_buffer);
   exec_graph->_origin_param_and_optimizer_buckets = std::move(origin_param_and_optimizer_buckets);
   exec_graph->_current_grad_buffer = std::move(current_grad_buffer);
   exec_graph->_accumulate_grad_buffer = std::move(accumulate_grad_buffer);
+  */
+  // TODO: better compatibility with hot switch and quantization
+  exec_graph->_origin_param_and_optimizer_buckets_map = std::move(origin_param_and_optimizer_buckets_map);
+  exec_graph->_transfer_param_buffer_map = std::move(transfer_param_buffer_map);
+  exec_graph->_current_grad_buffer_map = std::move(current_grad_buffer_map);
+  exec_graph->_accumulate_grad_buffer_map = std::move(accumulate_grad_buffer_map);
   exec_graph->_transfer_map = std::move(transfer_map);
   exec_graph->_grad_map = std::move(grad_map);
   
@@ -778,7 +887,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   _exec_graph_plan_pool.emplace_back(std::move(exec_graph), 
                                      std::move(op_to_exec_op_mapping),
                                      std::move(tensor_to_exec_tensor_mapping),
-                                     std::move(global_topo),
+                                     std::move(deq_global_topo),
                                      std::vector<Tensor2ShapeMap>{std::move(shape_plan)},
                                      CUR_STRATEGY_ID);
 
@@ -804,7 +913,8 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
 // 即允许feed_dict的shape（包括batch_size以及seq_len等）可变
 NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches,
                                    const FeedDict& feed_dict, const int num_micro_batches,
-                                   const int cur_strategy_id, RunLevel run_level, const double grad_scale) {
+                                   const int cur_strategy_id, RunLevel run_level,
+                                   bool save_checkpoint, const double grad_scale) {
   _run_level = run_level;
   CUR_STRATEGY_ID = static_cast<size_t>(cur_strategy_id);
   auto local_device = hetu::impl::comm::GetLocalDevice(); // only for debug use
@@ -833,7 +943,23 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       exec_plan_matched = false;
     }
     // 再看fetch匹配不
+    if (fetches.size() < exec_graph_plan.fetches.size()) {
+      exec_plan_matched = false;
+    }
+    // HT_LOG_INFO << i << "\n" << fetches << "\n" << exec_graph_plan.fetches
+    // << " " << exec_graph_plan.global_topo.size();
     for (const auto& fetch : fetches) {
+      bool find_fetch = false;
+      for (auto it = exec_graph_plan.fetches.begin(); it != exec_graph_plan.fetches.end(); ++it) {
+        if ((*it)->id() == fetch->id()) {
+          find_fetch = true;
+          break;
+        }
+      }
+      if (find_fetch == false) {
+        exec_plan_matched = false;
+        break;
+      }
       if (std::find(exec_graph_plan.fetches.begin(), exec_graph_plan.fetches.end(), fetch) == exec_graph_plan.fetches.end()) {
         HT_LOG_TRACE << local_device << ": exec_graph_plan fetches are " << exec_graph_plan.fetches 
           << " and the mismatch fetch is " << fetch;
@@ -925,14 +1051,23 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   }
 
   // 需要切换exec graph
+  if (save_checkpoint) // 存储param时不需要热切换
+    _is_active = false;
   if (!_is_active || _active_exec_plan != next_active_exec_plan) {
     HT_LOG_DEBUG << local_device << ": [Graph Plan] Context switch to the new exec plan begin...";
     // 热切换
     if (_is_active) {
       auto key = std::make_pair(_active_exec_plan, next_active_exec_plan);
       if (_param_switcher_pool.find(key) == _param_switcher_pool.end()) {
-        _param_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan);
-        _grad_switcher_pool[key] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan);
+        _param_and_opt_var_bucket_switcher_pool[key] = std::unordered_map<DataType, std::vector<std::shared_ptr<ParamBuffer>>>();;
+        _param_switcher_pool[key] = std::unordered_map<DataType, std::shared_ptr<ParamBuffer>>();
+        _grad_switcher_pool[key] = std::unordered_map<DataType, std::shared_ptr<ParamBuffer>>();
+        for (int i = 0; i < static_cast<int>(DataType::NUM_DATA_TYPES); i++) {
+          DataType dtype = static_cast<DataType>(i);
+          _param_and_opt_var_bucket_switcher_pool[key][dtype] = std::vector<std::shared_ptr<ParamBuffer>>();
+          _param_switcher_pool[key][dtype] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype);
+          _grad_switcher_pool[key][dtype] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype);
+        }
       }
       // 旧的exec graph
       auto& old_exec_graph = _exec_graph_plan_pool[_active_exec_plan].exec_graph;
@@ -986,15 +1121,19 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 那么只能切换origin param buffer
       // 2024.5.20 Update: 
       // 将optimzer和origin param放到一个buffer中
-      // 但目前在hetero+zero情形下无法使用
-      if (old_exec_graph->_transfer_param_buffer->IsEmpty()
-          || (old_exec_graph->_run_level == RunLevel::UPDATE
-              && param_switch_level == SWITCH_LEVEL::EXEC)) {
-        if (old_exec_graph->_use_origin_param_and_optimizer_buffer
-            || old_exec_graph->_use_origin_param_and_optimizer_buckets) {
-          param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER;
-        } else {
-          param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
+      // TODO: better compatibility with hot switch and quantization
+      for (auto it = old_exec_graph->_transfer_param_buffer_map.begin(); 
+           it != old_exec_graph->_transfer_param_buffer_map.end(); ++it) {
+        if (it->second->IsEmpty() 
+            || (old_exec_graph->_run_level == RunLevel::UPDATE 
+                && param_switch_level == SWITCH_LEVEL::EXEC)) {
+          if (old_exec_graph->_use_origin_param_and_optimizer_buffer
+              || old_exec_graph->_use_origin_param_and_optimizer_buckets) {
+            param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER;
+          } else {
+            HT_RUNTIME_ERROR << "deprecated";
+            param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
+          }
         }
       }
       // 3、----- buffer释放 -----
@@ -1004,24 +1143,33 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 那么热切换需要释放之前的transfer param buffer和current grad buffer
       if (old_exec_graph->_run_level == RunLevel::GRAD) {
         if (old_exec_graph->_use_current_grad_buffer) {
-          if (!old_exec_graph->_current_grad_buffer->IsEmpty()) {
-            HT_ASSERT(old_exec_graph->_current_grad_buffer->IsAllocated())
-              << "old exec graph with RunLevel::GRAD should have allocated the current grad buffer";
-            old_exec_graph->_current_grad_buffer->Free();
+          for (auto it = old_exec_graph->_current_grad_buffer_map.begin(); 
+             it != old_exec_graph->_current_grad_buffer_map.end(); ++it) {
+            if (it->second->IsEmpty()) {
+              HT_ASSERT(it->second->IsAllocated())
+                << "old exec graph with RunLevel::UPDATE should have allocated the current grad buffer";
+              it->second->Free();
+            }
           }
         }
       }
       if (old_exec_graph->_run_level == RunLevel::UPDATE) {
-        if (!old_exec_graph->_transfer_param_buffer->IsEmpty()) {
-          HT_ASSERT(old_exec_graph->_transfer_param_buffer->IsAllocated())
-            << "old exec graph with RunLevel::UPDATE should have allocated the transfer param buffer";
-          old_exec_graph->_transfer_param_buffer->Free();
+        for (auto it = old_exec_graph->_transfer_param_buffer_map.begin(); 
+             it != old_exec_graph->_transfer_param_buffer_map.end(); ++it) {
+          if (it->second->IsEmpty()) {
+            HT_ASSERT(it->second->IsAllocated())
+              << "old exec graph with RunLevel::UPDATE should have allocated the transfer param buffer";
+            it->second->Free();
+          }
         }
         if (old_exec_graph->_use_current_grad_buffer) {
-          if (!old_exec_graph->_current_grad_buffer->IsEmpty()) {
-            HT_ASSERT(old_exec_graph->_current_grad_buffer->IsAllocated())
-              << "old exec graph with RunLevel::UPDATE should have allocated the current grad buffer";
-            old_exec_graph->_current_grad_buffer->Free();
+          for (auto it = old_exec_graph->_current_grad_buffer_map.begin(); 
+             it != old_exec_graph->_current_grad_buffer_map.end(); ++it) {
+            if (it->second->IsEmpty()) {
+              HT_ASSERT(it->second->IsAllocated())
+                << "old exec graph with RunLevel::UPDATE should have allocated the current grad buffer";
+              it->second->Free();
+            }
           }
         }
         // 显存池当快要OOM时会自动处理
@@ -1046,26 +1194,39 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 如果要改成非async的
       // 更改环境变量HETU_SWITCH_PROFILE低于TIME即可
       // TODO: 实现CPU上的Switch（例如AdamOp的step，其目前并不在buffer中）
-      if (param_switch_mode != SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER
-          || old_exec_graph->_use_origin_param_and_optimizer_buckets == false) {
-        _param_switcher_pool[key]->SwitchParams(param_switch_mode, param_switch_level, "switch params and opt-states");
+      if (param_switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM
+          || param_switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
+        HT_ASSERT(param_switch_mode != SWITCH_MODE::SWITCH_ORIGIN_PARAM)
+          << "SWITCH_MODE::SWITCH_ORIGIN_PARAM is currently deprecated";
+        for (int i = 0; i < static_cast<int>(DataType::NUM_DATA_TYPES); i++) {
+          DataType dtype = static_cast<DataType>(i);
+          _param_switcher_pool[key][dtype]->SwitchParams(param_switch_mode, param_switch_level, "switch transfer params " + DataType2Str(dtype));
+        }
       }
       // 按buckets的顺序进行switch
       else {
-        size_t buckets_size = old_exec_graph->_origin_param_and_optimizer_buckets->buckets_size();
-        if (_param_and_opt_var_bucket_switcher_pool.find(key) == _param_and_opt_var_bucket_switcher_pool.end()) {
-          // 统一使用全局的通信组
-          // TODO: 后续使用实际参与的所有device
-          std::unordered_set<Device> comm_set = {};
-          const auto& global_device_group = hetu::impl::comm::GetGlobalDeviceGroup();
-          for (const auto& device : global_device_group.devices()) {
-            comm_set.emplace(device);
+        for (int i = 0; i < static_cast<int>(DataType::NUM_DATA_TYPES); i++) {
+          DataType dtype = static_cast<DataType>(i);
+          size_t buckets_size = old_exec_graph->_origin_param_and_optimizer_buckets_map[dtype]->buckets_size();
+          if (_param_and_opt_var_bucket_switcher_pool[key][dtype].empty()) {
+            // 统一使用全局的通信组
+            // TODO: 后续使用实际参与的所有device
+            std::unordered_set<Device> comm_set = {};
+            const auto& global_device_group = hetu::impl::comm::GetGlobalDeviceGroup();
+            for (const auto& device : global_device_group.devices()) {
+              comm_set.emplace(device);
+            }
+            for (int32_t bucket_num = 0; bucket_num < buckets_size; bucket_num++) {
+              _param_and_opt_var_bucket_switcher_pool[key][dtype].emplace_back(std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype, bucket_num, comm_set));
+            }
           }
-          _param_and_opt_var_bucket_switcher_pool[key] = std::vector<std::shared_ptr<SwitchExecGraph>>();
+          // 实际bucket热切换
           for (int32_t bucket_num = 0; bucket_num < buckets_size; bucket_num++) {
-            _param_and_opt_var_bucket_switcher_pool[key].emplace_back(std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, bucket_num, comm_set));
-          }
+            _param_and_opt_var_bucket_switcher_pool[key][dtype][bucket_num]->SwitchParams(param_switch_mode, param_switch_level, "switch params and opt-states dtype " + DataType2Str(dtype) + " bucket " + std::to_string(bucket_num));
         }
+        }
+        // old version w/o dtype (Malleus exp only)
+        /*
         // tricky part
         // topo caculation could be "overlapped"
         for (int32_t bucket_num = 0; bucket_num < buckets_size; bucket_num++) {
@@ -1081,9 +1242,13 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         global_mpi_group->Barrier(true);
         TOK(switch_buckets_time);
         HT_LOG_WARN << "switch buckets time = " << COST_MSEC(switch_buckets_time) << " ms";
+        */
       }
       if (!(grad_switch_level == SWITCH_LEVEL::TOPO && !_need_grad_switch_topo)) {
-        _grad_switcher_pool[key]->SwitchParams(grad_switch_mode, grad_switch_level, "switch grads");
+        for (int i = 0; i < static_cast<int>(DataType::NUM_DATA_TYPES); i++) {
+          DataType dtype = static_cast<DataType>(i);
+          _grad_switcher_pool[key][dtype]->SwitchParams(grad_switch_mode, grad_switch_level, "switch grads " + DataType2Str(dtype));
+        }
       }
     }
     _is_active = true;

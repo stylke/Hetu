@@ -38,7 +38,7 @@ class ContiguousOpImpl final : public OpInterface {
                         RuntimeContext& ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const {};
+                 RuntimeContext& ctx) const override;
 
   TensorList DoGradient(Operator& op, const TensorList& grad_outputs) const override;
 

@@ -3,6 +3,8 @@ import hetu as ht
 from hetu_gpt_ds_parallel_sp import GPTLMHeadModel
 # from hetu_gpt_ds_parallel import GPTLMHeadModel
 from hetu.nn.modules.parallel_ds import config2ds
+from hetu.utils.checkpoint import load_file, save_file, temp_load, temp_save,\
+                                  temp_load_split, temp_save_split,load_model, save_model, save_checkpoint
 from gpt_config import GPTConfig
 from data_utils import GPTJsonDataset, get_mask_and_position_ids, build_pretraining_data_loader
 import numpy as np
@@ -15,21 +17,26 @@ from queue import Queue
 local_device = None
 all_devices = None
 
-def distributed_init(use_multi_node: bool = False):
+def distributed_init(args, use_multi_node: bool = False):
     if use_multi_node:
         hostname = socket.gethostname()
-        os.environ['HETU_LOCAL_HOSTNAME'] = os.environ['LOCAL_HOSTNAME']
-        #if hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-master-0':
-        #    os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-0'
-        #elif hostname == 'job-e44df83d-4af0-4fbf-b066-b4650867451d-worker-0':
-        #    os.environ['HETU_LOCAL_HOSTNAME'] = 'a100-1'
-        #else:
-        #    raise ValueError(f"Unknown hostname: {hostname}")
+        # zhiyuan A100
+        # note tencent A800 should use LOCAL_HOSTNAME instead
+        os.environ['HETU_LOCAL_HOSTNAME'] = os.environ['HOSTNAME']
+        '''
+        if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
+           os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-0'
+        elif hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0':
+           os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-1'
+        else:
+           raise ValueError(f"Unknown hostname: {hostname}")
+        '''
 
     global local_device, all_devices
-    ht.init_comm_group(8)
+    ht.init_comm_group(args.ngpus, server_address=args.server_addr+":"+args.server_port)
     local_device = ht.local_device()
     all_devices = ht.global_device_group()
+    # print(local_device, os.environ['HETU_LOCAL_HOSTNAME'])
     if local_device.index == 0:
         print(f'local_device: {local_device}, all_devices: {all_devices}')
 
@@ -65,6 +72,11 @@ def train_dataset_provider(args):
         vocab_file=args.vocab_file,
         merge_file=args.merge_file)
     return train_dataset
+
+def get_position_ids(gbs_per_dp, seq_len): 
+    position_ids = np.arange(0, seq_len, dtype=np.int64) # [1, seq_len]
+    position_ids = np.tile(position_ids, [gbs_per_dp, 1]) # [dp_size, seq_len]
+    return position_ids
 
 def train_data_iterator(dataset, consumed_samples, mbs, dp_rank, dp_size):
     # print(f'new dataloader: consumed_samples = {consumed_samples}')
@@ -113,15 +125,17 @@ def pretrain(args):
     mbs_times_dp = micro_batch_size * dp_size    
 
     input_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='input_ids')
+    position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='position_ids')
     # token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='token_type_ids')
     attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[mbs_times_dp, config.seq_len], ds=input_ds, device_group=input_device_group, name='attention_mask')
     masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds=label_ds, device_group=label_device_group, name='masked_lm_labels')
 
     print(f'{local_device}: build model begin...')
     loss = model(input_ids=input_ids,
-                            attention_mask=attention_mask,
-                            # token_type_ids=token_type_ids,
-                            labels=masked_lm_labels)
+                 position_ids=position_ids,
+                 attention_mask=attention_mask,
+                 # token_type_ids=token_type_ids,
+                 labels=masked_lm_labels)
     print(f'{local_device}: build model end...')
 
     loss_mean = loss
@@ -137,6 +151,14 @@ def pretrain(args):
     print(f'{local_device}: build dataset begin...')
     train_dataset = train_dataset_provider(args)
     print(f'{local_device}: build dataset end...')
+
+    load_st = time.time()
+    # temp_load(model, opt, "./checkpoint/temp3", config=config, local_device=local_device)
+    # load_model(model, "./checkpoint/temp2", config=config, local_device=local_device)
+    # temp_load_split(model, opt, "./checkpoint/temp3", config=config, local_device=local_device)
+    load_ed = time.time()
+    print("Checkpoint Loaded.")
+    print('%s: Load_Time = %.4f'%(local_device, load_ed - load_st))
 
     # return
     # device in same dp_group will read the same batch data, idx=-1 means no need to read data
@@ -185,6 +207,7 @@ def pretrain(args):
 
                 feed_dict = {
                     input_ids: tokens.astype(np.int64),
+                    position_ids: _position_ids.astype(np.int64),
                     # token_type_ids: _token_type_ids.astype(np.int64),
                     attention_mask: _attention_mask.astype(np.int64),
                     masked_lm_labels: labels.astype(np.int64),
@@ -192,6 +215,7 @@ def pretrain(args):
             else: # fake data; feed_dict={} will cause segment fault?
                 feed_dict = {
                     input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64),
                     # token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
                     attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
                     masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
@@ -208,9 +232,15 @@ def pretrain(args):
                 loss_out = results[0].numpy(force=True).mean()
                 print('%s: [Epoch %d] (Iteration %d, consumed_samples = %d): Loss = %.3f, Time = %.4f'%(local_device, ep, step, consumed_samples, loss_out, end_time-start_time))
 
-            
-            if input_device_group.contains(local_device) and step == 1 and dp_rank == 0:
-                os.system('nvidia-smi')
+                if step == 10 and dp_rank == 0:
+                    os.system('nvidia-smi')
+    
+    save_st = time.time()
+    # save_model(model, "./checkpoint/temp", config=config, local_device=local_device, save_dtype=ht.float32)
+    # temp_save(model, opt, "./checkpoint/temp3", config=config, local_device=local_device, save_dtype=ht.float32)
+    save_ed = time.time()
+    print("Checkpoint Saved.")
+    print('%s: Save_Time = %.4f'%(local_device, save_ed - save_st))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -287,8 +317,20 @@ if __name__ == '__main__':
     parser.add_argument(
         "--bf16", action="store_true", help="Use bfloat16."
     )
+    parser.add_argument(
+        "--server_addr", type=str, default='127.0.0.1', help="server's address"
+    )
+    parser.add_argument(
+        "--server_port", type=str, default='23457', help="server's port"
+    ) 
+    parser.add_argument(
+        "--ngpus", type=int, default=8, help="num of gpus"
+    ) 
+    parser.add_argument(
+        "--rank", type=int, default=0, help="the rank of process"
+    ) 
     args = parser.parse_args()
-    distributed_init(args.use_multi_node)
+    distributed_init(args, args.use_multi_node)
     with ht.graph("define_and_run"):
         if args.bf16:
             precision = "ht.bfloat16"

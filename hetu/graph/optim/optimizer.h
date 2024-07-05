@@ -23,6 +23,10 @@ class Optimizer {
 
   Tensor Minimize(const Tensor& loss, const TensorList& var_list = {},
                   const Tensor& grad_loss = {}, const OpName& name = "");
+  
+  StateDict GetStates(const Tensor& var);
+  
+  void SetStates(const Tensor& var, const OpName state_name, const NDArray& value);
 
   virtual GradAndVarList ComputeGradients(const Tensor& loss,
                                           const TensorList& var_list = {},
@@ -43,6 +47,7 @@ class Optimizer {
 
   TensorList _params;
   float _learning_rate;
+  std::unordered_map<TensorId, StateDict> state_dict;
 };
 
 class SGDOptimizer : public Optimizer {

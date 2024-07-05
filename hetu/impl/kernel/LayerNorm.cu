@@ -326,10 +326,11 @@ void LayerNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
         out_grad_offset_calculator, in_offset_calculator,
         scale_offset_calculator, mean_offset_calculator,
         var_offset_calculator, grad_offset_calculator);
+      NDArray::MarkUsedBy({scale_out_grads_, db_, dy_mul_x_, ds_}, stream);
     });
     
   NDArray::MarkUsedBy({out_grads, in_arr, ln_scale, grad_arr,
-                       grad_scale, grad_bias, mean_arr, var_arr,
+                       grad_scale, grad_bias, mean_arr, var_arr, gscale_,
                        out_grad_offset_calculator_arr, in_offset_calculator_arr,
                        mean_offset_calculator_arr, var_offset_calculator_arr,
                        gscale_offset_calculator_arr, scale_offset_calculator_arr,

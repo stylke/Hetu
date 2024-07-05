@@ -321,6 +321,106 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
   return outputs;
 }
 
+NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
+                                        RuntimeContext& runtime_ctx, const Device& device) const {
+  NDArrayList outputs;
+  auto output_size = op->num_outputs();
+  if (output_size > 0) {
+    outputs.reserve(output_size);
+    // 动态图
+    // 无runtime_ctx
+    // 现推output_shapes
+    if (runtime_ctx.shape_plan().empty()) {
+      HTShapeList input_shapes;
+      input_shapes.reserve(op->num_inputs());
+      for (auto& input : inputs) {
+        input_shapes.push_back(input->shape());
+      }
+      auto output_shapes = DoInferShape(op, input_shapes, runtime_ctx);
+      for (size_t i = 0; i < output_size; i++) {
+        outputs.push_back(NDArray::empty(output_shapes[i],
+                          device,
+                          op->output(i)->dtype(),
+                          op->instantiation_ctx().stream_index));
+      }
+    }
+    // 静态图
+    // 有runtime_ctx
+    // output_shapes全部提前设置好
+    // 部分output的allocation也会设置好
+    else {
+      for (size_t i = 0; i < output_size; i++) {
+        // question: will tensor shape != NDArray shape happen in any situation
+        auto output_id = op->output(i)->id();
+        // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": get runtime shape for " << op->output(i);
+        const auto& output_shape = runtime_ctx.get_runtime_shape(output_id);
+        HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
+          << " output " << i << " shape = " << output_shape << " ds = " << op->output(i)->get_distributed_states().ds_info();
+        if (runtime_ctx.has_runtime_allocation(output_id)) {
+          outputs.push_back(runtime_ctx.get_runtime_allocation(output_id));
+        } 
+        // alloc on-the-fly
+        // 后续要改成memory plan
+        else {
+          outputs.push_back(NDArray::empty(output_shape,
+                            device,
+                            op->output(i)->dtype(),
+                            op->instantiation_ctx().stream_index));
+        }
+      }
+    }
+  }
+  return outputs;
+}
+
+
+NDArray OpInterface::DoAllocOutput(Operator& op, const NDArrayList& inputs,
+                                   size_t idx, RuntimeContext& runtime_ctx) const {
+  auto output_size = op->num_outputs();
+  HT_ASSERT(idx < output_size)
+  << "Output index " << idx << " is out of range for op " << op
+  << " while allocating outputs";
+
+  // 动态图
+  // 无runtime_ctx
+  // 现推output_shapes
+  if (runtime_ctx.shape_plan().empty()) {
+    HTShapeList input_shapes;
+    input_shapes.reserve(op->num_inputs());
+    for (auto& input : inputs) {
+      input_shapes.push_back(input->shape());
+    }
+    auto output_shapes = DoInferShape(op, input_shapes, runtime_ctx);
+    return NDArray::empty(output_shapes[idx],
+                          op->instantiation_ctx().placement,
+                          op->output(idx)->dtype(),
+                          op->instantiation_ctx().stream_index);
+  }
+  // 静态图
+  // 有runtime_ctx
+  // output_shapes全部提前设置好
+  // 部分output的allocation也会设置好
+  else {
+    // question: will tensor shape != NDArray shape happen in any situation
+    auto output_id = op->output(idx)->id();
+    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": get runtime shape for " << op->output(idx);
+    const auto& output_shape = runtime_ctx.get_runtime_shape(output_id);
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
+      << " output " << idx << " shape = " << output_shape << " ds = " << op->output(idx)->get_distributed_states().ds_info();
+    if (runtime_ctx.has_runtime_allocation(output_id)) {
+      return runtime_ctx.get_runtime_allocation(output_id);
+    } 
+    // alloc on-the-fly
+    // 后续要改成memory plan
+    else {
+      return NDArray::empty(output_shape,
+                            op->instantiation_ctx().placement,
+                            op->output(idx)->dtype(),
+                            op->instantiation_ctx().stream_index);
+    }
+  }
+}
+
 OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
              std::shared_ptr<OpInterface> body, TensorList inputs,
              OpMeta op_meta)
@@ -415,7 +515,7 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
       if (!exist_none_ds) {
         _body->DeduceStatesHierarchy(_inputs, _outputs, _op_meta, graph);
       } else if (exist_ds) {
-        HT_LOG_ERROR << "Only part of " << name() << " inputs has distributed states!";
+        HT_RUNTIME_ERROR << "Only part of " << name() << " inputs has distributed states!";
       }
     };
     if (graph.type() == GraphType::DEFINE_AND_RUN) {
@@ -429,7 +529,7 @@ OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
     } else if (graph.type() == GraphType::EAGER) {
       // eager graph no need to deduce states
     } else {
-      HT_LOG_ERROR << "deduce states do not support this graph type: " << graph.type();
+      HT_RUNTIME_ERROR << "deduce states do not support this graph type: " << graph.type();
     }
   }
 }

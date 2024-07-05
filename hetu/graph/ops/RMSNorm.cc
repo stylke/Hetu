@@ -1,5 +1,4 @@
 #include "hetu/graph/ops/RMSNorm.h"
-#include "hetu/graph/ops/Reduce.h"
 #include "hetu/graph/ops/Reshape.h"
 #include "hetu/graph/ops/Slice.h"
 #include "hetu/graph/headers.h"
@@ -19,22 +18,14 @@ void RMSNormOpImpl::DoCompute(Operator& op,
   const NDArray colscale_ = input_indexs(5) >= 0 ? inputs.at(input_indexs(5)) : NDArray();
   const NDArray x0_subset_ = input_indexs(6) >= 0 ? inputs.at(input_indexs(6)) : NDArray();
   const NDArray z_subset_ = input_indexs(7) >= 0 ? inputs.at(input_indexs(7)) : NDArray();
-  auto itype = x0->dtype();
-  auto rtype = residual_.is_defined()
-      ? residual_->dtype()
-      : (residual_in_fp32() ? kFloat32 : x0->dtype());
-  bool save_x = residual_.is_defined() || (dropout_p() > 0.f) || rowscale_.is_defined() || 
-                colscale_.is_defined() || x0_subset_.is_defined() || (itype != rtype);
   NDArray z = output_indexs(0) >= 0 ? outputs.at(output_indexs(0)) : NDArray();
-  NDArray x = (output_indexs(1) >= 0 && save_x) ? outputs.at(output_indexs(1)) : NDArray();
+  NDArray x = output_indexs(1) >= 0 ? outputs.at(output_indexs(1)) : NDArray();
   NDArray dmask = output_indexs(2) >= 0 ? outputs.at(output_indexs(2)) : NDArray();
   NDArray mu = output_indexs(3) >= 0 ? outputs.at(output_indexs(3)) : NDArray();
   NDArray rsigma = output_indexs(4) >= 0 ? outputs.at(output_indexs(4)) : NDArray();
 
   int64_t hidden_size = gamma->numel();
   NDArray x0mat = x0.is_defined() ? NDArray::view(x0, {-1, hidden_size}) : x0;
-  if (output_indexs(1) >= 0 && !save_x)
-    outputs[output_indexs(1)] = x0;
   NDArray residualmat = residual_.is_defined() ? NDArray::view(residual_, {-1, hidden_size}) : residual_;
   NDArray rowscalemat = rowscale_.is_defined() ? NDArray::view(rowscale_, {-1}) : rowscale_;
   NDArray x0_subsetmat = x0_subset_.is_defined() ? NDArray::view(x0_subset_, {-1}) : x0_subset_;
@@ -47,7 +38,6 @@ void RMSNormOpImpl::DoCompute(Operator& op,
 
 TensorList RMSNormOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   TensorList grad_tensors(op->num_inputs(), Tensor());
-  // output_1, if input_5 ? input_0 : None, output_2, input_2, output_3, output_4, input_4, input_5 
   int64_t x0_numrows = 1;
   for (int i = 0; i < op->input(input_indexs(0))->ndim() - 1; ++i) {
     x0_numrows *= op->input(input_indexs(0))->shape(i);
@@ -67,16 +57,17 @@ TensorList RMSNormOpImpl::DoGradient(Operator& op, const TensorList& grad_output
                                            dropout_p(), rowscale_const(), input_indexs(6) >= 0 ? x0_numrows : 0,
                                            input_indexs(1) >= 0 ? true : false, is_rms_norm(),
                                            op->grad_op_meta().set_name(op->grad_name()));
-  if (input_indexs(0) >= 0 && op->input(input_indexs(0))->requires_grad())
-    grad_tensors[input_indexs(0)] = grads[0];
-  if (input_indexs(1) >= 0 && op->input(input_indexs(1))->requires_grad())
-    grad_tensors[input_indexs(1)] = grads[1];
-  if (input_indexs(2) >= 0 && op->input(input_indexs(2))->requires_grad())
-    grad_tensors[input_indexs(2)] = grads[2];
-  if (input_indexs(3) >= 0 && op->input(input_indexs(3))->requires_grad())
-    grad_tensors[input_indexs(3)] = grads[3];
-  if (input_indexs(5) >= 0 && op->input(input_indexs(5))->requires_grad())
-    grad_tensors[input_indexs(5)] = grads[5];
+
+  if (input_indexs(0) >= 0 && op->requires_grad(input_indexs(0)))
+    grad_tensors[0] = grads[0];
+  if (input_indexs(1) >= 0 && op->requires_grad(input_indexs(1)))
+    grad_tensors[1] = grads[1];
+  if (input_indexs(2) >= 0 && op->requires_grad(input_indexs(2)))
+    grad_tensors[2] = grads[2];
+  if (input_indexs(3) >= 0 && op->requires_grad(input_indexs(3)))
+    grad_tensors[3] = grads[3];
+  if (input_indexs(5) >= 0 && op->requires_grad(input_indexs(5)))
+    grad_tensors[5] = grads[5];
   return grad_tensors;
 }
 
@@ -134,10 +125,6 @@ void RMSNormOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_
 
 void RMSNormGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
                                       NDArrayList& outputs, RuntimeContext& ctx) const {
-  for (auto input : op->inputs()) {
-    HT_LOG_TRACE << "rms gradient input " << input << ", ds = " << input->get_distributed_states().ds_info() << ", shape = " << input->shape()
-      << ", producer = " << input->producer(); 
-  }
   const NDArray dz = input_indexs(0) >= 0 ? inputs.at(input_indexs(0)) : NDArray();
   const NDArray dx_ = input_indexs(1) >= 0 ? inputs.at(input_indexs(1)) : NDArray();
   const NDArray x = input_indexs(2) >= 0 ? inputs.at(input_indexs(2)) : NDArray();
@@ -209,7 +196,6 @@ void RMSNormGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs
 HTShapeList RMSNormGradientOpImpl::DoInferShape(Operator& op, 
                                                 const HTShapeList& input_shapes, 
                                                 RuntimeContext& ctx) const {
-  HT_LOG_TRACE << "GradInferShape";
   HTShapeList out_shapes = {};
   HTShape dz = input_indexs(0) >= 0 ? input_shapes.at(input_indexs(0)) : HTShape();
   HTShape dx_ = input_indexs(1) >= 0 ? input_shapes.at(input_indexs(1)) : HTShape();
@@ -237,7 +223,6 @@ HTShapeList RMSNormGradientOpImpl::DoInferShape(Operator& op,
   if (output_indexs(4) >= 0) {
     out_shapes.emplace_back(colscale_);
   }
-  HT_LOG_TRACE << "GradInferShape-end";
   return out_shapes;
 }
 
@@ -258,9 +243,8 @@ TensorList MakeRMSNormOp(Tensor x0, Tensor residual_, Tensor gamma,
   bool save_x = residual_.is_defined() || (dropout_p > 0.f) || rowscale_.is_defined() || 
                 colscale_.is_defined() || x0_subset_.is_defined() || (itype != rtype);
   output_indexs[0] = ptr++;
-  output_indexs[1] = ptr++;
-  // if (save_x)
-  //   output_indexs[1] = ptr++;
+  if (save_x)
+    output_indexs[1] = ptr++;
   if (dropout_p > 0.f)
     output_indexs[2] = ptr++;
   output_indexs[3] = ptr++;
@@ -294,18 +278,6 @@ TensorList MakeRMSNormGradientOp(Tensor dz, Tensor dx_, Tensor x, Tensor x0_,
                                  Tensor z_subset_, const float dropout_p, const float rowscale_const,
                                  const int64_t x0_numrows, const bool has_residual,
                                  bool is_rms_norm, OpMeta op_meta) {
-  HT_LOG_TRACE << dz;
-  HT_LOG_TRACE << dx_;
-  HT_LOG_TRACE << x;
-  HT_LOG_TRACE << x0_;
-  HT_LOG_TRACE << dmask_;
-  HT_LOG_TRACE << mu;
-  HT_LOG_TRACE << rsigma;
-  HT_LOG_TRACE << gamma;
-  HT_LOG_TRACE << rowscale_;
-  HT_LOG_TRACE << colscale_;
-  HT_LOG_TRACE << x0_subset_;
-  HT_LOG_TRACE << z_subset_;
   std::vector<int> output_indexs(5, -1);
   int ptr = 0;
   output_indexs[0] = ptr++;
@@ -317,12 +289,10 @@ TensorList MakeRMSNormGradientOp(Tensor dz, Tensor dx_, Tensor x, Tensor x0_,
   if (colscale_.is_defined()) {
     output_indexs[4] = ptr++;
   }
-  HT_LOG_TRACE << "U1";
   TensorList inputs = {std::move(dz), std::move(dx_), std::move(x), std::move(x0_),
                        std::move(dmask_), std::move(mu), std::move(rsigma), std::move(gamma),
                        std::move(rowscale_), std::move(colscale_), std::move(x0_subset_), std::move(z_subset_)};
   TensorList inputs_ = {};
-  HT_LOG_TRACE << "U2";
   std::vector<int> input_indexs(12, -1);
   ptr = 0;
   for (int i = 0; i < inputs.size(); ++i) {
@@ -331,7 +301,6 @@ TensorList MakeRMSNormGradientOp(Tensor dz, Tensor dx_, Tensor x, Tensor x0_,
       inputs_.emplace_back(inputs[i]);
     }
   }
-   HT_LOG_TRACE << "U3";
   return Graph::MakeOp(
          std::make_shared<RMSNormGradientOpImpl>(dropout_p, rowscale_const, x0_numrows, 
                                                  has_residual, is_rms_norm, input_indexs,
@@ -340,7 +309,5 @@ TensorList MakeRMSNormGradientOp(Tensor dz, Tensor dx_, Tensor x, Tensor x0_,
          std::move(op_meta))->outputs();
 }
 
-
 } // namespace graph
 } // namespace hetu
-

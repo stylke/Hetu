@@ -24,7 +24,9 @@ void DataTransferCpu(const NDArray& from, NDArray& to, const Stream& stream) {
   auto _future = cpu_stream.EnqueueTask(
   [from, to, to_ptr, from_ptr, numel]() {
     if (from->dtype() == to->dtype()) {
-      memcpy(to_ptr, from_ptr, numel * DataType2Size(from->dtype()));
+      memcpy(to_ptr, from_ptr, (from->dtype() == kFloat4 || from->dtype() == kNFloat4)
+                               ? ((numel + 1) / 2) * DataType2Size(from->dtype())
+                               : numel * DataType2Size(from->dtype()));
     } else {
       HT_DISPATCH_PAIRED_SIGNED_INTEGER_AND_FLOATING_TYPES(
         from->dtype(), to->dtype(), spec_a_t, spec_b_t, "DataTransferCpu", [&]() {

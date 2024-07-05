@@ -4,6 +4,10 @@
 #include "hetu/utils/shared_ptr_wrapper.h"
 #include "hetu/core/ndarray.h"
 #include "hetu/core/stream.h"
+#include "hetu/impl/communication/rpc_client_impl.h"
+#include "hetu/utils/json/json.hpp"
+
+using json = nlohmann::json;
 
 namespace hetu {
 namespace impl {
@@ -40,7 +44,7 @@ class CommunicationGroupDef : public shared_ptr_target {
   }
 
   inline static bool IsRanksValid(const std::vector<int>& ranks) {
-    if (ranks.size() < 2)
+    if (ranks.size() < 1)
       return false;
     for (size_t i = 1; i < ranks.size(); i++)
       if (ranks[i - 1] >= ranks[i])
@@ -81,13 +85,13 @@ class CommunicationGroupDef : public shared_ptr_target {
                        << "\" is not defined.";
   }
 
-  virtual void AllGather(const NDArray& input, NDArray& output) {
+  virtual void AllGather(const NDArray& input, NDArray& output, int32_t gather_dim = 0) {
     HT_NOT_IMPLEMENTED << "AllGather fn of backend \"" << backend()
                        << "\" is not defined.";
   }
 
   virtual void ReduceScatter(const NDArray& input, NDArray& output,
-                             ReductionType red_type = kSUM) {
+                             int32_t scatter_dim = 0, ReductionType red_type = kSUM) {
     HT_NOT_IMPLEMENTED << "ReduceScatter fn of backend \"" << backend()
                        << "\" is not defined.";
   }
@@ -212,10 +216,14 @@ using CommunicationGroup = CommGroupWrapper<CommunicationGroupDef>;
 // since we rely on MPI to get the world rank and size now.
 int GetWorldRank();
 int GetWorldSize();
+std::vector<int> GetWorldRanks();
 int GetGroupRank(const std::vector<int>& world_ranks);
+std::shared_ptr<DeviceClientImpl> GetLocalClient();
 void SetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device);
 Device SetUpDeviceMappingAndAssignLocalDeviceOnce(
-  const std::map<DeviceType, int>& resources = {{kCUDA, 8}});
+  const std::map<DeviceType, int>& resources = {{kCUDA, 8}},
+  const std::vector<int64_t>& device_idxs = {},
+  const std::string server_address = "127.0.0.1:23457");
 bool IsGlobalDeviceGroupReady();
 const DeviceGroup& GetGlobalDeviceGroup();
 const Device& GetLocalDevice();

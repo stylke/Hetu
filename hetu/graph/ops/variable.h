@@ -116,6 +116,10 @@ class VariableOpImpl : public OpInterface {
     return _requires_grad;
   }
 
+  void set_requires_grad(bool requires_grad) {
+    _requires_grad = requires_grad;
+  }
+
  protected:
   std::shared_ptr<Initializer> _init;
   NDArray _provided_data;
@@ -130,27 +134,33 @@ class ParallelVariableOpImpl : public OpInterface {
  public:
   ParallelVariableOpImpl(const Initializer& init, HTShape global_shape, 
                          const DistributedStatesHierarchy& ds_hierarchy, std::vector<int64_t> local_idx,
-                         DataType dtype = kFloat32, bool requires_grad = false)
+                         DataType dtype = kFloat32, bool requires_grad = false,
+                         ParameterDict parameter_dict = {})
   : OpInterface(quote(ParallelVariableOp)), _init(init.copy()), 
     _global_shape(std::move(global_shape)), _local_idx(std::move(local_idx)), 
-    _dtype(dtype), _ds_hierarchy(ds_hierarchy), _requires_grad(requires_grad) {
+    _dtype(dtype), _ds_hierarchy(ds_hierarchy), _requires_grad(requires_grad),
+    _parameter_dict(parameter_dict) {
       _local_shape = get_local_shape(_global_shape, _ds_hierarchy.get_default_ds()); // deduce local shape default by ds[0]
     }
 
   ParallelVariableOpImpl(NDArray provided_data, bool copy_provided_data, 
-                         const DistributedStatesHierarchy& ds_hierarchy, DataType dtype, bool requires_grad) 
+                         const DistributedStatesHierarchy& ds_hierarchy, DataType dtype, bool requires_grad,
+                         ParameterDict parameter_dict = {}) 
   : OpInterface(quote(ParallelVariableOp)), _provided_data(provided_data),
     _copy_provided_data(copy_provided_data), _local_shape(provided_data->shape()),
-    _dtype(_InferDataType(provided_data, dtype)), _ds_hierarchy(ds_hierarchy), _requires_grad(requires_grad) {
+    _dtype(_InferDataType(provided_data, dtype)), _ds_hierarchy(ds_hierarchy), _requires_grad(requires_grad),
+    _parameter_dict(parameter_dict) {
       _global_shape = get_global_shape(_local_shape, _ds_hierarchy.get_default_ds());
     }
 
   // todo: if need provide multi shape for multi ds?
   ParallelVariableOpImpl(NDArrayList multi_provided_data, bool copy_provided_data, 
-                         const DistributedStatesHierarchy& ds_hierarchy, DataType dtype, bool requires_grad) 
+                         const DistributedStatesHierarchy& ds_hierarchy, DataType dtype, bool requires_grad,
+                         ParameterDict parameter_dict = {}) 
   : OpInterface(quote(ParallelVariableOp)), _multi_provided_data(std::move(multi_provided_data)),
     _copy_provided_data(copy_provided_data), _local_shape(_multi_provided_data[0]->shape()), // use the first strategy shape
-    _dtype(_InferDataType(_multi_provided_data[0], dtype)), _ds_hierarchy(ds_hierarchy), _requires_grad(requires_grad) {
+    _dtype(_InferDataType(_multi_provided_data[0], dtype)), _ds_hierarchy(ds_hierarchy), _requires_grad(requires_grad),
+    _parameter_dict(parameter_dict) {
       _global_shape = get_global_shape(_local_shape, _ds_hierarchy.get_default_ds());
     }    
 
@@ -273,6 +283,15 @@ class ParallelVariableOpImpl : public OpInterface {
     return _requires_grad;
   }
 
+  void set_requires_grad(bool requires_grad) {
+    _requires_grad = requires_grad;
+  }
+
+  ParameterDict get_parameter_dict() {
+    return _parameter_dict;    
+  }
+
+
   std::shared_ptr<Initializer> _init;
   mutable NDArray _provided_data; // local_data
   mutable NDArrayList _multi_provided_data; // local_data
@@ -284,6 +303,7 @@ class ParallelVariableOpImpl : public OpInterface {
   std::vector<int64_t> _local_idx; // _local_idx only be assigned when op is in pipeline device_group, and return local_device index in the device_group
   DataType _dtype;
   bool _requires_grad;
+  ParameterDict _parameter_dict;
 };
 
 Tensor MakeVariableOp(const Initializer& init, HTShape shape, 
@@ -309,29 +329,36 @@ Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data = false,
 Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape, 
                               const DistributedStatesHierarchy& ds_hierarchy, std::vector<int64_t> local_idx={-1},
                               DataType dtype = kFloat32, bool requires_grad = false,
+                              ParameterDict parameter_dict = {}, 
                               OpMeta op_meta = OpMeta());
 
 Tensor MakeParallelVariableOp(NDArray provided_data, const DistributedStatesHierarchy& ds_hierarchy, 
                               bool copy_provided_data = false, DataType dtype = kUndeterminedDataType, 
-                              bool requires_grad = false, OpMeta op_meta = OpMeta());
+                              bool requires_grad = false, ParameterDict parameter_dict = {}, 
+                              OpMeta op_meta = OpMeta());
 
 Tensor MakeParallelVariableOp(NDArrayList multi_provided_data, DistributedStatesHierarchy ds_hierarchy, 
                               bool copy_provided_data = false, DataType dtype = kUndeterminedDataType, 
-                              bool requires_grad = false, OpMeta op_meta = OpMeta());
+                              bool requires_grad = false,
+                              ParameterDict parameter_dict = {}, 
+                              OpMeta op_meta = OpMeta());
 
 Tensor MakeParallelParameterOp(const Initializer& init, HTShape global_shape, 
                                const DistributedStatesHierarchy& ds_hierarchy, std::vector<int64_t> local_idx={-1},
                                DataType dtype = kFloat32, bool requires_grad = false,
+                               ParameterDict parameter_dict = {}, 
                                OpMeta op_meta = OpMeta());
 // provided_data is local_data!
 Tensor MakeParallelParameterOp(NDArray provided_data, const DistributedStatesHierarchy& ds_hierarchy, 
                                bool copy_provided_data = false, DataType dtype = kUndeterminedDataType, 
-                               bool requires_grad = false, OpMeta op_meta = OpMeta());
+                               bool requires_grad = false, ParameterDict parameter_dict = {},  
+                               OpMeta op_meta = OpMeta());
 
 // provided_data is local_data!
 Tensor MakeParallelParameterOp(NDArrayList multi_provided_data, DistributedStatesHierarchy ds_hierarchy, 
                                bool copy_provided_data = false, DataType dtype = kUndeterminedDataType, 
-                               bool requires_grad = false, OpMeta op_meta = OpMeta());
+                               bool requires_grad = false, ParameterDict parameter_dict = {}, 
+                               OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

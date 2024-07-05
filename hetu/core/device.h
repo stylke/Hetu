@@ -131,6 +131,22 @@ class Device {
     return _dprops[idx].second;
   }
 
+  cudaDeviceProp cuda_dprop() {
+    HT_ASSERT(is_cuda())
+      << "cuda_dprop() is only available for CUDA devices";
+    auto& dprop = _dprops[index()].second;
+    auto cuda_dprop = cudaDeviceProp();
+    // copy all fields from DeviceProp to cudaDeviceProp
+    cuda_dprop.major = dprop.major;
+    cuda_dprop.minor = dprop.minor;
+    cuda_dprop.multiProcessorCount = dprop.multiProcessorCount;
+    cuda_dprop.maxThreadsPerMultiProcessor = dprop.maxThreadsPerMultiProcessor;
+    for (int i = 0; i < 3; ++i) {
+      cuda_dprop.maxGridSize[i] = dprop.maxGridSize[i];
+    }
+    return std::move(cuda_dprop);
+  }
+
   std::string compat_string() const;
 
   static inline std::string GetLocalHostname() {

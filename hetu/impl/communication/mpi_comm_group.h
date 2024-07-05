@@ -47,10 +47,10 @@ class MPICommunicationGroupDef : public CommunicationGroupDef {
   void Reduce(const NDArray& input, NDArray& output, int reducer,
               ReductionType red_type = kSUM) override;
 
-  void AllGather(const NDArray& input, NDArray& output) override;
+  void AllGather(const NDArray& input, NDArray& output, int32_t gather_dim = 0) override;
 
   void ReduceScatter(const NDArray& input, NDArray& output,
-                     ReductionType red_type = kSUM) override;
+                     int32_t scatter_dim = 0, ReductionType red_type = kSUM) override;
 
   void Gather(const NDArray& input, NDArray& output, int gatherer) override;
 
@@ -115,6 +115,14 @@ class MPICommunicationGroup final
     return GetOrCreateWorldwide(Stream(device, kCollectiveStream));
   }
 };
+
+int GetMPIWorldRank();
+int GetMPIWorldSize();
+int GetMPIGroupRank(const std::vector<int>& world_ranks);
+void MPISetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device);
+Device MPISetUpDeviceMappingAndAssignLocalDeviceOnce(
+  const std::map<DeviceType, int>& resources = {{kCUDA, 8}},
+  const std::vector<int64_t>& device_idxs = {});
 
 } // namespace comm
 } // namespace impl

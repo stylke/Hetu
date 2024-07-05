@@ -46,10 +46,10 @@ class NCCLCommunicationGroupDef : public CommunicationGroupDef {
   void Reduce(const NDArray& input, NDArray& output, int reducer,
               ReductionType red_type = kSUM) override;
 
-  void AllGather(const NDArray& input, NDArray& output) override;
+  void AllGather(const NDArray& input, NDArray& output, int32_t gather_dim = 0) override;
 
   void ReduceScatter(const NDArray& input, NDArray& output,
-                     ReductionType red_type = kSUM) override;
+                     int32_t scatter_dim = 0, ReductionType red_type = kSUM) override;
 
   void Gather(const NDArray& input, NDArray& output, int gatherer) override;
 
@@ -74,7 +74,7 @@ class NCCLCommunicationGroupDef : public CommunicationGroupDef {
   }
 
  protected:
-  static void CreateNCCLUniqueId(const std::vector<int>& world_ranks,
+  static void CreateNCCLUniqueId(const std::vector<int>& world_ranks, const Stream& stream,
                                  ncclUniqueId& id);
 
   ncclUniqueId _unique_id;

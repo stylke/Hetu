@@ -102,18 +102,18 @@ void InstanceNormCuda(const NDArray& in_arr, NDArray& mean_arr,
 }
 
 template <typename spec_t>
-__global__ void calculate_grad_kernel(const spec_t* out_grads,
-                                      const spec_t* in_arr,
-                                      const spec_t* mean_arr,
-                                      const spec_t* var_arr, 
-                                      spec_t* ds, spec_t* dbias,
-                                      spec_t* grad_arr,
-                                      size_t last2dim, float eps, size_t size,
-                                      const OffsetCalculator* out_grads_offset_calculator,
-                                      const OffsetCalculator* in_offset_calculator,
-                                      const OffsetCalculator* mean_offset_calculator,
-                                      const OffsetCalculator* var_offset_calculator,
-                                      const OffsetCalculator* grad_offset_calculator) {
+__global__ void instancenorm_grad_kernel(const spec_t* out_grads,
+                                         const spec_t* in_arr,
+                                         const spec_t* mean_arr,
+                                         const spec_t* var_arr, 
+                                         spec_t* ds, spec_t* dbias,
+                                         spec_t* grad_arr,
+                                         size_t last2dim, float eps, size_t size,
+                                         const OffsetCalculator* out_grads_offset_calculator,
+                                         const OffsetCalculator* in_offset_calculator,
+                                         const OffsetCalculator* mean_offset_calculator,
+                                         const OffsetCalculator* var_offset_calculator,
+                                         const OffsetCalculator* grad_offset_calculator) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -131,18 +131,18 @@ __global__ void calculate_grad_kernel(const spec_t* out_grads,
 }
 
 template <>
-__global__ void calculate_grad_kernel<float16>(const float16* out_grads,
-                                      const float16* in_arr,
-                                      const float16* mean_arr,
-                                      const float16* var_arr, 
-                                      float16* ds, float16* dbias,
-                                      float16* grad_arr,
-                                      size_t last2dim, float eps, size_t size,
-                                      const OffsetCalculator* out_grads_offset_calculator,
-                                      const OffsetCalculator* in_offset_calculator,
-                                      const OffsetCalculator* mean_offset_calculator,
-                                      const OffsetCalculator* var_offset_calculator,
-                                      const OffsetCalculator* grad_offset_calculator) {
+__global__ void instancenorm_grad_kernel<float16>(const float16* out_grads,
+                                                  const float16* in_arr,
+                                                  const float16* mean_arr,
+                                                  const float16* var_arr, 
+                                                  float16* ds, float16* dbias,
+                                                  float16* grad_arr,
+                                                  size_t last2dim, float eps, size_t size,
+                                                  const OffsetCalculator* out_grads_offset_calculator,
+                                                  const OffsetCalculator* in_offset_calculator,
+                                                  const OffsetCalculator* mean_offset_calculator,
+                                                  const OffsetCalculator* var_offset_calculator,
+                                                  const OffsetCalculator* grad_offset_calculator) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -160,18 +160,18 @@ __global__ void calculate_grad_kernel<float16>(const float16* out_grads,
 }
 
 template <>
-__global__ void calculate_grad_kernel<bfloat16>(const bfloat16* out_grads,
-                                      const bfloat16* in_arr,
-                                      const bfloat16* mean_arr,
-                                      const bfloat16* var_arr, 
-                                      bfloat16* ds, bfloat16* dbias,
-                                      bfloat16* grad_arr,
-                                      size_t last2dim, float eps, size_t size,
-                                      const OffsetCalculator* out_grads_offset_calculator,
-                                      const OffsetCalculator* in_offset_calculator,
-                                      const OffsetCalculator* mean_offset_calculator,
-                                      const OffsetCalculator* var_offset_calculator,
-                                      const OffsetCalculator* grad_offset_calculator) {
+__global__ void instancenorm_grad_kernel<bfloat16>(const bfloat16* out_grads,
+                                                   const bfloat16* in_arr,
+                                                   const bfloat16* mean_arr,
+                                                   const bfloat16* var_arr, 
+                                                   bfloat16* ds, bfloat16* dbias,
+                                                   bfloat16* grad_arr,
+                                                   size_t last2dim, float eps, size_t size,
+                                                   const OffsetCalculator* out_grads_offset_calculator,
+                                                   const OffsetCalculator* in_offset_calculator,
+                                                   const OffsetCalculator* mean_offset_calculator,
+                                                   const OffsetCalculator* var_offset_calculator,
+                                                   const OffsetCalculator* grad_offset_calculator) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= size)
     return;
@@ -202,21 +202,17 @@ void InstanceNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
   HT_ASSERT(ndim == 4);
   size_t total_elements = 1;
 
-
-  HT_ASSERT(ndim == 4);
-  int last_2dim = in_arr->shape(ndim - 1) * in_arr->shape(ndim - 2);
-
   for (int i = 0; i < ndim; ++i)
     total_elements *= out_grads->shape(i);
-  int last2dim = out_grads->shape(ndim - 1) * out_grads->shape(ndim - 2);
+  int last2dim = in_arr->shape(ndim - 1) * in_arr->shape(ndim - 2);
 
   size_t size = total_elements;
   if (size == 0)
     return;
   
-  auto device_id = out_grads->device().index();
-  hetu::cuda::CUDADeviceGuard guard(device_id);
   CUDAStream cuda_stream(stream);
+  hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+  cudnnHandle_t handle = hetu::impl::GetCudnnHandle(cuda_stream.device_id());
   NDArray out_grad_offset_calculator_arr, in_offset_calculator_arr,
           mean_offset_calculator_arr, var_offset_calculator_arr,
           grad_offset_calculator_arr;
@@ -236,12 +232,13 @@ void InstanceNormGradientCuda(const NDArray& out_grads, const NDArray& in_arr,
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
-  NDArray dbias_arr = NDArray::sum(out_grads, {2, 3}, true, stream.stream_index());
+  HTAxes reduce_axes = {2, 3};
+  NDArray dbias_arr = NDArray::sum(out_grads, reduce_axes, true, stream.stream_index());
   NDArray dy_mul_x_arr = NDArray::mul(out_grads, in_arr, stream.stream_index());
-  NDArray dscale_arr = NDArray::sum(dy_mul_x_arr, {2, 3}, true, stream.stream_index());
+  NDArray dscale_arr = NDArray::sum(dy_mul_x_arr, reduce_axes, true, stream.stream_index());
   HT_DISPATCH_FLOATING_TYPES(
     in_arr->dtype(), spec_t, "CauculateGradCuda", [&]() {
-      calculate_grad_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
+      instancenorm_grad_kernel<spec_t><<<blocks, threads, 0, cuda_stream>>>(
         out_grads->data_ptr<spec_t>(), in_arr->data_ptr<spec_t>(),
         mean_arr->data_ptr<spec_t>(), var_arr->data_ptr<spec_t>(),
         dscale_arr->data_ptr<spec_t>(), dbias_arr->data_ptr<spec_t>(),

@@ -14,6 +14,11 @@ NDArrayList ExpOpImpl::DoCompute(Operator& op,
   return outputs;
 }
 
+void ExpOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                          NDArrayList& outputs, RuntimeContext& ctx) const {
+  NDArray::exp(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
+}
+
 TensorList ExpOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   return {op->requires_grad(0) ? MakeMulElewiseOp(op->output(0), grad_outputs.at(0),
                                  op->grad_op_meta().set_name(op->grad_name()))

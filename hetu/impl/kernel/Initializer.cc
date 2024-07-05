@@ -48,6 +48,10 @@ void NormalInitsCpu(NDArray& data, double mean, double stddev, uint64_t seed,
   size_t size = data->numel();
   if (size == 0)
     return;
+  if (data->dtype() == kFloat4 || data->dtype() == kNFloat4) {
+    NDArray::MarkUsedBy({data}, stream);
+    return;
+  }
   if (seed == 0)
     seed = GenNextRandomSeed();
   HT_DISPATCH_FLOATING_TYPES(data->dtype(), spec_t, "NormalInitsCpu", [&]() {
@@ -71,6 +75,10 @@ void UniformInitsCpu(NDArray& data, double lb, double ub, uint64_t seed,
   size_t size = data->numel();
   if (size == 0)
     return;
+  if (data->dtype() == kFloat4 || data->dtype() == kNFloat4) {
+    NDArray::MarkUsedBy({data}, stream);
+    return;
+  }
   if (seed == 0)
     seed = GenNextRandomSeed();
   HT_DISPATCH_FLOATING_TYPES(data->dtype(), spec_t, "UniformInitCpu", [&]() {
@@ -93,6 +101,10 @@ void TruncatedNormalInitsCpu(NDArray& data, double mean, double stddev,
   size_t size = data->numel();
   if (size == 0)
     return;
+  if (data->dtype() == kFloat4 || data->dtype() == kNFloat4) {
+    NDArray::MarkUsedBy({data}, stream);
+    return;
+  }
   if (seed == 0)
     seed = GenNextRandomSeed();
   HT_DISPATCH_FLOATING_TYPES(

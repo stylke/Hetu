@@ -158,12 +158,12 @@ class ExecutableGraph : public Graph {
   std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
   GeneratePipedreamFlushSchedule(size_t num_stages, size_t num_micro_batches, bool is_inference);
 
-  void ComputeFunc(size_t& micro_batch_id, const OpRefList& topo, RuntimeContext& runtime_ctx, 
-                  Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
-                  Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
-                  const FeedDict& feed_dict, const TensorList& fetches,
-                  const std::unordered_map<TensorId, size_t>& fetch_indices, 
-                  bool& is_continuous_p2p);
+  void ComputeFunc(size_t& micro_batch_id, const OpRefList& topo, RuntimeContext& runtime_ctx,
+                                    Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
+                                    Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
+                                    const FeedDict& feed_dict, const TensorList& fetches,
+                                    const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p,
+                                    NDArray& memory, MemoryPlan& memory_plan);
 
   void SubstituteCommOp(const OpRefList& topo_order);
 
@@ -204,6 +204,19 @@ class ExecutableGraph : public Graph {
   void AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ctx_list);
 
   void GetExecEnvs();
+  
+  // memory plan相关
+  void AllocMemory(size_t& memory_size, MemoryPlan& memory_plan,
+                            MemoryBlockList& temporary_free_memory, MemoryBlockList& free_memory, MicroBatchTensorId tensor_id,
+                            size_t alloc_memory_size);
+  
+  void FreeMemory(MemoryPlan& memory_plan, MemoryBlockList& free_memory,
+                  MicroBatchTensorId tensor_id);
+  
+  MemoryPlan GenerateMemoryPlan(size_t& memory_size, std::vector<std::pair<bool, size_t>> tasks,
+                                std::vector<Tensor2IntMap> tensor2degrees_list,
+                                const std::unordered_map<TensorId, size_t>& fetch_indices,
+                                const FeedDict& feed_dict);
 
   // plan相关
   ExecutePlan _execute_plan;
@@ -219,12 +232,18 @@ class ExecutableGraph : public Graph {
   std::vector<std::unique_ptr<Event>> _p2p_events;
 
   // switch相关
+  /*
   std::shared_ptr<ParamBuffer> _origin_param_buffer;
   std::shared_ptr<ParamBuffer> _transfer_param_buffer;
   std::shared_ptr<ParamBuffer> _origin_param_and_optimizer_buffer; // deprecated
   std::shared_ptr<ParamBuckets> _origin_param_and_optimizer_buckets; 
-  std::shared_ptr<ParamBuffer> _current_grad_buffer; // deprecated
-  std::shared_ptr<ParamBuffer> _accumulate_grad_buffer;
+  std::shared_ptr<ParamBuffer> _current_grad_buffer; 
+  std::shared_ptr<ParamBuffer> _accumulate_grad_buffer; 
+  */
+  std::unordered_map<DataType, std::shared_ptr<ParamBuckets>> _origin_param_and_optimizer_buckets_map;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _transfer_param_buffer_map;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _current_grad_buffer_map;
+  std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _accumulate_grad_buffer_map;
   Tensor2TensorMap _transfer_map; // origin param到transfer param的映射
   Tensor2TensorMap _grad_map; // origin param到未substitue comm op前的grad的映射
   Tensor2TensorMap _grad_grad_map; // 未substitue comm op前的grad到substitue comm op后的grad的映射

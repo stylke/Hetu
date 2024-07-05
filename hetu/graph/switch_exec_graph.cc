@@ -12,7 +12,6 @@
 #include "hetu/graph/ops/placeholder.h"
 #include "hetu/graph/ops/Communication.h"
 #include "hetu/impl/communication/comm_group.h"
-#include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
 #include "hetu/impl/memory/CUDACachingMemoryPool.cuh"
 #include "hetu/core/device.h"
@@ -949,18 +948,18 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
   auto& before_grad_map = before_graph->_grad_map;
   auto& after_grad_map = after_graph->_grad_map;
 
-  std::string comm_graph_name_prefix;
+  std::string comm_graph_name_prefix = "dtype_" + DataType2Str(_dtype) + "_";
   if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM
       || switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
-    comm_graph_name_prefix = "param";
+    comm_graph_name_prefix += "param";
   } else if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER) {
-    comm_graph_name_prefix = "param_and_optimizer_variable";
+    comm_graph_name_prefix += "param_and_optimizer_variable";
     if (_bucket_num != -1) {
       comm_graph_name_prefix += "_bucket_" + std::to_string(_bucket_num);
     }
   } else if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD
              || switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
-    comm_graph_name_prefix = "grad";
+    comm_graph_name_prefix += "grad";
   } else {
     HT_RUNTIME_ERROR << "switch mode type wrong";
   }
@@ -974,7 +973,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
   std::unordered_set<Device> dst_set;
   DataType dtype = DataType::UNDETERMINED;
   auto& define_enumerate_params = (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER ?
-                                   _define_graph_params_and_optvars : _define_graph_params);
+                                   _define_graph_params_and_opt_vars : _define_graph_params);
   for (auto& define_param_ref : define_enumerate_params) {
     auto& define_param = define_param_ref.get();
     // Test Case
@@ -1098,7 +1097,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
           if (src_set.find(device) == src_set.end()) {
             src_set.insert(device);
           }
-          // 用来之后BatchedIsendIrecv以及MPI同步的
+          // 用来之后BatchedIsendIrecv以及进程组同步的
           if (_comm_set.find(device) == _comm_set.end()) {
             _comm_set.insert(device);
           }
@@ -1109,7 +1108,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
           if (dst_set.find(device) == dst_set.end()) {
             dst_set.insert(device);
           }
-          // 用来之后BatchedIsendIrecv以及MPI同步的
+          // 用来之后BatchedIsendIrecv以及进程组同步的
           if (_comm_set.find(device) == _comm_set.end()) {
             _comm_set.insert(device);
           }
@@ -1451,25 +1450,46 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
   std::shared_ptr<ParamBuffer> before_param_buffer;
   std::shared_ptr<ParamBuffer> after_param_buffer;
   if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM) {
-    before_param_buffer = _switch_graph_pair.first->_origin_param_buffer;
-    after_param_buffer = _switch_graph_pair.second->_origin_param_buffer;
+    HT_RUNTIME_ERROR << "deprecated, use SWITCH_ORIGIN_PARAM_AND_OPTIMIZER instead";
+    /*
+    before_param_buffer = _switch_graph_pair.first->_origin_param_buffer_map[_dtype];
+    after_param_buffer = _switch_graph_pair.second->_origin_param_buffer_map[_dtype];
+    */
   } else if (switch_mode == SWITCH_MODE::SWITCH_TRANSFER_PARAM) {
-    before_param_buffer = _switch_graph_pair.first->_transfer_param_buffer;
-    after_param_buffer = _switch_graph_pair.second->_transfer_param_buffer;
+    if (_define_graph_params.empty()) {
+      return;
+    }
+    before_param_buffer = _switch_graph_pair.first->_transfer_param_buffer_map[_dtype];
+    after_param_buffer = _switch_graph_pair.second->_transfer_param_buffer_map[_dtype];
   } else if (switch_mode == SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER) {
     if (_bucket_num == -1) {
+      HT_RUNTIME_ERROR << "deprecated, must use buckets now";
+      /*
       before_param_buffer = _switch_graph_pair.first->_origin_param_and_optimizer_buffer;
       after_param_buffer = _switch_graph_pair.second->_origin_param_and_optimizer_buffer;
-    } else {
-      before_param_buffer = _switch_graph_pair.first->_origin_param_and_optimizer_buckets->GetBucket(_bucket_num);
-      after_param_buffer = _switch_graph_pair.second->_origin_param_and_optimizer_buckets->GetBucket(_bucket_num);
+      */
+    }
+    // 只考虑单个bucket 
+    else {
+      if (_define_graph_params_and_opt_vars.empty()) {
+        return;
+      }
+      before_param_buffer = _switch_graph_pair.first->_origin_param_and_optimizer_buckets_map[_dtype]->GetBucket(_bucket_num);
+      after_param_buffer = _switch_graph_pair.second->_origin_param_and_optimizer_buckets_map[_dtype]->GetBucket(_bucket_num);
     }
   } else if (switch_mode == SWITCH_MODE::SWITCH_CURRENT_GRAD) {
-    before_param_buffer = _switch_graph_pair.first->_current_grad_buffer;
-    after_param_buffer = _switch_graph_pair.second->_current_grad_buffer;
+    HT_LOG_ERROR << "should be deprecated, please don't use it";
+    if (_define_graph_params.empty()) {
+      return;
+    }
+    before_param_buffer = _switch_graph_pair.first->_current_grad_buffer_map[_dtype];
+    after_param_buffer = _switch_graph_pair.second->_current_grad_buffer_map[_dtype];
   } else if (switch_mode == SWITCH_MODE::SWITCH_ACCUMULATE_GRAD) {
-    before_param_buffer = _switch_graph_pair.first->_accumulate_grad_buffer;
-    after_param_buffer = _switch_graph_pair.second->_accumulate_grad_buffer;
+    if (_define_graph_params.empty()) {
+      return;
+    }
+    before_param_buffer = _switch_graph_pair.first->_accumulate_grad_buffer_map[_dtype];
+    after_param_buffer = _switch_graph_pair.second->_accumulate_grad_buffer_map[_dtype];
   } else {
     HT_RUNTIME_ERROR << "NotImplementedError";
   }
@@ -1586,20 +1606,17 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     SynchronizeAllStreams(local_device);
     // rank同步
     // 这里对参与热切换的rank进行同步
-    std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
-    DeviceGroup mpi_device_group{mpi_devices};
-    auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
+    std::vector<Device> devices(_comm_set.begin(), _comm_set.end());
+    DeviceGroup device_group{devices};
+    auto& group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(device_group));
     if (_comm_set.size() >= 2) {
-      mpi_group->Barrier(true);
+      group->Barrier(true);
     }
     if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
       GetCUDAProfiler(local_device)->PrintCurrMemoryInfo("switch exec graph begin");
     }
     if (_profile_level <= SWITCH_PROFILE_LEVEL::NVLINK) {
       GetCUDAProfiler(local_device)->PrintNvlinkStart();
-    }
-    if (_comm_set.size() >= 2) {
-      mpi_group->Barrier(true);
     }
   }
   
@@ -1847,10 +1864,10 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     // rank同步（不同rank耗时不一样，因此放在TOK之后）
     // 这里对参与热切换的rank进行同步
     if (_comm_set.size() >= 2) {
-      std::vector<Device> mpi_devices(_comm_set.begin(), _comm_set.end());
-      DeviceGroup mpi_device_group{mpi_devices};
-      auto& mpi_group = hetu::impl::comm::MPICommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(mpi_device_group));
-      mpi_group->Barrier(true);
+      std::vector<Device> devices(_comm_set.begin(), _comm_set.end());
+      DeviceGroup device_group{devices};
+      auto& group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(device_group));
+      group->Barrier(true);
     }
     HT_LOG_WARN << local_device << ": " << switch_name << " running time = " << COST_MSEC(switch_params_running) << " ms";
     char* switch_log_file = std::getenv("HETU_SWITCH_LOG_FILE");

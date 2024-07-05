@@ -190,23 +190,50 @@ void MatMulGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs, ND
     }
     NDArray::matmul(NDArray::unsqueeze(a_, dim_a), NDArray::unsqueeze(b, 0), false, false,
                     op->instantiation_ctx().stream_index, outputs.front());
+  } else if (dim_a == 1 && trans_a()) {
+    auto b_shape = b->shape();
+    auto b_ = b;
+    if (dim_b >= 2 && trans_b()) {
+      std::iter_swap(b_shape.end() - 2, b_shape.end() - 1);
+      b_ = NDArray::empty(b_shape, b->device(), b->dtype(), op->instantiation_ctx().stream_index);
+      auto ndims_b_ = HTAxes(dim_b);
+      std::iota(ndims_b_.begin(), ndims_b_.end(), 0);
+      std::iter_swap(ndims_b_.end() - 2, ndims_b_.end() - 1);
+      b_ = NDArray::permute(b, ndims_b_, op->instantiation_ctx().stream_index);
+    }
+    NDArray::matmul(NDArray::unsqueeze(a, 0), NDArray::unsqueeze(b_, dim_b), true, true,
+                    op->instantiation_ctx().stream_index, outputs.front());
   } else {
-    NDArray unreduced;
-    unreduced = NDArray::matmul(a, b, trans_a(), trans_b(),
-                    op->instantiation_ctx().stream_index, unreduced);
     const auto grad = inputs.at(grad_idx());
     const auto dst = inputs.at(2);
     const auto dim_grad = grad->ndim();
     const auto dim_dst = dst->ndim();
+    NDArray unreduced;
     if (dim_grad > dim_dst) {
+      NDArray a_, b_;
       auto reduce_dims = HTAxes(dim_grad - dim_dst);
       std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
-      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-                                      hetu::impl::ReduceSum, unreduced, outputs.front(),
-                                      reduce_dims.data(), reduce_dims.size(),
-                                      op->instantiation_ctx().stream());
+      if (a->ndim() > dim_dst) {
+        if (grad_idx() == 0)
+          a_ = NDArray::sum(a, reduce_dims, false, op->instantiation_ctx().stream_index);
+        else
+          a_ = NDArray::mean(a, reduce_dims, false, op->instantiation_ctx().stream_index);
+      }
+      else 
+        a_ = a;
+      if (b->ndim() > dim_dst) {
+        if (grad_idx() == 1)
+          b_ = NDArray::sum(b, reduce_dims, false, op->instantiation_ctx().stream_index);
+        else
+          b_ = NDArray::mean(b, reduce_dims, false, op->instantiation_ctx().stream_index);
+      }
+      else 
+        b_ = b;
+      NDArray::matmul(a_, b_, trans_a(), trans_b(),
+                      op->instantiation_ctx().stream_index, outputs.front());
     } else {
-      NDArray::copy(unreduced, op->instantiation_ctx().stream_index, outputs.front());
+      NDArray::matmul(a, b, trans_a(), trans_b(),
+                      op->instantiation_ctx().stream_index, outputs.front());
     }
   }
 }
@@ -240,6 +267,14 @@ Tensor MakeMatMulGradientOp(Tensor a, Tensor b, Tensor dst, int grad_idx,
   TensorList inputs = {std::move(a), std::move(b), std::move(dst)};
   return Graph::MakeOp(std::make_shared<MatMulGradientOpImpl>(trans_a, trans_b, grad_idx),
                       std::move(inputs), std::move(op_meta))
+    ->output(0);
+}
+
+Tensor MakeMatMul4BitOp(Tensor a, Tensor b, Tensor absmax, Tensor datatype, 
+                        bool trans_a, bool trans_b, int blocksize, OpMeta op_meta) {
+  TensorList inputs = {std::move(a), std::move(b), std::move(absmax), std::move(datatype)};
+  return Graph::MakeOp(std::make_shared<MatMul4BitOpImpl>(trans_a, trans_b, blocksize),
+                       std::move(inputs), std::move(op_meta))
     ->output(0);
 }
 

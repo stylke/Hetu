@@ -19,6 +19,10 @@ class TransposeOpImpl final : public ViewsOpImpl {
     return _perms;
   }
 
+  inline uint64_t op_indicator() const noexcept override {
+    return INPLACE_OP;
+  }
+
  protected:
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {

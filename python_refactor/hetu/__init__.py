@@ -185,4 +185,61 @@ class _MergeStrategyContext(object):
         
 def merge_strategy(target_graph="default", num_strategy=-1):
     return _MergeStrategyContext(target_graph=target_graph, num_strategy=num_strategy)
-        
+
+class _RecomputeContext(object):
+    def __enter__(self):
+        _hetu_core._internal_context.push_recompute_ctx()
+        return self
+
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_recompute_ctx()
+
+def recompute():
+    return _RecomputeContext()
+
+class _CPUOffloadContext(object):
+    def __enter__(self):
+        _hetu_core._internal_context.push_cpu_offload_ctx()
+        return self
+    
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_cpu_offload_ctx()
+
+def cpu_offload():
+    return _CPUOffloadContext()
+
+class _ProfileContex(object):
+    def __init__(self, enabled : bool = True, use_cpu : bool = False, use_cuda : bool = False,
+                 record_shapes : bool = False , profile_memory : bool = False):
+      self.profile = _hetu_core._internal_context.make_new_profile(enabled, use_cpu, use_cuda, record_shapes, profile_memory)
+
+    def __enter__(self):
+        _hetu_core._internal_context.push_profile_ctx(self.profile.id)
+        return self.profile
+
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_profile_ctx()
+
+
+def profiler(enabled : bool = True, use_cpu : bool = False, use_cuda : bool = False,
+             record_shapes : bool = False , profile_memory : bool = False):
+    return _ProfileContex(enabled, use_cpu, use_cuda, record_shapes, profile_memory)
+
+class _SubGraphContext(object):
+    def __init__(self, subgraph_type = "", name = "global"):
+        if name is None:
+            self.subgraph = _hetu_core._internal_context.get_default_subgraph()
+        else:
+            self.subgraph = _hetu_core._internal_context.make_new_subgraph(subgraph_type=subgraph_type, name=name)
+    def __enter__(self):
+        _hetu_core._internal_context.push_subgraph_ctx(self.subgraph.name)
+        return self
+    
+    def __exit__(self, e_type, e_value, e_trace):
+        _hetu_core._internal_context.pop_subgraph_ctx()
+
+def subgraph(subgraph_type="", name=""):
+    return _SubGraphContext(subgraph_type=subgraph_type, name=name)
+
+def add_to_subgraph(tensor, subgraph_name=""):
+    _hetu_core._internal_context.add_op_to_subgraph(tensor, subgraph_name)

@@ -111,7 +111,8 @@ PyObject* PyGraph_run(PyGraph* self, PyObject* args, PyObject* kwargs) {
     "run(Tensor fetch, FeedDict feed_dict=None)", 
     "run(List[Tensor] fetches, FeedDict feed_dict=None)",
     "run(Tensor loss, Tensor fetch, FeedDict feed_dict=None, int num_micro_batches=1)", 
-    "run(Tensor loss, List[Tensor] fetches, FeedDict feed_dict=None, int num_micro_batches=1, int cur_strategy_id=0, int run_level=0, double grad_scale=1)",
+    "run(Tensor loss, List[Tensor] fetches, FeedDict feed_dict=None, int num_micro_batches=1, \
+         int cur_strategy_id=0, int run_level=0, bool save_checkpoint=False, double grad_scale=1)",
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
@@ -136,7 +137,8 @@ PyObject* PyGraph_run(PyGraph* self, PyObject* args, PyObject* kwargs) {
       parsed_args.get_int64_or_default(3),
       parsed_args.get_int64_or_default(4),
       static_cast<RunLevel>(parsed_args.get_int64_or_default(5)),
-      parsed_args.get_float64_or_default(6)));
+      parsed_args.get_bool_or_default(6),
+      parsed_args.get_float64_or_default(7)));
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();

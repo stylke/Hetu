@@ -14,6 +14,11 @@ NDArrayList SinOpImpl::DoCompute(Operator& op,
   return outputs;
 }
 
+void SinOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                          NDArrayList& outputs, RuntimeContext& ctx) const {
+  NDArray::sin(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
+}
+
 TensorList SinOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   HT_ASSERT(!inplace())
     << "This op doesn't support gradient for inplace.";
@@ -35,6 +40,11 @@ NDArrayList CosOpImpl::DoCompute(Operator& op,
   NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
   NDArray::cos(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
   return outputs;
+}
+
+void CosOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                          NDArrayList& outputs, RuntimeContext& ctx) const {
+  NDArray::cos(inputs.at(0), op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
 TensorList CosOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {

@@ -20,7 +20,6 @@ class MatMulOpImpl final : public OpInterface {
   DoInferMeta(const TensorList& inputs) const override {
     const Tensor& a = inputs.at(0);
     const Tensor& b = inputs.at(1);
-    HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
     const auto dim_a = a->ndim();
     const auto dim_b = b->ndim();
     int64_t m_a = -1;
@@ -115,7 +114,10 @@ class MatMulOpImpl final : public OpInterface {
       output_shape.emplace_back(trans_b() ? b_shape.cend()[-2] : b_shape.back());
       shape = output_shape;
     }
-    return {NDArrayMeta().set_dtype(a->dtype()).set_shape(shape)};
+    auto dst_dtype = (a->dtype() == kFloat4 || a->dtype() == kNFloat4)
+                     ? b->dtype()
+                     : a->dtype();
+    return {NDArrayMeta().set_dtype(dst_dtype).set_shape(shape)};
   }
 
   void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
@@ -322,6 +324,102 @@ class MatMulGradientOpImpl final : public OpInterface {
 Tensor MakeMatMulGradientOp(Tensor a, Tensor b, Tensor output, int grad_idx,
                             bool trans_a = false, bool trans_b = false,
                             OpMeta op_meta = OpMeta());
+
+class MatMul4BitOpImpl final : public OpInterface {
+ public:
+  MatMul4BitOpImpl(bool trans_a, bool trans_b, int blocksize)
+  : OpInterface(quote(MatMul4BitOp)), _trans_a(trans_a), _trans_b(trans_b),
+                                      _blocksize(blocksize) {}
+
+ protected:
+  std::vector<NDArrayMeta>
+  DoInferMeta(const TensorList& inputs) const override {
+    const Tensor& a = inputs.at(0);
+    const Tensor& b = inputs.at(1);
+    const auto dim_a = a->ndim();
+    const auto dim_b = b->ndim();
+    int64_t m_a = -1;
+    int64_t m_b = -1;
+    HTShape shape;
+    m_a = a->shape(trans_a() ? 0 : 1);
+    m_b = b->shape(trans_b() ? 1 : 0);
+    HT_ASSERT(m_a == - 1 || m_b == -1 || m_a == m_b)
+      << "Failed to construct the \"MatMul4Bit\" op: "
+      << "Dimensions must be compatible. "
+      << "Got " << m_a << " vs. " << m_b << ". "
+      << "Input shape: " << a->shape() << " vs. " << b->shape() << ". ";
+    shape = HTShape({a->shape(trans_a() ? 1 : 0), b->shape(trans_b() ? 0 : 1)});
+    auto out_meta = a->meta(); 
+    out_meta.set_shape(shape);
+    return {out_meta};
+  }
+
+  void DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                      const OpMeta& op_meta) const override;
+
+  HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
+                           RuntimeContext& runtime_ctx) const override {
+    const HTShape& a = input_shapes.at(0);
+    const HTShape& b = input_shapes.at(1);
+    const auto dim_a = a.size();
+    const auto dim_b = b.size();
+    int64_t m_a = -1;
+    int64_t m_b = -1;
+    HTShape shape;
+    m_a = a[trans_a() ? 0 : 1];
+    m_b = b[trans_b() ? 1 : 0];
+    HT_ASSERT(m_a == - 1 || m_b == -1 || m_a == m_b)
+      << "Failed to construct the \"MatMul4Bit\" op: "
+      << "Dimensions must be compatible. "
+      << "Got " << m_a << " vs. " << m_b << ". "
+      << "Input shape: " << a << " vs. " << b << ". ";
+    shape = HTShape({a[trans_a() ? 1 : 0], b[trans_b() ? 0 : 1]});
+    return {shape};
+  }
+
+  void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
+                 RuntimeContext& runtime_ctx) const override {
+    NDArray::matmul4bit(inputs.at(0), inputs.at(1), inputs.at(2), inputs.at(3),
+                        trans_a(), trans_b(), blocksize(),
+                        op->instantiation_ctx().stream_index, outputs.front());
+  }
+
+ public:
+  inline bool require_contig_inputs() const override {
+    return false;
+  }
+
+  bool operator==(const OpInterface& rhs) const override {
+    if (OpInterface::operator==(rhs)) {
+      const auto& rhs_ = reinterpret_cast<const MatMul4BitOpImpl&>(rhs);
+      return trans_a() == rhs_.trans_a() 
+          && trans_b() == rhs_.trans_b()
+          && blocksize() == rhs_.blocksize();
+    }
+    return false;
+  }
+
+  bool trans_a() const {
+    return _trans_a;
+  }
+
+  bool trans_b() const {
+    return _trans_b;
+  }
+
+  int blocksize() const {
+    return _blocksize;
+  }
+
+ protected:
+  bool _trans_a;
+  bool _trans_b;
+  int _blocksize;
+};
+
+Tensor MakeMatMul4BitOp(Tensor a, Tensor b, Tensor absmax, Tensor datatype, 
+                        bool trans_a = false, bool trans_b = false, 
+                        int blocksize = 4096, OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

@@ -62,8 +62,6 @@ CUDACachingMemoryPool::~CUDACachingMemoryPool() {
 // 没有匹配项再cudaMalloc
 DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
                                               const Stream& stream) {                         
-  // mempool debug use    
-  // HT_LOG_INFO << "Try to alloc: " << num_bytes << " to " << stream;
   HT_VALUE_ERROR_IF(!stream.device().is_cuda())
     << "Cuda arrays must be allocated on cuda streams. Got " << stream;
   if (num_bytes == 0)
@@ -133,8 +131,6 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
 
   if (reuse_flag != -1) {
     if (reuse_flag == 0) {
-      // mempool debug use    
-      // HT_LOG_INFO << "Reuse curr stream available " << curr_stream_data_ptr;
       data_ptr = curr_stream_data_ptr;
       info_it = _data_ptr_info.find(curr_stream_data_ptr.id);
       HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
@@ -147,8 +143,6 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
       target_table = curr_stream_table;
     }
     else if (reuse_flag == 1) {
-      // mempool debug use    
-      // HT_LOG_INFO << "Reuse all stream available " << all_stream_data_ptr;
       data_ptr = all_stream_data_ptr;
       info_it = _data_ptr_info.find(all_stream_data_ptr.id);
       HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end())
@@ -234,9 +228,6 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
     // 将remaining data ptr插入table
     HT_ASSERT(target_table)
       << "Target table is a nullptr";
-    // mempool debug use
-    // HT_LOG_INFO << "[Create] create new split: " << remaining_data_ptr;
-    // HT_LOG_INFO << "[Insert] split then insert to table: " << remaining_data_ptr;
     InsertAvailable(remaining_data_ptr, *target_table);
     // 将remaining (cuda) data ptr插入info
     auto new_info = std::make_shared<CudaDataPtrInfo>(remaining_ptr, 
@@ -282,19 +273,12 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
   _allocated += data_ptr.size;
   _alloc_cnt++;
   HT_LOG_TRACE << "ptr: " << data_ptr << ", alloc: " << data_ptr.size << ", stream: " << stream;
-  // mempool debug use
-  // HT_LOG_INFO << "[Interface] alloc to user: " << data_ptr;
-  /*
-  info_it = _data_ptr_info.find(data_ptr.id);
-  HT_ASSERT(data_ptr.size == info_it->second->num_bytes)
-    << "Find info: size = " << info_it->second->num_bytes
-    << ", but data ptr = " << data_ptr; 
-  */
   return data_ptr;
 }
 
 // deprecated for now
-[[deprecated]] size_t CUDACachingMemoryPool::GetAlignedMallocSize(size_t request_size) {
+[[deprecated]]
+size_t CUDACachingMemoryPool::GetAlignedMallocSize(size_t request_size) {
   if (request_size < kMallocMinBuffer) {
     return kMallocMinBuffer;
   } else if (request_size < kMallocLargeBuffer) {
@@ -341,13 +325,6 @@ bool CUDACachingMemoryPool::FindAvailable(size_t num_bytes,
     // 目前available table中的应该全是unallocated的条目
     HT_ASSERT(!info_it->second->allocated())
       << "Allocated status error";
-    /*
-    // 已经alloc的条目无法再被占用
-    if (info_it->second->allocated()) {
-      it++;
-      continue;
-    }
-    */
     HT_ASSERT(it->size >= num_bytes)
       << "Size error";
     if (it->size != num_bytes) {
@@ -368,8 +345,6 @@ bool CUDACachingMemoryPool::FindAvailable(size_t num_bytes,
     reuse_data_ptr = (*it);
     // 删除条目
     if (remove_if_find) {
-      // mempool debug use
-      // HT_LOG_INFO << "[Reuse] remove from table: " << reuse_data_ptr;
       lookup_table.table.erase(it);
     }
     return true;
@@ -525,8 +500,6 @@ bool CUDACachingMemoryPool::ReleaseAndAlloc(void*& ptr, size_t request_size) {
     if (it != lookup_table.begin()) {
       it--;
     }
-    // mempool debug use
-    // HT_LOG_INFO << "[cudaFree] Erase " << it->size << " bytes from all stream available table";
     // 清空all stream available table中所有可以直接cudaFree的
     // 仍然无法cudaMalloc
     // 那么只能返回false放弃分配
@@ -543,37 +516,6 @@ bool CUDACachingMemoryPool::ReleaseAndAlloc(void*& ptr, size_t request_size) {
 bool CUDACachingMemoryPool::WaitUntilAlloc(void*& ptr, size_t request_size) {
   // Use a thread per stream to async wait is not a good idea.
   // Different stream may have interference because of cache-cache movement.
-  /*
-  std::mutex release_mutex;
-  size_t released_size = 0;
-  // 处理single stream上的free
-  auto wait_and_release_on_single_stream = [&](AvailableEventLookupTable* ptr) -> void {
-    auto& stream_free_events = ptr->table; 
-    while (!stream_free_events.empty()) {
-      auto event_it = stream_free_events.begin();
-      event_it->event->Sync();
-      {
-        std::lock_guard<std::mutex> lock(release_mutex);
-        DataPtrId data_ptr_id = event_it->id;
-        auto info_it = _data_ptr_info.find(data_ptr_id);
-        HT_ASSERT(info_it != _data_ptr_info.end())
-          << "Cannot find data ptr with id " << data_ptr_id << " in the info"; 
-        auto info = info_it->second;
-        // 删除available event
-        stream_free_events.erase(event_it);
-        auto event_info_it = _available_event_info.find(data_ptr_id);
-        HT_ASSERT(event_info_it != _available_event_info.end())
-          << "Cannot find the info of single stream free event towards data ptr id " << data_ptr_id;
-        _available_event_info.erase(event_info_it);
-        // 移动cache entry到合适的table
-        MoveAvailable(info);
-        if (info->status == OccupationStatus::AVAILABLE_FOR_ALL_STREAM) {
-          released_size += info->num_bytes;
-        }
-      }
-    }
-  };
-  */
   while (1) {
     WatchEvents();
     bool successfully_release = ReleaseAndAlloc(ptr, request_size);
@@ -628,39 +570,6 @@ bool CUDACachingMemoryPool::WaitUntilAlloc(void*& ptr, size_t request_size) {
   }
 }
 
-// deprecated
-/*
-// Try to empty a ptr look up table: delete all the records and free corresponding pointer. 
-// If maybe_allocated is set to true, it only delete records whose pointer is not in use. 
-// Caller should hold the mutex.
-// For now, all entry in the look up table should be unallocated, and maybe_allocated is unused.
-bool CUDACachingMemoryPool::ReleaseAll(DataPtrLookupTable& lookup_table, 
-                                       bool maybe_allocated) {   
-  for(auto it = lookup_table.table.begin(); it != lookup_table.table.end(); it++) {
-    auto info_it = _data_ptr_info.find(it->id);
-    HT_RUNTIME_ERROR_IF(info_it == _data_ptr_info.end()) 
-      << "Cannot find one ptr's info";
-    // 目前available table中的应该全是unallocated的条目
-    HT_ASSERT(!info_it->second->allocated())
-      << "Assumption error";
-    if (maybe_allocated && info_it->second->allocated())
-      continue;
-    if (info_it->second->can_free()) {
-      CudaFree(it->ptr);
-      auto info = info_it->second;
-      if(info->prev != nullptr)
-        info->prev->next = info->next;
-      if(info->next != nullptr)
-        info->next->prev = info->prev;
-      _data_ptr_info.erase(info_it);
-      it = lookup_table.table.erase(it);
-      _reserved -= it->size;
-    }
-  }
-  return true;
-}
-*/
-
 // *Note this will hang the whole system!
 // Caller should hold the mutex.
 void CUDACachingMemoryPool::EmptyCache() {
@@ -701,9 +610,6 @@ DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
 }
 
 void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
-
-  // mempool debug use
-  // HT_LOG_INFO << "[Interface] free from user: " << data_ptr;
   if (data_ptr.ptr == nullptr || data_ptr.size == 0)
     return;
   std::lock_guard<std::mutex> lock(_mtx);
@@ -720,31 +626,6 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
   HT_ASSERT(info->num_bytes == data_ptr.size)
       << "Find info: size = " << info->num_bytes 
       << ", but data ptr = " << data_ptr;
-  /*
-  // 允许info要比实际的data ptr要大
-  if (info->num_bytes > data_ptr.size) {
-    // data ptr过大时
-    // 空余的不能超过max internal fragment size
-    if (data_ptr.size > max_split_size) {
-      HT_ASSERT(info->num_bytes - data_ptr.size <= max_internal_fragment_size)
-        << "Find info: size = " << info->num_bytes 
-        << ", but data ptr: size = " << data_ptr.size;
-    }
-    // data ptr不够大
-    // 则说明没有发生split
-    else {
-      HT_ASSERT(info->num_bytes - data_ptr.size < kMinSplitRemaining)
-        << "Find info: size = " << info->num_bytes 
-        << ", but data ptr: size = " << data_ptr.size;
-    }
-  }
-  // 其余大部分情况只可能相等
-  else {
-    HT_ASSERT(info->num_bytes == data_ptr.size)
-      << "Find info: size = " << info->num_bytes 
-      << ", but data ptr: size = " << data_ptr.size;
-  }
-  */
 
   // for borrow data, we currently adopt method 1
   // the exec graph running & switching memory profiling will be more accurate
@@ -826,8 +707,6 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
     data_ptr.ptr = info->ptr; 
     info->cached_pool = target_table;
     InsertAvailable(data_ptr, *target_table); 
-    // mempool debug use
-    // HT_LOG_INFO << "[Insert] free occupy then insert to table: " << data_ptr;
     HT_ASSERT(data_ptr.id == info->id)
       << "The data ptr id and the info id are mismatched";
   } 
@@ -962,8 +841,6 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
       auto table_it = prev_info->cached_pool->table.find(prev_data_ptr);
       HT_ASSERT(table_it != prev_info->cached_pool->table.end())
         << "Cannot find " << prev_data_ptr << " in the target table";
-      // mempool debug use
-      // HT_LOG_INFO << "[Merge] remove forever: " << *table_it;
       prev_info->cached_pool->table.erase(table_it);
       data_info->ptr = prev_info->ptr;
       data_info->num_bytes += prev_info->num_bytes;
@@ -993,8 +870,6 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
       auto table_it = next_info->cached_pool->table.find(next_data_ptr);
       HT_ASSERT(table_it != next_info->cached_pool->table.end())
         << "Cannot find " << next_data_ptr << " in the target table";
-      // mempool debug use
-      // HT_LOG_INFO << "[Merge] remove forever: " << *table_it;
       next_info->cached_pool->table.erase(table_it);
       data_info->num_bytes += next_info->num_bytes;
       data_info->next = next_info->next;
@@ -1132,8 +1007,6 @@ void CUDACachingMemoryPool::WatchEvents() {
           HT_ASSERT(data_ptr_id == info->id)
             << "The data ptr id and the info id are mismatched"; 
           info->cached_pool = target_table;
-          // mempool debug use
-          // HT_LOG_INFO << "[Insert] sync free event then insert to table: " << data_ptr;
           InsertAvailable(data_ptr, *target_table); 
         }
       }
@@ -1291,6 +1164,7 @@ struct CUDACachingMemoryPoolRegister {
     });
   }
 };
+
 static CUDACachingMemoryPoolRegister cuda_caching_memory_pool_register;
 
 } // namespace

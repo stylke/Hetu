@@ -56,6 +56,10 @@ std::string ArgType2Str(ArgType type) {
       return "List[hetu.Operator]";
     case ArgType::FEED_DICT:
       return "FeedDict";
+    case ArgType::PARAMETER_DICT:
+      return "ParameterDict";
+    case ArgType::STATE_DICT:
+      return "StateDict";
     case ArgType::SGDOPTIMIZER:
       return "SGDOptimizer";
     case ArgType::ADAMOPTIMIZER:
@@ -118,7 +122,8 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::DEVICE;
   if (type == "hetu.DeviceGroup" || type == "DeviceGroup")
     return ArgType::DEVICE_GROUP;
-  if (type == "List[hetu.DeviceGroup]" || type == "List[DeviceGroup]")
+  if (type == "List[hetu.DeviceGroup]" || type == "List[DeviceGroup]" ||
+      type == "hetu.DeviceGroupList" || type == "DeviceGroupList")
     return ArgType::DEVICE_GROUP_LIST;
   if (type == "List[List[hetu.DeviceGroup]]" || type == "List[List[DeviceGroup]]" || 
       type == "DeviceGroupHierarchy")
@@ -148,6 +153,10 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::OPERATOR_LIST;
   if (type == "FeedDict" || type == "feed_dict")
     return ArgType::FEED_DICT;
+  if (type == "ParameterDict" || type == "parameter_dict")
+    return ArgType::PARAMETER_DICT;
+  if (type == "StateDict" || type == "state_dict")
+    return ArgType::STATE_DICT;
   if (type == "Optimizer" || type == "SGDOptimizer")
     return ArgType::SGDOPTIMIZER;
   if (type == "AdamOptimizer")
@@ -289,6 +298,7 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
       case ArgType::OPERATOR:
       case ArgType::OPERATOR_LIST:
       case ArgType::FEED_DICT:
+      case ArgType::PARAMETER_DICT:
       case ArgType::DISTRIBUTED_STATES:
       case ArgType::DISTRIBUTED_STATES_LIST:
       case ArgType::DS_HIERARCHY:
@@ -358,6 +368,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyOperatorList(obj);
     case ArgType::FEED_DICT:
       return CheckPyFeedDict(obj);
+    case ArgType::PARAMETER_DICT:
+      return CheckPyParameterDict(obj);
     case ArgType::SGDOPTIMIZER:
       return CheckPySGDOptimizer(obj);
     case ArgType::ADAMOPTIMIZER:

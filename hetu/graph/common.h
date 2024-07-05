@@ -3,7 +3,7 @@
 #include "hetu/common/macros.h"
 #include "hetu/core/ndarray.h"
 #include <vector>
-// #include <queue>
+#include <queue>
 #include <deque>
 #include <type_traits>
 #include <functional>
@@ -26,6 +26,7 @@ using OpList = std::vector<Operator>;
 using OpDeque = std::deque<Operator>;
 using OpRefList = std::vector<OpRef>;
 using OpCRefList = std::vector<OpCRef>;
+using OpRefQueue = std::queue<OpRef>;
 using OpRefDeque = std::deque<OpRef>;
 using OpCRefDeque = std::deque<OpCRef>;
 using OpIdList = std::vector<OpId>;
@@ -33,6 +34,7 @@ using OpIdSet = std::unordered_set<OpId>;
 using Op2OpMap = std::unordered_map<OpId, Operator>;
 using Op2OpRefMap = std::unordered_map<OpId, OpRef>;
 using Op2OpCRefMap = std::unordered_map<OpId, OpCRef>;
+
 
 template <typename T>
 struct is_op_list : std::false_type {};
@@ -56,6 +58,7 @@ using Tensor2NDArrayMap = std::unordered_map<TensorId, NDArray>;
 using Tensor2IntMap = std::unordered_map<TensorId, int>;
 using Tensor2StringMap = std::unordered_map<TensorId, std::string>;
 using Tensor2ShapeMap = std::unordered_map<TensorId, HTShape>;
+using StateDict = std::unordered_map<OpName, Tensor>;
 
 using GradAndVar = std::pair<Tensor, Tensor>;
 using GradAndVarList = std::vector<GradAndVar>;
@@ -68,6 +71,11 @@ struct is_tensor_list<TensorList> : std::true_type {};
 using GraphId = uint64_t;
 using GraphName = std::string;
 using FeedDict = Tensor2NDArrayMap;
+using ParameterDict = std::unordered_map<std::string, int64_t>;
+using MemoryBlock = std::pair<size_t, size_t>;
+using MemoryBlockList = std::vector<MemoryBlock>;
+using MicroBatchTensorId = std::pair<size_t, TensorId>;
+using MemoryPlan = std::map<MicroBatchTensorId, MemoryBlock>;
 using Device2PipelineMap = std::unordered_map<Device, DeviceGroupList>;
 class Graph;
 class EagerGraph;

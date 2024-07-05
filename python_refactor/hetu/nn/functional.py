@@ -4,44 +4,44 @@ import math
 
 from typing import Tuple, List
 
-def generalized_xavier_(tshape: List, dist: str, mode: str, gain: float, requires_grad: bool = False, dtype = hetu.float32, device_group = None) -> Tensor:
+def generalized_xavier_(tshape: List, dist: str, mode: str, gain: float, requires_grad: bool = False, dtype = hetu.float32, device_groups = None) -> Tensor:
     factor = _calculate_correct_fan(tshape, mode)
     if dist == 'uniform':
         limit = math.sqrt(gain / factor)
-        return hetu.rand(tshape, -limit, limit, requires_grad = requires_grad, dtype = dtype, device_group = device_group)
+        return hetu.rand(tshape, -limit, limit, requires_grad = requires_grad, dtype = dtype, device_groups = device_groups)
     elif dist == 'normal':
         std = math.sqrt(gain / factor)
-        return hetu.randn(tshape, 0., std, requires_grad = requires_grad, dtype = dtype, device_group = device_group)
+        return hetu.randn(tshape, 0., std, requires_grad = requires_grad, dtype = dtype, device_groups = device_groups)
     else:
         raise ValueError(f"Invalid dist: {dist}")
 
-def xavier_uniform_(tshape: List, gain: float = 1., requires_grad: bool = False, device_group = None) -> Tensor:
-    return generalized_xavier_(tshape, 'uniform', 'avg', gain * 3, requires_grad, device_group = device_group)
+def xavier_uniform_(tshape: List, gain: float = 1., requires_grad: bool = False, device_groups = None) -> Tensor:
+    return generalized_xavier_(tshape, 'uniform', 'avg', gain * 3, requires_grad, device_groups = device_groups)
 
-def xavier_normal_(tshape: List, gain: float = 1., requires_grad: bool = False, device_group = None) -> Tensor:
-    return generalized_xavier_(tshape, 'normal', 'avg', gain, requires_grad, device_group = device_group)
+def xavier_normal_(tshape: List, gain: float = 1., requires_grad: bool = False, device_groups = None) -> Tensor:
+    return generalized_xavier_(tshape, 'normal', 'avg', gain, requires_grad, device_groups = device_groups)
 
 def kaiming_uniform_(tshape: List, a: float = 0., mode: str = 'fan_in', 
                      nonlinearity: str = 'leaky_relu', requires_grad: bool = False, 
-                     dtype = hetu.float32, device_group = None) -> Tensor:
+                     dtype = hetu.float32, device_groups = None) -> Tensor:
     gain = calculate_gain(nonlinearity, param=a)
-    return generalized_xavier_(tshape, 'uniform', 'fan_in', (gain ** 2) * 3, requires_grad, dtype, device_group = device_group)
+    return generalized_xavier_(tshape, 'uniform', 'fan_in', (gain ** 2) * 3, requires_grad, dtype, device_groups = device_groups)
 
 he_uniform_ = kaiming_uniform_
 
 def kaiming_normal_(tshape: List, a: float = 0., mode: str = 'fan_in', 
                     nonlinearity: str = 'leaky_relu', 
-                    requires_grad: bool = False, device_group = None) -> Tensor:
+                    requires_grad: bool = False, device_groups = None) -> Tensor:
     gain = calculate_gain(nonlinearity, param=a)
-    return generalized_xavier_(tshape, 'normal', 'fan_in', gain ** 2, requires_grad, device_group = device_group)
+    return generalized_xavier_(tshape, 'normal', 'fan_in', gain ** 2, requires_grad, device_groups = device_groups)
 
 he_normal_ = kaiming_normal_
 
-def lecun_uniform_(tshape: List, gain: float = 1., requires_grad: bool = False, device_group = None) -> Tensor:
-    return generalized_xavier_(tshape, 'uniform', 'fan_in', gain * 3, requires_grad, device_group = device_group)
+def lecun_uniform_(tshape: List, gain: float = 1., requires_grad: bool = False, device_groups = None) -> Tensor:
+    return generalized_xavier_(tshape, 'uniform', 'fan_in', gain * 3, requires_grad, device_groups = device_groups)
 
-def lecun_normal_(tshape: List, gain: float = 1., requires_grad: bool = False, device_group = None) -> Tensor:
-    return generalized_xavier_(tshape, 'normal', 'fan_in', gain, requires_grad, device_group = device_group)
+def lecun_normal_(tshape: List, gain: float = 1., requires_grad: bool = False, device_groups = None) -> Tensor:
+    return generalized_xavier_(tshape, 'normal', 'fan_in', gain, requires_grad, device_groups = device_groups)
 
 def _calculate_fan_in_and_fan_out(tshape : List) -> Tuple[int, int]:
     ndim = len(tshape)

@@ -30,8 +30,199 @@ enum class RunLevel : int8_t {
   TOPO
 };
 
+enum class SubGraphType : int8_t {
+  FORWARD = 0,
+  BACKWARD,
+  UPDATE,
+  NUM_GRAPH_TYPES
+};
+
+
 std::string GraphType2Str(GraphType);
 std::ostream& operator<<(std::ostream&, GraphType);
+
+class SubGraph {
+  private:
+    Op2OpMap _ops;
+    Op2OpMap _bwd_ops;
+    Op2OpMap _update_ops;
+    std::unordered_map<std::string, std::shared_ptr<SubGraph>> _subgraphs;
+    std::shared_ptr<SubGraph> _parent_graph;
+    std::string _name;
+    std::string _subgraph_type;
+    std::string _global_graph_name;
+    int64_t _fwd_time;
+    int64_t _bwd_time;
+    int64_t _update_time;
+    bool _already_profiled;
+
+  public:
+    SubGraph() {
+      _subgraphs = {};
+      _ops = {};
+      _already_profiled = false;
+    }
+
+    SubGraph(std::string name) {
+      _name = name;
+      _subgraphs = {};
+      _ops = {};
+      _already_profiled = false;
+    }
+
+    SubGraph(std::string name, std::string subgraph_type, std::string global_graph_name = "") {
+      _name = name;
+      _subgraph_type = subgraph_type;
+      _global_graph_name = global_graph_name;
+      _subgraphs = {};
+      _ops = {};
+      _already_profiled = false;
+    }
+
+    void add_op(Operator& op) {
+      // _ops.push_back(op);
+      if (_ops.find(op->id()) == _ops.end()) {
+        _ops.emplace(op->id(), op);
+      }
+    }
+
+    void add_bwd_op(Operator& op) {
+      if (_bwd_ops.find(op->id()) == _bwd_ops.end()) {
+        _bwd_ops.emplace(op->id(), op);
+      }
+    }
+
+    void add_update_op(Operator& op) {
+      if (_update_ops.find(op->id()) == _update_ops.end()) {
+        _update_ops.emplace(op->id(), op);
+      }
+    }
+
+    void add_subgraph(std::shared_ptr<SubGraph> subgraph) {
+      if (_subgraphs.find(subgraph->global_graph_name()) != _subgraphs.end())
+        _subgraphs.emplace(subgraph->global_graph_name(), subgraph);
+    }
+
+    void set_parent_graph(std::shared_ptr<SubGraph> parent_graph) {
+      _parent_graph = parent_graph;
+    }
+
+    std::string name() const {
+      return _name;
+    }
+
+    std::string subgraph_type() const {
+      return _subgraph_type;
+    }
+
+    std::string global_graph_name() const {
+      return _global_graph_name;
+    }
+
+    Op2OpMap ops() const {
+      return _ops;
+    }
+
+    Op2OpMap bwd_ops() const {
+      return _bwd_ops;
+    }
+
+    Op2OpMap update_ops() const {
+      return _update_ops;
+    }
+
+    std::vector<std::string> subgraph_info() {
+      std::vector<std::string> output = {};
+      output.reserve(_subgraphs.size());
+      for (auto it = _subgraphs.begin(); it != _subgraphs.end(); ++it) {
+        output.push_back("name=" + it->second->name() + 
+                         ", type=" + it->second->subgraph_type());
+      }
+      return output;
+    }
+
+    int64_t fwd_time() const {
+      return _fwd_time;
+    }
+
+    int64_t bwd_time() const {
+      return _bwd_time;
+    }
+
+    int64_t update_time() const {
+      return _update_time;
+    }
+
+    int64_t total_time() const {
+      return _fwd_time + _bwd_time + _update_time;
+    }
+
+    void set_fwd_time(int64_t fwd_time) {
+      _fwd_time = fwd_time;
+    }
+
+    void set_bwd_time(int64_t bwd_time) {
+      _bwd_time = bwd_time;
+    }
+
+    void set_update_time(int64_t update_time) {
+      _update_time = update_time;
+    }
+
+    void profiling_ops(std::unordered_map<OpId, int64_t> op_execute_map, int num_micro_batches = 1) {
+      _fwd_time = 0;
+      _bwd_time = 0;
+      _update_time = 0;
+      for (auto it = _ops.begin(); it != _ops.end(); ++it) {
+        if (op_execute_map.find(it->second->id()) == op_execute_map.end())
+          continue;
+        for (int i = 0; i < num_micro_batches; ++i) {
+          _fwd_time += it->second->TimeCost(i);
+        }
+      }
+      for (auto it = _bwd_ops.begin(); it != _bwd_ops.end(); ++it) {
+        if (op_execute_map.find(it->second->id()) == op_execute_map.end())
+          continue;
+        for (int i = 0; i < num_micro_batches; ++i) {
+          _bwd_time += it->second->TimeCost(i);
+        }
+      }
+      for (auto it = _update_ops.begin(); it != _update_ops.end(); ++it) {
+        if (op_execute_map.find(it->second->id()) == op_execute_map.end())
+          continue;
+        for (int i = 0; i < num_micro_batches; ++i) {
+          _update_time += it->second->TimeCost(i);
+        }
+      }
+    }
+
+    std::unordered_map<std::string, std::shared_ptr<SubGraph>> subgraphs() {
+      return _subgraphs;
+    }
+
+    void profile(std::unordered_map<OpId, int64_t> op_execute_map, int num_micro_batches = 1) {
+      if (_already_profiled) {
+        return;
+      }
+      profiling_ops(op_execute_map, num_micro_batches);
+      for (auto it = _subgraphs.begin(); it != _subgraphs.end(); ++it) {
+        it->second->profile(op_execute_map, num_micro_batches);
+        _fwd_time += it->second->fwd_time();
+        _bwd_time += it->second->bwd_time();
+        _update_time += it->second->update_time();
+      }
+      _already_profiled = true;
+    }
+
+    void profile_reset() {
+      _fwd_time = 0;
+      _bwd_time = 0;
+      _update_time = 0;
+      _already_profiled = false;
+    }
+};
+
+std::ostream& operator<<(std::ostream&, SubGraph&);
 
 class Graph {
  protected:
@@ -71,7 +262,8 @@ class Graph {
 
   virtual NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                           const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
-                          const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE, const double grad_scale = 1) {}                          
+                          const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE,
+                          bool save_checkpoint = false, const double grad_scale = 1) {}                          
 
   GraphId id() const noexcept {
     return _id;
@@ -151,6 +343,102 @@ class Graph {
   Operator& GetOp(OpId op_id) {
     return _op_indexing[op_id];
   }
+
+  std::shared_ptr<SubGraph> GetSubGraph(std::string subgraph_name = "") {
+    if (subgraph_name == "")
+      subgraph_name = get_cur_subgraph_name();
+    HT_ASSERT(_subgraphs.find(subgraph_name) != _subgraphs.end());
+    return _subgraphs[subgraph_name];
+  }
+
+  std::shared_ptr<SubGraph> GetSubGraph(Operator& op) {
+    if (_op_to_subgraph.find(op->id()) != _op_to_subgraph.end()) {
+      HT_ASSERT(_subgraphs.find(_op_to_subgraph[op->id()]) != _subgraphs.end());
+      return _subgraphs[_op_to_subgraph[op->id()]];
+    }
+    return nullptr;
+  }
+
+  std::unordered_map<std::string, std::shared_ptr<SubGraph>>& GetAllSubGraphs() {
+    return _subgraphs;
+  }
+
+  SubGraphType GetSubGraphType(Operator& op) {
+    HT_ASSERT(_op_to_subgraph_type.find(op->id()) != _op_to_subgraph_type.end());
+    return _op_to_subgraph_type[op->id()];
+  }
+
+  std::shared_ptr<SubGraph> AddOpToSubGraph(Operator& op, std::string subgraph_name = "", 
+                                            SubGraphType op_type = SubGraphType::FORWARD) {
+    if (subgraph_name == "")
+      subgraph_name = get_cur_subgraph_name();
+    HT_ASSERT(_subgraphs.find(subgraph_name) != _subgraphs.end());
+    switch(op_type) {
+      case SubGraphType::FORWARD:
+        _subgraphs[subgraph_name]->add_op(op);
+        break;
+      case SubGraphType::BACKWARD:
+        _subgraphs[subgraph_name]->add_bwd_op(op);
+        break;
+      case SubGraphType::UPDATE:
+        _subgraphs[subgraph_name]->add_update_op(op);
+        break;
+      default:
+        HT_NOT_IMPLEMENTED << "unsupported subgraph type.";
+    }
+    if (_op_to_subgraph.find(op->id()) == _op_to_subgraph.end())
+      _op_to_subgraph[op->id()] = subgraph_name;
+    if (_op_to_subgraph_type.find(op->id()) == _op_to_subgraph_type.end())
+      _op_to_subgraph_type[op->id()] = op_type;
+    return _subgraphs[subgraph_name];
+  }
+
+  std::shared_ptr<SubGraph> MakeSubGraph(std::string subgraph_type = "", 
+                                         std::string name = "", 
+                                         std::string subgraph_name = "") {
+    std::string parent_subgraph_name = get_cur_subgraph_name();
+    if (subgraph_name == "" && name != "")
+      if (parent_subgraph_name == "")
+        subgraph_name = name;
+      else 
+        subgraph_name = parent_subgraph_name + "." + name;
+    if (_subgraphs.find(subgraph_name) == _subgraphs.end()) {
+      _subgraphs[subgraph_name] = std::make_shared<SubGraph>(name, subgraph_type, subgraph_name);
+    }
+    if (parent_subgraph_name != "") {
+      HT_ASSERT(_subgraphs.find(parent_subgraph_name) != _subgraphs.end());
+      _subgraphs[subgraph_name]->set_parent_graph(_subgraphs[parent_subgraph_name]);
+      _subgraphs[parent_subgraph_name]->add_subgraph(_subgraphs[subgraph_name]);
+    }
+    return _subgraphs[subgraph_name];
+  }
+
+  void push_subgraph_ctx(std::string name) {
+    _subgraph_ctx.push_back(name);
+  }
+
+  void pop_subgraph_ctx() {
+    _subgraph_ctx.pop_back();
+  }
+
+  std::string get_cur_subgraph_name() {
+    if (_subgraph_ctx.empty())
+      return "";
+    std::string cur_subgraph_name = "";
+    for (int i = 0; i < _subgraph_ctx.size() - 1; ++i) {
+      cur_subgraph_name = cur_subgraph_name + _subgraph_ctx[i] + ".";
+    }
+    cur_subgraph_name += _subgraph_ctx.back();
+    return cur_subgraph_name;
+  }
+
+  std::shared_ptr<SubGraph> cur_subgraph() {
+    std::string cur_subgraph_name = get_cur_subgraph_name();
+    HT_ASSERT(_subgraphs.find(cur_subgraph_name) != _subgraphs.end());
+    return _subgraphs[cur_subgraph_name]; 
+  }
+
+  void SubGraphProfiling(std::unordered_map<OpId, int64_t> op_execute_map, int num_micro_batches = 1);
 
  protected:
   virtual Operator& MakeOpInner(std::shared_ptr<OpInterface> body,
@@ -293,11 +581,17 @@ class Graph {
   const GraphName _name;
   std::unordered_map<OpType, uint32_t> _op_type_cnts;
 
-  std::unordered_map<OpId, Operator> _op_indexing;
+  Op2OpMap _op_indexing;
   std::unordered_set<OpId> _parameter_ops;
   std::unordered_set<OpId> _optimizer_variable_ops;
   std::unordered_set<OpId> _source_ops;
   std::unordered_set<OpId> _sink_ops;
+  std::unordered_map<OpId, OpId> _paramter_to_absmax;
+  std::unordered_map<OpId, int64_t> _paramter_to_blocksize;
+  std::unordered_map<std::string, std::shared_ptr<SubGraph>> _subgraphs;
+  std::unordered_map<OpId, std::string> _op_to_subgraph;
+  std::unordered_map<OpId, SubGraphType> _op_to_subgraph_type;
+  std::vector<std::string> _subgraph_ctx;
   
   std::unordered_map<OpId, uint32_t> _op_out_degrees;
   Tensor2NDArrayMap _preserved_data;
@@ -588,9 +882,9 @@ class Graph {
       return;
     }
     if (in_deps.size() == 1) {
-      op->_extra_in_dep_linkers.push_back(in_deps.front());
+      op->add_in_dep_linker(in_deps.front());
     } else {
-      op->_extra_in_dep_linkers.push_back(
+      op->add_in_dep_linker(
         MakeGroupOp(OpMeta()
                       .set_extra_deps(in_deps)
                       .set_name(op->name() + "_extra_in_dep")));
@@ -671,7 +965,8 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
     auto& op = op_ref.get();
     auto op_in_degrees = (stop_at && stop_at(op)) ? 0 : op->in_degrees();
     if (op_in_degrees != op->in_degrees()) {
-      HT_LOG_DEBUG << "make topo: " << op << " is forced to be stopped";
+      HT_LOG_DEBUG << "make topo: " << op << " is forced to be stopped "
+      << op_in_degrees << " " << op->in_degrees();
     }
     in_degrees[op->id()] = op_in_degrees;
     if (op_in_degrees == 0) {
@@ -688,8 +983,8 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
 
   // iteratively find the topo order
   while (!topo_queue.empty()) {
-    auto& op_ref = topo_queue.front();
-    topo_queue.pop_front();
+    auto& op_ref = topo_queue.back();
+    topo_queue.pop_back();
     ret.push_back(op_ref);
     Operator::for_each_output_tensor(op_ref.get(), [&](Tensor& tensor) {
       // Place inplace ops after other ops
@@ -730,23 +1025,30 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
         });
       }
       // Step 3. Check extra_edges and decrease in_degrees of inplace ops.
+      OpRefList dfs_list;
       Tensor::for_each_consumer(tensor, [&](Operator& consumer_op) {
         if (in_degrees.find(consumer_op->id()) == in_degrees.end())
           return;
         if ((--in_degrees[consumer_op->id()]) == 0) {
-          topo_queue.push_back(std::ref(consumer_op));
+          // topo_queue.push_back(std::ref(consumer_op));
+          dfs_list.push_back(std::ref(consumer_op));
           if (has_extra_edge && !is_inplace_op(std::ref(consumer_op))) {
             for (auto inplace_id : extra_edges[consumer_op->id()]) {
               if (--in_degrees[inplace_id] == 0) {
                 auto inplace_op = std::find_if(inplace_ops.begin(), inplace_ops.end(),
                   [&](const OpRef& op_ref) { return op_ref.get()->id() == inplace_id; });
+                // if (inplace_op != inplace_ops.end())
+                //   topo_queue.push_back(*inplace_op);
                 if (inplace_op != inplace_ops.end())
-                  topo_queue.push_back(*inplace_op);
+                  dfs_list.push_back(*inplace_op);
               }
             }
           }
         }
       });
+      for (auto it = dfs_list.rbegin(); it != dfs_list.rend(); ++it) {
+        topo_queue.push_back(*it);
+      }
     });
   }
 
@@ -854,7 +1156,8 @@ inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_
   fw_ops.reserve(fw_set.size());
   std::copy_if(topo.begin(), topo.end(), std::back_inserter(fw_ops),
                [&fw_set](const OpRef& op_ref) {
-                 return fw_set.find(op_ref.get()->id()) != fw_set.end();
+                 return fw_set.find(op_ref.get()->id()) != fw_set.end() ||
+                        op_ref.get()->op_meta().is_offload;
                });
 
   // get the backward ops
@@ -862,7 +1165,8 @@ inline std::tuple<OpRefList, OpRefList> Graph::disentangle_forward_and_backward_
   bw_ops.reserve(topo.size() - fw_ops.size());
   std::copy_if(topo.begin(), topo.end(), std::back_inserter(bw_ops),
                [&fw_set](const OpRef& op_ref) {
-                 return fw_set.find(op_ref.get()->id()) == fw_set.end();
+                 return fw_set.find(op_ref.get()->id()) == fw_set.end() &&
+                        !op_ref.get()->op_meta().is_offload;
                });
 
   return {fw_ops, bw_ops};

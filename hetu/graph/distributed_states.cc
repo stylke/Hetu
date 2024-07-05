@@ -13,7 +13,8 @@ void DistributedStates::set_placement_group(const DeviceGroup& placement_group) 
 }
 
 void DistributedStates::set_placement(const Device& placement) {
-  HT_ASSERT(_placement_group.num_devices() > 0 && (_placement_group.contains(placement) || placement == kCPU))
+  HT_ASSERT((_placement_group.num_devices() > 0 && (_placement_group.contains(placement) || placement == kCPU))
+            || _placement_group.empty())
             << "the placement device " << placement << " must in placement group " << _placement_group;    
   _placement = placement;
 }
@@ -308,7 +309,8 @@ bool DistributedStates::check_allgather(const DistributedStates& dst_distributed
 }
 
 bool DistributedStates::check_reducescatter(const DistributedStates& dst_distributed_states) const {
-  std::pair<std::vector<int32_t>, int32_t> src2dst = {{-2}, 0};
+  int32_t scatter_dim = dst_distributed_states.get_split_dim(*this);
+  std::pair<std::vector<int32_t>, int32_t> src2dst = {{-2}, scatter_dim};
   return states(-2) > 1 && check_combine(dst_distributed_states, src2dst);
 }
 
@@ -328,6 +330,28 @@ int32_t DistributedStates::get_dim(int32_t index) const {
   } else {
     return 1;
   }
+}
+
+int32_t DistributedStates::get_split_dim(const DistributedStates& merged_distributed_states) const {
+  int32_t split_dim = -3; // -1 for duplicate and -2 for partial
+  std::vector<int32_t> split_dim_candidates;
+  for (auto& kv : _states) {
+    if (kv.first >= 0 && kv.second > 1) {
+      split_dim_candidates.push_back(kv.first);
+    }
+  }
+  if (!split_dim_candidates.empty()) {
+    const auto& merged_states = merged_distributed_states.get_states();
+    for (auto& candidate : split_dim_candidates) {
+      if (merged_states.find(candidate) == merged_states.end() || merged_states.at(candidate) < _states.at(candidate)) {
+        HT_ASSERT(split_dim == -3)
+        << "Only support gather on one dimension, but got distributed states of src: "
+        << _states << " vs dst: " << merged_states;
+        split_dim = candidate;
+      }
+    }
+  }
+  return split_dim;
 }
 
 std::vector<int32_t> DistributedStates::get_loop_sizes() const {

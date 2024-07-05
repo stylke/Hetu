@@ -216,6 +216,18 @@ Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy,
 Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, 
                   OpMeta op_meta = OpMeta());
 
+// single strategy
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, 
+                  ReductionType red_type, OpMeta op_meta = OpMeta());
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds,
+                  const std::string& mode, OpMeta op_meta = OpMeta());
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, DeviceGroup dst_group,
+                  OpMeta op_meta = OpMeta());
+
+Tensor MakeCommOp(Tensor input, DistributedStates dst_ds, OpMeta op_meta = OpMeta());
+
 class AllReduceOpImpl final : public OpInterface {
  public:
   AllReduceOpImpl(DeviceGroup comm_group, ReductionType red_type = kSUM, bool inplace = false)
@@ -254,7 +266,7 @@ class AllReduceOpImpl final : public OpInterface {
                         RuntimeContext& ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const {};
+                 RuntimeContext& ctx) const override;
   
   bool _inplace{false};
 
@@ -526,14 +538,18 @@ Tensor MakeBatchedISendIRecvOp(TensorList inputs,
 
 class AllGatherOpImpl final : public OpInterface {
  public:
-  AllGatherOpImpl(DeviceGroup comm_group)
-  : OpInterface(quote(AllGatherOp)), _comm_group(std::move(comm_group)) {
+  AllGatherOpImpl(const DeviceGroup& comm_group, int32_t gather_dim = 0)
+  : OpInterface(quote(AllGatherOp)), _gather_dim(gather_dim), _comm_group(std::move(comm_group)) {
     HT_ASSERT(_comm_group.num_devices() >= 2)
       << "AllGather requires two or more devices. Got " << _comm_group;
   }
 
   uint64_t op_indicator() const noexcept override {
     return ALL_GATHER_OP;
+  }
+
+  int32_t get_gather_dim() const {
+    return _gather_dim;
   }
 
  protected:
@@ -558,18 +574,20 @@ class AllGatherOpImpl final : public OpInterface {
  protected:
   DeviceGroup _comm_group;
   static NDArray _buffer_for_allgather; // workaround for allgather activation when use sp
+  int32_t _gather_dim;
 };
 
-Tensor MakeAllGatherOp(Tensor input, DeviceGroup comm_group,
+Tensor MakeAllGatherOp(Tensor input, const DeviceGroup& comm_group, int32_t gather_dim = 0,
                        OpMeta op_meta = OpMeta());
 
 class ReduceScatterOpImpl final : public OpInterface {
  public:
-  ReduceScatterOpImpl(DeviceGroup comm_group, ReductionType red_type = kSUM,
-                      bool inplace = false) : OpInterface(quote(ReduceScatterOp)), 
+  ReduceScatterOpImpl(const DeviceGroup& comm_group, int32_t scatter_dim = 0, ReductionType red_type = kSUM,
+                      bool inplace = false)
+  : OpInterface(quote(ReduceScatterOp)), _scatter_dim(scatter_dim),
     _comm_group(std::move(comm_group)), _red_type(red_type), _inplace(inplace) {
     HT_ASSERT(_comm_group.num_devices() >= 2)
-      << "ReduceScatter requires two or more devices. Got " << _comm_group;          
+      << "ReduceScatter requires two or more devices. Got " << _comm_group;            
   }
 
   inline bool inplace() const {
@@ -586,6 +604,10 @@ class ReduceScatterOpImpl final : public OpInterface {
 
   inline uint64_t op_indicator() const noexcept override {
     return _inplace ? REDUCE_SCATTER_OP | INPLACE_OP : REDUCE_SCATTER_OP;
+  }
+
+  int32_t get_scatter_dim() const {
+    return _scatter_dim;
   }
 
   ReductionType reduction_type() const {
@@ -614,19 +636,20 @@ class ReduceScatterOpImpl final : public OpInterface {
                         RuntimeContext& ctx) const override;
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
-                 RuntimeContext& ctx) const {};
+                 RuntimeContext& ctx) const override;
 
   bool _inplace;
 
  protected:
   DeviceGroup _comm_group;
+  int32_t _scatter_dim;
   ReductionType _red_type{kNONE};
 };
 
-Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group,  
+Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, int32_t scatter_dim = 0,
                            bool inplace = false, OpMeta op_meta = OpMeta());
 
-Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, ReductionType red_type, 
+Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, int32_t scatter_dim = 0, ReductionType red_type, 
                            bool inplace = false, OpMeta op_meta = OpMeta());
 
 class SplitAllGatherOpImpl final : public OpInterface {

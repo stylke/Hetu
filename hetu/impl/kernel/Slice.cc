@@ -30,6 +30,37 @@ void slice_cpu(const spec_t* input, spec_t* output, const int64_t* output_shape,
   }
 }
 
+void slice_quantization(const uint8_t* input, uint8_t* output, const int64_t* output_shape,
+                        const int64_t* input_shape, const int64_t* begin_pos,
+                        size_t ndim, size_t size) {
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+  for (size_t idx = 0; idx < size / 2; ++idx) {
+    output[idx] = 0;
+  }
+  for (size_t idx = 0; idx < size; ++idx) {
+    size_t tmp_index = idx;
+    size_t i_index = 0;
+    int64_t i_mat = 1;
+    for (int i = ndim - 1; i >= 0; --i) {
+      int64_t offset = begin_pos[i] + tmp_index % output_shape[i];
+      tmp_index /= output_shape[i];
+      i_index += offset * i_mat;
+      i_mat *= input_shape[i];
+    }
+    int tmp = 0;
+    if (i_index % 2 == 0)
+      tmp = input[i_index / 2] >> 4;
+    else 
+      tmp = input[i_index / 2] & (0x0F);
+    if (idx % 2 == 0)
+      output[idx / 2] += (tmp << 4);
+    else 
+      output[idx / 2] += tmp;
+  }
+}
+
 template <typename spec_t>
 void slice_gradient_cpu(const spec_t* input, spec_t* output,
                         const int64_t* output_shape, const int64_t* input_shape,
@@ -80,15 +111,23 @@ void SliceCpu(const NDArray& input, NDArray& output, const HTShape& begin_pos,
   HTShape pos = begin_pos;
   HTShape i_shape = input->shape();
   HTShape o_shape = output->shape();
-
-  HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
-    input->dtype(), spec_t, "SliceCpu", [&]() {
-      auto _future = cpu_stream.EnqueueTask(
-      [input, output, o_shape, i_shape, pos, ndim, size]() {
-      slice_cpu<spec_t>(input->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
-                        o_shape.data(), i_shape.data(), pos.data(), ndim, size);
-      }, "Slice");
-    });
+  if (input->dtype() == kFloat4 || input->dtype() == kNFloat4) {
+    auto _future = cpu_stream.EnqueueTask(
+        [input, output, o_shape, i_shape, pos, ndim, size]() {
+        slice_quantization(input->data_ptr<uint8_t>(), output->data_ptr<uint8_t>(),
+                          o_shape.data(), i_shape.data(), pos.data(), ndim, size);
+        }, "Slice");
+  }
+  else {
+    HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
+      input->dtype(), spec_t, "SliceCpu", [&]() {
+        auto _future = cpu_stream.EnqueueTask(
+        [input, output, o_shape, i_shape, pos, ndim, size]() {
+        slice_cpu<spec_t>(input->data_ptr<spec_t>(), output->data_ptr<spec_t>(),
+                          o_shape.data(), i_shape.data(), pos.data(), ndim, size);
+        }, "Slice");
+      });
+  }
   NDArray::MarkUsedBy({input, output}, stream);
 }
 

@@ -1,3 +1,4 @@
+import hetu
 class GPTConfig(object):
     def __init__(
         self,
@@ -31,6 +32,8 @@ class GPTConfig(object):
         num_micro_batches = 1,
         dp = 1,
         use_flash_attn = False,
+        lora_dtype="fp32",
+        dqtype="fp32",
     ):
         self.vocab_size = vocab_size
         self.n_ctx = n_ctx
@@ -76,3 +79,20 @@ class GPTConfig(object):
         self.output_attentions = False
         self.output_hidden_states= False
         self.use_flash_attn = use_flash_attn
+        if lora_dtype == "fp16":
+            self.lora_dtype = hetu.float16
+        elif lora_dtype == "bf16":
+            self.lora_dtype = hetu.bfloat16
+        elif lora_dtype == "fp4":
+            self.lora_dtype = hetu.float4
+        elif lora_dtype == "nf4":
+            self.lora_dtype = hetu.nfloat4
+        else:
+            self.lora_dtype = hetu.float32
+        
+        if dqtype == "fp16":
+            self.dqtype = hetu.float16
+        elif dqtype == "bf16":
+            self.dqtype = hetu.bfloat16
+        else:
+            self.dqtype = hetu.float32

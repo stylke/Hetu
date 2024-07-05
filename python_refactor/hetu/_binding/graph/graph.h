@@ -5,6 +5,7 @@
 #include "hetu/_binding/core/ndarray.h"
 #include "hetu/_binding/graph/tensor.h"
 #include "hetu/_binding/utils/numpy.h"
+#include "hetu/_binding/utils/python_primitives.h"
 #include "hetu/_binding/utils/pybind_common.h"
 
 namespace hetu {
@@ -57,6 +58,38 @@ inline bool CheckPyFeedDict(PyObject* obj) {
   return false;
 }
 
+inline bool CheckPyParameterDict(PyObject* obj) {
+  if (PyDict_Check(obj)) {
+    PyObject* key;
+    PyObject* value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(obj, &pos, &key, &value)) {
+      if (!CheckPyString(key))
+        return false;
+      if (!CheckPyLong(value))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+inline bool CheckPyStateDict(PyObject* obj) {
+  if (PyDict_Check(obj)) {
+    PyObject* key;
+    PyObject* value;
+    Py_ssize_t pos = 0;
+    while (PyDict_Next(obj, &pos, &key, &value)) {
+      if (!CheckPyString(key))
+        return false;
+      if (!CheckPyTensor(value))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 inline FeedDict FeedDict_FromPyObject(PyObject* obj) {
   FeedDict feed_dict;
   PyObject* key;
@@ -67,10 +100,40 @@ inline FeedDict FeedDict_FromPyObject(PyObject* obj) {
     HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": processing element " << cnt++ << " in FeedDict...";
     TensorId k = Tensor_FromPyObject(key)->id();
     NDArray v = CheckPyNDArray(value) ? NDArray_FromPyObject(value)
-                                      : NDArrayFromNumpy(value);
+                                      : NDArrayFromNumpy(value, {}, Tensor_FromPyObject(key)->dtype());
     feed_dict.insert({k, v});
   }
   return feed_dict;
+}
+
+inline ParameterDict ParameterDict_FromPyObject(PyObject* obj) {
+  ParameterDict parameter_dict;
+  PyObject* key;
+  PyObject* value;
+  Py_ssize_t pos = 0;
+  int64_t cnt = 0;
+  while (PyDict_Next(obj, &pos, &key, &value)) {
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": processing element " << cnt++ << " in ParamDict...";
+    std::string k = String_FromPyUnicode(key);
+    int64_t v = Int64_FromPyLong(value);
+    parameter_dict.insert({k, v});
+  }
+  return parameter_dict;
+}
+
+inline StateDict StateDict_FromPyObject(PyObject* obj) {
+  StateDict StateDict;
+  PyObject* key;
+  PyObject* value;
+  Py_ssize_t pos = 0;
+  int64_t cnt = 0;
+  while (PyDict_Next(obj, &pos, &key, &value)) {
+    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": processing element " << cnt++ << " in ParamDict...";
+    std::string k = String_FromPyUnicode(key);
+    Tensor v = Tensor_FromPyObject(value);
+    StateDict.insert({k, v});
+  }
+  return StateDict;
 }
 
 /******************************************************

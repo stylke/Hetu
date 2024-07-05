@@ -9,8 +9,8 @@ class Conv1D(ht.nn.Module):
         super().__init__()
         self.nf = nf
         # self.weight = ht.normal([nx, nf], requires_grad=True)
-        self.weight = ht.randn([nx, nf], 0., 0.02, requires_grad = True)
-        self.bias = ht.zeros([nf], requires_grad=True)
+        self.weight = ht.randn([nx, nf], 0., 0.02, requires_grad = True, device_groups=[ht.global_device_group()])
+        self.bias = ht.zeros([nf], requires_grad=True, device_groups=[ht.global_device_group()])
         # ht.nn.init.normal_(self.weight, std=0.02)
 
     def forward(self, x):
@@ -25,17 +25,9 @@ class GPTAttention(ht.nn.Module):
         super().__init__()
 
         max_positions = config.max_position_embeddings
-        # self.register_buffer(
-        #     "bias",
-        #     ht.from_numpy(np.tril(np.ones((max_positions, max_positions), dtype=np.uint8).reshape(
-        #             1, 1, max_positions, max_positions)))
-        # )
-        # self.bias = ht.from_numpy(np.tril(np.ones((max_positions, max_positions), dtype=np.uint8).reshape(
-        #             1, 1, max_positions, max_positions))).to_variable(False)
         self.bias = np.tril(np.ones((max_positions, max_positions), dtype=np.int64).reshape(
                     1, 1, max_positions, max_positions))
-        # self.register_buffer("masked_bias", ht.from_numpy(np.array([1e-4])))
-        self.masked_bias = ht.from_numpy(np.array([-1e4], dtype = np.float32))
+        self.masked_bias = ht.from_numpy(np.array([-1e4], dtype = np.float32), device_groups=[ht.global_device_group()])
 
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
@@ -80,8 +72,8 @@ class GPTAttention(ht.nn.Module):
             # if only "normal" attention layer implements causal mask
             query_length, key_length = query.shape[-2], key.shape[-2]
             # causal_mask = self.bias[:, :, key_length - query_length : key_length, :key_length].bool()
-            u1 = np.tile(self.bias[:, :, key_length - query_length : key_length, :key_length], (self.config.batch_size,12,1,1))
-            causal_mask = ht.from_numpy(u1)
+            u1 = np.tile(self.bias[:, :, key_length - query_length : key_length, :key_length], (self.config.global_batch_size,12,1,1))
+            causal_mask = ht.from_numpy(u1, device_groups=[ht.global_device_group()])
             mask = self.masked_bias.broadcast(attn_weights)
             attn_weights = ht.where(causal_mask, attn_weights, mask)
             # attn_weights = attn_weights
@@ -208,13 +200,13 @@ class GPTBlock(ht.nn.Module):
         hidden_size = config.hidden_size
         inner_dim = config.n_inner if config.n_inner is not None else 4 * hidden_size
 
-        self.ln_1 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
+        self.ln_1 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon, device_groups = [ht.global_device_group()])
         self.attn = GPTAttention(config, layer_idx=layer_idx)
-        self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
+        self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon, device_groups = [ht.global_device_group()])
 
         if config.add_cross_attention:
             self.crossattention = GPTAttention(config, is_cross_attention=True)
-            self.ln_cross_attn = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
+            self.ln_cross_attn = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon, device_groups = [ht.global_device_group()])
 
         self.mlp = GPTMLP(inner_dim, config)
 
@@ -289,14 +281,14 @@ class GPTModel(ht.nn.Module):
 
         self.embed_dim = config.hidden_size
 
-        self.wte = nn.Embedding(config.vocab_size, self.embed_dim)
+        self.wte = nn.Embedding(config.vocab_size, self.embed_dim, device_groups = [ht.global_device_group()])
         print("EMBED1:",config.vocab_size)
-        self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim)
+        self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim, device_groups = [ht.global_device_group()])
         print("EMBED2:",config.max_position_embeddings,)
 
         self.drop = nn.Dropout(config.embd_pdrop)
         self.h = ht.nn.ModuleList([GPTBlock(config, layer_idx=i) for i in range(config.num_hidden_layers)])
-        self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
+        self.ln_f = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon, device_groups = [ht.global_device_group()])
         self.config = config
         self.dtype = ht.float32
 
@@ -360,7 +352,7 @@ class GPTModel(ht.nn.Module):
         else:
             past_length = past_key_values[0][0].size(-2)
         if position_ids is None:
-            position_ids = ht.arange(past_length, input_shape[-1] + past_length, 1.0)
+            position_ids = ht.arange(past_length, input_shape[-1] + past_length, 1.0, device_groups = [ht.global_device_group()])
             # position_ids = np.arange(past_length, input_shape[-1] + past_length, dtype=np.int64)
             # out_shape = (1,) + position_ids.shape
             # position_ids = position_ids.reshape(out_shape).reshape(-1, input_shape[-1])
@@ -369,7 +361,7 @@ class GPTModel(ht.nn.Module):
 
         # GPTAttention mask.
         if attention_mask is not None:
-            batch_size = self.config.batch_size
+            batch_size = self.config.global_batch_size
             if batch_size <= 0:
                 raise ValueError("batch_size has to be defined and > 0")
             print(attention_mask.shape)
@@ -388,7 +380,7 @@ class GPTModel(ht.nn.Module):
             # positions we want to attend and -10000.0 for masked positions.
             # Since we are adding it to the raw scores before the softmax, this is
             # effectively the same as removing these entirely.
-            attention_mask = attention_mask.to(datatype=self.dtype)  # fp16 compatibility
+            attention_mask = attention_mask.to(dtype=self.dtype)  # fp16 compatibility
             attention_mask = (1.0 - attention_mask) * -10000.0
 
         # If a 2D or 3D attention mask is provided for the cross-attention
@@ -474,7 +466,7 @@ class GPTLMHeadModel(ht.nn.Module):
     def __init__(self, config):
         super(GPTLMHeadModel, self).__init__()
         self.transformer = GPTModel(config)
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False, device_groups = [ht.global_device_group()])
         self.config = config
     
     def forward(
@@ -543,84 +535,3 @@ class GPTLMHeadModel(ht.nn.Module):
         output = (lm_logits,) + transformer_outputs[1:]
         output = ((loss,) + output) if loss is not None else output
         return output
-
-# class Dropout(object):
-#     def __init__(self, dropout_prob=None):
-#         self.dropout_prob = dropout_prob
-
-#     def __call__(self, input_tensor):
-#         if self.dropout_prob is None or self.dropout_prob == 0.0:
-#             return input_tensor
-#         output = ht.dropout(input_tensor, 1.0 - self.dropout_prob)
-#         # output = input_tensor
-#         return output
-
-# class LayerNorm(object):
-#     def __init__(self, hidden_size, eps=1e-12):
-#         self.eps = eps
-#         self.hidden_size = hidden_size
-#         self.scale = ht.ones([hidden_size,], requires_grad=True)
-#         self.bias = ht.zeros([hidden_size,], requires_grad=True)
-
-#     def __call__(self, x):
-#         u = x.mean([-1], keepdims=[True])
-#         s = (x - u)
-#         s = s * s
-#         s = s.mean([-1], keepdims=[True])
-#         x = (x - u) / ht.sqrt(s + self.eps)
-#         x = self.scale * x + self.bias
-#         return x
-
-# class Embedding(object):
-#     def __init__(self, num_embeddings, embedding_dim, embedding_name=None, initializer=ht.nn.init.normal_):
-#         self.num_embeddings = num_embeddings
-#         self.embedding_dim = embedding_dim
-#         self.weight = ht.nn.functional.xavier_normal_([num_embeddings, embedding_dim], requires_grad=True)
-#         # ht.nn.Parameter(ht.empty([num_embeddings, embedding_dim], trainable=True))
-#         # ht.nn.init.xavier_normal_(self.weight)
-
-#     def to(self, dtype):
-#         self.weight = self.weight.to(datatype=dtype)
-
-#     def clone(self, dtype):
-#         model = Embedding(self.num_embeddings, self.embedding_dim)
-#         model.weight = self.weight.to(datatype=dtype)
-#         return model
-    
-#     def __call__(self, input_tensor):
-#         return ht.embedding_lookup(self.weight, input_tensor)
-
-# class Linear(object):
-#     def __init__(self, in_features, out_features, bias=True, activation=None, kernel_initializer=ht.nn.init.xavier_normal_, bias_initializer=ht.nn.init.zeros_, input_shape=None):
-#         self.bias_flag = bias
-#         self.activation = activation
-#         #self.weights = kernel_initializer(name='dense_weights', shape=(in_features, out_features))
-#         self.weights = ht.nn.functional.xavier_normal_([out_features, in_features], requires_grad=True)
-#         # self.weights = ht.nn.Parameter(ht.empty([out_features, in_features], trainable=True))
-#         # ht.nn.init.xavier_normal_(self.weights)
-#         if self.bias_flag:
-#             self.bias = ht.zeros([out_features,], requires_grad=True)
-#             # self.bias = ht.nn.Parameter(ht.zeros([out_features,], trainable=True))
-#             # ht.nn.init.zeros_(self.bias)
-#         self.input_shape = input_shape
-#         self.in_features = in_features
-#         self.out_features = out_features
-#         if self.input_shape is not None and self.input_shape[-1] != in_features:
-#             print("Specified in_features is not equal to input_shape[-1].")
-#             assert (False)
-
-#     def __call__(self, input_tensor):
-#         self.input_shape = input_tensor.shape
-#         if self.input_shape is not None and len(self.input_shape) != 2:
-#             input_tensor = ht.reshape(
-#                 input_tensor, [-1, self.in_features])
-#         #outputs = ht.matmul_op(input_tensor, self.weights)
-#         outputs = ht.matmul(input_tensor, self.weights, trans_b=True)
-#         if self.bias_flag:
-#             outputs = outputs + ht.broadcast(self.bias, outputs)
-#         if self.activation is not None:
-#             outputs = self.activation(outputs)
-#         if self.input_shape is not None and len(self.input_shape) != 2:
-#             outputs = ht.reshape(
-#                 outputs, self.input_shape[:-1]+[self.out_features])
-#         return outputs

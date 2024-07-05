@@ -9,7 +9,7 @@ TP=${8:-2}
 PP=${9:-2}
 NUM_GPUS=$(( $DP * $TP *$PP ))
 
-ROOT_FOLDER=/opt/tiger/test/Hetu-dev/examples/nlp/gpt/data
+ROOT_FOLDER=data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
 JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json

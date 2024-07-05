@@ -1,0 +1,15 @@
+hosts:
+  -
+    addr: 172.24.179.236
+    initial_workers: 8
+    min_workers: 2
+    max_workers: 8
+  -
+    addr: 172.24.98.116
+    initial_workers: 8
+    min_workers: 2
+    max_workers: 8
+max_restart_times: 5
+heartbeat_interval: 10.0
+
+

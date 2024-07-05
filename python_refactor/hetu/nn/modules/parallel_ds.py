@@ -92,7 +92,8 @@ class HtParallelRMSNorm(Module):
         return output_rms
 
 class HtParallelLayerNorm(Module):
-    def __init__(self, normalized_shape, ds_parallel_config, sp=False, eps=1e-5, dtype=hetu.float32, name='ln'):
+    def __init__(self, normalized_shape, ds_parallel_config, eps=1e-5, 
+                 dtype=hetu.float32, name='ln', ori_model = None):
         super(HtParallelLayerNorm, self).__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
@@ -101,18 +102,22 @@ class HtParallelLayerNorm(Module):
         self.sp = sp
         self.eps = eps
         self.name = name
+        self.ds_parallel_config = ds_parallel_config
+        self.dtype = dtype
         ds, self.device_group = config2ds(ds_parallel_config)
         device_index = get_device_index(self.device_group)
-        # self.sp_size = ds_parallel_config['sp'] # equal to tp?
-        self.ds_split0 = hetu.DistributedStates(ds.device_num, {0: ds.device_num}, [0], False) # for activation, no zero
-        self.weight = hetu.parallel_parameter(eval(f'hetu.ones_initializer()'), 
-                                              self.normalized_shape, ds, device_index, 
-                                              dtype=dtype, requires_grad=True, 
-                                              device_group=self.device_group, name=f'{name}_weight')
-        self.bias = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
-                                              self.normalized_shape, ds, device_index, 
-                                              dtype=dtype, requires_grad=False, 
-                                              device_group=self.device_group, name=f'{name}_bias')
+        if ori_model is None:
+            self.weight = hetu.parallel_parameter(eval(f'hetu.ones_initializer()'), 
+                                                self.normalized_shape, ds, device_index, 
+                                                dtype=dtype, requires_grad=True, 
+                                                device_group=self.device_group, name=f'{name}_weight')
+            self.bias = hetu.parallel_parameter(eval(f'hetu.zeros_initializer()'), 
+                                                self.normalized_shape, ds, device_index, 
+                                                dtype=dtype, requires_grad=True, 
+                                                device_group=self.device_group, name=f'{name}_bias')
+        else:
+            self.weight = ori_model.weight
+            self.bias = ori_model.bias
 
     def forward(self, input_p):
         # [bsz*seq_len, hidden_size]
@@ -133,44 +138,57 @@ class HtParallelLayerNorm(Module):
         return output_ln
 
 class HtParallelEmbedding(Module):
-    def __init__(self, num_embeddings, embedding_dim, ds_parallel_config, init_method='xavier_normal_', dtype=hetu.float32, name='embedding'):
+    def __init__(self, num_embeddings, embedding_dim, ds_parallel_config, init_method='xavier_normal_', 
+                 dtype=hetu.float32, name='embedding', ori_model = None):
         super(HtParallelEmbedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
+        self.ds_parallel_config = ds_parallel_config
+        self.dtype = dtype
+        
         ds, self.device_group = config2ds(ds_parallel_config)
         self.name = name
         device_index = get_device_index(self.device_group)
         # embedding_table should not be splited in any dimension!
-        self.embedding_table = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
-                                                       [num_embeddings, embedding_dim], ds, device_index, 
-                                                       dtype=dtype, requires_grad=True, 
-                                                       device_group=self.device_group, name=f'{name}_table')
+        if ori_model is None:
+            self.embedding_table = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
+                                                        [num_embeddings, embedding_dim], ds, device_index, 
+                                                        dtype=dtype, requires_grad=True, 
+                                                        device_group=self.device_group, name=f'{name}_table')
+        else:
+            self.embedding_table = ori_model.embedding_table
     
     def forward(self, input_p):
         return hetu.embedding_lookup(self.embedding_table, input_p, device_group=self.device_group, name=self.name)
     
 class HtVocabParallelEmbedding(Module):
-    def __init__(self, num_embeddings, embedding_dim, ds_parallel_config, init_method='xavier_normal_', dtype=hetu.float32, name='vocab_embedding'):
+    def __init__(self, num_embeddings, embedding_dim, ds_parallel_config, init_method='xavier_normal_', 
+                 dtype=hetu.float32, name='vocab_embedding', ori_model = None):
         super(HtVocabParallelEmbedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.name = name
-
+        self.ds_parallel_config = ds_parallel_config
+        self.dtype = dtype
         ds_dup_split0, self.device_group = config2ds(ds_parallel_config) # for embedding table
         dp, tp, num_devices = ds_parallel_config['dup'], ds_parallel_config['split'].get('0', 1), len(ds_parallel_config['device_group'])
         assert dp * tp == num_devices, f'VocabParallelEmbedding get wrong ds_parallel_config: {ds_parallel_config}!'
         device_index = get_device_index(self.device_group)
         ds_split0_dup = hetu.DistributedStates(num_devices, {-1: tp, 0: dp}, [0, -1]) # for data
-        self.ds_map = {'split0_dup': ds_split0_dup, 'dup_split0': ds_dup_split0}
+        ds_dup = hetu.DistributedStates(num_devices, {-1: dp * tp}, [-1])
+        self.ds_map = {'split0_dup': ds_split0_dup, 'dup_split0': ds_dup_split0, 'dup': ds_dup}
 
         dup_group_idx = ds_dup_split0.get_dup_group_index(device_index)
         self.vocab_start_index = num_embeddings // tp * dup_group_idx
 
         # embedding_table was splited in vocab dimension
-        self.embedding_table = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
-                                                       [num_embeddings, embedding_dim], ds_dup_split0, device_index, 
-                                                       dtype=dtype, requires_grad=True, 
-                                                       device_group=self.device_group, name=f'{name}_table')
+        if ori_model is None:
+            self.embedding_table = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
+                                                        [num_embeddings, embedding_dim], ds_dup_split0, device_index, 
+                                                        dtype=dtype, requires_grad=True, 
+                                                        device_group=self.device_group, name=f'{name}_table')
+        else:
+            self.embedding_table = ori_model.embedding_table
     
     def forward(self, input_p):
         if input_p.distributed_states.check_equal(self.ds_map['split0_dup']):
@@ -196,12 +214,14 @@ class HtColumnParallelLinear(Module):
     """
     def __init__(self, in_features, out_features, ds_parallel_config,
                  bias=True, gather_output=True, init_method='xavier_normal_', 
-                 dtype=hetu.float32, name='colp'):
+                 dtype=hetu.float32, name='colp', ori_model = None):
         super(HtColumnParallelLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.gather_output = gather_output
         self.name = name
+        self.ds_parallel_config = ds_parallel_config
+        self.dtype = dtype
 
         ds_dup_split1, self.device_group = config2ds(ds_parallel_config)
         dp, tp, num_devices, zero = ds_parallel_config['dup'], \
@@ -215,17 +235,24 @@ class HtColumnParallelLinear(Module):
         # when dp=8 tp=1, weights: ds_dup_split0->ds_dup, data: ds_split0_dup->ds_split0
         ds_dup_split0 = hetu.DistributedStates(num_devices, {-1: dp, 0: tp}, [-1, 0], zero) # for weights with trans_b
         ds_split0_dup = hetu.DistributedStates(num_devices, {-1: tp, 0: dp}, [0, -1]) # for data
-        self.ds_map = {'dup_split0': ds_dup_split0, 'split0_dup': ds_split0_dup}
-        self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
-                                              [out_features, in_features], 
-                                              ds_dup_split0, device_index, 
-                                              dtype=dtype, requires_grad=True, 
-                                              device_group=self.device_group, name=f'{name}_weight')
-        if bias:
-            self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], 
-                                                ds_dup_split0, device_index,
+        ds_dup = hetu.DistributedStates(num_devices, {-1: dp * tp}, [-1], zero)
+        self.ds_map = {'dup_split0': ds_dup_split0, 'split0_dup': ds_split0_dup, 'dup': ds_dup}
+        if ori_model is None:
+            self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
+                                                [out_features, in_features], 
+                                                ds_dup_split0, device_index, 
                                                 dtype=dtype, requires_grad=True, 
-                                                device_group=self.device_group, name=f'{name}_bias')
+                                                device_group=self.device_group, name=f'{name}_weight')
+        else:
+            self.weight = ori_model.weight
+        if bias:
+            if ori_model is None:
+                self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], 
+                                                    ds_dup_split0, device_index,
+                                                    dtype=dtype, requires_grad=True, 
+                                                    device_group=self.device_group, name=f'{name}_bias')
+            else:
+                self.bias = ori_model.bias
         else:
             self.bias = None
       
@@ -266,12 +293,13 @@ class HtRowParallelLinear(Module):
     def __init__(self, in_features, out_features, 
                  ds_parallel_config, sp=False, bias=True, 
                  init_method='xavier_normal_', 
-                 dtype=hetu.float32, name='rowp'):
+                 dtype=hetu.float32, name='rowp', ori_model = None):
         super(HtRowParallelLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.name = name
-        self.sp = sp
+        self.ds_parallel_config = ds_parallel_config
+        self.dtype = dtype
 
         ds_dup_split0, self.device_group = config2ds(ds_parallel_config)
         dp, tp, num_devices, zero = ds_parallel_config['dup'], \
@@ -288,16 +316,22 @@ class HtRowParallelLinear(Module):
         ds_split0 = hetu.DistributedStates(num_devices, {0: num_devices}, [0]) # for sequence parallel
         self.ds_map = {'dup_split1': ds_dup_split1, 'dup': ds_dup, 'split01': ds_split01, 'split0_dup': ds_split0_dup, 'split0': ds_split0}
 
-        self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
-                                              [out_features, in_features], 
-                                              ds_dup_split1, device_index, 
-                                              dtype=dtype, requires_grad=True, 
-                                              device_group=self.device_group, name=f'{name}_weight')        
-        if bias:
-            self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], 
-                                                ds_dup, device_index,
+        if ori_model is None:
+            self.weight = hetu.parallel_parameter(eval(f'hetu.{init_method}initializer()'), 
+                                                [out_features, in_features], 
+                                                ds_dup_split1, device_index, 
                                                 dtype=dtype, requires_grad=True, 
-                                                device_group=self.device_group, name=f'{name}_bias')
+                                                device_group=self.device_group, name=f'{name}_weight')      
+        else:
+            self.weight = ori_model.weight  
+        if bias:
+            if ori_model is None:
+                self.bias = hetu.parallel_parameter(hetu.zeros_initializer(), [out_features], 
+                                                    ds_dup, device_index,
+                                                    dtype=dtype, requires_grad=True, 
+                                                    device_group=self.device_group, name=f'{name}_bias')
+            else:
+                self.bias = ori_model.bias
         else:
             self.bias = None
 

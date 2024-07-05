@@ -1,5 +1,6 @@
 import hetu
 import itertools
+from contextlib import ExitStack, nullcontext
 from hetu import Tensor
 from ..parameter import Parameter
 from collections import OrderedDict, namedtuple
@@ -17,6 +18,9 @@ def parallel_data_provider(global_data, ds, device_index):
     order, states = ds.order, ds.states
     local_map = hetu.map_to_local_data(ds, device_index)
     local_data = global_data.copy()
+    dims = len(local_data.shape)
+    begin_pos = [0] * dims
+    out_shape = local_data.shape
     for dim in order:
         if dim < 0:
             continue
@@ -24,7 +28,13 @@ def parallel_data_provider(global_data, ds, device_index):
         split_index = local_map[dim]
         start = int(split_index * (global_data.shape[dim] / splits))
         stop = min(int((split_index + 1) * (global_data.shape[dim] / splits)), global_data.shape[dim])
-        local_data = local_data.take(range(start, stop), axis=dim)
+        if isinstance(local_data, hetu.NDArray): 
+            begin_pos[dim] = start
+            out_shape[dim] = stop - start
+        else:
+            local_data = local_data.take(range(start, stop), axis=dim)
+    if isinstance(local_data, hetu.NDArray):
+        local_data = local_data.slice(begin_pos, out_shape)
     return local_data
 
 
@@ -40,6 +50,11 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
 class Module(object):
 
     def __init__(self):
+        self._recompute = False
+        self._output_recompute = False
+        self._cpu_offload = False
+        self.module_name = None
+        self.global_name = ""
         with hetu.graph("define_and_run"):
             super().__setattr__("_parameters", OrderedDict())
             super().__setattr__("_modules", OrderedDict())
@@ -179,6 +194,8 @@ class Module(object):
             if _modules is None:
                 raise AttributeError(
                     "Cannot register modules before calling Module.__init__()")
+            value.__setattr__("module_name", name)
+            value.global_name = self.global_name + "." + name 
             self._register_member(name, value, _modules, Module)
     
     def add_module(self, name: str, value: Optional['Module']) -> None:
@@ -241,6 +258,19 @@ class Module(object):
                     for m in module.named_modules(memo, sub_prefix, remove_duplicate):
                         yield m
     
+    def find_module(self, key: str = '') -> Optional['Module']:
+        if key == '':
+            return self
+        if '.' not in key:
+            for name, module in self._modules.items():
+                if name == key:
+                    return module
+        key_list = key.split(".")
+        for name, module in self._modules.items():
+            if name == key_list[0]:
+                sub_prefix = ".".join(key_list[1:])
+                return module.find_module(sub_prefix)
+    
     def modules(self) -> Iterator['Module']:
         for _, module in self.named_modules():
             yield module
@@ -271,8 +301,27 @@ class Module(object):
     ############################################################################
 
     def __call__(self, *input, **kwargs) -> Any:
-        with hetu.graph("define_and_run"):
-            return self.forward(*input, **kwargs)
+        with ExitStack() as stack:
+            stack.enter_context(hetu.graph("define_and_run"))
+            if self.module_name is None:
+                print(self.__class__.__name__, "Not Have Module_Name")
+            else:
+                # print(self.__class__.__name__,  "Module_Name:", self.module_name, "Global_name:", self.global_name)
+                stack.enter_context(hetu.subgraph(subgraph_type = self.__class__.__name__, name = self.module_name))
+                _parameters = self.__dict__.get('_parameters')
+                for key, param in _parameters.items():
+                    # print(self.module_name, " ", key, " ", type(param), param)
+                    hetu.add_to_subgraph(param)
+                
+                
+            # for name, child in self.named_children():
+            #     print("Sub:", name, ",", child)
+            stack.enter_context(hetu.recompute() if self._recompute else nullcontext())
+            stack.enter_context(hetu.cpu_offload() if self._cpu_offload else nullcontext())
+            value = self.forward(*input, **kwargs)
+            if self._recompute and not self._output_recompute and isinstance(value, hetu.Tensor):
+                value._make_recompute(False)
+            return value
     
     def forward(self, *input: Any, **kwargs: Any) -> Any:
         raise NotImplementedError(
@@ -314,6 +363,15 @@ class Module(object):
         def convert(t):
             return t.to(dtype, device)
         return self._apply(convert) 
+    
+    def recompute(self, output_recompute=False):
+        self._recompute = True
+        self._output_recompute = output_recompute
+        return self
+
+    def cpu_offload(self):
+        self._cpu_offload = True
+        return self
     
     ############################################################################
     # Save and Load
@@ -411,6 +469,7 @@ class Module(object):
             key = prefix + name
             if key in state_dict:
                 param_data = state_dict[key]
+                # print("param_date_type", type(param_data))
                 try:
                     if local_device is None:
                         # Tensor
@@ -424,7 +483,8 @@ class Module(object):
                         # 3D parallel: for pipeline situation, a device don't need to load all the checkpoint
                         if device_group.contains(local_device):
                             device_index = device_group.get_index(local_device)
-                            param.reset_data(parallel_data_provider(param_data, param.distributed_states, device_index))
+                            data = parallel_data_provider(param_data, param.distributed_states, device_index)
+                            param.reset_data(data)
                             '''
                             if 'lm_head' in key:
                                 print('lm_head', parallel_data_provider(param_data, param.distributed_states, device_index), 

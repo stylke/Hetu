@@ -76,7 +76,37 @@ class OpMeta {
     is_step = step;
     return *this;
   }
-  
+
+  inline OpMeta& set_origin_op_id(OpId id) {
+    origin_op_id = id;
+    return *this;
+  }
+
+  inline OpMeta& set_is_recompute(bool recompute) {
+    is_recompute = recompute;
+    return *this;
+  }
+
+  inline OpMeta& set_is_cpu_offload(bool cpu_offload) {
+    is_cpu_offload = cpu_offload;
+    return *this;
+  }
+
+  inline OpMeta& set_is_offload(bool offload) {
+    is_offload = offload;
+    return *this;
+  }
+
+  inline OpMeta& set_parameter_dict(ParameterDict param_dict) {
+    parameter_dict = param_dict;
+    return *this;
+  }
+
+  bool need_dequantization() {
+    return parameter_dict.find("tensor_id") != parameter_dict.end()
+        && parameter_dict.find("blocksize") != parameter_dict.end();
+  }
+
   inline OpMeta& set(const OpMeta& other) {
     operator=(other);
     return *this;
@@ -108,8 +138,13 @@ class OpMeta {
   // deprecated: DeviceGroupList device_groups; // for multi ds deduce
   DeviceGroupHierarchy device_group_hierarchy{}; // for multi ds multi hetero-dp deduce
   TensorList extra_deps;
+  OpId origin_op_id{-1}; // for recomputation only
+  bool is_recompute{false};
+  bool is_cpu_offload{false};
+  bool is_offload{false}; // for offload D2H op only
   bool is_deduce_states{true};  
   bool is_step{false};
+  ParameterDict parameter_dict;
 };
 
 std::ostream& operator<<(std::ostream&, const OpMeta&);
@@ -146,10 +181,14 @@ class RuntimeContext {
   }
 
   OpRuntimeContext& get(OpId id) {
+    HT_ASSERT(_ctxs.find(id) != _ctxs.end())
+      << "Op " << id << " is not found in runtime context";
     return *_ctxs.at(id);
   }
 
   const OpRuntimeContext& get(OpId id) const {
+    HT_ASSERT(_ctxs.find(id) != _ctxs.end())
+      << "Op " << id << " is not found in runtime context";
     return *_ctxs.at(id);
   }
 
@@ -161,10 +200,6 @@ class RuntimeContext {
     _ctxs.clear();
   }
 
-  const Tensor2ShapeMap& shape_plan() const {
-    return _shape_plan;
-  }
-
   const HTShape& get_runtime_shape(const TensorId& tensor_id) const {
     HT_ASSERT(!_shape_plan.empty())
       << "The shape plan is empty, ensure that you've used a define graph to instantiate a exec graph";
@@ -172,6 +207,10 @@ class RuntimeContext {
     HT_ASSERT(it != _shape_plan.end())
       << "Tensor " << tensor_id << " is not existed in runtime shape plan";
     return it->second;
+  }
+  
+  const Tensor2ShapeMap& shape_plan() const {
+    return _shape_plan;
   }
 
   const Tensor2NDArrayMap& allocation_plan() const {
@@ -384,6 +423,12 @@ class OpInterface : public shared_ptr_target {
   virtual NDArrayList DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                                      RuntimeContext& runtime_ctx) const;
 
+  NDArrayList DoAllocOutputs(Operator& op, const NDArrayList& inputs,
+                             RuntimeContext& runtime_ctx, const Device& device) const;
+
+  virtual NDArray DoAllocOutput(Operator& op, const NDArrayList& inputs,
+                                size_t idx, RuntimeContext& runtime_ctx) const;
+
   virtual void DoCompute(Operator& op, const NDArrayList& inputs,
                          NDArrayList& outputs,
                          RuntimeContext& runtime_ctx) const = 0;
@@ -410,6 +455,7 @@ class OpDef : public shared_ptr_target {
   friend class DefineByRunGraph;
   friend class DefineAndRunGraph;
   friend class ExecutableGraph;
+  friend class Recompute;
   struct constrcutor_access_key {};
 
  public:
@@ -447,6 +493,36 @@ class OpDef : public shared_ptr_target {
   HTShapeList InferShape(const HTShapeList& input_shapes,
                          RuntimeContext& runtime_ctx) {
     return _body->InferShape(get_self(), input_shapes, runtime_ctx);
+  }
+
+  void Compute(const NDArrayList& inputs, NDArrayList& outputs, RuntimeContext& runtime_ctx, size_t micro_batch_id = 0) {
+    HT_ASSERT(micro_batch_id < HT_MAX_NUM_MICRO_BATCHES)
+      << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
+      << ", got micro batch id: " << micro_batch_id;
+    BlockOrSyncAllInputs(runtime_ctx, micro_batch_id);
+    // precision debug
+    /*
+    NDArrayList input_sums;
+    for (auto& input : inputs) {
+      input_sums.push_back(NDArray::sum(input));
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
+      << ", the input vals are (may not sync) " << input_sums;
+    */
+    // if(instantiation_ctx().placement.index() == 0) std::cout << "start_operator_compute" << std::endl;
+    instantiation_ctx().start[micro_batch_id]->Record(stream());
+    _body->Compute(get_self(), inputs, outputs, runtime_ctx);
+    instantiation_ctx().stop[micro_batch_id]->Record(stream());
+    // precision debug
+    /*
+    // stream().Sync();
+    NDArrayList ret_sums;
+    for (auto& ret : rets) {
+      ret_sums.push_back(NDArray::sum(ret));
+    }
+    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": compute op: " << name()
+      << ", the result is (may not sync) " << ret_sums;
+    */
   }
 
   NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx, size_t micro_batch_id = 0) {
@@ -590,6 +666,10 @@ class OpDef : public shared_ptr_target {
     return _op_meta;
   }
 
+  OpMeta& op_meta() {
+    return _op_meta;
+  }
+
   OpMeta grad_op_meta() const {
     return OpMeta()
       .set_stream_index(stream_index())
@@ -672,6 +752,10 @@ class OpDef : public shared_ptr_target {
     return _extra_in_dep_linkers.size();
   }
 
+  void add_in_dep_linker(Tensor in_dep) {
+    _extra_in_dep_linkers.push_back(in_dep);
+  }
+
   const Tensor& out_dep_linker() const noexcept {
     return _extra_out_dep_linkers.front();
   }
@@ -745,6 +829,10 @@ class OpDef : public shared_ptr_target {
 
   bool requires_grad(size_t i) const {
     return _inputs[i]->requires_grad();
+  }
+
+  bool is_bw_op() const {
+    return _fw_op_id != -1;
   }
 
  protected:
@@ -916,6 +1004,28 @@ class Operator : public shared_ptr_wrapper<OpDef> {
   }
 
   template <typename UnaryPredicate>
+  static bool any_input_tensor_of(Operator& op, UnaryPredicate pred) {
+    for (auto& tensor : op->_inputs)
+      if (pred(tensor))
+        return true;
+    for (auto& tensor : op->_extra_in_dep_linkers)
+      if (pred(tensor))
+        return true;
+    return false;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_input_tensor_of(const Operator& op, UnaryPredicate pred) {
+    for (const auto& tensor : op->_inputs)
+      if (pred(tensor))
+        return true;
+    for (const auto& tensor : op->_extra_in_dep_linkers)
+      if (pred(tensor))
+        return true;
+    return false;
+  }
+
+  template <typename UnaryPredicate>
   static bool all_output_tensors_of(Operator& op, UnaryPredicate pred) {
     if (op->_outputs.empty()) {
       return pred(op->_extra_out_dep_linkers.front());
@@ -937,6 +1047,30 @@ class Operator : public shared_ptr_wrapper<OpDef> {
           return false;
     }
     return true;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_output_tensor_of(Operator& op, UnaryPredicate pred) {
+    if (op->_outputs.empty()) {
+      return pred(op->_extra_out_dep_linkers.front());
+    } else {
+      for (auto& tensor : op->_outputs)
+        if (pred(tensor))
+          return true;
+    }
+    return false;
+  }
+
+  template <typename UnaryPredicate>
+  static bool any_output_tensor_of(const Operator& op, UnaryPredicate pred) {
+    if (op->_outputs.empty()) {
+      return pred(op->_extra_out_dep_linkers.front());
+    } else {
+      for (const auto& tensor : op->_outputs)
+        if (pred(tensor))
+          return true;
+    }
+    return false;
   }
 };
 
@@ -970,6 +1104,7 @@ static const uint64_t SPLIT_REDUCE_SCATTER_OP = 1ul << 22;
 static const uint64_t COMM_OP = 1ul << 23;
 static const uint64_t UNKNOWN_OP = 1ul << 24;
 static const uint64_t UNUSED_OP = 1ul << 25;
+static const uint64_t FUSED_GROUP_OP = 1ul << 53;
 static const uint64_t CONCAT_OP = 1ul << 54;
 static const uint64_t CONTIGUOUS_OP = 1ul << 55;
 static const uint64_t DATA_TRANSFER_OP = 1ul << 56;
@@ -1021,7 +1156,7 @@ DECLARE_OP_INDICATOR_CHECKER(grad_reduce,
 DECLARE_OP_INDICATOR_CHECKER(comm_split, COMM_SPLIT_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm, COMM_OP)
 DECLARE_OP_INDICATOR_CHECKER(unknown, UNKNOWN_OP)
-DECLARE_OP_INDICATOR_CHECKER(communucation,
+DECLARE_OP_INDICATOR_CHECKER(communication,
                              PEER_TO_PEER_SEND_OP | PEER_TO_PEER_RECV_OP |
                              ALL_TO_ALL_OP | ALL_REDUCE_OP |
                              ALL_GATHER_OP | REDUCE_SCATTER_OP |

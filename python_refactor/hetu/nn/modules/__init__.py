@@ -13,6 +13,7 @@ from .sparse import *
 
 from .parallel import *
 from .parallel_ds import *
+from .parallel_lora import *
 from .parallel_multi_ds import *
 
 __all__ = [
@@ -36,7 +37,12 @@ __all__ = [
     # parallel
     'ParallelLayerNorm', 'ParallelEmbedding', 'VocabParallelEmbedding', 'ColumnParallelLinear', 'RowParallelLinear',
     # parallel_ds
+    # deprecated
     'HtParallelRMSNorm', 'HtParallelLayerNorm', 'HtParallelEmbedding', 'HtVocabParallelEmbedding', 'HtColumnParallelLinear', 'HtRowParallelLinear',
+    # parallel_lora
+    # TODO: need to adjust to ds hierarchy
+    'LoRAParallelLayerNorm', 'LoRAParallelEmbedding', 'LoRAVocabParallelEmbedding', 
+    'LoRAColumnParallelLinear', 'LoRARowParallelLinear', 'LoRAModel',
     # parallel_multi_ds
     'HtMultiParallelRMSNorm', 'HtMultiParallelLayerNorm', 'HtMultiParallelEmbedding', 'HtMultiVocabParallelEmbedding', 'HtMultiColumnParallelLinear', 'HtMultiRowParallelLinear',
 ]

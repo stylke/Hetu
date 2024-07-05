@@ -12,13 +12,6 @@ namespace comm {
 
 using hetu::operator<<;
 
-DECLARE_HT_EXCEPTION(nccl_error);
-
-#define NCCL_CALL(f)                                                           \
-  for (auto result = (f); result != ncclSuccess; result = ncclSuccess)         \
-  __HT_FATAL_SILENT(hetu::impl::comm::nccl_error)                              \
-    << "NCCL call " << #f << " failed: " << ncclGetErrorString(result)
-
 namespace {
 
 static std::once_flag nccl_init_flag;
@@ -70,6 +63,8 @@ inline ncclDataType_t to_NCCL_Datatype(DataType dtype) {
     case kFloat32: return ncclFloat32;
     case kFloat64: return ncclFloat64;
     case kBFloat16: return ncclBfloat16;
+    case kFloat4: return ncclUint8;
+    case kNFloat4: return ncclUint8;
     default:
       HT_NOT_IMPLEMENTED << "Data type " << dtype
                          << " is not supported for NCCL.";
@@ -161,11 +156,14 @@ NCCLCommunicationGroupDef::NCCLCommunicationGroupDef(
     << "Failed to get rank and/or size. "
     << "(Got rank " << _rank << " and size " << _size << ".)";
 
-  CreateNCCLUniqueId(_world_ranks, _unique_id);
+  CreateNCCLUniqueId(_world_ranks, stream, _unique_id);
   {
     hetu::cuda::CUDADeviceGuard guard(_stream.device_index());
     {
       NCCLGroupGuard group_guard(false);
+      std::string unique_id;
+      unique_id.resize(sizeof(ncclUniqueId));
+      memcpy(unique_id.data(), &_unique_id, sizeof(ncclUniqueId));
       NCCL_CALL(ncclCommInitRank(&_comm, _size, _unique_id, _rank));
     }
   }
@@ -186,7 +184,9 @@ NCCLCommunicationGroupDef::~NCCLCommunicationGroupDef() {
 void NCCLCommunicationGroupDef::Broadcast(NDArray& data, int broadcaster) {
   HT_ASSERT_CUDA_DEVICE(data);
   void* buf = data->raw_data_ptr();
-  auto numel = data->numel();
+  auto numel = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+             ? (data->numel() + 1) / 2
+             : data->numel();
   auto nccl_dtype = to_NCCL_Datatype(data->dtype());
   int root = world_to_group_rank(broadcaster);
   {
@@ -207,7 +207,9 @@ void NCCLCommunicationGroupDef::AllReduce(const NDArray& input, NDArray& output,
   HT_ASSERT_EXCHANGABLE(input, output);
   void* send_buf = input->raw_data_ptr();
   void* recv_buf = output->raw_data_ptr();
-  auto numel = input->numel();
+  auto numel = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+             ? (input->numel() + 1) / 2
+             : input->numel();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
   auto nccl_red_op = to_NCCL_Op(red_type);
   {
@@ -245,7 +247,9 @@ void NCCLCommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
         // D2D Copy
         for (size_t i = 0; i < inputs.size(); i++) {
           void* send_buf = inputs[i]->raw_data_ptr();
-          int num_bytes = inputs[i]->numel() * to_num_bytes(inputs[i]->dtype());
+          int num_bytes = (inputs[i]->dtype() == kNFloat4 || inputs[i]->dtype() == kFloat4)  
+                          ? (inputs[i]->numel() + 1) / 2
+                          : inputs[i]->numel() * to_num_bytes(inputs[i]->dtype());
           CUDA_CALL(cudaMemcpyAsync(buffer_ptr + offset, send_buf, num_bytes,
                                     cudaMemcpyDeviceToDevice, cuda_stream));
           offset += num_bytes;
@@ -257,8 +261,9 @@ void NCCLCommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
         offset = 0;
         for (size_t i = 0; i < outputs.size(); i++) {
           void* recv_buf = outputs[i]->raw_data_ptr();
-          int num_bytes =
-            outputs[i]->numel() * to_num_bytes(outputs[i]->dtype());
+          int num_bytes = (outputs[i]->dtype() == kNFloat4 || outputs[i]->dtype() == kFloat4)  
+                          ? (outputs[i]->numel() + 1) / 2
+                          : outputs[i]->numel() * to_num_bytes(outputs[i]->dtype());
           CUDA_CALL(cudaMemcpyAsync(recv_buf, buffer_ptr + offset, num_bytes,
                                     cudaMemcpyDeviceToDevice, cuda_stream));
           offset += num_bytes;
@@ -274,7 +279,9 @@ void NCCLCommunicationGroupDef::AllReduceCoalesce(const NDArrayList& inputs,
         for (size_t i = 0; i < inputs.size(); i++) {
           void* send_buf = inputs[i]->raw_data_ptr();
           void* recv_buf = outputs[i]->raw_data_ptr();
-          auto numel = inputs[i]->numel();
+          auto numel = (inputs[i]->dtype() == kNFloat4 || inputs[i]->dtype() == kFloat4)  
+                          ? (inputs[i]->numel() + 1) / 2
+                          : inputs[i]->numel();
           NCCL_CALL(ncclAllReduce(send_buf, recv_buf, numel, nccl_dtype,
                                   nccl_red_op, _comm, cuda_stream));
         }
@@ -304,9 +311,15 @@ void NCCLCommunicationGroupDef::AlltoAll(const NDArray& input,
     {
       NCCLGroupGuard group_guard(true);
       for (int i = 0; i < _size; i++) {
-        NCCL_CALL(ncclSend(send_buf + i * numel * bytes_per_element, numel,
+        int ptr = (input->dtype() == kFloat4 || input->dtype() == kNFloat4)
+                  ? i * ((numel + 1) / 2)
+                  : i * numel * bytes_per_element;
+        int count = (input->dtype() == kFloat4 || input->dtype() == kNFloat4)
+                    ? (numel + 1) / 2
+                    : numel;
+        NCCL_CALL(ncclSend(send_buf + ptr, count,
                            nccl_dtype, i, _comm, cuda_stream));
-        NCCL_CALL(ncclRecv(recv_buf + i * numel * bytes_per_element, numel,
+        NCCL_CALL(ncclRecv(recv_buf + ptr, count,
                            nccl_dtype, i, _comm, cuda_stream));
       }
     }
@@ -328,7 +341,9 @@ void NCCLCommunicationGroupDef::Reduce(const NDArray& input, NDArray& output,
     HT_ASSERT_EXCHANGABLE(input, output);
     recv_buf = output->raw_data_ptr();
   }
-  auto numel = input->numel();
+  auto numel = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+             ? (input->numel() + 1) / 2
+             : input->numel();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
   auto nccl_red_op = to_NCCL_Op(red_type);
   {
@@ -344,17 +359,23 @@ void NCCLCommunicationGroupDef::Reduce(const NDArray& input, NDArray& output,
 }
 
 void NCCLCommunicationGroupDef::AllGather(const NDArray& input,
-                                          NDArray& output) {
+                                          NDArray& output, int32_t gather_dim) {
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_CUDA_DEVICE(output);
   HT_ASSERT_SAME_DTYPE(input, output);
   size_t input_size = input->numel();
   size_t output_size = output->numel();
-  HT_ASSERT(input->shape(0) * _size == output->shape(0) &&
+  HT_ASSERT(input->shape(gather_dim) * _size == output->shape(gather_dim) &&
             input_size * _size == output_size)
     << "Invalid shapes for AllGather: "
     << "(send) " << input->shape() << " vs. "
     << "(recv) " << output->shape() << ".";
+  input_size = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+             ? (input_size + 1) / 2
+             : input_size;
+  output_size = (output->dtype() == kNFloat4 || output->dtype() == kFloat4)  
+              ? (output_size + 1) / 2
+              : output_size;
   void* send_buf = input->raw_data_ptr();
   void* recv_buf = output->raw_data_ptr();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
@@ -371,18 +392,24 @@ void NCCLCommunicationGroupDef::AllGather(const NDArray& input,
 }
 
 void NCCLCommunicationGroupDef::ReduceScatter(const NDArray& input,
-                                              NDArray& output,
+                                              NDArray& output, int32_t scatter_dim,
                                               ReductionType red_type) {
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_CUDA_DEVICE(output);
   HT_ASSERT_SAME_DTYPE(input, output);
   size_t input_size = input->numel();
   size_t output_size = output->numel();
-  HT_ASSERT(input->shape(0) == output->shape(0) * _size &&
+  HT_ASSERT(input->shape(scatter_dim) == output->shape(scatter_dim) * _size &&
             input_size == output_size * _size)
     << "Invalid shapes for ReduceScatter: "
     << "(send) " << input->shape() << " vs. "
     << "(recv) " << output->shape() << ".";
+  input_size = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+             ? (input_size + 1) / 2
+             : input_size;
+  output_size = (output->dtype() == kNFloat4 || output->dtype() == kFloat4)  
+              ? (output_size + 1) / 2
+              : output_size;
   void* send_buf = input->raw_data_ptr();
   void* recv_buf = output->raw_data_ptr();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
@@ -416,6 +443,9 @@ void NCCLCommunicationGroupDef::Gather(const NDArray& input, NDArray& output,
       << "(send) " << input->shape() << " vs. "
       << "(recv) " << output->shape() << ".";
   }
+  input_size = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
+              ? (input_size + 1) / 2
+              : input_size;
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
   {
     CUDAStream cuda_stream(_stream);
@@ -461,6 +491,9 @@ void NCCLCommunicationGroupDef::Scatter(const NDArray& input, NDArray& output,
       << "(send) " << input->shape() << " vs. "
       << "(recv) " << output->shape() << ".";
   }
+  output_size = (output->dtype() == kNFloat4 || output->dtype() == kFloat4)  
+              ? (output_size + 1) / 2
+              : output_size;
   auto nccl_dtype = to_NCCL_Datatype(output->dtype());
   {
     CUDAStream cuda_stream(_stream);
@@ -495,7 +528,9 @@ void NCCLCommunicationGroupDef::Send(const NDArray& data, int receiver) {
    (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
   int dst = world_to_group_rank(receiver);
   HT_ASSERT(dst != _rank) << "Cannot send to self.";
-  size_t size = data->numel();
+  size_t size = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+              ? (data->numel() + 1) / 2
+              : data->numel();
   if (size == 0)
     return;
   void* send_buf = data->raw_data_ptr();
@@ -520,7 +555,9 @@ void NCCLCommunicationGroupDef::Recv(NDArray& data, int sender) {
    (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
   int src = world_to_group_rank(sender);
   HT_ASSERT(src != _rank) << "Cannot receive from self.";
-  size_t size = data->numel();
+  size_t size = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+              ? (data->numel() + 1) / 2
+              : data->numel();
   if (size == 0)
     return;
   void* recv_buf = data->raw_data_ptr();
@@ -545,7 +582,9 @@ CommTask NCCLCommunicationGroupDef::ISend(const NDArray& data, int receiver) {
    (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
   int dst = world_to_group_rank(receiver);
   HT_ASSERT(dst != _rank) << "Cannot send to self.";
-  size_t size = data->numel();
+  size_t size = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+              ? (data->numel() + 1) / 2
+              : data->numel();
   if (size == 0)
     return CommTask();
   void* send_buf = data->raw_data_ptr();
@@ -573,7 +612,9 @@ CommTask NCCLCommunicationGroupDef::IRecv(NDArray& data, int sender) {
    (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 7))
   int src = world_to_group_rank(sender);
   HT_ASSERT(src != _rank) << "Cannot receive from self.";
-  size_t size = data->numel();
+  size_t size = (data->dtype() == kNFloat4 || data->dtype() == kFloat4)  
+              ? (data->numel() + 1) / 2
+              : data->numel();
   if (size == 0)
     return CommTask();
   void* recv_buf = data->raw_data_ptr();
@@ -621,23 +662,21 @@ void NCCLCommunicationGroupDef::Sync() {
 }
 
 void NCCLCommunicationGroupDef::CreateNCCLUniqueId(
-  const std::vector<int>& world_ranks, ncclUniqueId& id) {
+  const std::vector<int>& world_ranks, const Stream& stream, ncclUniqueId& id) {
   // Currently we rely on MPI to synchronize the ncclUniqueId.
   // It may be replaced with a distributed memcache in the future.
-  auto mpi_comm_group = MPICommunicationGroup::GetOrCreate(world_ranks);
   // Walkaround: communication groups handle ndarrays only
   NDArray id_arr = NDArray::empty({sizeof(ncclUniqueId)}, Device(kCPU), kUInt8,
                                   kBlockingStream);
-  int broadcaster = mpi_comm_group->group_to_world_rank(0);
-  if (mpi_comm_group->rank() == 0) {
+  if (GetWorldRank() == world_ranks[0]) {
     NCCL_CALL(ncclGetUniqueId(&id));
-    memcpy(id_arr->raw_data_ptr(), &id, sizeof(ncclUniqueId));
-    mpi_comm_group->Broadcast(id_arr, broadcaster);
-    mpi_comm_group->Sync();
+    std::string nccl_id;
+    nccl_id.resize(sizeof(ncclUniqueId));
+    memcpy(nccl_id.data(), &id, sizeof(ncclUniqueId));
+    GetLocalClient()->CommitNcclId(nccl_id, world_ranks, stream.stream_index());
   } else {
-    mpi_comm_group->Broadcast(id_arr, broadcaster);
-    mpi_comm_group->Sync();
-    memcpy(&id, id_arr->raw_data_ptr(), sizeof(ncclUniqueId));
+    std::string nccl_id = GetLocalClient()->GetNcclId(world_ranks, stream.stream_index());
+    memcpy(&id, nccl_id.data(), sizeof(ncclUniqueId));
   }
 }
 

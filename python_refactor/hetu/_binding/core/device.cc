@@ -299,6 +299,22 @@ PyObject* PyDeviceGroup_num_devices(PyDeviceGroup* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyDeviceGroup_device_index(PyDeviceGroup* self) {
+  HT_PY_FUNC_BEGIN
+  const auto& device_group = self->device_group;
+  const auto& devices = device_group.devices();
+  
+  auto* py_devices = PyList_New(devices.size());
+  HT_RUNTIME_ERROR_IF(!py_devices) << "Failed to alloc list";
+  for (size_t i = 0; i < devices.size(); i++) {
+    auto* device_idx = PyLong_FromInteger(devices.at(i).index());
+    PyList_SET_ITEM(py_devices, i, device_idx);
+  }
+
+  return py_devices;
+  HT_PY_FUNC_END
+}
+
 PyObject* PyDeviceGroup_contains(PyDeviceGroup* self, PyObject* args) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -395,6 +411,7 @@ PyObject* PyDeviceGroup_reduce(PyDeviceGroup* self) {
 PyGetSetDef PyDeviceGroup_properties[] = {
   {PY_GET_SET_DEF_NAME("empty"), (getter) PyDeviceGroup_empty, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("num_devices"), (getter) PyDeviceGroup_num_devices, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("device_index"), (getter) PyDeviceGroup_device_index, nullptr, nullptr, nullptr},   
   {nullptr}
 };
 

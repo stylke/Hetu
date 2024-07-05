@@ -35,7 +35,9 @@ void transfer_device_to_device(const NDArray& from, NDArray& to, const Stream& s
   void* from_ptr = from->raw_data_ptr();
 
   if (memcpy_eligible) {
-    size_t num_bytes = numel * DataType2Size(from->dtype());
+    size_t num_bytes = (from->dtype() == kFloat4 || from->dtype() == kNFloat4)
+                       ? ((numel + 1) / 2) * DataType2Size(from->dtype())
+                       : numel * DataType2Size(from->dtype());
     bool require_peer_memcpy = from->device().index() != to->device().index();
     
     if (to_ptr != from_ptr || from->device() != to->device()) {
@@ -73,7 +75,14 @@ void DataTransferCuda(const NDArray& from, NDArray& to, const Stream& stream) {
     auto from_dsize = DataType2Size(from->dtype());
     auto to_dsize = DataType2Size(to->dtype());
     NDArray from_contig, to_contig;
-    if (from_dsize <= to_dsize) {
+    if (to->device().is_cpu()) {
+      from_contig = NDArray::contiguous(from, stream.stream_index());
+      to_contig = NDArray::empty(to->shape(), from->device(), to->dtype()); 
+      DataTransferCuda(from_contig, to_contig, stream);
+      DataTransferCuda(to_contig, to, stream);
+      NDArray::MarkUsedBy({from, to}, stream);
+      return;
+    } else if (from_dsize <= to_dsize) {
       auto from_converted = NDArray::to(from, from->device(), to->dtype(), stream.stream_index());
       from_contig = NDArray::contiguous(from_converted, stream.stream_index());
       to_contig = to->is_contiguous() ? to : NDArray::empty_like(to);
@@ -101,7 +110,9 @@ void DataTransferCuda(const NDArray& from, NDArray& to, const Stream& stream) {
   }
 
   // Copy between CPU and GPU
-  size_t num_bytes = numel * DataType2Size(from->dtype());
+  size_t num_bytes = (from->dtype() == kFloat4 || from->dtype() == kNFloat4) 
+                     ? (numel + 1) / 2
+                     : numel * DataType2Size(from->dtype());
   cudaMemcpyKind kind;
   if (from->device().is_cuda() && to->device().is_cpu()) {
     kind = cudaMemcpyDeviceToHost;

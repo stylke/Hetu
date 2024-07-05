@@ -16,6 +16,10 @@ void NormalInitsCuda(NDArray& data, double mean, double stddev, uint64_t seed,
   size_t size = data->numel();
   if (size == 0)
     return;
+  if (data->dtype() == kFloat4 || data->dtype() == kNFloat4) {
+    NDArray::MarkUsedBy({data}, stream);
+    return;
+  }
   CUDAStream cuda_stream(stream);
   CUDARandomState rand_state = GetCUDARandomState(cuda_stream.device_id(), seed, 4);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
@@ -40,6 +44,10 @@ void UniformInitsCuda(NDArray& data, double lb, double ub, uint64_t seed,
   size_t size = data->numel();
   if (size == 0)
     return;
+  if (data->dtype() == kFloat4 || data->dtype() == kNFloat4) {
+    NDArray::MarkUsedBy({data}, stream);
+    return;
+  }
   CUDAStream cuda_stream(stream);
   CUDARandomState rand_state = GetCUDARandomState(cuda_stream.device_id(), seed, 4);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(
@@ -63,6 +71,10 @@ void TruncatedNormalInitsCuda(NDArray& data, double mean, double stddev,
   size_t size = data->numel();
   if (size == 0)
     return;
+  if (data->dtype() == kFloat4 || data->dtype() == kNFloat4) {
+    NDArray::MarkUsedBy({data}, stream);
+    return;
+  }
   CUDAStream cuda_stream(stream);
   CUDARandomState rand_state = GetCUDARandomState(cuda_stream.device_id(), seed, 32);
   HT_DISPATCH_INTEGER_AND_FLOATING_TYPES(

@@ -4,22 +4,33 @@ HIDDEN_SIZE=${2:-4096}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-256}
 GLOBAL_BATCH_SIZE=${5:-16}
-NUM_MICRO_BATCHES=${6:-2}
+MICRO_BATCH_SIZE=${6:-2}
 
-PATH="/home/pkuhetu/envs/miniconda3/envs/hetu/bin:${PATH}"
+ROOT_FOLDER=data
+JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
+JSON_KEY=content
+VOCAB_FILE=${ROOT_FOLDER}/vocab.json
+MERGE_FILE=${ROOT_FOLDER}/merges.txt
+
+PATH="/home/pkuhetu/envs/miniconda3/envs/hetu-py/bin:${PATH}"
 HETU_HOME="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../../../" && pwd )"
 LD_LIBRARY_PATH="${HETU_HOME}/build/lib:${LD_LIBRARY_PATH}"
 PYTHONPATH="${HETU_HOME}/python_refactor:${HETU_HOME}/build/lib:${PYTHONPATH}"
 
+export NCCL_DEBUG=VERSION
+export HETU_INTERNAL_LOG_LEVEL=WARN
 mpirun --allow-run-as-root -np 16 \
--H a100-0:8,a100-1:8 \
+-H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
 -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python train_hetu_gpt_ds_parallel.py \
 --ds_parallel_config ds_parallel_config/two_node/dp4_tp2_pp2.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
---num_micro_batches $NUM_MICRO_BATCHES \
---dataset wikicorpus_en \
+--micro_batch_size $MICRO_BATCH_SIZE \
+--json_file $JSON_FILE \
+--json_key $JSON_KEY \
+--vocab_file $VOCAB_FILE \
+--merge_file $MERGE_FILE \
 --vocab_size 30592 \
 --hidden_size $HIDDEN_SIZE \
 --num_hidden_layers $NUM_LAYERS \

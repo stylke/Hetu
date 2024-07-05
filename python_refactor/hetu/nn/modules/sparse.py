@@ -11,12 +11,12 @@ __all__ = [
 
 class Embedding(Module):
     
-    def __init__(self, num_embeddings, embedding_dim, device_group = None) -> None:
+    def __init__(self, num_embeddings, embedding_dim, device_groups = None) -> None:
         with hetu.graph("define_and_run"):
             super(Embedding, self).__init__()
             self.num_embeddings = num_embeddings
             self.embedding_dim = embedding_dim
-            self.weight = hetu.nn.functional.xavier_normal_([num_embeddings, embedding_dim], requires_grad=True, device_group = device_group)
+            self.weight = hetu.nn.functional.xavier_normal_([num_embeddings, embedding_dim], requires_grad=True, device_groups=device_groups)
     
     def forward(self, input: Tensor) -> Tensor:
         return hetu.embedding_lookup(self.weight, input)

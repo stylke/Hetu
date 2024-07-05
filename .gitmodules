@@ -4,3 +4,6 @@
 [submodule "third_party/HetuML"]
 	path = third_party/HetuML
 	url = https://github.com/ccchengff/HetuML.git
+[submodule "third_party/nccl"]
+	path = third_party/nccl
+	url = https://github.com/NVIDIA/nccl.git

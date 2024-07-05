@@ -30,7 +30,6 @@ uint32_t get_type_id(DataType dtype){
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 uint64_t get_key(DataType wtype, DataType itype, DataType rtype, DataType otype, DataType ctype, uint64_t hidden_size) {
-    // using namespace layer_norm;
     uint64_t type_key = get_type_id(wtype) | (get_type_id(itype) << 2) | (get_type_id(rtype) << 4) | (get_type_id(otype) << 6) | (get_type_id(ctype) << 8);
     uint64_t launcher_key = (type_key << 32) | hidden_size;
     return launcher_key;
@@ -124,7 +123,7 @@ void DropoutAddLnFwdCuda(const NDArray& x0,      // Input: BxSxhidden_size
   HT_ASSERT(gamma->is_cuda());
 
   HT_ASSERT(x0->is_contiguous());
-  //  does not own the storage, so we need to construct a vector.
+  // does not own the storage, so we need to construct a vector.
   // Otherwise just constructing IntArrayRef({blah}) will cause uninitialized memory because
   // blah is then deallocated.
   HTShape sizes {!x0_subset_.is_defined() ? x0->shape(0) : x0_subset_->shape(0), x0->shape(1)};
@@ -188,18 +187,10 @@ void DropoutAddLnFwdCuda(const NDArray& x0,      // Input: BxSxhidden_size
   HT_ASSERT(epsilon >= 0.f);
 
   bool save_x = residual_.is_defined() || (dropout_p > 0.f) || rowscale_.is_defined() || colscale_.is_defined() || x0_subset_.is_defined() || (itype != rtype);
-  // NDArray x;
-  // if (save_x) { x = NDArray::empty(sizes, x0->device(), rtype, stream.stream_index()); }
-  // NDArray dmask;
-  // if (dropout_p > 0.f) { dmask = NDArray::empty(x0->shape(), x0->device(), mtype, stream.stream_index()); };
-  // auto z = NDArray::empty(z_subset_.is_defined() ? {z_numrows, cols} : sizes, x0->device(), otype, stream.stream_index());
-
-  // auto mu = NDArray::empty({ rows }, x0->device(), ctype, stream.stream_index());
-  // auto rsigma = NDArray::empty({ rows }, x0->device(), ctype, stream.stream_index());
 
   layer_norm::LaunchParams<layer_norm::FwdParams> launch_params;
 
-  cudaDeviceProp prop = Device::dprop(x0->device().index());
+  cudaDeviceProp prop = x0->device().cuda_dprop();
   launch_params.props = &prop;
   launch_params.stream = cuda_stream;
   HT_ASSERT(dropout_p < 1.f);
@@ -290,10 +281,6 @@ void DropoutAddLnBwdCuda(const NDArray& dz,     // BxSxhidden_size
                          bool is_rms_norm,
                          const Stream& stream) {
 
-    HT_LOG_TRACE << "dz = " << dz << ", dx_ = " << dx_  << ", x = " << x << ", x0_ = " << x0_ << ", dmask_ = " << dmask_ 
-	<< ", gamma = " << gamma << ", mu = " << mu << ", rsigma = " << rsigma
-	<< ", rowscale_ = " << rowscale_ << ", colscale_ = " << colscale_ << ", dx0 = " << dx0
-	<< ", dresidual = " << dresidual << ", dgamma = " << dgamma << ", dbeta = " << dbeta;
     auto itype = dz->dtype();
     auto rtype = x->dtype();
     auto wtype = gamma->dtype();
@@ -328,8 +315,7 @@ void DropoutAddLnBwdCuda(const NDArray& dz,     // BxSxhidden_size
     auto hidden_size = gamma->numel();
     HT_ASSERT(hidden_size == cols);
 
-    HT_LOG_TRACE << "rms 1";
-    //  does not own the storage, so we need to construct a vector.
+    // does not own the storage, so we need to construct a vector.
     // Otherwise just constructing IntArrayRef({blah}) will cause uninitialized memory because
     // blah is then deallocated.
     HTShape x0_sizes {!x0_subset_.is_defined() ? rows : x0_numrows, cols};
@@ -389,7 +375,6 @@ void DropoutAddLnBwdCuda(const NDArray& dz,     // BxSxhidden_size
         HT_ASSERT(z_subset->shape() == rows_shape);
         HT_ASSERT(z_subset->dtype() == kInt32);
     }
-    HT_LOG_TRACE << "rms 2";
     HT_ASSERT((hidden_size % 8 == 0) && (hidden_size <= 8192));
 
     HT_ASSERT(mu->numel() == rows);
@@ -397,20 +382,9 @@ void DropoutAddLnBwdCuda(const NDArray& dz,     // BxSxhidden_size
 
     HT_ASSERT(gamma->numel() == cols);
 
-    // auto dx0 = NDArray::empty(x0_sizes, x->device(), itype, stream.stream_index());
-    // NDArray dresidual;
-    // if (has_residual) { dresidual = NDArray::empty(x->shape(), x->device(), rtype, stream.stream_index()); }
-    // auto dgamma = NDArray::empty_like(gamma, stream.stream_index());
-    // auto dbeta = NDArray::empty_like(gamma, stream.stream_index());
-    // NDArray dcolscale;
-    // if (colscale_.is_defined()) {
-    //     dcolscale = NDArray::empty_like(colscale_, stream.stream_index());
-    // }
-
-    HT_LOG_TRACE << "rms 3";
     layer_norm::LaunchParams<layer_norm::BwdParams> launch_params;
     launch_params.stream = cuda_stream;
-    cudaDeviceProp prop = Device::dprop(x->device().index());
+    cudaDeviceProp prop = x->device().cuda_dprop();
     launch_params.props = &prop;
     HT_ASSERT(dropout_p < 1.f);
     launch_params.params.dropout_keep_p = 1.f - dropout_p;
@@ -424,7 +398,6 @@ void DropoutAddLnBwdCuda(const NDArray& dz,     // BxSxhidden_size
     const int multiple = hidden_size <= 1536 ? 256 : (hidden_size <= 3072 ? 512 : 1024);
     auto launcher = get_bwd_launcher(wtype, itype, rtype, otype, ctype, round_multiple(hidden_size, multiple));
 
-    HT_LOG_TRACE << "rms 4";
     launcher(launch_params, true);
     HTShape part_shape = {int64_t(launch_params.params.ctas_per_col), int64_t(hidden_size)};
     dgamma_part = NDArray::empty(part_shape, x->device(), ctype, stream.stream_index());
@@ -456,9 +429,9 @@ void DropoutAddLnBwdCuda(const NDArray& dz,     // BxSxhidden_size
     params.inverse_cols = 1.f / float(params.cols);
     params.rowscale_const = rowscale_const;
     params.is_rms_norm = is_rms_norm;
-    HT_LOG_TRACE << "rms 5";
-    if( int64_t(launch_params.barrier_size) > 0 ) {
-        // TODO Any way to avoid this?
+
+    if (int64_t(launch_params.barrier_size) > 0) {
+        // TODO: Any way to avoid this?
         HTShape barrier_shape{int64_t(launch_params.barrier_size)}, workspace_shape{int64_t(launch_params.workspace_bytes)};
         barrier = NDArray::zeros(barrier_shape, x->device(), kInt32, stream.stream_index());
         workspace = NDArray::empty(workspace_shape, x->device(), kUInt8, stream.stream_index());
@@ -559,23 +532,10 @@ void DropoutAddLnParallelResidualFwdCuda(
     HT_ASSERT(epsilon >= 0.f);
 
     bool save_x = residual_.is_defined() || x1_.is_defined() || (dropout_p > 0.f) || (itype != rtype);
-    // NDArray x;
-    // if (save_x) { x = NDArray::empty(sizes, x0->device(), rtype, stream.stream_index()); }
-    // NDArray dmask0, dmask1;
-    // if (dropout_p > 0.f) {
-    //     dmask0 = NDArray::empty(x0->shape(), x0->device(), otype, stream.stream_index());
-    //     if (x1_.is_defined()) { dmask1 = NDArray::empty(x0->shape(), x0->device(), mtype, stream.stream_index()); }
-    // };
-    // auto z0 = NDArray::empty(sizes, x0->device(), otype, stream.stream_index());
-    // NDArray z1;
-    // if (gamma1_.is_defined()) { z1 = NDArray::empty(sizes, x0->device(), otype, stream.stream_index()); }
-
-    // auto mu = NDArray::empty({ rows }, x0->device(), ctype, stream.stream_index());
-    // auto rsigma = NDArray::empty({ rows }, x0->device(), ctype, stream.stream_index());
 
     layer_norm::LaunchParams<layer_norm::FwdParams> launch_params;
 
-    cudaDeviceProp prop = Device::dprop(x0->device().index());
+    cudaDeviceProp prop = x0->device().cuda_dprop();
     launch_params.props = &prop;
     launch_params.stream = cuda_stream;
     HT_ASSERT(dropout_p < 1.f);
@@ -750,22 +710,9 @@ std::vector<NDArray> DropoutAddLnParallelResidualBwdCuda(
     HT_ASSERT(mu->numel() == rows);
     HT_ASSERT(mu->shape() == rsigma->shape());
 
-    // auto dx0 = NDArray::empty(sizes, x0->device(), itype, stream.stream_index());
-    // NDArray dx1;
-    // if (has_x1) { dx1 = NDArray::empty(sizes, x0->device(), itype, stream.stream_index()); }
-    // NDArray dresidual;
-    // if (has_residual) { dresidual = NDArray::empty_like(x, x0->device(), rtype, stream.stream_index()); }
-    // auto dgamma0 = NDArray::empty_like(gamma0, stream.stream_index());
-    // auto dbeta0 = NDArray::empty_like(gamma0, stream.stream_index());
-    // NDArray dgamma1, dbeta1;
-    // if (gamma1_.is_defined()) {
-    //     dgamma1 = NDArray::empty_like(gamma0, stream.stream_index());
-    //     dbeta1 = NDArray::empty_like(gamma0, stream.stream_index());
-    // }
-
     layer_norm::LaunchParams<layer_norm::BwdParams> launch_params;
     launch_params.stream = cuda_stream;
-    cudaDeviceProp prop = Device::dprop(x->device().index());
+    cudaDeviceProp prop = x->device().cuda_dprop();
     launch_params.props = &prop;
     HT_ASSERT(dropout_p < 1.f);
     launch_params.params.dropout_keep_p = 1.f - dropout_p;
@@ -777,13 +724,6 @@ std::vector<NDArray> DropoutAddLnParallelResidualBwdCuda(
 
     launcher(launch_params, true);
 
-    // auto dgamma0_part = NDArray::zeros({ launch_params.params.ctas_per_col, hidden_size }, x0->device(), ctype, stream.stream_index());
-    // auto dbeta0_part = NDArray::zeros({ launch_params.params.ctas_per_col, hidden_size }, x0->device(), ctype, stream.stream_index());
-    // NDArray dgamma1_part, dbeta1_part;
-    // if (gamma1_.is_defined()) {
-    //     dgamma1_part = NDArray::zeros_like(dgamma0_part, stream.stream_index());
-    //     dbeta1_part = NDArray::zeros_like(dbeta0_part, stream.stream_index());
-    // }
     NDArray workspace, barrier;
 
     layer_norm::BwdParams &params = launch_params.params;
@@ -814,7 +754,7 @@ std::vector<NDArray> DropoutAddLnParallelResidualBwdCuda(
     params.is_rms_norm = is_rms_norm;
 
     if( int64_t(launch_params.barrier_size) > 0 ) {
-        // TODO Any way to avoid this?
+        // TODO: Any way to avoid this?
         HTShape barrier_shape{int64_t(launch_params.barrier_size)}, workspace_shape{int64_t(launch_params.workspace_bytes)};
         barrier = NDArray::zeros(barrier_shape, x->device(), kInt32, stream.stream_index());
         workspace = NDArray::empty(workspace_shape, x->device(), kUInt8, stream.stream_index());

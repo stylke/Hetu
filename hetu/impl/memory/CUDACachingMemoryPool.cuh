@@ -191,33 +191,6 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     inline bool is_split() const noexcept {
       return prev != nullptr || next != nullptr;
     }
-
-    // deprecated
-    /*
-    // Note: can_free() means all related entries are unallocated
-    inline bool can_free() const noexcept {
-      if (allocated()) {
-        return false;
-      }
-      if (is_split()) {
-        auto tmp = prev;
-        while (tmp != nullptr) {
-          if (tmp->allocated()) {
-            return false;
-          }
-          tmp = prev->prev;
-        }
-        tmp = next;
-        while (tmp != nullptr) {
-          if (tmp->allocated()) {
-            return false;
-          }
-          tmp = next->next;
-        }
-      }
-      return true;
-    }
-    */
   
     inline void refresh() {
       used_streams.clear();

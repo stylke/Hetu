@@ -233,8 +233,8 @@ __forceinline__ __device__ double cuda_round<double>(double x) {
 
 template <typename T>
 __forceinline__ __device__ T cuda_log(T x) {
-  HT_NOT_IMPLEMENTED << "cuda_log is not implemented for type "
-                     << typeid(T).name();
+  // HT_NOT_IMPLEMENTED << "cuda_log is not implemented for type "
+  //                    << typeid(T).name();
 }
 
 template <>
@@ -442,8 +442,8 @@ __forceinline__ __device__ double cuda_cos<double>(double x) {
 
 template <typename T>
 __forceinline__ __device__ T cuda_tanh(T x) {
-  HT_NOT_IMPLEMENTED << "cuda_tanh is not implemented for type "
-                     << typeid(T).name();
+  // HT_NOT_IMPLEMENTED << "cuda_tanh is not implemented for type "
+  //                    << typeid(T).name();
 }
 
 template <>

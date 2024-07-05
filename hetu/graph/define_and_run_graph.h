@@ -93,7 +93,8 @@ class DefineAndRunGraph : public Graph {
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                   const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
-                  const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE, const double grad_scale = 1);
+                  const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE,
+                  bool save_checkpoint = false, const double grad_scale = 1);
 
   GraphType type() const {
     return GraphType::DEFINE_AND_RUN;
@@ -167,9 +168,9 @@ class DefineAndRunGraph : public Graph {
   // therefore each pipeline could be regard as a DeviceGroupList
   std::unordered_map<size_t, Device2PipelineMap> _multi_pipeline_maps;
 
-  std::unordered_map<std::pair<size_t, size_t>, std::vector<std::shared_ptr<SwitchExecGraph>>> _param_and_opt_var_bucket_switcher_pool;
-  std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _param_switcher_pool;
-  std::unordered_map<std::pair<size_t, size_t>, std::shared_ptr<SwitchExecGraph>> _grad_switcher_pool;
+  std::unordered_map<std::pair<size_t, size_t>, std::unordered_map<DataType, std::vector<std::shared_ptr<SwitchExecGraph>>>> _param_and_opt_var_bucket_switcher_pool;
+  std::unordered_map<std::pair<size_t, size_t>, std::unordered_map<DataType, std::shared_ptr<SwitchExecGraph>>> _param_switcher_pool; // 目前其实只会有transfer param
+  std::unordered_map<std::pair<size_t, size_t>, std::unordered_map<DataType, std::shared_ptr<SwitchExecGraph>>> _grad_switcher_pool; // 目前其实只会有accumulate grad
   std::vector<ExecGraphPlan> _exec_graph_plan_pool;
   // deprecated: now support single exec graph with multi shape plan
   // and we store multi shape plan into ExecGraphPlan

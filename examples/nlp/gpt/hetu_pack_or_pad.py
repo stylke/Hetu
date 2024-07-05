@@ -1,5 +1,4 @@
 import os
-import math
 import hetu as ht
 from hetu_gpt_multi_ds_parallel_symbolic import GPTLMHeadModel
 from hetu.nn.modules.parallel_multi_ds import config2ds, get_device_index
@@ -19,9 +18,9 @@ all_devices = None
 def distributed_init(use_two_node: bool = False):
     if use_two_node:
         hostname = socket.gethostname()
-        if hostname == 'n214-178-016':
+        if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
             os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-0'
-        elif hostname == 'n214-178-130':
+        elif hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0':
             os.environ['HETU_LOCAL_HOSTNAME'] = 'worker-1'
         else:
             raise ValueError(f"Unknown hostname: {hostname}")
@@ -229,7 +228,7 @@ def pretrain(args):
         assert global_batch_size % mbs_times_dp == 0, \
             f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
         num_micro_batches = global_batch_size // mbs_times_dp
-                
+
         config.mbs_times_dp_symbol.set_data(mbs_times_dp)
         config.seq_len_symbol.set_data(seq_len)
         print(f'{local_device}: dp_rank={dp_rank}, dp_size={dp_size}, gbs={global_batch_size}, mbs={micro_batch_size}, num_micro_batches={num_micro_batches}')

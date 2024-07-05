@@ -468,26 +468,42 @@ class SwitchExecGraph {
     SwitchExecGraph(DefineAndRunGraph* define_graph, 
                     size_t plan_before, 
                     size_t plan_after,
+                    DataType dtype,
                     int32_t bucket_num = -1,
                     std::unordered_set<Device> comm_set = {}):
       _define_graph(define_graph),
+      _dtype(dtype),
       _bucket_num(bucket_num),
       _comm_set(comm_set) {
-      _define_graph_params = define_graph->params();
       _switch_plan_pair = std::make_pair(plan_before, plan_after);
       _switch_graph_pair = std::make_pair(define_graph->GetPlan(plan_before).exec_graph, 
-                                          define_graph->GetPlan(plan_after).exec_graph);
-      _define_graph_params_and_optvars = TensorCRefList(); 
-      const auto& define_params_and_opt_vars = define_graph->params_and_opt_vars();
+                                          define_graph->GetPlan(plan_after).exec_graph); 
+      const auto& define_graph_params_unfiltered = define_graph->params();
+      const auto& define_graph_params_and_opt_vars_unfiltered = define_graph->params_and_opt_vars();
+      TensorCRefList define_graph_params, define_graph_params_and_opt_vars;
+      // 筛选出dtype类型的
+      for (const auto& param_and_opt_var_unfiltered_ref : define_graph_params_and_opt_vars_unfiltered) {
+        if (param_and_opt_var_unfiltered_ref.get()->dtype() == _dtype) {
+          define_graph_params_and_opt_vars.emplace_back(param_and_opt_var_unfiltered_ref);
+        }
+      }
+      for (const auto& param_unfiltered_ref : define_graph_params_unfiltered) {
+        if (param_unfiltered_ref.get()->dtype() == _dtype) {
+          define_graph_params.emplace_back(param_unfiltered_ref);
+        }
+      }
+      // 分别设置_define_graph_params和_define_graph_params_and_opt_vars
+      _define_graph_params = define_graph_params;
       if (_bucket_num == -1) {
-        _define_graph_params_and_optvars = define_params_and_opt_vars;
+        _define_graph_params_and_opt_vars = define_graph_params_and_opt_vars;
       } 
       // 筛选出bucket中含有的param和opt var
       else {
+        _define_graph_params_and_opt_vars = TensorCRefList();
         HT_ASSERT(_switch_graph_pair.first->_use_origin_param_and_optimizer_buckets
                   && _switch_graph_pair.second->_use_origin_param_and_optimizer_buckets)
           << "_bucket_num can only used when the _use_origin_param_and_optimizer_buckets is turned on";
-        for (const auto& param_and_opt_var_ref : define_params_and_opt_vars) {
+        for (const auto& param_and_opt_var_ref : define_graph_params_and_opt_vars) {
           auto before_it = define_graph->GetPlan(plan_before).tensor_to_exec_tensor_mapping.find(param_and_opt_var_ref.get()->id());
           auto after_it = define_graph->GetPlan(plan_after).tensor_to_exec_tensor_mapping.find(param_and_opt_var_ref.get()->id());
           // e.g. lm_head_weight in gpt 
@@ -504,10 +520,11 @@ class SwitchExecGraph {
           HT_ASSERT(before_bucket_id == after_bucket_id)
             << "Currently only support same bucket for same define graph tensor";
           if (before_bucket_id == _bucket_num) {
-            _define_graph_params_and_optvars.emplace_back(param_and_opt_var_ref);
+            _define_graph_params_and_opt_vars.emplace_back(param_and_opt_var_ref);
           }
         }
       }
+      // 环境变量
       char* algorithm_env = std::getenv("HETU_SWITCH_ALGORITHM");
       if (algorithm_env != nullptr) {
         std::string algorithm_level = algorithm_env;
@@ -603,10 +620,11 @@ class SwitchExecGraph {
 
   protected:
     // basic attributes
+    DataType _dtype; // 要切换的数据类型
     int32_t _bucket_num; // 要切换的bucket编号
     DefineAndRunGraph* _define_graph; // 定义图
     TensorCRefList _define_graph_params; // 定义图的params tensor
-    TensorCRefList _define_graph_params_and_optvars; // 定义图的params以及optimizer variables的tensor
+    TensorCRefList _define_graph_params_and_opt_vars; // 定义图的params以及optimizer variables的tensor
     std::pair<size_t, size_t> _switch_plan_pair; // 需要切换的两个exec graph plan的编号
     ExecGraphPair _switch_graph_pair; // 需要切换的两个exec graph的指针
 

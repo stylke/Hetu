@@ -16,6 +16,8 @@ enum class DataType : int8_t {
   FLOAT32,
   FLOAT64,
   BFLOAT16,
+  FLOAT4,
+  NFLOAT4,
   BOOL,
   NUM_DATA_TYPES,
   UNDETERMINED
@@ -41,6 +43,8 @@ DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::FLOAT16, float16, float16);
 DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::FLOAT32, float, float32);
 DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::FLOAT64, double, float64);
 DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::BFLOAT16, bfloat16, bfloat16);
+DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::FLOAT4, uint8_t, float4);
+DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::NFLOAT4, uint8_t, nfloat4);
 DECLARE_DATA_TYPE_TO_SPECIALIZED_META(DataType::BOOL, bool, bool);
 
 #define HT_DATA_TYPE_CASE_RETURN(DTYPE, RETURN_VALUE)                          \
@@ -64,6 +68,8 @@ constexpr DataType kFloat = DataType::FLOAT32;
 constexpr DataType kFloat64 = DataType::FLOAT64;
 constexpr DataType kDouble = DataType::FLOAT64;
 constexpr DataType kBFloat16 = DataType::BFLOAT16;
+constexpr DataType kFloat4 = DataType::FLOAT4;
+constexpr DataType kNFloat4 = DataType::NFLOAT4;
 constexpr DataType kBool = DataType::BOOL;
 constexpr DataType kUndeterminedDataType = DataType::UNDETERMINED;
 constexpr int16_t NUM_DATA_TYPES =

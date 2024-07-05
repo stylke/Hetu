@@ -6,7 +6,7 @@ SEQ_LEN=${4:-128}
 GLOBAL_BATCH_SIZE=${5:-16}
 NUM_MICRO_BATCHES=${6:-4}
 
-PATH="/home/pkuhetu/envs/miniconda3/envs/hetu-py/bin:${PATH}"
+PATH="/home/pkuhetu/envs/miniconda3/envs/hetu/bin:${PATH}"
 HETU_HOME="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../../../" && pwd )"
 LD_LIBRARY_PATH="${HETU_HOME}/build/lib:${LD_LIBRARY_PATH}"
 PYTHONPATH="${HETU_HOME}/python_refactor:${HETU_HOME}/build/lib:${PYTHONPATH}"

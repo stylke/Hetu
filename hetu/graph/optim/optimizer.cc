@@ -19,6 +19,16 @@ Tensor Optimizer::Minimize(const Tensor& loss, const TensorList& var_list,
   return ApplyGradients(filtered_grads_and_vars, name);
 }
 
+StateDict Optimizer::GetStates(const Tensor& var) {
+  HT_ASSERT(state_dict.find(var->id()) != state_dict.end());
+  return state_dict[var->id()];
+}
+
+void Optimizer::SetStates(const Tensor& var, const OpName state_name, const NDArray& value) {
+  HT_ASSERT(state_dict.find(var->id()) != state_dict.end());
+  ResetVariableData(state_dict[var->id()][state_name], value);
+}
+
 Tensor Optimizer::ApplyGradients(const GradAndVarList& grads_and_vars,
                                  const OpName& name, const Tensor& infinite_count) {
   TensorList updated_params;
@@ -44,12 +54,17 @@ Tensor Optimizer::MakeStates(const Tensor& variable, const Tensor& grad, const O
   //   << "Diastributed States for varibale " << variable << " must be valid!";  
   // HT_LOG_INFO << variable->name() + "_" + state_name << " directly use grad " << grad << ": " << grad_ds_hierarchy.get(1).ds_union_info();
   Tensor states = MakeParallelVariableOp(ZerosInitializer(), grad->global_shape(),
-                                         grad_ds_hierarchy, {0}, grad->dtype(), false,
+                                         grad_ds_hierarchy, {0}, grad->dtype(), false, {},
                                          OpMeta()
                                           .set_device_group_hierarchy(producer->device_group_hierarchy())
                                           .set_eager_device(producer->eager_device())
                                           .set_name(variable->name() + "_" + state_name));  
   Graph::MarkAsOptimizerVariable(states);
+  if (state_dict.find(variable->id()) == state_dict.end()) {
+    state_dict[variable->id()] = {};
+  }
+  state_dict[variable->id()][state_name] = states;
+
   return std::move(states);
 }
 
@@ -97,13 +112,19 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
                           .set_name("Update_" + var->name())
                           .set_is_deduce_states(false); // update op needn't deduce states
   HTShape step_shape = {1};
+  // 在cpu上不需要设置dstates
   Tensor step = MakeVariableOp(OnesInitializer(), step_shape, kInt64,
                                 false, var->ds_hierarchy(), 
                                 OpMeta()
                                   .set_device_group_hierarchy(var->producer()->device_group_hierarchy())
                                   .set_eager_device(kCPU)
                                   .set_name(var->name() + "_step")
+                                  .set_is_deduce_states(false)
                                   .set_is_step(true));
+  if (state_dict.find(var->id()) == state_dict.end()) {
+    state_dict[var->id()] = {};
+  }
+  state_dict[var->id()]["step"] = step;
   // variable: dup in dp group, grad: reduce-scatter in dp group, mean & variance: same as grad
   return MakeAdamOp(var, grad, MakeStates(var, grad, "mean"),
                     MakeStates(var, grad, "variance"),
@@ -113,3 +134,4 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
 
 } // namespace graph
 } // namespace hetu
+

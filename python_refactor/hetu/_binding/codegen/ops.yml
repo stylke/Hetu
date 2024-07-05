@@ -425,22 +425,22 @@
 
 - name: dropout
   op: DropoutOp
-  args: Tensor input, double keep_prob, bool recompute=False
+  args: Tensor input, double keep_prob
   self: input
 
 - name: dropout_
   op: DropoutInplaceOp
-  args: Tensor input, double keep_prob, bool recompute=False
+  args: Tensor input, double keep_prob
   self: input
 
 - name: dropout2d
   op: Dropout2dOp
-  args: Tensor input, double keep_prob, bool recompute=False
+  args: Tensor input, double keep_prob
   self: input
 
 - name: dropout2d_
   op: Dropout2dInplaceOp
-  args: Tensor input, double keep_prob, bool recompute=False
+  args: Tensor input, double keep_prob
   self: input
 
 # #######################################################
@@ -546,6 +546,56 @@
   args: Tensor input, bool lower=False, int64_t diagonal=0
   self: input
 
+- name: elu
+  op: EluOp
+  args: Tensor input, double alpha=1, double scale=1
+  self: input
+
+- name: hardshrink
+  op: HardshrinkOp
+  args: Tensor input, double lambda=0.5
+  self: input
+
+- name: hardsigmoid
+  op: HardsigmoidOp
+  args: Tensor input
+  self: input
+
+- name: hardtanh
+  op: HardtanhOp
+  args: Tensor input, double min_val=-1, double max_val=1
+  self: input
+
+- name: hardswish
+  op: HardswishOp
+  args: Tensor input
+  self: input
+
+- name: logsigmoid
+  op: LogsigmoidOp
+  args: Tensor input
+  self: input
+
+- name: silu
+  op: SiluOp
+  args: Tensor input
+  self: input
+
+- name: mish
+  op: MishOp
+  args: Tensor input
+  self: input
+
+- name: softplus
+  op: SoftplusOp
+  args: Tensor input, double beta=1, double threshold=20
+  self: input
+
+- name: softshrink
+  op: SoftshrinkOp
+  args: Tensor input, double lambda=0.5
+  self: input
+
 #######################################################
 # Optimizer
 #######################################################
@@ -566,7 +616,7 @@
 # Communication
 #######################################################
 
-- name: name
+- name: comm
   op: CommOp
   args: Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, std::string mode
 
@@ -577,6 +627,18 @@
 - name: comm
   op: CommOp
   args: Tensor input, DistributedStatesHierarchy dst_ds_hierarchy  
+
+- name: comm
+  op: CommOp
+  args: Tensor input, DistributedStates dst_ds, std::string mode
+
+- name: comm
+  op: CommOp
+  args: Tensor input, DistributedStates dst_ds, DeviceGroup dst_group
+
+- name: comm
+  op: CommOp
+  args: Tensor input, DistributedStates dst_ds  
 
 #######################################################
 # Others
@@ -659,6 +721,39 @@
   args: Tensor q, Tensor k, Tensor v, double p_dropout=0, double softmax_scale=-1, bool is_causal=False, bool return_softmax=False
   self: q
 
+- name: attn_varlen
+  op: AttentionVarlenOp
+  args: Tensor q, Tensor k, Tensor v, Tensor cu_seqlens_q, Tensor cu_seqlens_k, int max_seqlen_q, int max_seqlen_k,
+        double p_dropout=0, double softmax_scale=-1, bool zero_tensors=False, bool is_causal=False, bool return_softmax=False
+  self: q
+
+- name: attn_qkvpacked
+  op: AttentionPackedOp
+  args: Tensor qkv, double p_dropout=0, double softmax_scale=-1, bool is_causal=False, bool return_softmax=False
+  self: qkv
+
+- name: attn_varlen_qkvpacked
+  op: AttentionVarlenPackedOp
+  args: Tensor qkv, Tensor cu_seqlens_q, Tensor cu_seqlens_k, int max_seqlen_q, int max_seqlen_k,
+        double p_dropout=0, double softmax_scale=-1, bool zero_tensors=False, bool is_causal=False, bool return_softmax=False
+  self: qkv
+
+# quantization
+- name: quantization
+  op: QuantizationOp
+  args: Tensor input, DataType qtype, int64_t blocksize, bool stochastic=False
+  self: input
+
+- name: dequantization
+  op: DeQuantizationOp
+  args: Tensor input, Tensor absmax, DataType dqtype, int64_t blocksize
+  self: input
+
+- name: matmul4bit
+  op: MatMul4BitOp
+  args: Tensor a, Tensor b, Tensor absmax, Tensor datatype, bool trans_a=False, bool trans_b=False, int blocksize=4096
+  self: a
+
 - name: rms_norm
   op: RMSNormOp
   args: Tensor x0, Tensor residual_=None, Tensor gamma=None,
@@ -679,3 +774,8 @@
   op: SwiGLUOp
   args: Tensor input
   self: input
+  
+- name: checknumeric
+  op: CheckNumericOp
+  args: Tensor x
+  self: x

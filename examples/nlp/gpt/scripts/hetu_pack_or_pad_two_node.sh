@@ -12,7 +12,7 @@ JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json
 MERGE_FILE=${ROOT_FOLDER}/merges.txt
 
-# PATH="/home/pkuhetu/envs/miniconda3/envs/hetu/bin:${PATH}"
+PATH="/home/pkuhetu/envs/miniconda3/envs/hetu-py/bin:${PATH}"
 HETU_HOME="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../../../" && pwd )"
 LD_LIBRARY_PATH="${HETU_HOME}/build/lib:${LD_LIBRARY_PATH}"
 PYTHONPATH="${HETU_HOME}/python_refactor:${HETU_HOME}/build/lib:${PYTHONPATH}"
@@ -22,8 +22,10 @@ export HETU_SWITCH_ALGORITHM=NEW_GREEDY
 export HETU_SWITCH_PROFILE=NVLINK
 export HETU_INTERNAL_LOG_LEVEL=WARN
 mpirun --allow-run-as-root -np 16 \
--H worker-0:8,worker-1:8 \
--x LD_LIBRARY_PATH -x PYTHONPATH -x NCCL_DEBUG -x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL -x NCCL_IB_GID_INDEX=3 \
+-H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
+-x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
+-x NCCL_DEBUG \
+-x HETU_SWITCH_ALGORITHM -x HETU_SWITCH_PROFILE -x HETU_INTERNAL_LOG_LEVEL -x NCCL_IB_GID_INDEX=3 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python3 hetu_pack_or_pad.py \
 --num_strategy=1 \

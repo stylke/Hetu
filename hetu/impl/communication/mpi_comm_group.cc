@@ -336,13 +336,13 @@ void MPICommunicationGroupDef::Reduce(const NDArray& input, NDArray& output,
 }
 
 void MPICommunicationGroupDef::AllGather(const NDArray& input,
-                                         NDArray& output) {
+                                         NDArray& output, int32_t gather_dim) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_CPU_DEVICE(output);
   HT_ASSERT_SAME_DTYPE(input, output);
   size_t input_size = input->numel();
   size_t output_size = output->numel();
-  HT_ASSERT(input->shape(0) * _size == output->shape(0) &&
+  HT_ASSERT(input->shape(gather_dim) * _size == output->shape(gather_dim) &&
             input_size * _size == output_size)
     << "Invalid shapes for AllGather: "
     << "(send) " << input->shape() << " vs. "
@@ -361,14 +361,14 @@ void MPICommunicationGroupDef::AllGather(const NDArray& input,
 }
 
 void MPICommunicationGroupDef::ReduceScatter(const NDArray& input,
-                                             NDArray& output,
+                                             NDArray& output, int32_t scatter_dim,
                                              ReductionType red_type) {
   HT_ASSERT_CPU_DEVICE(input);
   HT_ASSERT_CPU_DEVICE(output);
   HT_ASSERT_SAME_DTYPE(input, output);
   size_t input_size = input->numel();
   size_t output_size = output->numel();
-  HT_ASSERT(input->shape(0) == output->shape(0) * _size &&
+  HT_ASSERT(input->shape(scatter_dim) == output->shape(scatter_dim) * _size &&
             input_size == output_size * _size)
     << "Invalid shapes for ReduceScatter: "
     << "(send) " << input->shape() << " vs. "
@@ -594,9 +594,9 @@ MPICommunicationGroup::GetOrCreate(const std::vector<int>& world_ranks,
     }
     return worldwide_mpi_comm_groups[stream_id + 1];
   } else {
-    HT_ASSERT(GetGroupRank(world_ranks) != -1)
+    HT_ASSERT(GetMPIGroupRank(world_ranks) != -1)
       << "Cannot get comm group " << world_ranks << " on rank "
-      << GetWorldRank() << ".";
+      << GetMPIWorldRank() << ".";
     auto it = mpi_comm_groups[stream_id + 1].find(world_ranks);
     if (it == mpi_comm_groups[stream_id + 1].end()) {
       std::unique_lock<std::mutex> lock(mpi_create_group_mutex);
@@ -631,18 +631,18 @@ MPICommunicationGroup::GetOrCreateWorldwide(const Stream& stream) {
     return GetOrCreate({});
 }
 
-int GetWorldRank() {
+int GetMPIWorldRank() {
   MPI_Init_Once();
   return mpi_world_rank;
 }
 
-int GetWorldSize() {
+int GetMPIWorldSize() {
   MPI_Init_Once();
   return mpi_world_size;
 }
 
-int GetGroupRank(const std::vector<int>& world_ranks) {
-  int my_world_rank = GetWorldRank();
+int GetMPIGroupRank(const std::vector<int>& world_ranks) {
+  int my_world_rank = GetMPIWorldRank();
   auto it = std::find(world_ranks.begin(), world_ranks.end(), my_world_rank);
   return it != world_ranks.end() ? std::distance(world_ranks.begin(), it) : -1;
 }
@@ -683,12 +683,12 @@ std::vector<std::string> AllGatherHostnames(MPICommunicationGroup& comm) {
   return hostnames;
 }
 
-void SetUpDeviceMappingWithAssignedLocalDevice(const Device& local_device) {
+void MPISetUpDeviceMappingWithAssignedLocalDevice(const Device& local_device) {
   HT_ASSERT(local_device.local()) << "Device is not local: " << local_device;
   auto& comm = MPICommunicationGroup::GetOrCreateWorldwide();
   auto hostnames = AllGatherHostnames(comm);
   // Walkaround: communication groups handle ndarrays only
-  auto world_size = GetWorldSize();
+  auto world_size = GetMPIWorldSize();
   NDArray local_arr = NDArray::empty({1, 3}, kCPU, kInt8, kBlockingStream);
   NDArray gathered_arr =
     NDArray::empty({comm->size(), 3}, kCPU, kInt8, kBlockingStream);
@@ -719,8 +719,9 @@ void SetUpDeviceMappingWithAssignedLocalDevice(const Device& local_device) {
   HT_LOG_DEBUG << "Global devices: " << global_device_group;
 }
 
-void SetUpDeviceMappingAndAssignLocalDevice(
-  const std::map<DeviceType, int>& resources) {
+void MPISetUpDeviceMappingAndAssignLocalDevice(
+  const std::map<DeviceType, int>& resources,
+  const std::vector<int64_t>& device_idxs) {
   auto& comm = MPICommunicationGroup::GetOrCreateWorldwide();
   auto hostnames = AllGatherHostnames(comm);
   auto local_hostname = Device::GetLocalHostname();
@@ -733,82 +734,84 @@ void SetUpDeviceMappingAndAssignLocalDevice(
       local_rank++;
   HT_LOG_DEBUG << "local host = " << local_hostname << ", rank = " << comm->rank() 
                << ", all hosts = " << hostnames << ", world ranks = " << comm->world_ranks()
-               << ", world size = " << GetWorldSize() << ", local rank = " << local_rank;
+               << ", world size = " << GetMPIWorldSize() << ", local rank = " << local_rank;
   Device local_device;
   if (resources.find(kCUDA) == resources.end() || resources.at(kCUDA) == 0) {
     // Question: do we need to set the multiplex field for CPU?
     local_device = Device(kCPU);
   } else {
-    auto device_id = local_rank % resources.at(kCUDA);
+    auto device_id = device_idxs.empty() ? local_rank % resources.at(kCUDA)
+                                         : device_idxs[local_rank % resources.at(kCUDA)];
     auto multiplex = local_rank / resources.at(kCUDA);
     local_device = Device(kCUDA, device_id, local_hostname, multiplex);
   }
-  SetUpDeviceMappingWithAssignedLocalDevice(local_device);
+  MPISetUpDeviceMappingWithAssignedLocalDevice(local_device);
 }
 
 } // namespace
 
-void SetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device) {
+void MPISetUpDeviceMappingWithAssignedLocalDeviceOnce(const Device& local_device) {
   if (!device_to_rank_mapping.empty()) {
     HT_LOG_WARN << "Device mapping has been set up.";
     return;
   }
   std::call_once(device_mapping_init_flag,
-                 SetUpDeviceMappingWithAssignedLocalDevice, local_device);
+                 MPISetUpDeviceMappingWithAssignedLocalDevice, local_device);
 }
 
-Device SetUpDeviceMappingAndAssignLocalDeviceOnce(
-  const std::map<DeviceType, int>& resources) {
+Device MPISetUpDeviceMappingAndAssignLocalDeviceOnce(
+  const std::map<DeviceType, int>& resources,
+  const std::vector<int64_t>& device_idxs) {
   if (!device_to_rank_mapping.empty()) {
     HT_LOG_WARN << "Device mapping has been set up.";
-    return rank_to_device_mapping[GetWorldRank()];
+    return rank_to_device_mapping[GetMPIWorldRank()];
   }
   std::call_once(device_mapping_init_flag,
-                 SetUpDeviceMappingAndAssignLocalDevice, resources);
-  return rank_to_device_mapping[GetWorldRank()];
+                 MPISetUpDeviceMappingAndAssignLocalDevice, resources, device_idxs);
+  return rank_to_device_mapping[GetMPIWorldRank()];
 }
 
-bool IsGlobalDeviceGroupReady() {
-  return !global_device_group.empty();
-}
+// bool IsGlobalDeviceGroupReady() {
+//   return !global_device_group.empty();
+// }
 
-const DeviceGroup& GetGlobalDeviceGroup() {
-  HT_ASSERT(!device_to_rank_mapping.empty())
-    << "Please set up the device mapping in advance.";
-  return global_device_group;
-}
+// const DeviceGroup& GetGlobalDeviceGroup() {
+//   HT_ASSERT(!device_to_rank_mapping.empty())
+//     << "Please set up the device mapping in advance.";
+//   return global_device_group;
+// }
 
-const Device& GetLocalDevice() {
-  if (rank_to_device_mapping.empty())
-    return Device();
-  HT_ASSERT(!rank_to_device_mapping.empty())
-    << "Please set up the device mapping in advance.";
-  return rank_to_device_mapping.at(GetWorldRank());
-}
+// const Device& GetLocalDevice() {
+//   if (rank_to_device_mapping.empty())
+//     return Device();
+//   HT_ASSERT(!rank_to_device_mapping.empty())
+//     << "Please set up the device mapping in advance.";
+//   return rank_to_device_mapping.at(GetMPIWorldRank());
+// }
 
-int GetRankOfLocalHost() {
-  int world_rank = GetWorldRank(), local_rank = 0;
-  for (int i = 0; i < world_rank; i++)
-    if (rank_to_device_mapping[i].local())
-      local_rank++;
-  return local_rank;
-}
+// int GetRankOfLocalHost() {
+//   int world_rank = GetMPIWorldRank(), local_rank = 0;
+//   for (int i = 0; i < world_rank; i++)
+//     if (rank_to_device_mapping[i].local())
+//       local_rank++;
+//   return local_rank;
+// }
 
-int DeviceToWorldRank(const Device& device) {
-  auto it = device_to_rank_mapping.find(device);
-  HT_ASSERT(it != device_to_rank_mapping.end())
-    << "Cannot find device " << device << ".";
-  return it->second;
-}
+// int DeviceToWorldRank(const Device& device) {
+//   auto it = device_to_rank_mapping.find(device);
+//   HT_ASSERT(it != device_to_rank_mapping.end())
+//     << "Cannot find device " << device << ".";
+//   return it->second;
+// }
 
-std::vector<int> DeviceGroupToWorldRanks(const DeviceGroup& device_group) {
-  std::vector<int> ranks;
-  ranks.reserve(device_group.num_devices());
-  for (const auto& device : device_group.devices())
-    ranks.push_back(DeviceToWorldRank(device));
-  std::sort(ranks.begin(), ranks.end());
-  return ranks;
-}
+// std::vector<int> DeviceGroupToWorldRanks(const DeviceGroup& device_group) {
+//   std::vector<int> ranks;
+//   ranks.reserve(device_group.num_devices());
+//   for (const auto& device : device_group.devices())
+//     ranks.push_back(DeviceToWorldRank(device));
+//   std::sort(ranks.begin(), ranks.end());
+//   return ranks;
+// }
 
 } // namespace comm
 } // namespace impl

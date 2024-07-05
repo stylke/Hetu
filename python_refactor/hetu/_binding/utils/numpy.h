@@ -23,11 +23,11 @@ bool CheckNumpyArrayList(PyObject* obj);
 
 DataType GetNumpyArrayDataType(PyObject* obj);
 
-NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape  = {});
+NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape = {}, DataType datatype = kUndeterminedDataType);
 
 NDArrayList NDArrayListFromNumpyList(PyObject* obj);
 
-PyObject* NDArrayToNumpy(NDArray ndarray, bool force);
+PyObject* NDArrayToNumpy(NDArray ndarray, bool force, bool save = false);
 
 PyObject* NumpyFromSequences(PyObject* obj);
 

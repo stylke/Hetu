@@ -148,6 +148,18 @@ PyObject* PyNDArray_dtype(PyNDArray* self) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyNDArray_shape(PyNDArray* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLongList_FromIntegerList(self->ndarray->shape());
+  HT_PY_FUNC_END
+}
+
+PyObject* PyNDArray_data_ptr(PyNDArray* self) {
+  HT_PY_FUNC_BEGIN
+  return PyLong_FromInteger(int64_t(self->ndarray->raw_data_ptr()));
+  HT_PY_FUNC_END
+}
+
 PyObject* PyNDArray_numel(PyNDArray* self) {
   HT_PY_FUNC_BEGIN
   return PyLong_FromInteger(self->ndarray->numel());
@@ -162,7 +174,8 @@ PyObject* PyNDArray_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
   
   static PyArgParser parser({
     "numpy_to_NDArray(numpy.array data)",
-    "numpy_to_NDArray(numpy.array data, HTShape dynamic_shape)"
+    "numpy_to_NDArray(numpy.array data, HTShape dynamic_shape)",
+    "numpy_to_NDArray(numpy.array data, DataType dtype)",
   });
   auto parsed_args = parser.parse(args, kwargs);
 
@@ -175,6 +188,11 @@ PyObject* PyNDArray_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
     HTShape dynamic_shape = parsed_args.get_int64_list(1);
     new(&self->ndarray) NDArray();
     self->ndarray = NDArrayFromNumpy(array_obj1, dynamic_shape);
+  } else if (parsed_args.signature_index() == 2) {
+    auto* array_obj1 = parsed_args.get_numpy_array(0);
+    DataType dtype = parsed_args.get_dtype(1);
+    new(&self->ndarray) NDArray();
+    self->ndarray = NDArrayFromNumpy(array_obj1, {}, dtype);
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -191,13 +209,13 @@ PyObject* PyNDArray_to_numpy(PyNDArray* self, PyObject* args,
   HT_VALUE_ERROR_IF(!self->ndarray.is_defined()) 
     << "NDArray is not defined";
   static PyArgParser parser({
-    "numpy(bool force=false)"
+    "numpy(bool force=false, bool save=false)"
   });
   auto parsed_args = parser.parse(args, kwargs);
-
   if (parsed_args.signature_index() == 0) {
     bool force = parsed_args.get_bool_or_default(0);
-    return NDArrayToNumpy(self->ndarray, force);
+    bool save = parsed_args.get_bool_or_default(1);
+    return NDArrayToNumpy(self->ndarray, force, save);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
     __builtin_unreachable();
@@ -258,10 +276,77 @@ PyObject* PyNDArray_to(PyNDArray* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_END
 }
 
+PyObject* PyNDArray_slice(PyNDArray* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "slice(HTShape begin_pos, HTShape output_shape)",
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+
+  if (parsed_args.signature_index() == 0) {
+    auto input = self->ndarray;
+    auto out = NDArray::empty(parsed_args.get_int64_list(1), input->device(),
+                              input->dtype(), kBlockingStream,
+                              parsed_args.get_int64_list(1));
+    Stream stream(input->device(), kBlockingStream);
+    HT_DISPATCH_KERNEL_CPU_AND_CUDA(input->device().type(), __FUNCTION__,
+                                    hetu::impl::Slice, input, out, 
+                                    parsed_args.get_int64_list(0), stream);
+    return PyNDArray_New(out);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
+PyObject* PyNDArray_transpose(PyNDArray* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "transpose(HTShape perms)",
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+
+  if (parsed_args.signature_index() == 0) {
+    auto out = NDArray::permute(self->ndarray, parsed_args.get_int64_list(0), kBlockingStream);
+    return PyNDArray_New(out);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
+PyObject* PyNDArray_copy(PyNDArray* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  auto out = NDArray::copy(self->ndarray, kBlockingStream);
+  return PyNDArray_New(out);
+  HT_PY_FUNC_END
+}
+
+PyObject* PyNDArray_view(PyNDArray* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "view(HTShape shape)",
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+
+  if (parsed_args.signature_index() == 0) {
+    auto out = NDArray::view(self->ndarray, parsed_args.get_int64_list(0));
+    return PyNDArray_New(out);
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  HT_PY_FUNC_END
+}
+
 // NOLINTNEXTLINE
 PyGetSetDef PyNDArray_properties[] = {
   {PY_GET_SET_DEF_NAME("device"), (getter) PyNDArray_device, nullptr, nullptr, nullptr}, 
-  {PY_GET_SET_DEF_NAME("dtype"), (getter) PyNDArray_dtype, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("dtype"), (getter) PyNDArray_dtype, nullptr, nullptr, nullptr},
+  {PY_GET_SET_DEF_NAME("shape"), (getter) PyNDArray_shape, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("data_ptr"), (getter) PyNDArray_data_ptr, nullptr, nullptr, nullptr}, 
   {nullptr}
 };
 
@@ -314,6 +399,10 @@ std::vector<PyMethodDef> InitNDArrayPyMethodDefs() {
     {"numpy", (PyCFunction) PyNDArray_to_numpy, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {"numel", (PyCFunction) PyNDArray_numel, METH_NOARGS, nullptr }, 
     {"to", (PyCFunction) PyNDArray_to, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"slice", (PyCFunction) PyNDArray_slice, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"copy", (PyCFunction) PyNDArray_copy, METH_NOARGS, nullptr }, 
+    {"transpose", (PyCFunction) PyNDArray_transpose, METH_VARARGS | METH_KEYWORDS, nullptr }, 
+    {"view", (PyCFunction) PyNDArray_view, METH_VARARGS | METH_KEYWORDS, nullptr }, 
     {nullptr}
   });
   AddPyMethodDefs(ret, hetu::impl::get_registered_ndarray_methods());

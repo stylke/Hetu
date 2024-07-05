@@ -98,8 +98,18 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
 Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
                         OpMeta op_meta, Graph& graph) {
   Graph::InitOnce();
-  return graph.MakeOpInner(std::move(body), std::move(inputs),
-                           std::move(op_meta));
+  Operator& op = graph.MakeOpInner(std::move(body), std::move(inputs),
+                                   std::move(op_meta));
+  if (graph.get_cur_subgraph_name() != "") {
+    graph.AddOpToSubGraph(op, graph.get_cur_subgraph_name());
+  }
+  if (is_optimizer_update_op(op)) {
+    std::shared_ptr<SubGraph> subgraph = graph.GetSubGraph(op->input(0)->producer());
+    if (subgraph != nullptr) {
+      graph.AddOpToSubGraph(op, subgraph->global_graph_name(), SubGraphType::UPDATE);
+    }
+  }
+  return op;
 }
 
 TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
@@ -218,7 +228,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         // 原地的comm
         grad_sum = MakeCommOp(partial_grad_sum, dst_ds_hierarchy, OpMeta().set_name("comm_op_after_partial_grad_sum"));
       } else {
-        grad_sum = MakeSumOp(filtered);
+        grad_sum = MakeSumOp(filtered, OpMeta().set_name("sum_op_for_partial_grad"));
       }
       grad_sum->set_is_grad(true);
       return grad_sum;
@@ -345,6 +355,15 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       // workaround: share weight grad
       if (!skip_actual_gradient_op) {
         grad_inputs = op->Gradient(grad_outputs);
+        // bw subgraph deduce
+        // TODO: subgraph need to contain other inserted intermediate op (e.g. sum)
+        auto& cur_graph = op->graph();
+        std::shared_ptr<SubGraph> subgraph = cur_graph.GetSubGraph(op);
+        if (subgraph != nullptr) {
+          cur_graph.AddOpToSubGraph(grad_inputs[i]->producer(), 
+                                    subgraph->global_graph_name(), 
+                                    SubGraphType::BACKWARD);
+        }
       } 
 
       // states deduce
@@ -517,6 +536,20 @@ std::string GraphType2Str(GraphType type) {
   }
 }
 
+void Graph::SubGraphProfiling(std::unordered_map<OpId, int64_t> op_execute_map, int num_micro_batches) {
+  for (auto it = _subgraphs.begin(); it != _subgraphs.end(); ++it) {
+    it->second->profile_reset();  
+  }
+  for (auto it = _subgraphs.begin(); it != _subgraphs.end(); ++it) {
+    it->second->profile(op_execute_map, num_micro_batches);
+    HT_LOG_INFO << it->first << ":" 
+    << "fwd_time: " << it->second->fwd_time() * 1.0 / 1e6 << "ms,"
+    << "bwd_time: " << it->second->bwd_time() * 1.0 / 1e6 << "ms,"
+    << "update_time: " << it->second->update_time() * 1.0 / 1e6 << "ms,"
+    << "total_time: " << it->second->total_time() * 1.0 / 1e6 << "ms.";  
+  }
+}
+
 std::ostream& operator<<(std::ostream& os, GraphType type) {
   os << GraphType2Str(type);
   return os;
@@ -525,6 +558,14 @@ std::ostream& operator<<(std::ostream& os, GraphType type) {
 std::ostream& operator<<(std::ostream& os, const Graph& graph) {
   os << "graph(name=" << graph.name() << ", id=" << graph.id()
      << ", type=" << graph.type() << ")";
+  return os;
+}
+
+std::ostream& operator<<(std::ostream& os, SubGraph& subgraph) {
+  os << "subgraph(name=" << subgraph.name() << ", type=" << subgraph.subgraph_type()
+     << ", ops=" << subgraph.ops() << ", bwd_ops=" << subgraph.bwd_ops() << 
+     ", update_ops=" << subgraph.update_ops() << ", subgraphs=" << subgraph.subgraph_info().size() << "-"
+     << subgraph.subgraph_info();
   return os;
 }
 
