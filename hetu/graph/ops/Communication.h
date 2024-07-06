@@ -649,7 +649,7 @@ class ReduceScatterOpImpl final : public OpInterface {
 Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, int32_t scatter_dim = 0,
                            bool inplace = false, OpMeta op_meta = OpMeta());
 
-Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, int32_t scatter_dim = 0, ReductionType red_type, 
+Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, ReductionType red_type, int32_t scatter_dim = 0, 
                            bool inplace = false, OpMeta op_meta = OpMeta());
 
 class SplitAllGatherOpImpl final : public OpInterface {

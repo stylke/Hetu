@@ -155,7 +155,7 @@ Tensor MakeParameterOp(NDArray provided_data, bool copy_provided_data,
 }
 
 Tensor MakeParallelVariableOp(const Initializer& init, HTShape global_shape, 
-                              const DistributedStatesList& multi_ds, std::vector<int64_t> local_idx,
+                              const DistributedStatesHierarchy& ds_hierarchy, std::vector<int64_t> local_idx,
                               DataType dtype, bool requires_grad, 
                               ParameterDict parameter_dict, OpMeta op_meta) {                  
   // init local_idx vector
@@ -276,7 +276,7 @@ Tensor MakeParallelVariableOp(NDArrayList multi_provided_data,
 }
 
 Tensor MakeParallelParameterOp(const Initializer& init, HTShape global_shape, 
-                               const DistributedStatesList& multi_ds, std::vector<int64_t> local_idx,
+                               const DistributedStatesHierarchy& ds_hierarchy, std::vector<int64_t> local_idx,
                                DataType dtype, bool requires_grad, 
                                ParameterDict parameter_dict, OpMeta op_meta) {
   auto out = MakeParallelVariableOp(init, std::move(global_shape), ds_hierarchy, std::move(local_idx), 

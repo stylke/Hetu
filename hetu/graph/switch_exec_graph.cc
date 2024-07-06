@@ -1608,7 +1608,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     // 这里对参与热切换的rank进行同步
     std::vector<Device> devices(_comm_set.begin(), _comm_set.end());
     DeviceGroup device_group{devices};
-    auto& group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(device_group));
+    auto& group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(device_group), local_device);
     if (_comm_set.size() >= 2) {
       group->Barrier(true);
     }
@@ -1866,7 +1866,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     if (_comm_set.size() >= 2) {
       std::vector<Device> devices(_comm_set.begin(), _comm_set.end());
       DeviceGroup device_group{devices};
-      auto& group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(device_group));
+      auto& group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(hetu::impl::comm::DeviceGroupToWorldRanks(device_group), local_device);
       group->Barrier(true);
     }
     HT_LOG_WARN << local_device << ": " << switch_name << " running time = " << COST_MSEC(switch_params_running) << " ms";

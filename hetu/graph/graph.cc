@@ -355,6 +355,13 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       // workaround: share weight grad
       if (!skip_actual_gradient_op) {
         grad_inputs = op->Gradient(grad_outputs);
+      } 
+
+      // states deduce
+      // 如出现partial需要自动将其转化为dup或split
+      for (size_t i = 0; i < op->num_inputs(); i++) {
+        if (!grad_inputs[i].is_defined())
+          continue;
         // bw subgraph deduce
         // TODO: subgraph need to contain other inserted intermediate op (e.g. sum)
         auto& cur_graph = op->graph();
@@ -364,13 +371,6 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
                                     subgraph->global_graph_name(), 
                                     SubGraphType::BACKWARD);
         }
-      } 
-
-      // states deduce
-      // 如出现partial需要自动将其转化为dup或split
-      for (size_t i = 0; i < op->num_inputs(); i++) {
-        if (!grad_inputs[i].is_defined())
-          continue;
         grad_inputs[i]->set_is_grad(true);
         grad_inputs[i]->producer()->set_fw_op_id(op->id());
         auto& grad_op = grad_inputs[i]->producer();

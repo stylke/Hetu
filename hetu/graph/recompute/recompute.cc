@@ -1,4 +1,5 @@
 #include "hetu/graph/recompute/recompute.h"
+#include "hetu/impl/communication/comm_group.h"
 
 namespace hetu {
 namespace graph {
@@ -18,11 +19,13 @@ namespace {
   }
 } // namespace
 
+// TODO: may have bugs after merging hetero
+// need to review the code
 bool Recompute::IsNoRecomputedOp(Operator& op) {
   if (is_comm_op(op)) {
     auto& comm_op = op;
     auto& comm_op_impl = reinterpret_cast<CommOpImpl&>(comm_op->body());
-    uint64_t comm_type = comm_op_impl.get_comm_type(comm_op);
+    uint64_t comm_type = comm_op_impl.get_comm_type(comm_op, hetu::impl::comm::GetLocalDevice());
     return comm_type == PEER_TO_PEER_RECV_OP ||
            comm_type == PEER_TO_PEER_SEND_OP ||
            comm_type == BATCHED_ISEND_IRECV_OP;
@@ -53,7 +56,7 @@ void Recompute::GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool ge
       for (auto& input : op_inputs) {
         auto& op = input->producer();
         if (op->op_meta().is_recompute && !IsNoRecomputedOp(op) &&
-            op->placement_group().contains(local_device) &&
+            op->placement_group_union().has(local_device) &&
             recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
           to_visit.push(std::ref(op));
         }
@@ -67,7 +70,7 @@ void Recompute::GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool ge
         for (auto& op_ref : out_consumers) {
           auto& op = op_ref.get();
           if (op->op_meta().is_recompute && !IsNoRecomputedOp(op) &&
-              op->placement_group().contains(local_device) &&
+              op->placement_group_union().has(local_device) &&
               recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
             to_visit.push(op_ref);
           }
@@ -138,12 +141,12 @@ Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2O
   for (auto& output : new_op->outputs()) {
     cur_exec_graph.RecordExecTensor(output);
   }
-  if (!origin_op->placement_group().empty())
-    new_op->MapToParallelDevices(origin_op->placement_group());
+  if (origin_op->placement_group_union().size() != 0)
+    new_op->MapToParallelDevices(origin_op->placement_group_union());
   new_op->Instantiate(origin_op->instantiation_ctx().placement, 
                       origin_op->instantiation_ctx().stream_index);
   for (auto i = 0; i < origin_op->num_outputs(); i++) {
-    new_op->output(i)->set_multi_distributed_states(origin_op->output(i)->multi_distributed_states());
+    new_op->output(i)->set_ds_hierarchy(origin_op->output(i)->ds_hierarchy());
   }
   origin_to_recomputed_map.insert({origin_op->id(), new_op});
   return origin_to_recomputed_map[origin_op->id()];
@@ -162,7 +165,7 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
   for (auto& op_ref : topo_order) {
     auto& op = op_ref.get();
     if (!op->op_meta().is_recompute || IsNoRecomputedOp(op) ||
-        !op->placement_group().contains(local_device)) {
+        !op->placement_group_union().has(local_device)) {
       continue;
     }
     // No recomputation if there is no grad op in the outputs

@@ -5,7 +5,7 @@
 #include "hetu/graph/recompute/recompute.h"
 #include "hetu/graph/offload/activation_cpu_offload.h"
 #include "hetu/impl/communication/comm_group.h"
-#include "hetu/impl/communication/mpi_comm_group.h"
+#include "hetu/impl/communication/nccl_comm_group.h"
 #include "hetu/impl/profiler/profiler.h"
 #include "hetu/impl/utils/cuda_utils.h"
 #include "hetu/core/symbol.h"
@@ -1074,8 +1074,9 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         // DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
         int32_t local_device_idx = info.dst_group.get_index(local_device);
         DeviceGroup comm_group = info.local_dst_ds.get_devices_by_dim(-1, local_device_idx, info.dst_group);
+        int32_t gather_dim = info.src_ds.get_split_dim(info.dst_ds);
         Tensor all_gather_output = MakeAllGatherOp(
-          result, comm_group,
+          result, comm_group, gather_dim,
           OpMeta().set_is_deduce_states(false)
                   .set_name(result->name() + "_AllGather"));
         RecordExecTensor(all_gather_output);
@@ -1091,9 +1092,10 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         HT_ASSERT(info.src_group == info.dst_group)
           << "wrong src and dst group relationship!";
         DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, -2);
+        int32_t scatter_dim = info.dst_ds.get_split_dim(info.src_ds);
         Tensor reduce_scatter_output =  MakeReduceScatterOp(
-          result, comm_group,
-          comm_op_impl.reduction_type(), false,
+          result, comm_group, comm_op_impl.reduction_type(), 
+          scatter_dim, false,
           OpMeta().set_is_deduce_states(false)
                   .set_name(result->name() + "_ReduceScatter"));
         RecordExecTensor(reduce_scatter_output);
@@ -2107,7 +2109,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     _execute_plan.update(local_placeholder_variable_ops, local_fw_topo, local_bw_topo, local_topo, dtype_transfer_tensor,
                          shared_weight_tensor, shared_weight_p2p, shared_weight_grad_p2p, accumulated_tensor, accumulated_ops);
     if (_used_ranks.size() >= 2) {
-      auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(_used_ranks);
+      auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(_used_ranks, local_device);
       comm_group->Barrier(true);
     }
     // sync partially
@@ -2485,7 +2487,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   bool is_analysis_perf = false;
   if (is_analysis_perf || _straggler_flag) {
     if (_used_ranks.size() >= 2) {
-      auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(_used_ranks);
+      auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(_used_ranks, local_device);
       comm_group->Barrier(true);
     }
   }

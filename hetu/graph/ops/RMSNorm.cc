@@ -1,6 +1,7 @@
 #include "hetu/graph/ops/RMSNorm.h"
 #include "hetu/graph/ops/Reshape.h"
 #include "hetu/graph/ops/Slice.h"
+#include "hetu/graph/ops/Reduce.h"
 #include "hetu/graph/headers.h"
 #include "hetu/graph/ops/kernel_links.h"
 

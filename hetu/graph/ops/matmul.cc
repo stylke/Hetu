@@ -254,6 +254,14 @@ void MatMulGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_
   outputs.at(0)->cur_ds_union().set_hetero_dim(hetero_res);
 }
 
+void MatMul4BitOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                      const OpMeta& op_meta) const {
+  const Tensor& a = inputs.at(0);
+  const Tensor& b = inputs.at(1);
+  DistributedStates ds_c = MatMulDeduceStates(a, b, trans_a(), trans_b());
+  outputs.at(0)->set_distributed_states(ds_c);
+}
+
 Tensor MakeMatMulOp(Tensor a, Tensor b, bool trans_a, bool trans_b,
                     OpMeta op_meta) {
   TensorList inputs = {std::move(a), std::move(b)};

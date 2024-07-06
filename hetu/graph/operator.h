@@ -1183,7 +1183,7 @@ inline StreamIndex get_suggested_stream_index(const Operator& op) {
     return kD2HStream;
   } else if (is_peer_to_peer_send_op(op) || is_peer_to_peer_recv_op(op)) {
     return kP2PStream;
-  } else if (is_communucation_op(op)) {
+  } else if (is_communication_op(op)) {
     return kCollectiveStream;
   } else {
     return kComputingStream;

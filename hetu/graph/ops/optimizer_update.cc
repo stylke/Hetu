@@ -81,6 +81,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
       auto& reduce_scatter_impl = reinterpret_cast<ReduceScatterOpImpl&>(reduce_scatter_op->body());
       auto& partial_grad = reduce_scatter_op->input(0);
       DeviceGroup comm_group = reduce_scatter_impl.comm_group();
+      int32_t scatter_dim = reduce_scatter_impl.get_scatter_dim();
       // HT_LOG_WARN << op << " comm group: " << comm_group;
       auto local_device_index = op->local_placement_group().get_index(op->placement());
       auto scatter_num = comm_group.num_devices();
@@ -110,9 +111,10 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                       beta1(), beta2(), eps(), weight_decay(), true,
                                       op->instantiation_ctx().stream());
       // in-place allgather
+      // gather dim和scatter dim对齐
       HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(), 
                                       hetu::impl::AllGather, param_scatter, param, 
-                                      comm_group, op->instantiation_ctx().stream());
+                                      comm_group, scatter_dim, op->instantiation_ctx().stream());
     }
     // hetero
     else if (is_split_reduce_scatter_op(op->input(1)->producer())) {
@@ -167,9 +169,10 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
         const auto& comm_groups = comm_groups_list.at(i);
         for (const auto& comm_group : comm_groups) {
           // in-place allgather
+          // 目前只支持在第0维split scatter和split gather
           HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                           hetu::impl::AllGather, split_param_scatter,
-                                          split_param.at(i), comm_group,
+                                          split_param.at(i), comm_group, 0,
                                           op->instantiation_ctx().stream());
         }
       }

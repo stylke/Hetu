@@ -515,8 +515,8 @@ class SwitchExecGraph {
           HT_ASSERT(before_it != define_graph->GetPlan(plan_before).tensor_to_exec_tensor_mapping.end()
                     && after_it != define_graph->GetPlan(plan_after).tensor_to_exec_tensor_mapping.end())
             << "Cannot find " << param_and_opt_var_ref;
-          size_t before_bucket_id = _switch_graph_pair.first->_origin_param_and_optimizer_buckets->GetSuggestedBucketId(before_it->second);
-          size_t after_bucket_id = _switch_graph_pair.second->_origin_param_and_optimizer_buckets->GetSuggestedBucketId(after_it->second);
+          size_t before_bucket_id = _switch_graph_pair.first->_origin_param_and_optimizer_buckets_map[_dtype]->GetSuggestedBucketId(before_it->second);
+          size_t after_bucket_id = _switch_graph_pair.second->_origin_param_and_optimizer_buckets_map[_dtype]->GetSuggestedBucketId(after_it->second);
           HT_ASSERT(before_bucket_id == after_bucket_id)
             << "Currently only support same bucket for same define graph tensor";
           if (before_bucket_id == _bucket_num) {

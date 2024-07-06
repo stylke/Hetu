@@ -1049,6 +1049,7 @@ NDArrayList SplitAllGatherOpImpl::DoCompute(Operator& op,
     << "Data type mismatched for SplitAllGather communication: " << inputs.at(0)->dtype()
     << " vs. " << op->input(0)->dtype();
   NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
+  // 目前只支持第0维切
   NDArrayList split_inputs = NDArray::split(inputs.at(0), split_num());
   NDArrayList split_outputs = NDArray::split(outputs.at(0), split_num());
   for (size_t i = 0; i < _comm_groups_list.size(); i++) {
@@ -1057,7 +1058,7 @@ NDArrayList SplitAllGatherOpImpl::DoCompute(Operator& op,
     for (const auto& comm_group : comm_groups) {
       HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                       hetu::impl::AllGather, split_inputs.at(i),
-                                      split_outputs.at(i), comm_group,
+                                      split_outputs.at(i), comm_group, 0,
                                       op->instantiation_ctx().stream());
     }
   }
@@ -1107,6 +1108,7 @@ NDArrayList SplitAllReduceOpImpl::DoCompute(Operator& op,
   if (!can_inplace) {
     outputs = DoAllocOutputs(op, inputs, ctx);
   }
+  // 目前只支持第0维切
   NDArrayList split_inputs = NDArray::split(inputs.at(0), split_num());
   NDArrayList split_outputs = NDArray::split(outputs.at(0), split_num());
   for (size_t i = 0; i < _comm_groups_list.size(); i++) {
@@ -1187,6 +1189,7 @@ NDArrayList SplitReduceScatterOpImpl::DoCompute(Operator& op,
     << "Data type mismatched for SplitReduceScatter communication: " << inputs.at(0)->dtype()
     << " vs. " << op->input(0)->dtype();
   NDArrayList outputs = DoAllocOutputs(op, inputs, ctx);
+  // 目前只支持第0维切
   NDArrayList split_inputs = NDArray::split(inputs.at(0), split_num());
   NDArrayList split_outputs = NDArray::split(outputs.at(0), split_num());
   for (size_t i = 0; i < _comm_groups_list.size(); i++) {
@@ -1195,7 +1198,7 @@ NDArrayList SplitReduceScatterOpImpl::DoCompute(Operator& op,
     for (const auto& comm_group : comm_groups) {
       HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), type(),
                                       hetu::impl::ReduceScatter, split_inputs.at(i),
-                                      split_outputs.at(i), reduction_type(), comm_group,
+                                      split_outputs.at(i), reduction_type(), comm_group, 0,
                                       op->instantiation_ctx().stream());
     }
   }
@@ -1327,8 +1330,8 @@ Tensor MakeReduceScatterOp(Tensor input, const DeviceGroup& comm_group, int32_t 
                       {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, int32_t scatter_dim,
-                           ReductionType red_type, bool inplace, OpMeta op_meta) {
+Tensor MakeReduceScatterOp(Tensor input, DeviceGroup comm_group, ReductionType red_type, 
+                           int32_t scatter_dim, bool inplace, OpMeta op_meta) {
   HT_ASSERT(op_meta.device_group_hierarchy.size() == 0 || (op_meta.device_group_hierarchy.size() == 1 && op_meta.device_group_hierarchy.get(0).size() == 1
     && op_meta.device_group_hierarchy.get(0).get(0).is_subset(comm_group))) << "comm_group must be subset of device_group!";
   return Graph::MakeOp(std::make_shared<ReduceScatterOpImpl>(std::move(comm_group), scatter_dim, red_type, inplace), 

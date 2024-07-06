@@ -37,7 +37,8 @@ void OpInterface::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
 
 void OpInterface::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                     TensorList& outputs, const OpMeta& op_meta) const {
-  HT_ASSERT(inputs_hetero_dim.size() > 0) << op_meta.name << ": distributed states hetero dim should be manually set when in_degree=0!";
+  HT_ASSERT(inputs_hetero_dim.size() > 0) 
+    << op_meta.name << ": distributed states hetero dim should be manually set when in_degree is 0";
   HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " " << op_meta.name << ": default copy states hetero dim from inputs";
   int32_t default_hetero_dim = -3;
   for (auto& hetero_dim : inputs_hetero_dim) {
@@ -45,7 +46,8 @@ void OpInterface::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_di
       default_hetero_dim = hetero_dim;
     }
     HT_ASSERT(default_hetero_dim == hetero_dim)
-      << "hetero dim should be equal for all inputs by default";
+      << "hetero dim should be equal for all inputs by default"
+      << ", or you need to implement special DoDeduceHeterProp() method for " << op_meta.name;
   }
   for (auto& output : outputs) {
     output->cur_ds_union().set_hetero_dim(default_hetero_dim);

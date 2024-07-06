@@ -296,16 +296,18 @@ bool DistributedStates::check_allreduce(const DistributedStates& dst_distributed
   return states(-2) > 1 && check_combine(dst_distributed_states, src2dst);
 }
 
-// split0_dup -> split0
+// split_dup -> split
 bool DistributedStates::check_scatter(const DistributedStates& dst_distributed_states) const {
-  std::pair<std::vector<int32_t>, int32_t> src2dst = {{-1}, 0};
+  int32_t scatter_dim = dst_distributed_states.get_split_dim(*this);
+  std::pair<std::vector<int32_t>, int32_t> src2dst = {{-1}, scatter_dim};
   return states(-1) > 1 && check_combine(dst_distributed_states, src2dst);
 }
 
-// split0 -> split0_dup
+// split -> split_dup
 bool DistributedStates::check_allgather(const DistributedStates& dst_distributed_states) const {
-  std::pair<std::vector<int32_t>, int32_t> src2dst = {{-1}, 0};
-  return states(0) > 1 && dst_distributed_states.states(-1) > 1 && dst_distributed_states.check_combine(*this, src2dst);
+  int32_t gather_dim = get_split_dim(dst_distributed_states);
+  std::pair<std::vector<int32_t>, int32_t> src2dst = {{-1}, gather_dim};
+  return states(gather_dim) > 1 && dst_distributed_states.states(-1) > 1 && dst_distributed_states.check_combine(*this, src2dst);
 }
 
 bool DistributedStates::check_reducescatter(const DistributedStates& dst_distributed_states) const {
@@ -332,6 +334,7 @@ int32_t DistributedStates::get_dim(int32_t index) const {
   }
 }
 
+// merged_distributed_states放的是gather后的
 int32_t DistributedStates::get_split_dim(const DistributedStates& merged_distributed_states) const {
   int32_t split_dim = -3; // -1 for duplicate and -2 for partial
   std::vector<int32_t> split_dim_candidates;
@@ -345,8 +348,8 @@ int32_t DistributedStates::get_split_dim(const DistributedStates& merged_distrib
     for (auto& candidate : split_dim_candidates) {
       if (merged_states.find(candidate) == merged_states.end() || merged_states.at(candidate) < _states.at(candidate)) {
         HT_ASSERT(split_dim == -3)
-        << "Only support gather on one dimension, but got distributed states of src: "
-        << _states << " vs dst: " << merged_states;
+          << "Only support gather on one dimension, but got distributed states of src: "
+          << _states << " vs dst: " << merged_states;
         split_dim = candidate;
       }
     }

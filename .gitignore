@@ -62,6 +62,7 @@ pip-delete-this-directory.txt
 .DS_Store
 
 # grpc
+hetu/impl/communication/rpc
 *_pb2.py
 *_pb2.pyi
 *_pb2_grpc.py

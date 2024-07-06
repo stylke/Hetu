@@ -623,12 +623,12 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     // 目前只是记录而并不会alloc
     if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
         && exec_tensor->producer()->placement_group_union().has(local_device)) {
-      origin_param_buffer->AddTensor(exec_tensor);
+      // origin_param_buffer->AddTensor(exec_tensor);
     }
     if ((_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
          || _optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end())
         && exec_tensor->producer()->placement_group_union().has(local_device)) {
-      // origin_param_and_optimizer_buffer->AddTensor(exec_tensor); // deprecates
+      // origin_param_and_optimizer_buffer->AddTensor(exec_tensor); // deprecated
       // origin_param_and_optimizer_buckets->AddTensor(exec_tensor);
       // TODO: better compatibility with hot switch and quantization
       origin_param_and_optimizer_buckets_map[exec_tensor->dtype()]->AddTensor(exec_tensor);
@@ -1059,12 +1059,12 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     if (_is_active) {
       auto key = std::make_pair(_active_exec_plan, next_active_exec_plan);
       if (_param_switcher_pool.find(key) == _param_switcher_pool.end()) {
-        _param_and_opt_var_bucket_switcher_pool[key] = std::unordered_map<DataType, std::vector<std::shared_ptr<ParamBuffer>>>();;
-        _param_switcher_pool[key] = std::unordered_map<DataType, std::shared_ptr<ParamBuffer>>();
-        _grad_switcher_pool[key] = std::unordered_map<DataType, std::shared_ptr<ParamBuffer>>();
+        _param_and_opt_var_bucket_switcher_pool[key] = std::unordered_map<DataType, std::vector<std::shared_ptr<SwitchExecGraph>>>();
+        _param_switcher_pool[key] = std::unordered_map<DataType, std::shared_ptr<SwitchExecGraph>>();
+        _grad_switcher_pool[key] = std::unordered_map<DataType, std::shared_ptr<SwitchExecGraph>>();
         for (int i = 0; i < static_cast<int>(DataType::NUM_DATA_TYPES); i++) {
           DataType dtype = static_cast<DataType>(i);
-          _param_and_opt_var_bucket_switcher_pool[key][dtype] = std::vector<std::shared_ptr<ParamBuffer>>();
+          _param_and_opt_var_bucket_switcher_pool[key][dtype] = std::vector<std::shared_ptr<SwitchExecGraph>>();
           _param_switcher_pool[key][dtype] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype);
           _grad_switcher_pool[key][dtype] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype);
         }
