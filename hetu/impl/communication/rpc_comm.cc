@@ -13,9 +13,9 @@ using hetu::operator<<;
 namespace {
 
 static std::once_flag rpc_init_flag;
-static int rpc_world_rank = -1;
-std::vector<int> rpc_world_ranks;
-static int rpc_world_size = -1;
+static int rpc_world_rank = -1; // 当前进程的rank
+std::vector<int> rpc_world_ranks; // [0, 1, 2, ..., rpc_world_size - 1]
+static int rpc_world_size = -1; // 一共有多少rank（例如2台A100机器就是16）
 static std::string global_server_address;
 static std::mutex rpc_call_mutex;
 static std::mutex rpc_create_group_mutex;
@@ -36,18 +36,26 @@ static void RPC_Init_Once() {
   std::call_once(rpc_init_flag, []() {
     // init rpc
     HT_LOG_INFO << "HTSVTR:\n" << global_server_address;
+    // 建立当前进程上的stub
     local_client = std::make_shared<DeviceClient>(grpc::CreateChannel(global_server_address, 
                                                                       grpc::InsecureChannelCredentials()));
+    // 告知server当前进程的hostname
+    // server会统计一共多少host以及每个host上有多少进程
     local_client->Connect(Device::GetLocalHostname());
     std::vector<int> all_ranks(rpc_world_size);
     std::iota(all_ranks.begin(), all_ranks.end(), 0);
     rpc_world_ranks = all_ranks;
     HT_LOG_INFO << "alrank:" << all_ranks;
+    // 同步
+    // 等所有client进程都向server注册完
     local_client->Barrier(0, all_ranks);
+    // 进程获取自己的rank（与注册顺序相关）
     int rank = local_client->GetRank(Device::GetLocalHostname());
     HT_LOG_DEBUG << "GETRANK:" << rank;
     HT_LOG_INFO << Device::GetLocalHostname();
     rpc_world_rank = rank;
+    // 启动一个后台线程
+    // 定期发送heartbeat给server
     local_client->LaunchHeartBeat(rpc_world_rank);
     // register exit handler
     HT_ASSERT(std::atexit([]() {
@@ -119,7 +127,7 @@ void SetUpDeviceMappingWithAssignedLocalDevice(const Device& local_device) {
   device_to_rank_mapping.reserve(world_size);
   rank_to_device_mapping.reserve(world_size);
   local_client->CommitDeviceInfo(static_cast<int>(local_device.type()), local_device.index(), 
-                                local_device.multiplex(), rpc_world_rank);
+                                 local_device.multiplex(), rpc_world_rank);
   for (int rank = 0; rank < world_size; rank++) {
     DeviceInfoReply reply = local_client->GetDeviceInfo(rank);
     Device rank_device(static_cast<DeviceType>(reply.type),
@@ -163,6 +171,7 @@ void SetUpDeviceMappingAndAssignLocalDevice(
     auto device_id = device_idxs.empty() ? local_rank % resources.at(kCUDA)
                                          : device_idxs[local_rank % resources.at(kCUDA)];
     auto multiplex = local_rank / resources.at(kCUDA);
+    // multiplex当rank数大于卡数时出现（比如只有4个GPU但开了8个进程）
     local_device = Device(kCUDA, device_id, local_hostname, multiplex);
   }
   SetUpDeviceMappingWithAssignedLocalDevice(local_device);

@@ -329,16 +329,17 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
     if (is_variable_op(op)) {
       // 是param且存在data transfer的情况需要单独处理
       // 因为有可能是热切换过来的而不需要再计算
-      if (_parameter_ops.find(op->id()) != _parameter_ops.end() && 
-          _transfer_param_buffer_map.find(op->output(0)->dtype()) != _transfer_param_buffer_map.end() &&
-          !_transfer_param_buffer_map[op->output(0)->dtype()]->IsEmpty()) {
+      if (_parameter_ops.find(op->id()) != _parameter_ops.end()
+          && !_transfer_map.empty()) {
         auto it = _transfer_map.find(op->output(0)->id());
         HT_ASSERT(it != _transfer_map.end())
           << "The transfer map does not consist of " << op->output(0) << " " << op->output(0)->dtype();
         auto& transfer_param = it->second;
+        HT_ASSERT(!_transfer_param_buffer_map[transfer_param->dtype()]->IsEmpty())
+          << "The transfer param buffer of " << DataType2Str(transfer_param->dtype()) << " should not be empty";
         auto transfer_param_data = NDArray(transfer_param->meta(),
-                                  _transfer_param_buffer_map[op->output(0)->dtype()]->AsStorage(), 
-                                  _transfer_param_buffer_map[op->output(0)->dtype()]->GetElementOffest(transfer_param));
+                                           _transfer_param_buffer_map[transfer_param->dtype()]->AsStorage(), 
+                                           _transfer_param_buffer_map[transfer_param->dtype()]->GetElementOffest(transfer_param));
         // 添加runtime allocation
         for (auto& runtime_ctx : runtime_ctx_list) {
           runtime_ctx.add_runtime_allocation(transfer_param->id(), transfer_param_data);
@@ -395,7 +396,7 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
       for (auto it_ = _current_grad_buffer_map.begin();
            it_ != _current_grad_buffer_map.end(); ++it_) {
         if (!it_->second->IsEmpty() && !it_->second->IsAllocated()) {
-          // alloc transfer param
+          // alloc current grad
           it_->second->Alloc(Stream(local_device, kBlockingStream));
           HT_LOG_DEBUG << local_device << ": alloc current grad buffer "
             << ", the size is " << it_->second->size();
@@ -442,6 +443,8 @@ void ExecutableGraph::AllocMemory(size_t& memory_size, MemoryPlan& memory_plan,
   sort(temporary_free_memory.begin(), temporary_free_memory.end(),
        [&](MemoryBlock a, MemoryBlock b) { return a.second < b.second; });
 
+  // 找temp free memory中最小的能容纳下的块
+  // 并进行split
   for (auto block_iter = temporary_free_memory.begin(); block_iter != temporary_free_memory.end(); block_iter++) {
     auto block_size = block_iter->second;
     if (block_size >= alloc_memory_size) {
@@ -459,6 +462,8 @@ void ExecutableGraph::AllocMemory(size_t& memory_size, MemoryPlan& memory_plan,
   sort(free_memory.begin(), free_memory.end(),
        [&](MemoryBlock a, MemoryBlock b) { return a.second < b.second; });
 
+  // 同上
+  // free memory更珍贵
   for (auto block_iter = free_memory.begin(); block_iter != free_memory.end(); block_iter++) {
     auto block_size = block_iter->second;
     if (block_size >= alloc_memory_size) {
@@ -505,7 +510,6 @@ void ExecutableGraph::FreeMemory(MemoryPlan& memory_plan, MemoryBlockList& free_
 
 MemoryPlan ExecutableGraph::GenerateMemoryPlan(size_t& memory_size, std::vector<std::pair<bool, size_t>> tasks,
                                                std::vector<Tensor2IntMap> tensor2degrees_list,    
-                                               const std::unordered_map<TensorId, size_t>& fetch_indices,
                                                const FeedDict& feed_dict){
   memory_size = 0;
   MemoryPlan memory_plan;
@@ -513,54 +517,65 @@ MemoryPlan ExecutableGraph::GenerateMemoryPlan(size_t& memory_size, std::vector<
   MemoryBlockList free_memory;
   std::map<MemoryBlock, int> storage_use_count;
 
-
   auto& subgraphs = GetAllSubGraphs();
   std::vector<OpList> block_ops;
-  std::vector<std::string> block_name = {"GPTBlock"};
-  for(auto [name, subgraph] : subgraphs){
+  std::vector<std::string> block_name = {"GPTBlock", "LLamaBlock"};
+  for (auto [name, subgraph] : subgraphs) {
     std::function<OpList(std::shared_ptr<SubGraph>)> get_all_ops = [&](std::shared_ptr<SubGraph> subgraph){
       OpList ops;
-      for(auto [name, op] : subgraph->ops()) 
-        ops.push_back(op);
-        
-      for(auto [name, child] : subgraph->subgraphs()){
+      for (auto [name, op] : subgraph->ops()) 
+        ops.push_back(op);  
+      for (auto [name, child] : subgraph->subgraphs()) {
         auto child_ops = get_all_ops(child);
-        for(auto op : child_ops) 
+        for (auto op : child_ops) 
           ops.push_back(op);
       }
       return ops;
     };
-
-    for(auto bname : block_name){
-      if(subgraph->subgraph_type() == bname){
+    for (auto bname : block_name) {
+      if (subgraph->subgraph_type() == bname) {
         block_ops.push_back(get_all_ops(subgraph));
       }
     }
   }
-  if(block_ops.size() <= 0){
-    HT_LOG_DEBUG << "The topology graph only supports segmentation using GPTBlock as the block, but don't find the GPTBlock. If you define other types of Blocks, please add the class name to the list above.";
+  if (block_ops.size() <= 0) {
+    HT_LOG_WARN << "The topology graph only supports segmentation using GPTBlock or LLamaBlock as the block, but find none of them. If you define other types of block, please add the class name to the list above.";
   }
   std::set<OpId> fw_block_start_op, fw_block_end_op;
-  for(auto ops : block_ops){
+  for (auto ops : block_ops) {
     std::vector<int> in_degree(ops.size(), 0), out_degree(ops.size(), 0);
-    for(int i = 0; i < ops.size(); i ++){
-      for(auto& output : ops[i]->outputs()){
-        for(auto consumer : output->consumers()){
-          for(int j = 0; j < ops.size(); j ++){
-            if(consumer.get()->graph_id() == ops[j]->graph_id() && consumer.get()->id() == ops[j]->id()){
-              in_degree[j] ++;
-              out_degree[i] ++;
+    for (int i = 0; i < ops.size(); i++) {
+      for (auto& output : ops[i]->outputs()) {
+        for (auto consumer : output->consumers()) {
+          for (int j = 0; j < ops.size(); j++) {
+            if (consumer.get()->graph_id() == ops[j]->graph_id() && consumer.get()->id() == ops[j]->id()) {
+              in_degree[j]++;
+              out_degree[i]++;
             }
           }
         }
       }
     }
     int start_op_cnt = 0, end_op_cnt = 0;
-    for(int i = 0; i < ops.size(); i ++){
-      if(in_degree[i] == 0) start_op_cnt ++, fw_block_start_op.insert(ops[i]->id());
-      else if(out_degree[i] == 0) end_op_cnt ++, fw_block_end_op.insert(ops[i]->id());
+    for (int i = 0; i < ops.size(); i++) {
+      // workaround: comm op还会出现在subgraph中而被当成是block start/end op
+      // 后续应该将comm op单独处理成bridge subgraph中（python端定义会用户不友好）
+      if (is_comm_op(ops[i])) {
+        HT_RUNTIME_ERROR << "subgraphs should not consists of comm op";
+      }
+      if (in_degree[i] == 0) {
+        start_op_cnt++;
+        fw_block_start_op.insert(ops[i]->id());
+        HT_LOG_DEBUG << ops[i] << " is a block start op, the inputs are " << ops[i]->inputs();
+      }
+      if (out_degree[i] == 0) {
+        end_op_cnt++;
+        fw_block_end_op.insert(ops[i]->id());
+        HT_LOG_DEBUG << ops[i] << " is a block end op, the inputs are " << ops[i]->inputs();
+      }
     }
-    HT_ASSERT(start_op_cnt == 1 && end_op_cnt == 1) << "Each block only has a start operator and an end operator.";
+    HT_ASSERT(start_op_cnt == 1 && end_op_cnt == 1) 
+      << "Each block only has a start operator and an end operator.";
   }
 
   for (size_t i = 0; i < tasks.size(); i++) {
@@ -577,135 +592,147 @@ MemoryPlan ExecutableGraph::GenerateMemoryPlan(size_t& memory_size, std::vector<
     const TensorIdSet& accumulated_tensor = _execute_plan.accumulated_tensor;
     const OpIdSet& accumulated_ops = _execute_plan.accumulated_ops;
 
-
     OpRefList executable_topo;
     for (auto& op_ref : topo) {
       auto& op = op_ref.get();
       bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
         return feed_dict.find(tensor->id()) != feed_dict.end();
       });
-
       if (computed ||
-        op->num_outputs() > 0 && dtype_transfer_tensor.find(op->output(0)->id()) != dtype_transfer_tensor.end() && micro_batch_id > 0 ||
-        !shared_weight_p2p.empty() && shared_weight_p2p.find(op->id()) != shared_weight_p2p.end() && micro_batch_id > 0 || 
-        !grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end() ){
+          op->num_outputs() > 0 && dtype_transfer_tensor.find(op->output(0)->id()) != dtype_transfer_tensor.end() && micro_batch_id > 0 ||
+          !shared_weight_p2p.empty() && shared_weight_p2p.find(op->id()) != shared_weight_p2p.end() && micro_batch_id > 0 || 
+          !grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
         continue;
       }
-
       executable_topo.push_back(op_ref);
     }
 
     std::vector<MicroBatchTensorId> release_tensor;
     for (auto& op_ref : executable_topo) {
       auto& op = op_ref.get();
-
-
       auto clear_tensor_and_merge_space = [&](){
-        for(auto &micro_tensor_id : release_tensor){
+        for (auto& micro_tensor_id : release_tensor) {
           FreeMemory(memory_plan, free_memory, micro_tensor_id);
           storage_use_count[memory_plan[micro_tensor_id]] = 0;
           storage_use_count.erase(memory_plan[micro_tensor_id]);
         }
         release_tensor.clear();
-        for(auto stream_id = 0; stream_id < HT_NUM_STREAMS_PER_DEVICE; stream_id ++){
-            for(auto& space : temporary_free_memory[stream_id]){
-              auto free_block_ptr = space.first;
-              auto free_block_size = space.second;
-              for (auto i = 0; i < free_memory.size(); i++) {
-                auto block_head = free_memory[i].first;
-                auto block_tail = block_head + free_memory[i].second;
-                if (block_tail == free_block_ptr) {
-                  free_block_ptr = block_head;
-                  free_block_size += free_memory[i].second;
-                  free_memory.erase(free_memory.begin() + i);
-                  i--;
-                } else if (free_block_ptr + free_block_size == block_head) {
-                  free_block_size += free_memory[i].second;
-                  free_memory.erase(free_memory.begin() + i);
-                  i--;
-                }
+        // 将所有stream上的temp free memory全部放回到free memory
+        for (auto stream_id = 0; stream_id < HT_NUM_STREAMS_PER_DEVICE; stream_id++) {
+          for (auto& space : temporary_free_memory[stream_id]) {
+            auto free_block_ptr = space.first;
+            auto free_block_size = space.second;
+            for (auto i = 0; i < free_memory.size(); i++) {
+              auto block_head = free_memory[i].first;
+              auto block_tail = block_head + free_memory[i].second;
+              if (block_tail == free_block_ptr) {
+                free_block_ptr = block_head;
+                free_block_size += free_memory[i].second;
+                free_memory.erase(free_memory.begin() + i);
+                i--;
+              } else if (free_block_ptr + free_block_size == block_head) {
+                free_block_size += free_memory[i].second;
+                free_memory.erase(free_memory.begin() + i);
+                i--;
               }
-              free_memory.push_back({free_block_ptr, free_block_size});
             }
-            temporary_free_memory[stream_id].clear();
+            free_memory.push_back({free_block_ptr, free_block_size});
+          }
+          temporary_free_memory[stream_id].clear();
         }
       };
 
-
-      if(is_forward && fw_block_start_op.find(op->id()) != fw_block_start_op.end() || !is_forward && fw_block_end_op.find(op->fw_op_id()) != fw_block_end_op.end()){
+      // fw block的开头和bw block的结尾
+      // 全部进行清空
+      if (is_forward && fw_block_start_op.find(op->id()) != fw_block_start_op.end() || !is_forward && fw_block_end_op.find(op->fw_op_id()) != fw_block_end_op.end()) {
         clear_tensor_and_merge_space();
       }
-
-      if(is_optimizer_update_op(op) || is_data_transfer_op(op)){
+      if (is_optimizer_update_op(op) || is_data_transfer_op(op)) {
         continue;
       }
-
-
-
-      if(op->type() == "TransposeOp"|| is_slice_op(op) ||
+      // TODO: maybe too heuristic
+      // 可以reuse的会累积storage_use_count
+      if (op->type() == "TransposeOp"|| is_slice_op(op) ||
           (op->type() == "ArrayReshapeOp" || op->type() == "ArrayReshapeGradientOp") && op->inputs().at(0)->is_contiguous() || 
-          is_inplace_op(op) || is_all_reduce_op(op) || is_reduce_scatter_op(op)){
+          is_inplace_op(op) || is_all_reduce_op(op) || is_reduce_scatter_op(op)) {
         auto input_id = op->inputs().at(0)->id();
         auto output_id = op->outputs().at(0)->id();
-        if(memory_plan.find({micro_batch_id, input_id}) != memory_plan.end() && 
-          storage_use_count.find(memory_plan[{micro_batch_id, input_id}]) != storage_use_count.end() && 
-          storage_use_count[memory_plan[{ micro_batch_id, input_id}]] > 0){
+        if (memory_plan.find({micro_batch_id, input_id}) != memory_plan.end()
+            && storage_use_count.find(memory_plan[{micro_batch_id, input_id}]) != storage_use_count.end()
+            && storage_use_count[memory_plan[{micro_batch_id, input_id}]] > 0) {
           memory_plan[{micro_batch_id, output_id}] = memory_plan[{micro_batch_id, input_id}];
-          storage_use_count[memory_plan[{ micro_batch_id, input_id}]] += tensor2degrees[output_id];
+          storage_use_count[memory_plan[{micro_batch_id, input_id}]] += tensor2degrees[output_id];
         }
-      }
-      else{
+      } 
+      // 其余情况需要分配
+      else {
         for (auto& output : op->outputs()) {
-            auto tensor_id = output->id();
-            int64_t numElem = output->numel();
-            numElem = DIVUP(numElem * DataType2Size(output->dtype()), 256) * 256 / DataType2Size(kInt64);
-            AllocMemory(memory_size, memory_plan, temporary_free_memory[op->stream_index()], free_memory, {micro_batch_id, tensor_id}, numElem);
-            storage_use_count[memory_plan[{micro_batch_id, tensor_id}]] = tensor2degrees[tensor_id];
+          auto tensor_id = output->id();
+          int64_t numElem = output->numel();
+          numElem = DIVUP(numElem * DataType2Size(output->dtype()), 256) * 256 / DataType2Size(kInt64);
+          AllocMemory(memory_size, memory_plan, temporary_free_memory[op->stream_index()], free_memory, {micro_batch_id, tensor_id}, numElem);
+          storage_use_count[memory_plan[{micro_batch_id, tensor_id}]] = tensor2degrees[tensor_id];
         }
       }
 
       for (size_t i = 0; i < op->num_outputs(); i++) {
         auto tensor_id = op->output(i)->id();
-        if(memory_plan.find({micro_batch_id, tensor_id}) == memory_plan.end()) continue;
-        if(storage_use_count.find(memory_plan[{micro_batch_id, tensor_id}]) == storage_use_count.end()) continue;
-        if(accumulated_tensor.find(tensor_id) != accumulated_tensor.end() || storage_use_count[memory_plan[{micro_batch_id, tensor_id}]] == 0){
+        if (memory_plan.find({micro_batch_id, tensor_id}) == memory_plan.end()) {
+          // HT_LOG_WARN << op << " output: micro batch " << micro_batch_id << " tensor " << op->output(i) << " is not in memory_plan";
+          continue;
+        }
+        if (storage_use_count.find(memory_plan[{micro_batch_id, tensor_id}]) == storage_use_count.end()) {
+          // HT_LOG_WARN << op << " output: micro batch " << micro_batch_id << " tensor " << op->output(i) << " is not in storage_use_count";
+          continue;
+        }
+        if (accumulated_tensor.find(tensor_id) != accumulated_tensor.end() 
+            || storage_use_count[memory_plan[{micro_batch_id, tensor_id}]] == 0) {
           FreeMemory(memory_plan, temporary_free_memory[op->stream_index()], {micro_batch_id, tensor_id});
           storage_use_count[memory_plan[{ micro_batch_id, tensor_id}]] = 0;
           storage_use_count.erase(memory_plan[{ micro_batch_id, tensor_id}]);
-          // if(op->placement().index() == 0) std::cout << "tensor " << tensor_id << ' ' << "free" << ' ' << memory_plan[{micro_batch_id, tensor_id}].first << ' ' << memory_plan[{micro_batch_id, tensor_id}].second << std::endl;
+          // if (op->placement().index() == 0) std::cout << "tensor " << tensor_id << ' ' << "free" << ' ' << memory_plan[{micro_batch_id, tensor_id}].first << ' ' << memory_plan[{micro_batch_id, tensor_id}].second << std::endl;
         }
       }
 
       for (const auto& input : op->inputs()) {
-        auto used_by_multi_stream = [&](const Tensor& tensor){
-          for(auto &consumer_ref : tensor->consumers()){
+        auto used_by_multi_stream = [&](const Tensor& tensor) {
+          for (auto &consumer_ref : tensor->consumers()) {
             auto& consumer = consumer_ref.get();
-            if(consumer->stream_index() != tensor->producer()->stream_index()){
+            if (consumer->stream_index() != tensor->producer()->stream_index()) {
               return true;
             }
           }
           return false;
         };
-        if(memory_plan.find({micro_batch_id, input->id()}) == memory_plan.end()) continue;
-        if(storage_use_count.find(memory_plan[{micro_batch_id, input->id()}]) == storage_use_count.end()) continue;
-        if(accumulated_tensor.find(input->id()) != accumulated_tensor.end()) continue;
-        // if(storage_use_count[memory_plan[{ micro_batch_id, input->id()}]] == 0)  
-        // if((input->id() == 4022) && op->placement().index() == 0)
-          // std::cout << storage_use_count[memory_plan[{ micro_batch_id, input->id()}]] << ' ' << (!is_peer_to_peer_recv_op(input->producer()) && !is_peer_to_peer_send_op(op)) << ' ' << (accumulated_tensor.find(input->id()) != accumulated_tensor.end()) << std::endl;
-        if ((--storage_use_count[memory_plan[{ micro_batch_id, input->id()}]] == 0) 
-            && !is_peer_to_peer_recv_op(input->producer()) && !is_peer_to_peer_send_op(op)) {
-              if(used_by_multi_stream(input) ==  false){
-                FreeMemory(memory_plan, temporary_free_memory[op->stream_index()], {micro_batch_id, input->id()});
-                storage_use_count[memory_plan[{ micro_batch_id, input->id()}]] = 0;
-                storage_use_count.erase(memory_plan[{ micro_batch_id, input->id()}]);
-                // if(op->placement().index() == 0) std::cout << "tensor " << input->id() << ' ' << "free" << ' ' << memory_plan[{micro_batch_id, input->id()}].first << ' ' << memory_plan[{micro_batch_id, input->id()}].second << std::endl;
-              }
-              else release_tensor.push_back({micro_batch_id, input->id()});
+        if (memory_plan.find({micro_batch_id, input->id()}) == memory_plan.end()) {
+          // HT_LOG_WARN << op << " input: micro batch " << micro_batch_id << " tensor " << input << " is not in memory_plan";
+          continue;
+        }
+        if (storage_use_count.find(memory_plan[{micro_batch_id, input->id()}]) == storage_use_count.end()) {
+          // HT_LOG_WARN << op << " input: micro batch " << micro_batch_id << " tensor " << input << " is not in storage_use_count";
+          continue;
+        }
+        if (accumulated_tensor.find(input->id()) != accumulated_tensor.end()) {
+          continue;
+        }
+        if (--storage_use_count[memory_plan[{micro_batch_id, input->id()}]] == 0
+            && !is_pipeline_stage_recv_op(input->producer()) && !is_pipeline_stage_send_op(op)) {
+          if (used_by_multi_stream(input) == false) {
+            FreeMemory(memory_plan, temporary_free_memory[op->stream_index()], {micro_batch_id, input->id()});
+            storage_use_count[memory_plan[{micro_batch_id, input->id()}]] = 0;
+            storage_use_count.erase(memory_plan[{micro_batch_id, input->id()}]);
+            // if (op->placement().index() == 0) std::cout << "tensor " << input->id() << ' ' << "free" << ' ' << memory_plan[{micro_batch_id, input->id()}].first << ' ' << memory_plan[{micro_batch_id, input->id()}].second << std::endl;
+          }
+          // multi-stream的memory plan暂时无法处理
+          // 只能是下一个block再去全部free
+          else {
+            release_tensor.push_back({micro_batch_id, input->id()});
+          }
         }
       }
-
-
-      if(is_forward && fw_block_end_op.find(op->id()) != fw_block_end_op.end() || !is_forward && fw_block_start_op.find(op->fw_op_id()) != fw_block_start_op.end()){
+      // fw block的结尾或者bw block的开头
+      // 再次清空
+      if (is_forward && fw_block_end_op.find(op->id()) != fw_block_end_op.end() || !is_forward && fw_block_start_op.find(op->fw_op_id()) != fw_block_start_op.end()) {
         clear_tensor_and_merge_space();
       }
     }
@@ -1319,8 +1346,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
                                   Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
                                   Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                                   const FeedDict& feed_dict, const TensorList& fetches,
-                                  const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p,
-                                  NDArray& memory, MemoryPlan& memory_plan) {
+                                  const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p) {
   const TensorIdSet& dtype_transfer_tensor = _execute_plan.dtype_transfer_tensor;
   const TensorIdSet& shared_weight_tensor = _execute_plan.shared_weight_tensor;
   const OpIdSet& shared_weight_p2p = _execute_plan.shared_weight_p2p;
@@ -1336,18 +1362,23 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
   auto local_device = hetu::impl::comm::GetLocalDevice();
 
+  // HT_LOG_INFO << "ComputeFunc topo: " << topo;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
-    
-    
+
+    // HT_LOG_INFO << "ComputeFunc op " << op;
     HT_ASSERT(!is_placeholder_op(op) && !is_variable_op(op))
       << "Placeholder & Variable ops should not appear in ComputeFunc!";
-    bool computed = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
+    bool is_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
       return feed_dict.find(tensor->id()) != feed_dict.end();
     });
-    if (computed)
+    
+    if (runtime_ctx.has_runtime_skipped(op->id())) {
+      continue; 
+    }
+    if (is_feed_dict_op) {
       continue;
-
+    }
     // just convert fp32 -> bf16, fp16 in micro batch 0
     // though most of it is actually put in runtime_skipped already
     // but some of it (rotary sin or cos, mask...) is not in runtime_skipped
@@ -1355,7 +1386,6 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       // HT_RUNTIME_ERROR << "unreachable";
       continue;
     }
-
     // in pipeline(shared_weight_p2p not empty), shared weight p2p ops only execute in micro batch 0
     if (!shared_weight_p2p.empty() && shared_weight_p2p.find(op->id()) != shared_weight_p2p.end() && micro_batch_id > 0) {
       // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": skip execute shared weight p2p: " << op;
@@ -1421,8 +1451,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       else if (_run_level == RunLevel::UPDATE) {
         // 如果有累积梯度那么此时要加上
         // 这里的逻辑和上面的正好反过来
-        if (_accumulate_grad_buffer_map.find(op->input(1)->dtype()) != _accumulate_grad_buffer_map.end() &&
-            _accumulate_grad_buffer_map[op->input(1)->dtype()]->IsAllocated()) {
+        if (_accumulate_grad_buffer_map[op->input(1)->dtype()]->IsAllocated()) {
           auto& grad = op->input(1);
           auto& grad_op = grad->producer();
           auto it = _reversed_grad_grad_map.find(grad->id());
@@ -1432,8 +1461,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
           HT_ASSERT(tensor2data.find(grad->id()) != tensor2data.end());
           auto current_grad_data = tensor2data[grad->id()];
           auto accumulate_grad_data = NDArray(grad->meta(), 
-                                              _accumulate_grad_buffer_map[op->input(1)->dtype()]->AsStorage(), 
-                                              _accumulate_grad_buffer_map[op->input(1)->dtype()]->GetElementOffest(grad_in_buffer));
+                                              _accumulate_grad_buffer_map[grad->dtype()]->AsStorage(), 
+                                              _accumulate_grad_buffer_map[grad->dtype()]->GetElementOffest(grad_in_buffer));
           auto grad_stream = Stream(grad_op->placement(),
                                     grad_op->instantiation_ctx().stream_index);
           if (_grad_scale != 1) {
@@ -1489,13 +1518,22 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     }
 
     // variable can be directly fetched, needn't save in tensor2data
+    // AMP data transfer can be directly fetched, needn't save in tensor2data
     NDArrayList input_vals;
     input_vals.reserve(op->num_inputs());
     for (const auto& input : op->inputs()) {
       NDArray input_val;
-      if (is_variable_op(input->producer())) {
-        input_val = GetVariableDataInner(input);     
-      } else {
+      if (_preserved_data.find(input->id()) != _preserved_data.end()) {
+        input_val = _preserved_data[input->id()];
+        // 如果有一些_preserved_data是switch过来的
+        // 那么我们这里进行实际的sync
+        auto event_it = _switch_param_events.find(input->id());
+        if (event_it != _switch_param_events.end()) {
+          event_it->second->Block(op->instantiation_ctx().stream());
+        }     
+      } 
+      // 其余情况从tensor2data中fetch
+      else {
         auto it = tensor2data.find(input->id());
         HT_ASSERT(it != tensor2data.end() && it->second.is_defined())
           << "Failed to execute the \"" << op->type() << "\" operation "
@@ -1517,7 +1555,6 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
             || micro_batch_id > 0)) {
           tensor2data.erase(input->id());
         }
-
       }
       input_vals.push_back(input_val);
     }
@@ -1529,35 +1566,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       ncclGroupStart();
     }
 
-    NDArrayList output_vals;
-    if(is_slice_op(op) || is_group_op(op) || op->type() == "TransposeOp" || is_inplace_op(op) ||
-      (op->type() == "ArrayReshapeOp" ||  op->type() == "ArrayReshapeGradientOp") && op->inputs().at(0)->is_contiguous() 
-      || is_optimizer_update_op(op) || is_data_transfer_op(op) || is_all_reduce_op(op) || is_reduce_scatter_op(op)){
-      output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
-    }
-    else{
-      for (size_t i = 0; i < op->num_outputs(); i++) {
-        auto Id = op->output(i)->id();
-        HT_ASSERT(memory_plan.count({micro_batch_id, Id}));
-        auto shape = GetTensorShape(op->output(i));
-        // if(op->instantiation_ctx().placement.index() == 7) std::cout << shape << std::endl;
-        auto space = memory_plan[{micro_batch_id, Id}];
-        // if(op->instantiation_ctx().placement.index() == 7) std::cout << space.first << " " << space.second << std::endl;
-        auto output_memory = NDArray::slice(memory, {space.first}, {space.second});
-        // if(op->instantiation_ctx().placement.index() == 7) std::cout << "over" << std::endl;
-        auto& local_device = hetu::impl::comm::GetLocalDevice();
-        HT_ASSERT(op->instantiation_ctx().placement == local_device);
-        // if(op->instantiation_ctx().placement.index() == 7) std::cout << "start alloc" << std::endl;
-        auto output_i = NDArray(
-          NDArrayMeta().set_shape(shape)
-                      .set_dtype(op->output(i)->dtype())
-                      .set_device(op->instantiation_ctx().placement), 
-          output_memory->storage(), output_memory->storage_offset() * DataType2Size(kInt64) / DataType2Size(op->output(i)->dtype()));
-        output_vals.push_back(output_i);
-
-      }
-      op->Compute(input_vals, output_vals, runtime_ctx, micro_batch_id);
-    }
+    // **** 调用op计算 ****
+    NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
 
     // auto output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
     if (is_shared_weight_or_grad_p2p(op)) {
@@ -1585,7 +1595,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         if (grad_accumulation_finished) {
           tensor2data[output->id()] = grad_accumulation[output->id()];
         }
-      } else if(fetch_indices.find(output->id()) != fetch_indices.end()){
+      } else if (fetch_indices.find(output->id()) != fetch_indices.end()) {
         tensor2data[output->id()] = NDArray::zeros_like(output_vals[i]);
         NDArray::add(tensor2data[output->id()], output_vals[i], op->instantiation_ctx().stream_index, tensor2data[output->id()]);    
       } else if (tensor2degrees[output->id()] > 0) {
@@ -2156,8 +2166,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // ********************** Run Level Check Point **********************
 
   HT_LOG_DEBUG << local_device << ": 1. pipeline init[begin]";
-  // pipeline compute
-  // runtimectx for m micro batches
+  // runtime ctx for m micro batches
   std::vector<RuntimeContext> runtime_ctx_list(num_micro_batches, 
     RuntimeContext(_execute_plan.local_topo.size(), _shape_plan_pool.at(_active_shape_plan)));
   // tensor data for m micro batches
@@ -2171,12 +2180,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   for (const auto& kv : feed_dict) {
     if (!kv.second.is_defined()) continue; // only feed placeholder_op in local device group
     auto micro_batches = NDArray::split(kv.second, num_micro_batches);
-    // 加一个pipeline split的tensor状态
     for (int i = 0; i < num_micro_batches; i++) {
       // tensor2data_list[i][kv.first] = NDArray::squeeze(micro_batches[i], 0);
       tensor2data_list[i][kv.first] = micro_batches[i];
     }
   }
+
   std::unordered_map<TensorId, size_t> fetch_indices;
   for (size_t i = 0; i < fetches.size(); i++)
     fetch_indices[fetches.at(i)->id()] = i;
@@ -2190,25 +2199,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   for (int i = 0; i < num_micro_batches; i++) {
     tensor2degrees_list[i] = tensor2degrees;
   }
-  HT_LOG_DEBUG << local_device << ": 1. pipeline init[end]";
 
-  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[begin]";
-  // alloc origin/transfer params and pre-compute, alloc grads
-  AllocRuntimeBuffer(runtime_ctx_list);
-  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[end]";
-
-  // ********************** Run Level Check Point **********************
-  if (_run_level == RunLevel::ALLOC) {
-    SynchronizeAllStreams();
-    // memory debug use
-    // hetu::impl::comm::EmptyNCCLCache();
-    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
-      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run ALLOC end");
-    return {};
-  }
-  // ********************** Run Level Check Point **********************
-
-  HT_LOG_DEBUG << local_device << ": 3. compute[begin]";
   if (_pipeline_map.find(local_device) == _pipeline_map.end()) {
     HT_LOG_WARN << local_device << ": can't figure out which pipeline the local device belongs to"
       << ", so we just return";
@@ -2235,11 +2226,58 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // HT_LOG_DEBUG << local_device << ": stages = " << _stages << "; stage id = " << stage_id;
   auto& tasks = schedule[stage_id];
   // NOTE: revert memory plan for now and may be used in the future
-
-  size_t memory_size = 0;
-  auto memory_plan = GenerateMemoryPlan(memory_size, tasks, tensor2degrees_list, fetch_indices, feed_dict);
-  auto memory_space = NDArray::empty({memory_size}, local_device, kInt64, kComputingStream);
   HT_LOG_DEBUG << local_device << ": stage id = " << stage_id;
+  HT_LOG_DEBUG << local_device << ": 1. pipeline init[end]";
+
+  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[begin]";
+  // alloc origin/transfer params and pre-compute, alloc grads
+  AllocRuntimeBuffer(runtime_ctx_list);
+  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[end]";
+
+  // ********************** Run Level Check Point **********************
+  if (_run_level == RunLevel::ALLOC) {
+    SynchronizeAllStreams();
+    // memory debug use
+    // hetu::impl::comm::EmptyNCCLCache();
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run ALLOC end");
+    return {};
+  }
+  // ********************** Run Level Check Point **********************
+
+  /*
+  HT_LOG_DEBUG << local_device << ": 2-plus. memory plan[begin]";
+  // TODO: cache memory plan
+  size_t memory_size = 0;
+  auto memory_plan = GenerateMemoryPlan(memory_size, tasks, tensor2degrees_list, feed_dict);
+  auto memory_space = NDArray::empty({memory_size}, local_device, kInt64, kComputingStream);
+  HT_LOG_DEBUG << "Memory plan is generated and allocated";
+  if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+    GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " alloc memory according to plan end");
+  for (auto& op_ref : _execute_plan.local_topo) {
+    auto& op = op_ref.get();
+    for (auto& tensor : op->outputs()) {
+      for (size_t micro_batch_id = 0; micro_batch_id < num_micro_batches; micro_batch_id++) {
+        auto it = memory_plan.find({micro_batch_id, tensor->id()});
+        if (it == memory_plan.end()) {
+          break;
+        }
+        auto begin_pos = it->second.first;
+        auto block_size = it->second.second;
+        auto raw_memory = NDArray::slice(memory_space, {begin_pos}, {block_size});
+        auto memory = NDArray(NDArrayMeta()
+                              .set_shape(GetTensorShape(tensor))
+                              .set_dtype(tensor->dtype())
+                              .set_device(tensor->producer()->instantiation_ctx().placement), 
+                              raw_memory->storage(), raw_memory->storage_offset() * DataType2Size(kInt64) / DataType2Size(tensor->dtype()));
+        runtime_ctx_list.at(micro_batch_id).add_runtime_allocation(tensor->id(), memory);
+      }
+    }
+  }
+  HT_LOG_DEBUG << local_device << ": 2-plus. memory plan[end]";
+  */
+  
+  HT_LOG_DEBUG << local_device << ": 3. compute[begin]";
   bool is_continuous_p2p = false;
   for (size_t i = 0; i < tasks.size(); i++) {
     auto& task = tasks[i];
@@ -2283,12 +2321,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (is_forward) {
       ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx,
                   tensor2data, tensor2degrees, grad_accumulation, false, 
-                  feed_dict, fetches, fetch_indices, is_continuous_p2p, memory_space, memory_plan);
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
     } else {
       bool grad_accumulation_finished = (i == tasks.size() - 1);
       ComputeFunc(micro_batch_id, _execute_plan.local_bw_topo, runtime_ctx, 
                   tensor2data, tensor2degrees, grad_accumulation, grad_accumulation_finished, 
-                  feed_dict, fetches, fetch_indices, is_continuous_p2p, memory_space, memory_plan);
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
     }
     // micro batch i: profile memory end
     if (_memory_profile_level == MEMORY_PROFILE_LEVEL::MICRO_BATCH) {
@@ -2330,9 +2368,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       // 然后将当前的current_grad_buffer加到当前的accumulate_grad_buffer后清空即可
       for (auto it = _current_grad_buffer_map.begin();
            it != _current_grad_buffer_map.end(); ++it) {
-        if (!it->second->IsEmpty() &&
-            _accumulate_grad_buffer_map.find(it->first) != _accumulate_grad_buffer_map.end() &&
-            !_accumulate_grad_buffer_map[it->first]->IsEmpty()) {
+        if (!it->second->IsEmpty() && !_accumulate_grad_buffer_map[it->first]->IsEmpty()) {
           DataType dtype = it->first;
           if (!_accumulate_grad_buffer_map[dtype]->IsAllocated()) {
             // 说明是第一次算grad，之前没有累积grad
@@ -2386,7 +2422,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
        it != _transfer_param_buffer_map.end(); ++it) {
     if (!it->second->IsEmpty()) {
       HT_ASSERT(it->second->IsAllocated()) 
-      << "transfer param buffer should be allocated";
+        << "transfer param buffer should be allocated";
       transfer_not_empty = true;
     }
   }
@@ -2464,7 +2500,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // 因此把transfer param buffer和current grad buffer的清理放在需要热切换的时候
   if (_run_level == RunLevel::UPDATE) {
     for (auto it = _accumulate_grad_buffer_map.begin();
-           it != _accumulate_grad_buffer_map.end(); ++it) {
+         it != _accumulate_grad_buffer_map.end(); ++it) {
       if (it->second->IsAllocated()) {
         // 已经对fetches sync过了
         // 这里直接free即可

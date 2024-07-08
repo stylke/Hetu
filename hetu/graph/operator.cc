@@ -401,7 +401,7 @@ NDArray OpInterface::DoAllocOutput(Operator& op, const NDArrayList& inputs,
   // 静态图
   // 有runtime_ctx
   // output_shapes全部提前设置好
-  // 部分output的allocation也会设置好
+  // 在使用memory plan后大部分output的allocation也会设置好
   else {
     // question: will tensor shape != NDArray shape happen in any situation
     auto output_id = op->output(idx)->id();
@@ -413,7 +413,6 @@ NDArray OpInterface::DoAllocOutput(Operator& op, const NDArrayList& inputs,
       return runtime_ctx.get_runtime_allocation(output_id);
     } 
     // alloc on-the-fly
-    // 后续要改成memory plan
     else {
       return NDArray::empty(output_shape,
                             op->instantiation_ctx().placement,

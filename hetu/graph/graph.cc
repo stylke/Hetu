@@ -100,13 +100,16 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
   Graph::InitOnce();
   Operator& op = graph.MakeOpInner(std::move(body), std::move(inputs),
                                    std::move(op_meta));
-  if (graph.get_cur_subgraph_name() != "") {
-    graph.AddOpToSubGraph(op, graph.get_cur_subgraph_name());
-  }
-  if (is_optimizer_update_op(op)) {
-    std::shared_ptr<SubGraph> subgraph = graph.GetSubGraph(op->input(0)->producer());
-    if (subgraph != nullptr) {
-      graph.AddOpToSubGraph(op, subgraph->global_graph_name(), SubGraphType::UPDATE);
+  // workaround: 暂时不把pipeline插入的comm op放到任何subgraph中
+  if (op->name().find("pipeline_layer") == std::string::npos) { 
+    if (graph.get_cur_subgraph_name() != "") {
+      graph.AddOpToSubGraph(op, graph.get_cur_subgraph_name());
+    }
+    if (is_optimizer_update_op(op)) {
+      std::shared_ptr<SubGraph> subgraph = graph.GetSubGraph(op->input(0)->producer());
+      if (subgraph != nullptr) {
+        graph.AddOpToSubGraph(op, subgraph->global_graph_name(), SubGraphType::UPDATE);
+      }
     }
   }
   return op;

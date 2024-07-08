@@ -162,8 +162,7 @@ class ExecutableGraph : public Graph {
                                     Tensor2NDArrayMap& tensor2data, Tensor2IntMap& tensor2degrees, 
                                     Tensor2NDArrayMap& grad_accumulation, bool grad_accumulation_finished,
                                     const FeedDict& feed_dict, const TensorList& fetches,
-                                    const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p,
-                                    NDArray& memory, MemoryPlan& memory_plan);
+                                    const std::unordered_map<TensorId, size_t>& fetch_indices, bool& is_continuous_p2p);
 
   void SubstituteCommOp(const OpRefList& topo_order);
 
@@ -215,7 +214,6 @@ class ExecutableGraph : public Graph {
   
   MemoryPlan GenerateMemoryPlan(size_t& memory_size, std::vector<std::pair<bool, size_t>> tasks,
                                 std::vector<Tensor2IntMap> tensor2degrees_list,
-                                const std::unordered_map<TensorId, size_t>& fetch_indices,
                                 const FeedDict& feed_dict);
 
   // plan相关

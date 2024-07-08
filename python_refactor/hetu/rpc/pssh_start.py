@@ -2,8 +2,12 @@ import os
 import argparse
 import yaml
 from pssh.clients import ParallelSSHClient
-from heturpc_server import server_launch
+from pssh.utils import enable_host_logger
+# from heturpc_polling_server import server_launch
+from heturpc_async_server import server_launch
 import multiprocessing.spawn
+
+# enable_host_logger()
 
 def read_yaml(file_path):
     with open(file_path, "r") as f:
@@ -26,24 +30,36 @@ def pssh(args):
             for i in range(initial_workers):
                 hostnames.append(addr)
     print("HostNames:", hostnames)
-    client = ParallelSSHClient(hostnames)
     train_command = args.command
-    print(train_command)
     cwd = os.getcwd()
-    print(cwd)
-    cmd1 = "cd " + cwd
-    conda_env = os.environ["CONDA_PREFIX"]
-    # output0 =client.run_command(cmd1)
-    cmd2 = cmd1 + " && source activate && conda activate " + conda_env \
-                + " && source ../../../hetu_refactor.exp && " + train_command
-    print(cmd2)
-    output = client.run_command(cmd2)
-    for host_out in output:
-        for line in host_out.stderr:
-            print(line)
-        for line in host_out.stdout:
-            print(line)
-        exit_code = host_out.exit_code
+    cmd = "cd " + cwd 
+    cmd += f" && source {args.envs} && " + train_command 
+    print(cmd)
+    cmd_list = []
+    for i in range(len(hostnames)):
+        # 请注意log编号目前并不等于rank编号
+        # log编号是进程编号
+        # 但不能保证分配到同样编号的rank
+        cmd_list.append(cmd + f" 2>&1 | tee {args.log_path}" + "/log_" + f"{i}" + ".txt")
+    clients = []
+    outputs = []
+    for hostname, cmd in zip(hostnames, cmd_list):
+        client = ParallelSSHClient([hostname])
+        output = client.run_command(cmd)
+        clients.append(client)
+        outputs.append(output)
+    for client in clients:
+        client.join() 
+    for output in outputs:
+        for host_out in output:
+            for line in host_out.stderr:
+                print("[stderr]:", line)
+            '''
+            for line in host_out.stdout:
+                print(line)
+            exit_code = host_out.exit_code
+            '''
+        
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -59,10 +75,15 @@ if __name__ == '__main__':
         "--ngpus", type=int, default=8, help="num gpus"
     )
     parser.add_argument(
-        "--hosts", type=str, help="server's port"
+        "--hosts", type=str, help="multi-node hosts"
+    )
+    parser.add_argument(
+        "--envs", type=str, help="multi-node shared envs"
+    )
+    parser.add_argument(
+        "--log_path", type=str, help="log folder path"
     )
     args = parser.parse_args()
-    # os.system("python ../../../python_refactor/hetu/rpc/heturpc_server.py --port " + args.server_port + "&")
     p = multiprocessing.Process(target=server_launch, args=(args.server_port,))
     p.start()
     pssh(args)

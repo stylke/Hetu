@@ -1,9 +1,7 @@
 #pragma once
 
 #include <Python.h>
-#include <mpi.h>
 #include "hetu/impl/communication/comm_group.h"
-#include "hetu/impl/communication/mpi_comm_group.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
 #include "hetu/core/stream.h"
 #include "hetu/_binding/utils/pybind_common.h"

@@ -19,21 +19,11 @@ import ptvsd
 local_device = None
 all_devices = None
 
-def distributed_init(use_two_node: bool = False, tencent: bool = False):
-    if tencent:
-        hostname = socket.gethostname()
-        os.environ['HETU_LOCAL_HOSTNAME'] = os.environ['LOCAL_HOSTNAME']
-    elif use_two_node:
-        hostname = socket.gethostname()
-        if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
-        elif hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-2'
-        else:
-            raise ValueError(f"Unknown hostname: {hostname}")
-
+def distributed_init(args):
     global local_device, all_devices
-    ht.init_comm_group(8)
+    hostname = socket.gethostname()
+    os.environ['HETU_LOCAL_HOSTNAME'] = hostname
+    ht.init_comm_group(args.ngpus, server_address=args.server_addr+":"+args.server_port)
     local_device = ht.local_device()
     all_devices = ht.global_device_group()
     if local_device.index == 0:
@@ -51,8 +41,6 @@ def read_ds_parallel_config(args):
     ds_parallel_configs = []
     for config_path in config_paths:
         ds_parallel_config = json.load(open(config_path, 'r'))
-        # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp2_pp2.json', 'r'))
-        # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp4.json', 'r'))
         zero = ds_parallel_config['zero']
         # assign zero to all variables
         config_queue = Queue()
@@ -369,10 +357,6 @@ def pretrain(args):
                 }
             # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
             start_time = time.time()
-            if args.run_straggler_experiment and step == 2:
-                os.environ['HETU_STRAGGLER_LOG_FILE'] = args.straggler_file
-            if args.run_memory_experiment and step == 0:
-                os.environ['HETU_MEMORY_LOG_FILE'] = args.memory_file
             try:
                 results = train_op.graph.run(loss_mean, 
                                                 [loss_mean, train_op], 
@@ -383,13 +367,10 @@ def pretrain(args):
                                                 grad_scale = 1.0)
             except RuntimeError as e:
                 print(e)
+                with open("exception.txt", 'w') as file:
+                    print("device index:", local_device.index, file=file)
+                    print(e, file=file)
                 os.killpg(0, signal.SIGTERM)
-            if (args.run_straggler_experiment and step == 2) or (args.run_memory_experiment and step == 0):
-                if 'HETU_MEMORY_LOG_FILE' in os.environ:
-                    del os.environ['HETU_MEMORY_LOG_FILE'] 
-                if 'HETU_STRAGGLER_LOG_FILE' in os.environ:
-                    del os.environ['HETU_STRAGGLER_LOG_FILE'] 
-                return consumed_samples
             end_time = time.time()
             consumed_samples += global_batch_size
             # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run end, consumed_samples = {consumed_samples}")
@@ -406,8 +387,6 @@ def pretrain(args):
     # 单轮样例 
     def test_single_round(): 
         strategy_id = 0
-        if args.hetero_pipeline:
-            strategy_id = 1
         consumed_samples = 0 # should be reset when run next epoch
         consumed_samples = run_plan(epoch = 0,
                                     steps = args.steps,
@@ -421,8 +400,6 @@ def pretrain(args):
     # 多轮样例
     def test_multi_round():
         strategy_id = 0
-        if args.hetero_pipeline:
-            strategy_id = 1
         for epoch in range(args.epochs):
             consumed_samples = 0 # should be reset when run next epoch
             consumed_samples = run_plan(epoch = epoch,
@@ -438,15 +415,6 @@ def pretrain(args):
     # 热切换
     def test_switch(): 
         consumed_samples = 0 # should be reset when run next epoch
-        args.hetero_data = True
-        consumed_samples = run_plan(epoch = 0,
-                                    steps = args.steps,
-                                    consumed_samples = consumed_samples, 
-                                    global_batch_size = args.global_batch_size, 
-                                    micro_batch_size = args.micro_batch_size, 
-                                    seq_len = args.seq_length, 
-                                    strategy_id = 1, 
-                                    run_level = ht.run_level("update"))
         args.hetero_data = False
         consumed_samples = run_plan(epoch = 0,
                                     steps = args.steps,
@@ -456,6 +424,15 @@ def pretrain(args):
                                     seq_len = args.seq_length, 
                                     strategy_id = 0, 
                                     run_level = ht.run_level("update"))
+        args.hetero_data = True
+        consumed_samples = run_plan(epoch = 0,
+                                    steps = args.steps,
+                                    consumed_samples = consumed_samples, 
+                                    global_batch_size = args.global_batch_size, 
+                                    micro_batch_size = args.micro_batch_size, 
+                                    seq_len = args.seq_length, 
+                                    strategy_id = 1, 
+                                    run_level = ht.run_level("update"))
     
     if args.switch:
         test_switch()
@@ -464,6 +441,7 @@ def pretrain(args):
         # test_multi_round()
 
 if __name__ == '__main__':
+    print("Run hetu training")
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
@@ -490,15 +468,6 @@ if __name__ == '__main__':
         "--unused_rank", type=str, default="[]", help='unused rank.'
     )
     parser.add_argument(
-        "--run_straggler_experiment", action="store_true", help="run heterogenous pipeline experiment."
-    )
-    parser.add_argument(
-        "--run_memory_experiment", action="store_true", help="run memory experiment."
-    )
-    parser.add_argument(
-        "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
-    )
-    parser.add_argument(
         "--switch", type=int, default=0, help='switch.'
     )
     parser.add_argument(
@@ -506,12 +475,6 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--ds_parallel_config", default="ds_parallel_config/dp2_tp2_pp2.json", type=str, help="ds parallel config json file"
-    )
-    parser.add_argument(
-        "--straggler_file", default="", type=str, help="straggler experiment result file"
-    )
-    parser.add_argument(
-        "--memory_file", default="", type=str, help="memory experiment result file"
     )
     parser.add_argument(
         "--num_strategy", type=int, default=1, help="multi ds num"
@@ -584,11 +547,18 @@ if __name__ == '__main__':
         "--bf16", action="store_true", help="Use bfloat16."
     )
     parser.add_argument(
-        "--tencent", action="store_true", help="Use tencent env."
+        "--server_addr", type=str, default='127.0.0.1', help="server's address"
     )
+    parser.add_argument(
+        "--server_port", type=str, default='23457', help="server's port"
+    ) 
+    parser.add_argument(
+        "--ngpus", type=int, default=8, help="num of gpus"
+    ) 
     args = parser.parse_args()
     pynvml.nvmlInit()
-    distributed_init(args.use_two_node, args.tencent)
+    print("Hetu distributed init")
+    distributed_init(args)
     with ht.graph("define_and_run", num_strategy=args.num_strategy):
         if args.bf16:
             precision = "ht.bfloat16"

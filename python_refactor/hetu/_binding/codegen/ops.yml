@@ -628,18 +628,6 @@
   op: CommOp
   args: Tensor input, DistributedStatesHierarchy dst_ds_hierarchy  
 
-- name: comm
-  op: CommOp
-  args: Tensor input, DistributedStates dst_ds, std::string mode
-
-- name: comm
-  op: CommOp
-  args: Tensor input, DistributedStates dst_ds, DeviceGroup dst_group
-
-- name: comm
-  op: CommOp
-  args: Tensor input, DistributedStates dst_ds  
-
 #######################################################
 # Others
 #######################################################
