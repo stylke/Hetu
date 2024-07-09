@@ -367,7 +367,7 @@ def pretrain(args):
                                                 grad_scale = 1.0)
             except RuntimeError as e:
                 print(e)
-                with open("exception.txt", 'w') as file:
+                with open("./logs/exception.txt", 'w') as file:
                     print("device index:", local_device.index, file=file)
                     print(e, file=file)
                 os.killpg(0, signal.SIGTERM)

@@ -1,11 +1,11 @@
 hosts:
   -
-    addr: 172.24.158.111 # worker-0
+    addr: 172.24.183.105 # master-0
     initial_workers: 8
     min_workers: 2
     max_workers: 8
   -
-    addr: 172.24.183.105 # master-0
+    addr: 172.24.158.111 # worker-0
     initial_workers: 8
     min_workers: 2
     max_workers: 8
