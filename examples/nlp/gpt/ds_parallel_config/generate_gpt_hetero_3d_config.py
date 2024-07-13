@@ -3,7 +3,7 @@ import json
 import os
 import ast
 
-def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, accumulate_hetero_stages, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, accumulate_hetero_stages, recompute_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
     if dp == 1:
         zero = False
     
@@ -78,6 +78,7 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, a
         blocks_json = ds_parallel_config['gpt']['blocks']
         blocks_json[f'blocks{block_id}'] = {
             'range': [block_id,],
+            'recompute': True if block_id in recompute_layers else False,
             'layernorm1': {
                 'split': {},
                 'dup': [tp_union_list[block_id][i] * dp for i in range(dp)],
@@ -155,6 +156,9 @@ if __name__ == '__main__':
         '--zero', action='store_true', help='use zero or not.'
     )
     parser.add_argument(
+        '--recompute_layers', type=str, default="[]", help='layers to recompute'
+    )
+    parser.add_argument(
         '--file_name', type=str, default=""
     )
     args = parser.parse_args()
@@ -184,7 +188,9 @@ if __name__ == '__main__':
             rank_to_device_mapping[idx] = idx
     else:
         rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
-    ds_parallel_config = generate_gpt_3d_config(rank_to_device_mapping, ast.literal_eval(args.unused_rank), hetero_layers, accumulate_hetero_stages, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+        
+    ds_parallel_config = generate_gpt_3d_config(rank_to_device_mapping, ast.literal_eval(args.unused_rank), hetero_layers, accumulate_hetero_stages, ast.literal_eval(args.recompute_layers), num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    
     save_folder = './ds_parallel_config/hetero'
     if args.file_name == "":
         file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'

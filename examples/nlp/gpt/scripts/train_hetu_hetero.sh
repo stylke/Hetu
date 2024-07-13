@@ -6,13 +6,13 @@ SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
 # FFN_HIDDEN_SIZE=${7:-11008}
-FFN_HIDDEN_SIZE=${7:-1376}
+FFN_HIDDEN_SIZE=${7:-2752}
 SERVER_ADDR=${8:-"172.24.183.105"} # master-0
 SERVER_PORT=${9:-"23456"}
 HOST_FILE_PATH=${10:-"./scripts/host.yaml"}
 ENV_FILE_PATH=${11:-"./scripts/env.sh"}
 
-CASE=3
+CASE=2
 if [[ ${CASE} -eq 1 ]]; then
 	# 单机同构
 	# setting 1
@@ -51,6 +51,7 @@ elif [[ ${CASE} -eq 4 ]]; then
 	PP=4
 	HETERO=true
 	LAYERS_NUM_LIST="1,10,11,10,8,8,8,8"
+	STAGES_NUM_LIST="[4,4]"
 	MICRO_BATCH_NUM_LIST="[28,36]"
 	UNUSED_RANK="[1]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:14,7:15,8:8,9:9,10:10,11:11,12:12,13:13,14:6,15:7}"

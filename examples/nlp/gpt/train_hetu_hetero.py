@@ -175,13 +175,13 @@ def pretrain(args):
     config.mbs_times_dp_symbol = ht.IntSymbol(mbs_times_dp)
     config.seq_len_symbol = input_ids.symbolic_shape[1]
 
-    # print(f'{local_device}: build model begin...')
+    print(f'{local_device}: build model begin...')
     loss = model(input_ids=input_ids,
                  # position_ids=position_ids,
                  # attention_mask=attention_mask,
                  # token_type_ids=token_type_ids,
                  labels=masked_lm_labels)
-    # print(f'{local_device}: build model end...')
+    print(f'{local_device}: build model end...')
 
     loss_mean = loss
 
@@ -380,8 +380,6 @@ def pretrain(args):
                 if label_device_group != None:
                     loss_out = results[0].numpy(force=True).mean()
                     print(f"{local_device}: [Epoch {epoch}] (step {step}, consumed_samples = {consumed_samples}): loss = {loss_out:.3f}, time = {end_time - start_time:.4f}")
-            if args.switch and step == 0:
-                return consumed_samples
         return consumed_samples
     
     # 单轮样例 
@@ -411,34 +409,9 @@ def pretrain(args):
                                         strategy_id = strategy_id, 
                                         run_level = ht.run_level("update"))
             print(f"epoch {epoch} finished, consumed_samples = {consumed_samples}")
-            
-    # 热切换
-    def test_switch(): 
-        consumed_samples = 0 # should be reset when run next epoch
-        args.hetero_data = False
-        consumed_samples = run_plan(epoch = 0,
-                                    steps = args.steps,
-                                    consumed_samples = consumed_samples, 
-                                    global_batch_size = args.global_batch_size, 
-                                    micro_batch_size = args.micro_batch_size, 
-                                    seq_len = args.seq_length, 
-                                    strategy_id = 0, 
-                                    run_level = ht.run_level("update"))
-        args.hetero_data = True
-        consumed_samples = run_plan(epoch = 0,
-                                    steps = args.steps,
-                                    consumed_samples = consumed_samples, 
-                                    global_batch_size = args.global_batch_size, 
-                                    micro_batch_size = args.micro_batch_size, 
-                                    seq_len = args.seq_length, 
-                                    strategy_id = 1, 
-                                    run_level = ht.run_level("update"))
     
-    if args.switch:
-        test_switch()
-    else:
-        test_single_round()
-        # test_multi_round()
+    test_single_round()
+    # test_multi_round()
 
 if __name__ == '__main__':
     print("Run hetu training")
@@ -466,9 +439,6 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--unused_rank", type=str, default="[]", help='unused rank.'
-    )
-    parser.add_argument(
-        "--switch", type=int, default=0, help='switch.'
     )
     parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'
@@ -559,6 +529,7 @@ if __name__ == '__main__':
     pynvml.nvmlInit()
     print("Hetu distributed init")
     distributed_init(args)
+    print("Local device world rank is", all_devices.get_index(local_device))
     with ht.graph("define_and_run", num_strategy=args.num_strategy):
         if args.bf16:
             precision = "ht.bfloat16"

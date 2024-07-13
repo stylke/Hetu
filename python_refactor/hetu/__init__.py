@@ -12,6 +12,7 @@ from hetu import utils as utils
 import builtins # bool is resovled as hetu.bool
 
 cur_graph_contexts = []
+cur_recompute_contexts = []
 
 class _OpContext(object):
     def __init__(self, 
@@ -187,15 +188,33 @@ def merge_strategy(target_graph="default", num_strategy=-1):
     return _MergeStrategyContext(target_graph=target_graph, num_strategy=num_strategy)
 
 class _RecomputeContext(object):
+    def __init__(self, multi_recompute):
+        self.multi_recompute = multi_recompute
+        
     def __enter__(self):
-        _hetu_core._internal_context.push_recompute_ctx()
+        cur_recompute_contexts.append(self)
+        # 可能会出现recompute module嵌套
+        # 只要某一层的recompute是true那么最终就要recompute
+        cur_multi_recompute = []
+        multi_len = len(self.multi_recompute)
+        for recompute_context in cur_recompute_contexts:
+            assert multi_len == len(recompute_context.multi_recompute), "all multi len should be equal"
+        for i in range(multi_len):
+            cur_recompute = False
+            for recompute_context in cur_recompute_contexts:
+                if recompute_context.multi_recompute[i] == True:
+                    cur_recompute = True
+                    break
+            cur_multi_recompute.append(cur_recompute)
+        _hetu_core._internal_context.push_recompute_ctx(cur_multi_recompute)
         return self
 
     def __exit__(self, e_type, e_value, e_trace):
         _hetu_core._internal_context.pop_recompute_ctx()
+        cur_recompute_contexts.remove(self)
 
-def recompute():
-    return _RecomputeContext()
+def recompute(multi_recompute):
+    return _RecomputeContext(multi_recompute)
 
 class _CPUOffloadContext(object):
     def __enter__(self):
@@ -219,7 +238,6 @@ class _ProfileContex(object):
 
     def __exit__(self, e_type, e_value, e_trace):
         _hetu_core._internal_context.pop_profile_ctx()
-
 
 def profiler(enabled : bool = True, use_cpu : bool = False, use_cuda : bool = False,
              record_shapes : bool = False , profile_memory : bool = False):

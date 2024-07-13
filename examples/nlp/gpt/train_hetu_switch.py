@@ -19,21 +19,11 @@ import ptvsd
 local_device = None
 all_devices = None
 
-def distributed_init(use_two_node: bool = False, tencent: bool = False):
-    if tencent:
-        hostname = socket.gethostname()
-        os.environ['HETU_LOCAL_HOSTNAME'] = os.environ['LOCAL_HOSTNAME']
-    elif use_two_node:
-        hostname = socket.gethostname()
-        if hostname == 'job-4e4cb411-1139-4f15-b221-5a30f1760a2b-master-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
-        elif hostname == 'job-4e4cb411-1139-4f15-b221-5a30f1760a2b-worker-0':
-            os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-2'
-        else:
-            raise ValueError(f"Unknown hostname: {hostname}")
-
+def distributed_init(args):
     global local_device, all_devices
-    ht.init_comm_group(8)
+    hostname = socket.gethostname()
+    os.environ['HETU_LOCAL_HOSTNAME'] = hostname
+    ht.init_comm_group(args.ngpus, server_address=args.server_addr+":"+args.server_port)
     local_device = ht.local_device()
     all_devices = ht.global_device_group()
     if local_device.index == 0:
@@ -51,8 +41,6 @@ def read_ds_parallel_config(args):
     ds_parallel_configs = []
     for config_path in config_paths:
         ds_parallel_config = json.load(open(config_path, 'r'))
-        # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp2_pp2.json', 'r'))
-        # ds_parallel_config = json.load(open('./ds_parallel_config/dp2_tp4.json', 'r'))
         zero = ds_parallel_config['zero']
         # assign zero to all variables
         config_queue = Queue()
@@ -179,8 +167,8 @@ def pretrain(args):
         
     # todo: assign multi dg_hierarchy, and instantiate only one placement_group
     input_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='input_ids')
-    position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='position_ids')
-    token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='token_type_ids')
+    # position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='position_ids')
+    # token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='token_type_ids')
     # attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='attention_mask')
     masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=label_ds_hierarchy, device_group_hierarchy=label_dg_hierarchy, name='masked_lm_labels')
 
@@ -189,9 +177,9 @@ def pretrain(args):
 
     # print(f'{local_device}: build model begin...')
     loss = model(input_ids=input_ids,
-                 position_ids=position_ids,
+                 # position_ids=position_ids,
                  # attention_mask=attention_mask,
-                 token_type_ids=token_type_ids,
+                 # token_type_ids=token_type_ids,
                  labels=masked_lm_labels)
     # print(f'{local_device}: build model end...')
 
@@ -290,10 +278,7 @@ def pretrain(args):
                     hetero_pipeline_num = i
                     break
             # assert hetero_pipeline_num != -1, "can't figure out pipeline num"
-            # 说明是没有被用到的靠后的rank
-            # 随便给一个pipeline编号即可
-            if hetero_pipeline_num == -1:
-                hetero_pipeline_num = 0
+            # -1说明是没有被用到的靠后的rank
             # hetero_pipeline_num = curr_rank_id % (dp_size * args.hetero_stage_gpus) // args.hetero_stage_gpus
             # adjust micro_batch_size
             '''
@@ -312,6 +297,7 @@ def pretrain(args):
             else:
                 num_micro_batches = normal_micro_batches
             '''
+            # hetero_pipeline_num是-1的话data随便取都无关紧要
             num_micro_batches = ast.literal_eval(args.micro_batch_num_list)[hetero_pipeline_num]
             # re-assign
             gbs_per_dp = micro_batch_size * num_micro_batches
@@ -323,7 +309,7 @@ def pretrain(args):
 
         # if dp_size * mbs changes, then should use the new dataloader
         # start_time = time.time()
-        if dp_rank != -1:
+        if dp_rank != -1 and hetero_pipeline_num != -1:
             train_iter = train_data_iterator(train_dataset, consumed_samples, micro_batch_size, dp_rank, dp_size) # need cache?
         else:
             train_iter = None
@@ -349,25 +335,21 @@ def pretrain(args):
 
                 feed_dict = {
                     input_ids: tokens.astype(np.int64),
-                    position_ids: _position_ids.astype(np.int64), 
-                    token_type_ids: _token_type_ids.astype(np.int64),
+                    # position_ids: _position_ids.astype(np.int64), 
+                    # token_type_ids: _token_type_ids.astype(np.int64),
                     # attention_mask: _attention_mask.astype(np.int64),
                     masked_lm_labels: labels.astype(np.int64),
                 }
             else: # fake data; feed_dict={} will cause segment fault?
                 feed_dict = {
                     input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
-                    position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64), 
-                    token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    # position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64), 
+                    # token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
                     # attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
                     masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
                 }
             # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
             start_time = time.time()
-            if args.run_straggler_experiment and step == 5:
-                os.environ['HETU_STRAGGLER_LOG_FILE'] = args.straggler_file
-            if args.run_memory_experiment and step == 0:
-                os.environ['HETU_MEMORY_LOG_FILE'] = args.memory_file
             try:
                 results = train_op.graph.run(loss_mean, 
                                                 [loss_mean, train_op], 
@@ -378,13 +360,10 @@ def pretrain(args):
                                                 grad_scale = 1.0)
             except RuntimeError as e:
                 print(e)
+                with open("./logs/exception.txt", 'w') as file:
+                    print("device index:", local_device.index, file=file)
+                    print(e, file=file)
                 os.killpg(0, signal.SIGTERM)
-            if (args.run_straggler_experiment and step == 5) or (args.run_memory_experiment and step == 0):
-                if 'HETU_MEMORY_LOG_FILE' in os.environ:
-                    del os.environ['HETU_MEMORY_LOG_FILE'] 
-                if 'HETU_STRAGGLER_LOG_FILE' in os.environ:
-                    del os.environ['HETU_STRAGGLER_LOG_FILE'] 
-                return consumed_samples
             end_time = time.time()
             consumed_samples += global_batch_size
             # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run end, consumed_samples = {consumed_samples}")
@@ -394,46 +373,15 @@ def pretrain(args):
                 if label_device_group != None:
                     loss_out = results[0].numpy(force=True).mean()
                     print(f"{local_device}: [Epoch {epoch}] (step {step}, consumed_samples = {consumed_samples}): loss = {loss_out:.3f}, time = {end_time - start_time:.4f}")
-            if args.switch and step == 0:
+                # switch只跑一个iter
                 return consumed_samples
         return consumed_samples
-    
-    # 单轮样例 
-    def test_single_round(): 
-        strategy_id = 0
-        if args.hetero_pipeline:
-            strategy_id = 1
-        consumed_samples = 0 # should be reset when run next epoch
-        consumed_samples = run_plan(epoch = 0,
-                                    steps = args.steps,
-                                    consumed_samples = consumed_samples, 
-                                    global_batch_size = args.global_batch_size, 
-                                    micro_batch_size = args.micro_batch_size, 
-                                    seq_len = args.seq_length, 
-                                    strategy_id = strategy_id, 
-                                    run_level = ht.run_level("update"))
-    
-    # 多轮样例
-    def test_multi_round():
-        strategy_id = 0
-        if args.hetero_pipeline:
-            strategy_id = 1
-        for epoch in range(args.epochs):
-            consumed_samples = 0 # should be reset when run next epoch
-            consumed_samples = run_plan(epoch = epoch,
-                                        steps = args.steps,
-                                        consumed_samples = consumed_samples, 
-                                        global_batch_size = args.global_batch_size, 
-                                        micro_batch_size = args.micro_batch_size, 
-                                        seq_len = args.seq_length, 
-                                        strategy_id = strategy_id, 
-                                        run_level = ht.run_level("update"))
-            print(f"epoch {epoch} finished, consumed_samples = {consumed_samples}")
             
     # 热切换
     def test_switch(): 
         consumed_samples = 0 # should be reset when run next epoch
         args.hetero_data = True
+        args.hetero_stage_gpus = args.before_hetero_stage_gpus
         args.hetero_stages = args.before_hetero_stages
         args.micro_batch_num_list = args.before_micro_batch_num_list
         args.rank_to_device_mapping = args.before_rank_to_device_mapping
@@ -446,6 +394,7 @@ def pretrain(args):
                                     seq_len = args.seq_length, 
                                     strategy_id = 0, 
                                     run_level = ht.run_level("update"))
+        args.hetero_stage_gpus = args.after_hetero_stage_gpus
         args.hetero_stages = args.after_hetero_stages
         args.micro_batch_num_list = args.after_micro_batch_num_list
         args.rank_to_device_mapping = args.after_rank_to_device_mapping
@@ -459,22 +408,22 @@ def pretrain(args):
                                     strategy_id = 1, 
                                     run_level = ht.run_level("update"))
     
-    if args.switch:
-        test_switch()
-    else:
-        test_single_round()
-        # test_multi_round()
+    test_switch()
 
 if __name__ == '__main__':
+    print("Run hetu single switch training")
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
-    )
     parser.add_argument(
         "--hetero_pipeline", action="store_true", help="use heterogenous pipeline."
     )
     parser.add_argument(
         "--hetero_data", action="store_true", help="use heterogenous data for each heterogenous pipeline."
+    )
+    parser.add_argument(
+        '--before_hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
+    )
+    parser.add_argument(
+        '--after_hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
     )
     parser.add_argument(
         '--before_hetero_stages', type=str, default="[]", help='hetero stages.'
@@ -501,28 +450,10 @@ if __name__ == '__main__':
         "--after_unused_rank", type=str, help='unused rank.'
     )
     parser.add_argument(
-        "--run_straggler_experiment", action="store_true", help="run heterogenous pipeline experiment."
-    )
-    parser.add_argument(
-        "--run_memory_experiment", action="store_true", help="run memory experiment."
-    )
-    parser.add_argument(
-        "--use_two_node", action="store_true", help="use 2x8 gpus to run script."
-    )
-    parser.add_argument(
-        "--switch", type=int, default=0, help='switch.'
-    )
-    parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'
     )
     parser.add_argument(
         "--ds_parallel_config", default="ds_parallel_config/dp2_tp2_pp2.json", type=str, help="ds parallel config json file"
-    )
-    parser.add_argument(
-        "--straggler_file", default="", type=str, help="straggler experiment result file"
-    )
-    parser.add_argument(
-        "--memory_file", default="", type=str, help="memory experiment result file"
     )
     parser.add_argument(
         "--num_strategy", type=int, default=1, help="multi ds num"
@@ -595,11 +526,18 @@ if __name__ == '__main__':
         "--bf16", action="store_true", help="Use bfloat16."
     )
     parser.add_argument(
-        "--tencent", action="store_true", help="Use tencent env."
+        "--server_addr", type=str, default='127.0.0.1', help="server's address"
     )
+    parser.add_argument(
+        "--server_port", type=str, default='23457', help="server's port"
+    ) 
+    parser.add_argument(
+        "--ngpus", type=int, default=8, help="num of gpus"
+    ) 
     args = parser.parse_args()
     pynvml.nvmlInit()
-    distributed_init(args.use_two_node, args.tencent)
+    print("Hetu distributed init")
+    distributed_init(args)
     with ht.graph("define_and_run", num_strategy=args.num_strategy):
         if args.bf16:
             precision = "ht.bfloat16"

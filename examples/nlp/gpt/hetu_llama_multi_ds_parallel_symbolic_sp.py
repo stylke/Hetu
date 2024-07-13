@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from queue import Queue
 
-from hetu.nn.modules.parallel_multi_ds import parallel_data_provider, parallel_multi_data_provider
+from hetu.nn.modules.parallel_multi_ds import parallel_data_provider, parallel_multi_data_provider, get_multi_ds_parallel_config
 
 def generate_cos_sin(seqlen, rotary_dim, dtype):
     assert rotary_dim % 2 == 0
@@ -11,25 +11,6 @@ def generate_cos_sin(seqlen, rotary_dim, dtype):
     cos = np.cos(angle).astype(dtype)
     sin = np.sin(angle).astype(dtype)
     return cos, sin
-
-def get_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
-    multi_ds_parallel_config = []
-    for ds_parallel_config in ds_parallel_configs:
-        config_queue = Queue()
-        config_queue.put(ds_parallel_config)
-        while (not config_queue.empty()):
-            config = config_queue.get()
-            if module_name in config:
-                multi_ds_parallel_config.append(config[module_name])
-                break
-            else:
-                for value in config.values():
-                    if type(value) == dict:
-                        if "range" in value and (_range < value["range"][0] or _range > value["range"][-1]):
-                            continue
-                        config_queue.put(value)
-    assert len(multi_ds_parallel_config) == len(ds_parallel_configs), 'ds_parallel_configs parse error!'
-    return multi_ds_parallel_config
   
 # self-attn
 class LLamaAttention(ht.nn.Module):
@@ -37,6 +18,7 @@ class LLamaAttention(ht.nn.Module):
         super().__init__()
 
         self.config = config
+        self.ds_parallel_configs = ds_parallel_configs
         self.use_flash_attn = config.use_flash_attn
         # self.add_bias = True
         self.add_bias = False
@@ -196,6 +178,7 @@ class ParallelMLP(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs, layer_idx, name='mlp'):
         super(ParallelMLP, self).__init__()
         self.config = config
+        self.ds_parallel_configs = ds_parallel_configs
         # self.add_bias = True
         self.add_bias = False
         
@@ -244,6 +227,7 @@ class LLamaMLP(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs, layer_idx, name='mlp'):
         super(LLamaMLP, self).__init__()
         self.config = config
+        self.ds_parallel_configs = ds_parallel_configs
         self.parallel_mlp = ParallelMLP(config, ds_parallel_configs, layer_idx, name)
 
     def forward(self, hidden_states):
@@ -265,14 +249,15 @@ class LLamaBlock(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs, layer_idx):
         super().__init__()
         self.config = config
+        self.ds_parallel_configs = ds_parallel_configs
         self.layer_idx = layer_idx
         hidden_size = config.hidden_size
 
         # sequence parallel: layernorm前做reduce-scatter(这一部分由row prallel的reduce-scatter完成); layernorm后做allgather
         self.rmsnorm_1 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm1', layer_idx), sp=True, name=f'rmsnorm1_block{layer_idx}')
-        self.attn = LLamaAttention(config, ds_parallel_configs, layer_idx=layer_idx, name=f'attn_block{layer_idx}')
+        self.attn = LLamaAttention(config, get_multi_ds_parallel_config(ds_parallel_configs, "attn", layer_idx), layer_idx=layer_idx, name=f'attn_block{layer_idx}')
         self.rmsnorm_2 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm2', layer_idx), sp=True, name=f'rmsnorm2_block{layer_idx}')
-        self.mlp = LLamaMLP(config, ds_parallel_configs, layer_idx=layer_idx, name=f'mlp_block{layer_idx}')
+        self.mlp = LLamaMLP(config, get_multi_ds_parallel_config(ds_parallel_configs, "mlp", layer_idx), layer_idx=layer_idx, name=f'mlp_block{layer_idx}')
 
     def forward(
         self,
@@ -306,6 +291,7 @@ class LLamaModel(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs):
         super(LLamaModel, self).__init__()
         self.config = config
+        self.ds_parallel_configs = ds_parallel_configs
         self.dtype = ht.float32
 
         self.embed_dim = config.hidden_size
@@ -315,7 +301,7 @@ class LLamaModel(ht.nn.Module):
         self.drop = ht.nn.Dropout(config.embd_pdrop)
         blocks = []
         for i in range(config.num_hidden_layers):
-            blocks.append(LLamaBlock(config, ds_parallel_configs, layer_idx=i))
+            blocks.append(LLamaBlock(config, get_multi_ds_parallel_config(ds_parallel_configs, f'block{i}'), layer_idx=i))
             # for _, block_config in ds_parallel_config['blocks'].items():
             #     if i >= block_config['range'][0] and i <= block_config['range'][1]:
             #         blocks.append(GPTBlock(config, block_config, layer_idx=i))
@@ -395,7 +381,9 @@ class LLamaLMHeadModel(ht.nn.Module):
 
     def __init__(self, config, ds_parallel_configs):
         super(LLamaLMHeadModel, self).__init__()
-        self.transformer = LLamaModel(config, ds_parallel_configs)
+        self.config = config
+        self.ds_parallel_configs = ds_parallel_configs
+        self.transformer = LLamaModel(config, get_multi_ds_parallel_config(ds_parallel_configs, 'gpt'))
         self.lm_head = ht.nn.HtMultiColumnParallelLinear(
             config.n_embd,
             config.vocab_size,

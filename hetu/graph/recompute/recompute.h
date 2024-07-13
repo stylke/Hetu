@@ -10,16 +10,19 @@ namespace graph {
 
 class Recompute {
  public:
-  static bool enabled() {
-    return _enabled;
+  static const std::vector<bool>& multi_recompute() {
+    return _multi_recompute;
   }
 
-  static void set_recompute_enabled() {
-    _enabled = true;
+  static void set_recompute_enabled(const std::vector<bool>& multi_recompute) {
+    _multi_recompute = multi_recompute;
   }
 
   static void reset_recompute_enabled() {
-    _enabled = false;
+    auto multi_len = _multi_recompute.size();
+    for (size_t i = 0; i < multi_len; i++) {
+      _multi_recompute[i] = false;
+    }
   }
 
   static void InsertRecomputedOps(const OpRefList& topo_order);
@@ -36,7 +39,7 @@ class Recompute {
                                          const TensorList& first_mapped_grad_inputs, Op2OpMap& origin_to_recomputed_map,
                                          ExecutableGraph& cur_exec_graph);
 
-  static bool _enabled;
+  static std::vector<bool> _multi_recompute;
 };
 
 } // namespace graph

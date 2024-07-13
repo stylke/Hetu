@@ -19,9 +19,9 @@ all_devices = None
 def distributed_init(use_two_node: bool = False):
     if use_two_node:
         hostname = socket.gethostname()
-        if hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0':
+        if hostname == 'job-4e4cb411-1139-4f15-b221-5a30f1760a2b-master-0':
             os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-1'
-        elif hostname == 'job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0':
+        elif hostname == 'job-4e4cb411-1139-4f15-b221-5a30f1760a2b-worker-0':
             os.environ['HETU_LOCAL_HOSTNAME'] = 'A100-2'
         else:
             raise ValueError(f"Unknown hostname: {hostname}")

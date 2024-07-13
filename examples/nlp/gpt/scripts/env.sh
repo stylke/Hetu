@@ -15,11 +15,11 @@ export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=20
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 export NCCL_NVLS_ENABLE=0
-export NCCL_DEBUG=WARN
+export NCCL_DEBUG=VERSION
 export NCCL_SOCKET_IFNAME=en,eth,em,bond0
 export GLOO_SOCKET_IFNAME=en,eth,em,bond0
 export NCCL_IB_DISABLE=0
-export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_5,mlx5_6,mlx5_7,mlx5_8,mlx5_11
+export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_7
 export NCCL_NET_GDR_READ=1
 export NCCL_IB_GID_INDEX=3
 export NCCL_NET_GDR_LEVEL=2

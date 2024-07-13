@@ -4,7 +4,7 @@
 namespace hetu {
 namespace graph {
 
-bool Recompute::_enabled = false;
+std::vector<bool> Recompute::_multi_recompute = {};
 
 // helper functions
 namespace {
@@ -19,8 +19,7 @@ namespace {
   }
 } // namespace
 
-// TODO: may have bugs after merging hetero
-// need to review the code
+// 尽量确保op在local device上有之后再调用
 bool Recompute::IsNoRecomputedOp(Operator& op) {
   if (is_comm_op(op)) {
     auto& comm_op = op;
@@ -55,9 +54,8 @@ void Recompute::GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool ge
       auto& op_inputs = op_ref.get()->inputs();
       for (auto& input : op_inputs) {
         auto& op = input->producer();
-        if (op->op_meta().is_recompute && !IsNoRecomputedOp(op) &&
-            op->placement_group_union().has(local_device) &&
-            recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
+        if (op->placement_group_union().has(local_device) && op->op_meta().multi_is_recompute.at(op->graph().CUR_STRATEGY_ID)
+            && !IsNoRecomputedOp(op) && recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
           to_visit.push(std::ref(op));
         }
       }
@@ -69,9 +67,8 @@ void Recompute::GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool ge
         auto& out_consumers = output->consumers();
         for (auto& op_ref : out_consumers) {
           auto& op = op_ref.get();
-          if (op->op_meta().is_recompute && !IsNoRecomputedOp(op) &&
-              op->placement_group_union().has(local_device) &&
-              recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
+          if (op->placement_group_union().has(local_device) && op->op_meta().multi_is_recompute.at(op->graph().CUR_STRATEGY_ID) 
+              && !IsNoRecomputedOp(op) && recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
             to_visit.push(op_ref);
           }
         }
@@ -122,17 +119,19 @@ Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2O
       auto out_idx = get_out_idx_of(input_op, input);
       HT_ASSERT(out_idx != -1)
         << "Cannot find input " << input << " in the outputs of recomputed op " << input_op;
-      auto& new_input = DuplicateRecomputedOp(input_op, filtered_recomputed_ops,
+      auto& new_input_op = DuplicateRecomputedOp(input_op, filtered_recomputed_ops,
                                               first_mapped_grad_inputs, origin_to_recomputed_map, cur_exec_graph);
-      new_inputs.push_back(new_input->output(out_idx));
+      new_inputs.push_back(new_input_op->output(out_idx));
     }
   }
   auto new_op_meta = OpMeta().set(origin_op->op_meta())
-                             .set_is_recompute(false)
+                             .set_is_recompute({false})
                              .set_name(origin_op->name() + "_recompute")
                              .set_is_deduce_states(false)
                              .set_origin_op_id(origin_op->id());
   // add the execution dependency
+  // 即对于输入op全都不在recompute subgraph中的
+  // 需要添加一条之前grad op到该op的依赖边
   if (!has_recomputed_input) {
     new_op_meta.set_extra_deps(first_mapped_grad_inputs);
   }
@@ -164,8 +163,9 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
   OpRefList candidate_recomputed_ops;
   for (auto& op_ref : topo_order) {
     auto& op = op_ref.get();
-    if (!op->op_meta().is_recompute || IsNoRecomputedOp(op) ||
-        !op->placement_group_union().has(local_device)) {
+    if (!op->placement_group_union().has(local_device) 
+        || !op->op_meta().multi_is_recompute.at(op->graph().CUR_STRATEGY_ID)
+        || IsNoRecomputedOp(op)) {
       continue;
     }
     // No recomputation if there is no grad op in the outputs
@@ -194,8 +194,8 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
     visited_ops.insert(max_recompute_subgraph_ids.begin(), max_recompute_subgraph_ids.end());
     // Filter recomputed ops that directly output to grad ops.
     HT_LOG_DEBUG << "[Recompute] filter recomputed ops that directly output to grad ops begin...";
-    Op2OpRefMap filtered_recomputed_ops;
-    Op2OpRefMap mapped_grad_ops;
+    Op2OpRefMap filtered_recomputed_ops; // 记录recompute subgraph中下一个算子是反向传播算子的算子
+    Op2OpRefMap mapped_grad_ops; // 记录recompute subgraph的那些邻接的反向传播算子（不在recompute subgraph中）
     for (auto& op_opref : max_recompute_subgraph) {
       bool inserted = false;
       auto op_id = op_opref.first;
@@ -203,6 +203,7 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
       auto& op_outputs = op_ref.get()->outputs();
       for (auto& output : op_outputs) {
         auto& out_consumers = output->consumers();
+        // 只要有一个consumer是grad就要算在里头
         for (auto& out_op_ref : out_consumers) {
           if (!out_op_ref.get()->is_bw_op()) {
             continue;
@@ -225,8 +226,8 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
     // Find inputs of the first mapped grad op in the topo order, these
     // inputs will be the execution dependencies of the recompute subgraph.
     HT_LOG_DEBUG << "[Recompute] find inputs of the first mapped grad op in the topo order begin...";
-    TensorList first_mapped_grad_inputs;
-    std::unordered_map<OpId, bool> has_filter_op_map;
+    TensorList first_mapped_grad_inputs; // 记录在进行recompute之前的邻接的grad op
+    std::unordered_map<OpId, bool> has_filter_op_map; // 记录依赖于recompute subgraph的recompute op和grad op
     auto filter_fn = [&filtered_recomputed_ops, &mapped_grad_ops](const Operator& op) -> bool {
       return filtered_recomputed_ops.find(op->id()) != filtered_recomputed_ops.end() ||
              mapped_grad_ops.find(op->id()) != mapped_grad_ops.end();
@@ -241,6 +242,7 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
         if (!op->is_bw_op()) {
           continue;
         }
+        // 目前获得了一个反向传播图中某一个依赖recompute subgraph（即位于mapped_grad_ops）的grad op的前一个input grad op
         // As execution dependency, `input` should not rely on
         // any recomputed op that will be executed later and
         // any mapped grad op that relies on the recompute subgraph.
@@ -258,7 +260,7 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
     Op2OpMap origin_to_recomputed_map;
     // recompute pass is executed after instantiating exec graph,
     // so we ensure current graph is an exec graph
-    auto& cur_exec_graph = reinterpret_cast<ExecutableGraph&>(Graph::GetGraph(Graph::cur_graph_ctx()));
+    auto& cur_exec_graph = dynamic_cast<ExecutableGraph&>(Graph::GetGraph(Graph::cur_graph_ctx()));
     for (auto& op_opref : mapped_grad_ops) {
       auto& mapped_grad_op = op_opref.second.get();
       auto num_inputs = mapped_grad_op->num_inputs();

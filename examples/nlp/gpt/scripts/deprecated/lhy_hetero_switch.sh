@@ -90,7 +90,7 @@ export NCCL_IB_GID_INDEX=3
 
 if [ "${SWITCH}" = 1 ]; then
     mpirun --allow-run-as-root -np 16 \
-        -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
+        -H job-4e4cb411-1139-4f15-b221-5a30f1760a2b-master-0:8,job-4e4cb411-1139-4f15-b221-5a30f1760a2b-worker-0:8 \
         -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
         -x NCCL_DEBUG -x NCCL_IB_HCA -x NCCL_IB_GID_INDEX \
         -x HETU_MAX_SPLIT_SIZE_MB -x HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB \
@@ -134,7 +134,7 @@ if [ "${SWITCH}" = 1 ]; then
         --after_unused_rank $AFTER_UNUSED_RANK
 else
     mpirun --allow-run-as-root -np 16 \
-        -H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
+        -H job-4e4cb411-1139-4f15-b221-5a30f1760a2b-master-0:8,job-4e4cb411-1139-4f15-b221-5a30f1760a2b-worker-0:8 \
         -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
         -x NCCL_DEBUG -x NCCL_IB_HCA -x NCCL_IB_GID_INDEX \
         -x HETU_MAX_SPLIT_SIZE_MB -x HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB \

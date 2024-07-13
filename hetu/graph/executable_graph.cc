@@ -1362,11 +1362,11 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
   auto local_device = hetu::impl::comm::GetLocalDevice();
 
-  // HT_LOG_INFO << "ComputeFunc topo: " << topo;
+  // HT_LOG_INFO << local_device << ": computeFunc topo is" << topo;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
 
-    // HT_LOG_INFO << "ComputeFunc op " << op;
+    // HT_LOG_INFO << local_device << ": computeFunc op " << op;
     HT_ASSERT(!is_placeholder_op(op) && !is_variable_op(op))
       << "Placeholder & Variable ops should not appear in ComputeFunc!";
     bool is_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
@@ -1388,7 +1388,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     }
     // in pipeline(shared_weight_p2p not empty), shared weight p2p ops only execute in micro batch 0
     if (!shared_weight_p2p.empty() && shared_weight_p2p.find(op->id()) != shared_weight_p2p.end() && micro_batch_id > 0) {
-      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": skip execute shared weight p2p: " << op;
+      // HT_LOG_INFO << local_device << ": skip execute shared weight p2p: " << op;
       continue;
     }
     // shared weight grad p2p ops are included in accumulated_ops, only execute in last micro batch
@@ -1491,7 +1491,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       }
     }
 
-    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op << " start...";
+    // HT_LOG_INFO << local_device << ": op execute " << op << " start...";
     // batched p2p send & recv
     // 跨hetero stage的batchedIsendIrecv已经包了一层ncclGroupStart和ncclGroupEnd
     // 但参考nccl文档可知最终取决于最外层的ncclGroupStart和ncclGroupEnd
@@ -1503,18 +1503,18 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         event->Record(Stream(op->placement(), kComputingStream));
         event->Block(Stream(op->placement(), kP2PStream));
         _p2p_events.emplace_back(std::move(event));
-        ncclGroupStart();
-        // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group start";
+        NCCL_CALL(ncclGroupStart());
+        // HT_LOG_INFO << local_device << ": nccl group start";
       }
     } else if (is_continuous_p2p) {
       is_continuous_p2p = false;
-      ncclGroupEnd();
+      NCCL_CALL(ncclGroupEnd());
       auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
       event->Record(Stream(op->placement(), kP2PStream));
       event->Block(Stream(op->placement(), kComputingStream));
       // event->Block(Stream(op->placement(), kOptimizerStream));
       _p2p_events.emplace_back(std::move(event));
-      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": nccl group end";
+      // HT_LOG_INFO << local_device << ": nccl group end";
     }
 
     // variable can be directly fetched, needn't save in tensor2data
@@ -1562,8 +1562,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       auto event = std::make_unique<hetu::impl::CUDAEvent>(op->placement());
       event->Record(Stream(op->placement(), kComputingStream));
       event->Block(Stream(op->placement(), kP2PStream));
-      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group start";
-      ncclGroupStart();
+      // HT_LOG_INFO << local_device << ": wte nccl group start";
+      NCCL_CALL(ncclGroupStart());
     }
 
     // **** 调用op计算 ****
@@ -1571,15 +1571,15 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
     // auto output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
     if (is_shared_weight_or_grad_p2p(op)) {
-      // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": wte nccl group end";
-      ncclGroupEnd();
+      // HT_LOG_INFO << local_device << ": wte nccl group end";
+      NCCL_CALL(ncclGroupEnd());
     }
     // HT_LOG_INFO << "micro batch[" << micro_batch_id << "] Running op " << op << " (type: " << op->type() << ") mid...";    
     // Note: The usage should be marked inside kernels, 
     // but we still mark here in case we forget to do so in some kernels. 
     NDArray::MarkUsedBy(input_vals, op->instantiation_ctx().stream());
     NDArray::MarkUsedBy(output_vals, op->instantiation_ctx().stream());
-    // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op;
+    // HT_LOG_INFO << local_device << ": op execute " << op;
     for (size_t i = 0; i < op->num_outputs(); i++) {
       const auto& output = op->output(i);
       if (accumulated_tensor.find(output->id()) != accumulated_tensor.end()) {
@@ -1603,7 +1603,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       } 
     }
   // op->instantiation_ctx().stream().Sync();
-  // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": op execute " << op << " end...";
+  // HT_LOG_INFO << local_device << ": op execute " << op << " end...";
   }
 }
 
@@ -1688,17 +1688,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       Instantiate(fetches, local_device);
       HT_LOG_DEBUG << local_device << ": [Execution Plan] Instantiate end...";
 
-      // init topo contains comm_op
-      OpRefList topo_before_substitute_comm = Graph::TopoSort(fetches, num_ops(), is_op_computed);
-      HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo_before_substitute_comm;
-
-      // substitute comm_op
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op begin...";
-      Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
-      SubstituteCommOp(topo_before_substitute_comm);
-      Graph::pop_graph_ctx();
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op end...";
-
       // init instantiated topo
       OpRefList topo_before_recompute = Graph::TopoSort(fetches, num_ops(), is_op_computed);
       HT_LOG_DEBUG << local_device << ": global topo before recompute pass: " << topo_before_recompute;
@@ -1715,11 +1704,23 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       HT_LOG_DEBUG << local_device << ": global topo before activation offload pass: " << topo_before_activation_offload;
 
       // insert activation offload ops
+      // TODO: need code review, offload may have bugs
       HT_LOG_DEBUG << local_device << ": [Execution Plan] activation offload pass begin...";
       Graph::push_graph_ctx(id());
       ActivationCPUOffload::OffloadToCPU(topo_before_activation_offload);
       Graph::pop_graph_ctx();
       HT_LOG_DEBUG << local_device << ": [Execution Plan] activation offload pass end...";
+
+      // init topo contains comm_op
+      OpRefList topo_before_substitute_comm = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo_before_substitute_comm;
+
+      // substitute comm_op
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op begin...";
+      Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
+      SubstituteCommOp(topo_before_substitute_comm);
+      Graph::pop_graph_ctx();
+      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op end...";
 
       // update topo with substituted comm_ops
       OpRefList topo_before_contiguous = Graph::TopoSort(fetches, num_ops(), is_op_computed);

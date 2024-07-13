@@ -22,7 +22,8 @@ Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
                                          TensorList inputs, OpMeta op_meta) {
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
   // for optimization passes
-  op_meta = op_meta.set_is_recompute(Recompute::enabled())
+  // TODO: support multi-strategies offload
+  op_meta = op_meta.set_is_recompute(Recompute::multi_recompute())
                    .set_is_cpu_offload(ActivationCPUOffload::enabled());
   auto& op = MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
   if (op->op_meta().need_dequantization()) {
@@ -531,7 +532,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   // 初始化buffer
   for (int i = 0; i < static_cast<int>(DataType::NUM_DATA_TYPES); i++) {
     DataType dtype = static_cast<DataType>(i);
-    origin_param_and_optimizer_buckets_map[dtype] = std::make_shared<ParamBuckets>("origin_param_and_optimizer_buffets_" + 
+    origin_param_and_optimizer_buckets_map[dtype] = std::make_shared<ParamBuckets>("origin_param_and_optimizer_buckets_" + 
                                                                                    DataType2Str(dtype));
     transfer_param_buffer_map[dtype] = std::make_shared<ParamBuffer>("transfer_param_buffer_" + DataType2Str(dtype));
     current_grad_buffer_map[dtype] = std::make_shared<ParamBuffer>("current_grad_buffer_" + DataType2Str(dtype));

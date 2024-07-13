@@ -54,6 +54,7 @@ class Module(object):
         self._output_recompute = False
         self._cpu_offload = False
         self.module_name = None
+        self.ds_parallel_configs = None
         self.global_name = ""
         with hetu.graph("define_and_run"):
             super().__setattr__("_parameters", OrderedDict())
@@ -312,15 +313,29 @@ class Module(object):
                 for key, param in _parameters.items():
                     # print(self.module_name, " ", key, " ", type(param), param)
                     hetu.add_to_subgraph(param)
-                
+            
+            # multi-strategies of recompute  
+            if self._recompute:
+                mutli_recompute = [True for i in range(1 if self.ds_parallel_configs is None else len(self.ds_parallel_configs))]  
+            elif self.ds_parallel_configs is not None:
+                mutli_recompute = [False if 'recompute' not in self.ds_parallel_configs[i] else self.ds_parallel_configs[i]['recompute'] for i in range(len(self.ds_parallel_configs))]  
+            else:
+                mutli_recompute = [False]  
+                print(f"Warning: {self.__class__.__name__} does not have ds_parallel_configs attribute, undefined behavior may happen")
                 
             # for name, child in self.named_children():
             #     print("Sub:", name, ",", child)
-            stack.enter_context(hetu.recompute() if self._recompute else nullcontext())
+            print(self.module_name, self.ds_parallel_configs)
+            stack.enter_context(hetu.recompute(mutli_recompute))
+            # TODO: support multi-strategies 
             stack.enter_context(hetu.cpu_offload() if self._cpu_offload else nullcontext())
+
+            # 实际forward
             value = self.forward(*input, **kwargs)
-            if self._recompute and not self._output_recompute and isinstance(value, hetu.Tensor):
-                value._make_recompute(False)
+            
+            # 默认output不做recompute
+            if isinstance(value, hetu.Tensor):
+                value._make_recompute([False for i in range(1 if self.ds_parallel_configs is None else len(self.ds_parallel_configs))])
             return value
     
     def forward(self, *input: Any, **kwargs: Any) -> Any:

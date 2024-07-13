@@ -20,7 +20,7 @@ PYTHONPATH="${HETU_HOME}/python_refactor:${HETU_HOME}/build/lib:${PYTHONPATH}"
 export NCCL_DEBUG=VERSION
 export HETU_INTERNAL_LOG_LEVEL=WARN
 mpirun --allow-run-as-root -np 16 \
--H job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-master-0:8,job-26147b12-dd3f-4226-88a1-df64c6ec8ffa-worker-0:8 \
+-H job-4e4cb411-1139-4f15-b221-5a30f1760a2b-master-0:8,job-4e4cb411-1139-4f15-b221-5a30f1760a2b-worker-0:8 \
 -x PATH -x LD_LIBRARY_PATH -x PYTHONPATH \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \
 python train_hetu_gpt_ds_parallel.py \

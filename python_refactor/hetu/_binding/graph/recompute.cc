@@ -8,9 +8,19 @@
 namespace hetu {
 namespace graph {
 
-PyObject* PyPushRecomputeCtx(PyObject*) {
+PyObject* PyPushRecomputeCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
-  Recompute::set_recompute_enabled();
+  static PyArgParser parser({
+    "push_recompute_ctx(List[bool] multi_recompute)",
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    Recompute::set_recompute_enabled(parsed_args.get_bool_list(0));
+    Py_RETURN_NONE;
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
   Py_RETURN_NONE;
   HT_PY_FUNC_END
 }
@@ -24,7 +34,7 @@ PyObject* PyPopRecomputeCtx(PyObject*, PyObject* args, PyObject* kwargs) {
 
 // NOLINTNEXTLINE
 PyMethodDef PyRecomputeCtx_methods[] = { 
-  {"push_recompute_ctx", (PyCFunction) PyPushRecomputeCtx, METH_NOARGS, nullptr},
+  {"push_recompute_ctx", (PyCFunction) PyPushRecomputeCtx, METH_VARARGS | METH_KEYWORDS, nullptr},
   {"pop_recompute_ctx", (PyCFunction) PyPopRecomputeCtx, METH_NOARGS, nullptr},
   {nullptr}
 };

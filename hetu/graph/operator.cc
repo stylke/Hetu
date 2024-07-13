@@ -279,6 +279,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     // 有runtime_ctx
     // output_shapes全部提前设置好
     // 部分output的allocation也会设置好
+    // 在使用memory plan后大部分output的allocation也会设置好
     else {
       for (size_t i = 0; i < output_size; i++) {
         // question: will tensor shape != NDArray shape happen in any situation
@@ -292,7 +293,6 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
           outputs.push_back(runtime_ctx.get_runtime_allocation(output_id));
         } 
         // alloc on-the-fly
-        // 后续要改成memory plan
         else {
           // mempool debug use
           /*
@@ -350,6 +350,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     // 有runtime_ctx
     // output_shapes全部提前设置好
     // 部分output的allocation也会设置好
+    // 在使用memory plan后大部分output的allocation也会设置好
     else {
       for (size_t i = 0; i < output_size; i++) {
         // question: will tensor shape != NDArray shape happen in any situation
@@ -362,7 +363,6 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
           outputs.push_back(runtime_ctx.get_runtime_allocation(output_id));
         } 
         // alloc on-the-fly
-        // 后续要改成memory plan
         else {
           outputs.push_back(NDArray::empty(output_shape,
                             device,

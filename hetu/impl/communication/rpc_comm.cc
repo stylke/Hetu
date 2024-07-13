@@ -35,7 +35,7 @@ struct RPCCallGuard {
 static void RPC_Init_Once() {
   std::call_once(rpc_init_flag, []() {
     // init rpc
-    HT_LOG_INFO << "HTSVTR:\n" << global_server_address;
+    HT_LOG_INFO << "HTSVTR: " << global_server_address;
     // 建立当前进程上的stub
     local_client = std::make_shared<DeviceClient>(grpc::CreateChannel(global_server_address, 
                                                                       grpc::InsecureChannelCredentials()));

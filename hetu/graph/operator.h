@@ -82,16 +82,18 @@ class OpMeta {
     return *this;
   }
 
-  inline OpMeta& set_is_recompute(bool recompute) {
-    is_recompute = recompute;
+  inline OpMeta& set_is_recompute(const std::vector<bool>& multi_recompute) {
+    multi_is_recompute = multi_recompute;
     return *this;
   }
 
+  // TODO: support multi-strategies offload
   inline OpMeta& set_is_cpu_offload(bool cpu_offload) {
     is_cpu_offload = cpu_offload;
     return *this;
   }
 
+  // TODO: support multi-strategies offload
   inline OpMeta& set_is_offload(bool offload) {
     is_offload = offload;
     return *this;
@@ -139,7 +141,8 @@ class OpMeta {
   DeviceGroupHierarchy device_group_hierarchy{}; // for multi ds multi hetero-dp deduce
   TensorList extra_deps;
   OpId origin_op_id{-1}; // for recomputation only
-  bool is_recompute{false};
+  std::vector<bool> multi_is_recompute{{false}}; // for multi recomputation
+  // TODO: support multi-strategies offload
   bool is_cpu_offload{false};
   bool is_offload{false}; // for offload D2H op only
   bool is_deduce_states{true};  

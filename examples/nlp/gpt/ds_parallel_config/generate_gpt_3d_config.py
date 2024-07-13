@@ -1,8 +1,9 @@
 import argparse
 import json
 import os
+import ast
 
-def generate_gpt_3d_config(num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+def generate_gpt_3d_config(recompute_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
     if dp == 1:
         zero = False
     num_layers_per_stage = num_layers // pp
@@ -57,51 +58,53 @@ def generate_gpt_3d_config(num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=Tru
 
     for stage_id in range(pp):
         block_start_id = num_layers_per_stage * stage_id
-        block_end_id = num_layers_per_stage * (stage_id + 1) - 1
-        blocks_json = ds_parallel_config['gpt']['blocks']
-        blocks_json[f'blocks{block_start_id}-{block_end_id}'] = {
-            'range': [block_start_id, block_end_id],
-            'layernorm1': {
-                'split': {},
-                'dup': [dp * tp],
-                'device_group_union': [device_groups[stage_id]],
-                'type': 'variable'
-            },
-            'attn': {
-                'qkv': {
-                    'split': {'1': [tp]},
-                    'dup': [dp],
+        block_end_id = num_layers_per_stage * (stage_id + 1)
+        for block_id in range(block_start_id, block_end_id):
+            blocks_json = ds_parallel_config['gpt']['blocks']
+            blocks_json[f'blocks{block_id}'] = {
+                'range': [block_id,],
+                'recompute': True if block_id in recompute_layers else False,
+                'layernorm1': {
+                    'split': {},
+                    'dup': [dp * tp],
                     'device_group_union': [device_groups[stage_id]],
                     'type': 'variable'
                 },
-                'dense': {
-                    'split': {'0': [tp]},
-                    'dup': [dp],
-                    'device_group_union': [device_groups[stage_id]],
-                    'type': 'variable'
-                }
-            },
-            'layernorm2': {
-                'split': {},
-                'dup': [dp * tp],
-                'device_group_union': [device_groups[stage_id]],
-                'type': 'variable'
-            },
-            'mlp': {
-                'dense_h_to_4h': {
-                    'split': {'1': [tp]},
-                    'dup': [dp],
+                'attn': {
+                    'qkv': {
+                        'split': {'1': [tp]},
+                        'dup': [dp],
+                        'device_group_union': [device_groups[stage_id]],
+                        'type': 'variable'
+                    },
+                    'dense': {
+                        'split': {'0': [tp]},
+                        'dup': [dp],
+                        'device_group_union': [device_groups[stage_id]],
+                        'type': 'variable'
+                    }
+                },
+                'layernorm2': {
+                    'split': {},
+                    'dup': [dp * tp],
                     'device_group_union': [device_groups[stage_id]],
                     'type': 'variable'
                 },
-                'dense_4h_to_h': {
-                    'split': {'0': [tp]},
-                    'dup': [dp],
-                    'device_group_union': [device_groups[stage_id]],
-                    'type': 'variable'
+                'mlp': {
+                    'dense_h_to_4h': {
+                        'split': {'1': [tp]},
+                        'dup': [dp],
+                        'device_group_union': [device_groups[stage_id]],
+                        'type': 'variable'
+                    },
+                    'dense_4h_to_h': {
+                        'split': {'0': [tp]},
+                        'dup': [dp],
+                        'device_group_union': [device_groups[stage_id]],
+                        'type': 'variable'
+                    }
                 }
             }
-        }
     return ds_parallel_config
 
 if __name__ == '__main__':
@@ -124,15 +127,17 @@ if __name__ == '__main__':
     parser.add_argument(
         '--zero', action='store_true', help='use zero or not.'
     )
-    # parser.add_argument(
-    #     '--save_folder', type=str, default='./'
-    # )
+    parser.add_argument(
+        '--recompute_layers', type=str, default="[]", help='layers to recompute'
+    )
     args = parser.parse_args()
     num_layers = args.num_layers
         
     assert args.dp * args.tp * args.pp == args.num_gpus, \
             f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
-    ds_parallel_config = generate_gpt_3d_config(num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    
+    ds_parallel_config = generate_gpt_3d_config(ast.literal_eval(args.recompute_layers), num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    
     save_folder = './ds_parallel_config/homo'
     file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
     if not os.path.exists(save_folder):
