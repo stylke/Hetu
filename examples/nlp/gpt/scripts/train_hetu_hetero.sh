@@ -8,9 +8,10 @@ MICRO_BATCH_SIZE=${6:-4}
 # FFN_HIDDEN_SIZE=${7:-11008}
 FFN_HIDDEN_SIZE=${7:-2752}
 SERVER_ADDR=${8:-"172.24.183.105"} # master-0
+SERVER_ADDR=${8:-"127.0.0.1"} # 216
 SERVER_PORT=${9:-"23456"}
 HOST_FILE_PATH=${10:-"./scripts/host.yaml"}
-ENV_FILE_PATH=${11:-"./scripts/env.sh"}
+ENV_FILE_PATH=${11:-"./scripts/env_4090.sh"}
 
 CASE=2
 if [[ ${CASE} -eq 1 ]]; then
@@ -176,7 +177,7 @@ CMD="python3 -u train_hetu_hetero.py \
 
 fi
 
-source ./scripts/env.sh
+source ${ENV_FILE_PATH}
 if [ ${NUM_GPUS} -gt 8 ]; then
 python3 ../../../python_refactor/hetu/rpc/pssh_start.py \
 	--hosts ${HOST_FILE_PATH} \

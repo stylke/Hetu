@@ -1,7 +1,6 @@
 import hetu as ht
 import numpy as np
 import torch
-from queue import Queue
 
 from hetu.nn.modules.parallel_multi_ds import parallel_data_provider, parallel_multi_data_provider, get_multi_ds_parallel_config
 
@@ -301,7 +300,7 @@ class LLamaModel(ht.nn.Module):
         self.drop = ht.nn.Dropout(config.embd_pdrop)
         blocks = []
         for i in range(config.num_hidden_layers):
-            blocks.append(LLamaBlock(config, get_multi_ds_parallel_config(ds_parallel_configs, f'block{i}'), layer_idx=i))
+            blocks.append(LLamaBlock(config, get_multi_ds_parallel_config(ds_parallel_configs, f'blocks{i}'), layer_idx=i))
             # for _, block_config in ds_parallel_config['blocks'].items():
             #     if i >= block_config['range'][0] and i <= block_config['range'][1]:
             #         blocks.append(GPTBlock(config, block_config, layer_idx=i))

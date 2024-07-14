@@ -177,7 +177,9 @@ class DistributedStatesUnion {
     bool judgement_1 = (_hetero_dim != NULL_HETERO_DIM);
     bool judgement_2 = (_union.size() > 1);
     HT_ASSERT(!(judgement_1 ^ judgement_2))
-        << "hetero means union size is greater than 1";
+        << "hetero means union size is greater than 1"
+        << ", but found hetero dim is " << _hetero_dim
+        << " and union size is " << _union.size();
     return judgement_1;
   }
 

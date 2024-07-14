@@ -23,7 +23,7 @@ Operator& DefineAndRunGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
   // for optimization passes
   // TODO: support multi-strategies offload
-  op_meta = op_meta.set_is_recompute(Recompute::multi_recompute())
+  op_meta = op_meta.set_multi_recompute(Recompute::multi_recompute())
                    .set_is_cpu_offload(ActivationCPUOffload::enabled());
   auto& op = MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
   if (op->op_meta().need_dequantization()) {
@@ -1118,23 +1118,28 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       }
       // 2、----- mode设置 -----
       // 如果旧的exec graph没开AMP
-      // 或者是刚刚进行了update（使得transfer param是空的）
+      // 或者是刚刚进行了update
       // 那么只能切换origin param buffer
       // 2024.5.20 Update: 
       // 将optimzer和origin param放到一个buffer中
       // TODO: better compatibility with hot switch and quantization
+      bool is_amp = false;
       for (auto it = old_exec_graph->_transfer_param_buffer_map.begin(); 
            it != old_exec_graph->_transfer_param_buffer_map.end(); ++it) {
-        if (it->second->IsEmpty() 
-            || (old_exec_graph->_run_level == RunLevel::UPDATE 
-                && param_switch_level == SWITCH_LEVEL::EXEC)) {
-          if (old_exec_graph->_use_origin_param_and_optimizer_buffer
-              || old_exec_graph->_use_origin_param_and_optimizer_buckets) {
-            param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER;
-          } else {
-            HT_RUNTIME_ERROR << "deprecated";
-            param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
-          }
+        if (!it->second->IsEmpty()) {
+          is_amp = true;
+          break;
+        }
+      }
+      if ((old_exec_graph->_run_level == RunLevel::UPDATE 
+           && param_switch_level == SWITCH_LEVEL::EXEC)
+          || !is_amp) {
+        if (old_exec_graph->_use_origin_param_and_optimizer_buffer
+            || old_exec_graph->_use_origin_param_and_optimizer_buckets) {
+          param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM_AND_OPTIMIZER;
+        } else {
+          HT_RUNTIME_ERROR << "deprecated";
+          param_switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM;
         }
       }
       // 3、----- buffer释放 -----
@@ -1145,8 +1150,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       if (old_exec_graph->_run_level == RunLevel::GRAD) {
         if (old_exec_graph->_use_current_grad_buffer) {
           for (auto it = old_exec_graph->_current_grad_buffer_map.begin(); 
-             it != old_exec_graph->_current_grad_buffer_map.end(); ++it) {
-            if (it->second->IsEmpty()) {
+               it != old_exec_graph->_current_grad_buffer_map.end(); ++it) {
+            if (!it->second->IsEmpty()) {
               HT_ASSERT(it->second->IsAllocated())
                 << "old exec graph with RunLevel::UPDATE should have allocated the current grad buffer";
               it->second->Free();
@@ -1157,7 +1162,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       if (old_exec_graph->_run_level == RunLevel::UPDATE) {
         for (auto it = old_exec_graph->_transfer_param_buffer_map.begin(); 
              it != old_exec_graph->_transfer_param_buffer_map.end(); ++it) {
-          if (it->second->IsEmpty()) {
+          if (!it->second->IsEmpty()) {
             HT_ASSERT(it->second->IsAllocated())
               << "old exec graph with RunLevel::UPDATE should have allocated the transfer param buffer";
             it->second->Free();
@@ -1166,7 +1171,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         if (old_exec_graph->_use_current_grad_buffer) {
           for (auto it = old_exec_graph->_current_grad_buffer_map.begin(); 
              it != old_exec_graph->_current_grad_buffer_map.end(); ++it) {
-            if (it->second->IsEmpty()) {
+            if (!it->second->IsEmpty()) {
               HT_ASSERT(it->second->IsAllocated())
                 << "old exec graph with RunLevel::UPDATE should have allocated the current grad buffer";
               it->second->Free();
@@ -1177,7 +1182,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         // 但目前发现那样会很慢
         // 因此这里手动清空
         hetu::impl::ProfileAfterEmptyAllCUDACache(local_device);
-        hetu::impl::comm::EmptyNCCLCache();
+        // hetu::impl::comm::EmptyNCCLCache(); // TODO: this may cause "NCCL call ncclCommInitRank(&_comm, _size, _unique_id, _rank) failed: unhandled system error"
         // GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " after empty cache");
       }
       /*

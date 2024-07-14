@@ -82,9 +82,22 @@ class OpMeta {
     return *this;
   }
 
-  inline OpMeta& set_is_recompute(const std::vector<bool>& multi_recompute) {
+  inline OpMeta& set_multi_recompute(const std::vector<bool>& multi_recompute) {
     multi_is_recompute = multi_recompute;
     return *this;
+  }
+
+  bool get_recompute(size_t strategy_id) {
+    size_t multi_len = multi_is_recompute.size();
+    HT_ASSERT(multi_len > 0)
+      << name << " multi recompute is empty, something wrong";
+    if (multi_is_recompute.size() == 1) {
+      return multi_is_recompute.at(0);
+    }
+    HT_ASSERT(multi_len > strategy_id)
+      << name << " multi recompute size is wrong"
+      << ", can't fetch strategy id " << strategy_id << " within len " << multi_len;
+    return multi_is_recompute.at(strategy_id);
   }
 
   // TODO: support multi-strategies offload

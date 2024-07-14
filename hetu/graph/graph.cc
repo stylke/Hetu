@@ -356,9 +356,11 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       // 实际求导操作
       // 生成相应的gradient算子
       // workaround: share weight grad
+      HT_LOG_TRACE << "Make gradient op for " << op << " with inputs " << grad_outputs;
       if (!skip_actual_gradient_op) {
         grad_inputs = op->Gradient(grad_outputs);
       } 
+      HT_LOG_TRACE << "Gradient op outputs are " << grad_inputs;
 
       // states deduce
       // 如出现partial需要自动将其转化为dup或split
@@ -487,6 +489,9 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
               dst_ds_union.add(ds_dst);
               is_need_comm_op = true;
             } else {
+              HT_ASSERT(dst_ds_union.hetero_dim() == NULL_HETERO_DIM || dst_ds_union.hetero_dim() == grad_inputs[i]->cur_ds_union().hetero_dim())
+                << "hetero dim in the union should be consistent";
+              dst_ds_union.set_hetero_dim(grad_inputs[i]->cur_ds_union().hetero_dim());
               dst_ds_union.add(ds_grad);
             }
           }

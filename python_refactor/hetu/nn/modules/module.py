@@ -325,7 +325,7 @@ class Module(object):
                 
             # for name, child in self.named_children():
             #     print("Sub:", name, ",", child)
-            print(self.module_name, self.ds_parallel_configs)
+            # print(self.module_name, self.ds_parallel_configs)
             stack.enter_context(hetu.recompute(mutli_recompute))
             # TODO: support multi-strategies 
             stack.enter_context(hetu.cpu_offload() if self._cpu_offload else nullcontext())

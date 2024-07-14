@@ -4,7 +4,7 @@
 namespace hetu {
 namespace graph {
 
-std::vector<bool> Recompute::_multi_recompute = {};
+std::vector<bool> Recompute::_multi_recompute = {false};
 
 // helper functions
 namespace {
@@ -54,7 +54,7 @@ void Recompute::GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool ge
       auto& op_inputs = op_ref.get()->inputs();
       for (auto& input : op_inputs) {
         auto& op = input->producer();
-        if (op->placement_group_union().has(local_device) && op->op_meta().multi_is_recompute.at(op->graph().CUR_STRATEGY_ID)
+        if (op->placement_group_union().has(local_device) && op->op_meta().get_recompute(op->graph().CUR_STRATEGY_ID)
             && !IsNoRecomputedOp(op) && recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
           to_visit.push(std::ref(op));
         }
@@ -67,7 +67,7 @@ void Recompute::GetMaxRecomputeSubGraph(Op2OpRefMap& recompute_subgraph, bool ge
         auto& out_consumers = output->consumers();
         for (auto& op_ref : out_consumers) {
           auto& op = op_ref.get();
-          if (op->placement_group_union().has(local_device) && op->op_meta().multi_is_recompute.at(op->graph().CUR_STRATEGY_ID) 
+          if (op->placement_group_union().has(local_device) && op->op_meta().get_recompute(op->graph().CUR_STRATEGY_ID) 
               && !IsNoRecomputedOp(op) && recompute_subgraph.find(op->id()) == recompute_subgraph.end()) {
             to_visit.push(op_ref);
           }
@@ -125,7 +125,7 @@ Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2O
     }
   }
   auto new_op_meta = OpMeta().set(origin_op->op_meta())
-                             .set_is_recompute({false})
+                             .set_multi_recompute({false})
                              .set_name(origin_op->name() + "_recompute")
                              .set_is_deduce_states(false)
                              .set_origin_op_id(origin_op->id());
@@ -164,7 +164,7 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
   for (auto& op_ref : topo_order) {
     auto& op = op_ref.get();
     if (!op->placement_group_union().has(local_device) 
-        || !op->op_meta().multi_is_recompute.at(op->graph().CUR_STRATEGY_ID)
+        || !op->op_meta().get_recompute(op->graph().CUR_STRATEGY_ID)
         || IsNoRecomputedOp(op)) {
       continue;
     }

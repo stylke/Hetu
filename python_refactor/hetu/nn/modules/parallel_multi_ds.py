@@ -1,5 +1,6 @@
 import hetu
 import numpy as np
+from queue import Queue
 from .module import Module
 import numbers
 
@@ -123,6 +124,7 @@ def config2ds(config):
 class HtMultiParallelRMSNorm(Module):
     def __init__(self, normalized_shape, multi_ds_parallel_config, sp=False, dtype=hetu.float32, name='rmsnorm'):
         super(HtMultiParallelRMSNorm, self).__init__()
+        self.ds_parallel_configs = multi_ds_parallel_config
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
             normalized_shape = [normalized_shape]  # type: ignore[assignment]
@@ -170,6 +172,7 @@ class HtMultiParallelRMSNorm(Module):
 class HtMultiParallelLayerNorm(Module):
     def __init__(self, normalized_shape, multi_ds_parallel_config, sp=False, eps=1e-5, dtype=hetu.float32, name='ln'):
         super(HtMultiParallelLayerNorm, self).__init__()
+        self.ds_parallel_configs = multi_ds_parallel_config
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
             normalized_shape = [normalized_shape]  # type: ignore[assignment]
@@ -223,6 +226,7 @@ class HtMultiParallelEmbedding(Module):
     def __init__(self, num_embeddings, embedding_dim, multi_ds_parallel_config, 
                  init_method='xavier_normal_', dtype=hetu.float32, name='embedding'):
         super(HtMultiParallelEmbedding, self).__init__()
+        self.ds_parallel_configs = multi_ds_parallel_config
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.name = name
@@ -249,6 +253,7 @@ class HtMultiVocabParallelEmbedding(Module):
     def __init__(self, num_embeddings, embedding_dim, multi_ds_parallel_config, 
                 init_method='xavier_normal_', dtype=hetu.float32, name='vocab_embedding'):
         super(HtMultiVocabParallelEmbedding, self).__init__()
+        self.ds_parallel_configs = multi_ds_parallel_config
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.name = name
@@ -314,6 +319,7 @@ class HtMultiColumnParallelLinear(Module):
                  bias=True, gather_output=True, init_method='xavier_normal_', 
                  dtype=hetu.float32, name='colp'):
         super(HtMultiColumnParallelLinear, self).__init__()
+        self.ds_parallel_configs = multi_ds_parallel_config
         self.in_features = in_features
         self.out_features = out_features
         self.gather_output = gather_output
@@ -404,6 +410,7 @@ class HtMultiRowParallelLinear(Module):
                  init_method='xavier_normal_', 
                  dtype=hetu.float32, name='rowp'):
         super(HtMultiRowParallelLinear, self).__init__()
+        self.ds_parallel_configs = multi_ds_parallel_config
         self.in_features = in_features
         self.out_features = out_features
         self.name = name

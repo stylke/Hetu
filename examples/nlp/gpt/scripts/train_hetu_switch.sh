@@ -8,9 +8,10 @@ MICRO_BATCH_SIZE=${6:-4}
 # FFN_HIDDEN_SIZE=${7:-11008}
 FFN_HIDDEN_SIZE=${7:-1376}
 SERVER_ADDR=${8:-"172.24.183.105"} # master-0
+SERVER_ADDR=${8:-"127.0.0.1"} # 216
 SERVER_PORT=${9:-"23456"}
 HOST_FILE_PATH=${10:-"./scripts/host.yaml"}
-ENV_FILE_PATH=${11:-"./scripts/env.sh"}
+ENV_FILE_PATH=${11:-"./scripts/env_4090.sh"}
 
 # before
 NUM_GPUS=16
@@ -22,6 +23,17 @@ BEFORE_STAGES_NUM_LIST="[2,2,2,2]"
 BEFORE_MICRO_BATCH_NUM_LIST="[16,16,16,16]"
 BEFORE_UNUSED_RANK="[]"
 BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
+
+# before
+NUM_GPUS=8
+BEFORE_DP=2
+BEFORE_TP=2
+BEFORE_PP=2
+BEFORE_LAYERS_NUM_LIST="16,16,16,16"
+BEFORE_STAGES_NUM_LIST="[2,2]"
+BEFORE_MICRO_BATCH_NUM_LIST="[32,32]"
+BEFORE_UNUSED_RANK="[]"
+BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7}"
 
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--num_layers $NUM_LAYERS \
@@ -42,9 +54,21 @@ AFTER_DP=2
 AFTER_TP=2
 AFTER_PP=4
 AFTER_LAYERS_NUM_LIST="1,10,11,10,8,8,8,8"
+AFTER_STAGES_NUM_LIST="[4,4]"
 AFTER_MICRO_BATCH_NUM_LIST="[28,36]"
 AFTER_UNUSED_RANK="[1]"
 AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:14,7:15,8:8,9:9,10:10,11:11,12:12,13:13,14:6,15:7}"
+
+# after
+NUM_GPUS=8
+AFTER_DP=2
+AFTER_TP=1
+AFTER_PP=4
+AFTER_LAYERS_NUM_LIST="1,10,11,10,8,8,8,8"
+AFTER_STAGES_NUM_LIST="[4,4]"
+AFTER_MICRO_BATCH_NUM_LIST="[28,36]"
+AFTER_UNUSED_RANK="[]"
+AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7}"
 
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--num_layers $NUM_LAYERS \
@@ -58,8 +82,6 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--rank_to_device_mapping $AFTER_RANK_TO_DEVICE_MAPPING \
 	--unused_rank $AFTER_UNUSED_RANK \
 	--file_name "after.json"
-
-echo dp=${DP}, tp=${TP}, pp=${PP}, num_gpus=${NUM_GPUS} 
 
 if [[ ${NUM_LAYERS} -eq 32 && ${HIDDEN_SIZE} -eq 4096 && ${NUM_HEADS} -eq 32 ]]; then
 	MODEL_SIZE=7b
@@ -80,7 +102,7 @@ fi
 echo use seq_len = ${SEQ}
 
 # 请注意log编号目前并不等于rank编号
-LOG_FOLDER=logs/hot-switch_gpus${NUM_GPUS}_${MODEL_SIZE}_seq${SEQ}_gbs${GLOBAL_BATCH_SIZE}_mbs${MICRO_BATCH_SIZE}_dp${DP}_tp${TP}_pp${PP}
+LOG_FOLDER=logs/hot-switch
 mkdir -p ${LOG_FOLDER}
 echo logs will save to ${LOG_FOLDER}...
 
@@ -129,7 +151,7 @@ CMD="python3 -u train_hetu_switch.py \
 --server_port ${SERVER_PORT} \
 --ngpus ${NUM_GPUS}"
 
-source ./scripts/env.sh
+source ${ENV_FILE_PATH}
 if [ ${NUM_GPUS} -gt 8 ]; then
 python3 ../../../python_refactor/hetu/rpc/pssh_start.py \
 	--hosts ${HOST_FILE_PATH} \

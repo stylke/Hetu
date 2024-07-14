@@ -13,6 +13,7 @@ void CudaTryGetDevice(int* device_id) {
 }
 
 void CudaSetDevice(int device_id) {
+  // HT_LOG_INFO << "device id is " << device_id << " and old device id is " << current_device_id;
   if (current_device_id != device_id) {
     CUDA_CALL(cudaSetDevice(device_id));
     current_device_id = device_id;
