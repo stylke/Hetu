@@ -859,6 +859,25 @@ class Graph {
   }
 
   static void 
+  ReplaceInDepLinker(Operator& op, size_t in_dep_linker_index, Tensor& new_in_dep_linker, bool ignore_shape=false) {
+    auto& old_in_dep_linker = op->_extra_in_dep_linkers[in_dep_linker_index];
+    // stride may not be equal
+    // since we need to replace the uncontiguous tensor
+    if (!ignore_shape) {
+      HT_ASSERT(old_in_dep_linker->shape() == new_in_dep_linker->shape())
+        << "ReplaceInDepLinker can only used when the new tensor shape is equal to the old one"
+        << ", but the new tensor " << new_in_dep_linker << " shape is " << new_in_dep_linker->shape()
+        << " and the old tensor " << old_in_dep_linker << " shape is " << old_in_dep_linker->shape();
+    }
+    if (old_in_dep_linker->symbolic()) {
+      new_in_dep_linker->copy_symbolic_shape(old_in_dep_linker->symbolic_shape());
+    }
+    old_in_dep_linker->DelConsumer(op);
+    op->_extra_in_dep_linkers[in_dep_linker_index] = new_in_dep_linker;
+    new_in_dep_linker->AddConsumer(op);
+  }
+
+  static void 
   ReplaceOutput(Operator& op, size_t output_index, Tensor& new_output) {
     auto& old_output = op->_outputs[output_index];
     // stride may not be equal

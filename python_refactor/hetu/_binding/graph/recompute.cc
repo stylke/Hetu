@@ -15,7 +15,7 @@ PyObject* PyPushRecomputeCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
-    Recompute::set_recompute_enabled(parsed_args.get_bool_list(0));
+    Recompute::push_recompute_enabled(parsed_args.get_bool_list(0));
     Py_RETURN_NONE;
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -27,7 +27,7 @@ PyObject* PyPushRecomputeCtx(PyObject*, PyObject* args, PyObject* kwargs) {
 
 PyObject* PyPopRecomputeCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
-  Recompute::reset_recompute_enabled();
+  Recompute::pop_recompute_enabled();
   Py_RETURN_NONE;
   HT_PY_FUNC_END
 }

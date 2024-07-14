@@ -196,10 +196,10 @@ class _RecomputeContext(object):
         # 可能会出现recompute module嵌套
         # 只要某一层的recompute是true那么最终就要recompute
         cur_multi_recompute = []
-        multi_len = len(self.multi_recompute)
+        self.multi_len = len(self.multi_recompute)
         for recompute_context in cur_recompute_contexts:
-            assert multi_len == len(recompute_context.multi_recompute), "all multi len should be equal"
-        for i in range(multi_len):
+            assert self.multi_len == len(recompute_context.multi_recompute), "all multi len should be equal"
+        for i in range(self.multi_len):
             cur_recompute = False
             for recompute_context in cur_recompute_contexts:
                 if recompute_context.multi_recompute[i] == True:

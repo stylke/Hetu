@@ -23,6 +23,7 @@ BEFORE_STAGES_NUM_LIST="[2,2,2,2]"
 BEFORE_MICRO_BATCH_NUM_LIST="[16,16,16,16]"
 BEFORE_UNUSED_RANK="[]"
 BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7,8:8,9:9,10:10,11:11,12:12,13:13,14:14,15:15}"
+BEFORE_RECOMPUTE_LAYERS="[15,16]"
 
 # before
 NUM_GPUS=8
@@ -32,8 +33,9 @@ BEFORE_PP=2
 BEFORE_LAYERS_NUM_LIST="16,16,16,16"
 BEFORE_STAGES_NUM_LIST="[2,2]"
 BEFORE_MICRO_BATCH_NUM_LIST="[32,32]"
-BEFORE_UNUSED_RANK="[]"
+BEFORE_UNUSED_RANK="[4]"
 BEFORE_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7}"
+BEFORE_RECOMPUTE_LAYERS="[15,16]"
 
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--num_layers $NUM_LAYERS \
@@ -46,6 +48,7 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--hetero_stages $BEFORE_STAGES_NUM_LIST \
 	--rank_to_device_mapping $BEFORE_RANK_TO_DEVICE_MAPPING \
 	--unused_rank $BEFORE_UNUSED_RANK \
+	--recompute_layers $BEFORE_RECOMPUTE_LAYERS \
 	--file_name "before.json"
 	
 # after
@@ -58,6 +61,7 @@ AFTER_STAGES_NUM_LIST="[4,4]"
 AFTER_MICRO_BATCH_NUM_LIST="[28,36]"
 AFTER_UNUSED_RANK="[1]"
 AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:14,7:15,8:8,9:9,10:10,11:11,12:12,13:13,14:6,15:7}"
+AFTER_RECOMPUTE_LAYERS="[0,1]"
 
 # after
 NUM_GPUS=8
@@ -69,6 +73,7 @@ AFTER_STAGES_NUM_LIST="[4,4]"
 AFTER_MICRO_BATCH_NUM_LIST="[28,36]"
 AFTER_UNUSED_RANK="[]"
 AFTER_RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7}"
+AFTER_RECOMPUTE_LAYERS="[0,1]"
 
 python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--num_layers $NUM_LAYERS \
@@ -81,6 +86,7 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--hetero_stages $AFTER_STAGES_NUM_LIST \
 	--rank_to_device_mapping $AFTER_RANK_TO_DEVICE_MAPPING \
 	--unused_rank $AFTER_UNUSED_RANK \
+	--recompute_layers $AFTER_RECOMPUTE_LAYERS \
 	--file_name "after.json"
 
 if [[ ${NUM_LAYERS} -eq 32 && ${HIDDEN_SIZE} -eq 4096 && ${NUM_HEADS} -eq 32 ]]; then

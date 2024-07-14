@@ -333,9 +333,10 @@ class Module(object):
             # 实际forward
             value = self.forward(*input, **kwargs)
             
-            # 默认output不做recompute
-            if isinstance(value, hetu.Tensor):
-                value._make_recompute([False for i in range(1 if self.ds_parallel_configs is None else len(self.ds_parallel_configs))])
+            # block之间显式地插入了comm op从而阻隔了连续的recompute
+            # 之前需要在这里手动设置block的output不做recompute
+            # if isinstance(value, hetu.Tensor):
+            #     value._make_recompute([False for i in range(1 if self.ds_parallel_configs is None else len(self.ds_parallel_configs))])
             return value
     
     def forward(self, *input: Any, **kwargs: Any) -> Any:

@@ -761,13 +761,20 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
       auto& comm_op_impl = dynamic_cast<CommOpImpl&>(op->body());
       // 1. remove unused comm ops
       if (comm_op_impl.get_comm_type(op, preferred_device) == UNUSED_OP) {
-        // HT_LOG_WARN << op << " is an unused comm op and will be removed";
+        HT_LOG_DEBUG << op << " is an unused comm op and will be removed";
+        // the former op of the unused comm op should have the same recompute setting
+        op->input(0)->producer()->op_meta().set_multi_recompute(op->op_meta().multi_is_recompute);
         // should remove consumer of unused comm_op from end to begin
         for (int i = op->output(0)->num_consumers() - 1; i >= 0; i--) {
           auto& consumer_i = op->output(0)->consumer(i);
           for (int j = 0; j < consumer_i->num_inputs(); j++) {
             if (consumer_i->input(j)->id() == op->output(0)->id()) {
               Graph::ReplaceInput(consumer_i, j, op->input(0));
+            }
+          }
+          for (int j = 0; j < consumer_i->num_in_dep_linkers(); j++) {
+            if (consumer_i->in_dep_linker(j)->id() == op->output(0)->id()) {
+              Graph::ReplaceInDepLinker(consumer_i, j, op->input(0));
             }
           }
         }
@@ -810,6 +817,11 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
             for (int j = 0; j < consumer_i->num_inputs(); j++) {
               if (consumer_i->input(j)->id() == grad->id()) {
                 Graph::ReplaceInput(consumer_i, j, grad_scale);
+              }
+            }
+            for (int j = 0; j < consumer_i->num_in_dep_linkers(); j++) {
+              if (consumer_i->in_dep_linker(j)->id() == grad->id()) {
+                Graph::ReplaceInDepLinker(consumer_i, j, grad_scale);
               }
             }
           }
@@ -1208,6 +1220,11 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
         for (int j = 0; j < consumer_i->num_inputs(); j++) {
           if (consumer_i->input(j)->id() == comm_op->output(0)->id()) {
             Graph::ReplaceInput(consumer_i, j, result, ignore_flag);
+          }
+        }
+        for (int j = 0; j < consumer_i->num_in_dep_linkers(); j++) {
+          if (consumer_i->in_dep_linker(j)->id() == comm_op->output(0)->id()) {
+            Graph::ReplaceInDepLinker(consumer_i, j, result, ignore_flag);
           }
         }
       }

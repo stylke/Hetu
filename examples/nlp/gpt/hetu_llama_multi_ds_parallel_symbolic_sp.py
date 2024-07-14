@@ -263,10 +263,6 @@ class LLamaBlock(ht.nn.Module):
         hidden_states,
         attention_mask=None,
     ):
-        if self.rmsnorm_1.sp:
-            hidden_states = ht.comm(hidden_states, self.rmsnorm_1.ds_union_map['split0'], self.rmsnorm_1.device_group_unions, name=f"pipeline_layer_{self.layer_idx}_comm")
-        else:
-            hidden_states = ht.comm(hidden_states, self.attn.qkv_dense.ds_union_map['split0_dup'], self.rmsnorm_1.device_group_unions, name=f"pipeline_layer_{self.layer_idx}_comm")
         residual = hidden_states
         hidden_states = self.rmsnorm_1(hidden_states)
         attn_output = self.attn(
@@ -372,6 +368,13 @@ class LLamaModel(ht.nn.Module):
                 hidden_states, # [b, seq_len, embed_dim]
                 attention_mask=attention_mask, # [b, 1, 1, seq_len]
             )
+            # hetero需要显示地插入通信算子
+            if i != len(self.h) - 1:
+                next_block = self.h[i + 1]
+                if next_block.rmsnorm_1.sp:
+                    hidden_states = ht.comm(hidden_states, next_block.rmsnorm_1.ds_union_map['split0'], next_block.rmsnorm_1.device_group_unions, name=f"pipeline_layer_{i}_comm")
+                else:
+                    hidden_states = ht.comm(hidden_states, next_block.attn.qkv_dense.ds_union_map['split0_dup'], next_block.rmsnorm_1.device_group_unions, name=f"pipeline_layer_{i}_comm")
         # layernorm
         hidden_states = self.rmsnorm_f(hidden_states)
         return hidden_states

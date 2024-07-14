@@ -4,7 +4,7 @@
 namespace hetu {
 namespace graph {
 
-std::vector<bool> Recompute::_multi_recompute = {false};
+std::stack<std::vector<bool>> Recompute::_multi_recompute_stack{{std::vector<bool>{false}}};
 
 // helper functions
 namespace {
@@ -137,8 +137,16 @@ Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2O
   }
   auto& new_op = Graph::MakeOp(origin_op->_body, std::move(new_inputs),
                                std::move(new_op_meta), cur_exec_graph);
-  for (auto& output : new_op->outputs()) {
-    cur_exec_graph.RecordExecTensor(output);
+  for (size_t i = 0; i < new_op->num_outputs(); i++) {
+    const auto& new_output = new_op->output(i);
+    const auto& old_output = origin_op->output(i);
+    if (old_output->symbolic()) {
+      new_output->copy_symbolic_shape(old_output->symbolic_shape());
+      if (is_SyShape_leaf(new_output->symbolic_shape())) {
+        new_output->set_symbolic_shape(new_output->shape());
+      }
+    }
+    cur_exec_graph.RecordExecTensor(new_output);
   }
   if (origin_op->placement_group_union().size() != 0)
     new_op->MapToParallelDevices(origin_op->placement_group_union());
@@ -163,6 +171,7 @@ void Recompute::InsertRecomputedOps(const OpRefList& topo_order) {
   OpRefList candidate_recomputed_ops;
   for (auto& op_ref : topo_order) {
     auto& op = op_ref.get();
+    HT_LOG_DEBUG << "[Recompute] " << op << " recompute is " << op->op_meta().get_recompute(op->graph().CUR_STRATEGY_ID);
     if (!op->placement_group_union().has(local_device) 
         || !op->op_meta().get_recompute(op->graph().CUR_STRATEGY_ID)
         || IsNoRecomputedOp(op)) {

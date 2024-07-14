@@ -22,6 +22,7 @@ if [[ ${CASE} -eq 1 ]]; then
 	TP=2
 	PP=2
 	HETERO=false
+	RECOMPUTE_LAYERS="[]"
 elif [[ ${CASE} -eq 2 ]]; then
 	# 单机异构
 	# setting 2
@@ -35,6 +36,7 @@ elif [[ ${CASE} -eq 2 ]]; then
 	MICRO_BATCH_NUM_LIST="[30,34]"
 	UNUSED_RANK="[4]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7}"
+	RECOMPUTE_LAYERS="[15,16]"
 elif [[ ${CASE} -eq 3 ]]; then
 	# 多机同构
 	# setting 3
@@ -43,6 +45,7 @@ elif [[ ${CASE} -eq 3 ]]; then
 	TP=2
 	PP=2
 	HETERO=false
+	RECOMPUTE_LAYERS="[]"
 elif [[ ${CASE} -eq 4 ]]; then	
 	# 多机异构
 	# setting 4
@@ -56,6 +59,7 @@ elif [[ ${CASE} -eq 4 ]]; then
 	MICRO_BATCH_NUM_LIST="[28,36]"
 	UNUSED_RANK="[1]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:14,7:15,8:8,9:9,10:10,11:11,12:12,13:13,14:6,15:7}"
+	RECOMPUTE_LAYERS="[15,16]"
 else
     echo unknown CASE
 	exit 1
@@ -98,7 +102,8 @@ python ./ds_parallel_config/generate_gpt_3d_config.py \
 	--dp $DP \
 	--tp $TP \
 	--pp $PP \
-	--zero
+	--zero \
+	--recompute_layers $RECOMPUTE_LAYERS
 
 CMD="python3 -u train_hetu_hetero.py \
 --num_strategy=1 \
@@ -139,7 +144,8 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--hetero_layers $LAYERS_NUM_LIST \
 	--hetero_stages $STAGES_NUM_LIST \
 	--rank_to_device_mapping $RANK_TO_DEVICE_MAPPING \
-	--unused_rank $UNUSED_RANK
+	--unused_rank $UNUSED_RANK \
+	--recompute_layers $RECOMPUTE_LAYERS
 
 CMD="python3 -u train_hetu_hetero.py \
 --num_strategy=1 \

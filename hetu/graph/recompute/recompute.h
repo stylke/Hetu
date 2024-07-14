@@ -4,6 +4,7 @@
 #include "hetu/graph/executable_graph.h"
 #include "hetu/graph/graph.h"
 #include <functional>
+#include <stack>
 
 namespace hetu {
 namespace graph {
@@ -11,18 +12,15 @@ namespace graph {
 class Recompute {
  public:
   static const std::vector<bool>& multi_recompute() {
-    return _multi_recompute;
+    return _multi_recompute_stack.top();
   }
 
-  static void set_recompute_enabled(const std::vector<bool>& multi_recompute) {
-    _multi_recompute = multi_recompute;
+  static void push_recompute_enabled(const std::vector<bool>& multi_recompute) {
+    _multi_recompute_stack.push(multi_recompute);
   }
 
-  static void reset_recompute_enabled() {
-    auto multi_len = _multi_recompute.size();
-    for (size_t i = 0; i < multi_len; i++) {
-      _multi_recompute[i] = false;
-    }
+  static void pop_recompute_enabled() {
+    _multi_recompute_stack.pop();
   }
 
   static void InsertRecomputedOps(const OpRefList& topo_order);
@@ -39,7 +37,7 @@ class Recompute {
                                          const TensorList& first_mapped_grad_inputs, Op2OpMap& origin_to_recomputed_map,
                                          ExecutableGraph& cur_exec_graph);
 
-  static std::vector<bool> _multi_recompute;
+  static std::stack<std::vector<bool>> _multi_recompute_stack;
 };
 
 } // namespace graph
