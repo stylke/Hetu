@@ -837,7 +837,7 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
   
   // get updated topo
   OpRefList updated_topo = Graph::TopoSort(fetches, num_ops(), is_op_instantiated);
-  HT_LOG_DEBUG << "local info for local_device begin...";
+  HT_LOG_DEBUG << "local info for local_device begin, topo is " << updated_topo;
   // local info for local_device
   for (auto& op_ref : updated_topo) {
     auto& op = op_ref.get();
@@ -1379,7 +1379,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
   auto local_device = hetu::impl::comm::GetLocalDevice();
 
-  // HT_LOG_INFO << local_device << ": computeFunc topo is" << topo;
+  // HT_LOG_DEBUG << local_device << ": computeFunc topo is" << topo;
   for (auto& op_ref : topo) {
     auto& op = op_ref.get();
 
@@ -1508,7 +1508,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       }
     }
 
-    // HT_LOG_INFO << local_device << ": op execute " << op << " start...";
+    // HT_LOG_DEBUG << local_device << ": op execute " << op << " start...";
     // batched p2p send & recv
     // 跨hetero stage的batchedIsendIrecv已经包了一层ncclGroupStart和ncclGroupEnd
     // 但参考nccl文档可知最终取决于最外层的ncclGroupStart和ncclGroupEnd
@@ -1620,7 +1620,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       } 
     }
   // op->instantiation_ctx().stream().Sync();
-  // HT_LOG_INFO << local_device << ": op execute " << op << " end...";
+  // HT_LOG_DEBUG << local_device << ": op execute " << op << " end...";
   }
 }
 
@@ -1700,6 +1700,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (!fetch->has_placement_group() || 
         (fetch->placement_group_union().has(local_device) && 
          fetch->placement().is_undetermined())) {
+      /*
+      // topo
+      OpRefList topo_before_instantiate = Graph::TopoSort(fetches, num_ops(), is_op_computed);
+      HT_LOG_DEBUG << local_device << ": global topo before instantiate: " << topo_before_instantiate;
+      */
+     
       // instantiate ops
       HT_LOG_DEBUG << local_device << ": [Execution Plan] Instantiate begin...";
       Instantiate(fetches, local_device);

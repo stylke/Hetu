@@ -9,6 +9,9 @@
 #include "hetu/graph/init/initializer.h"
 #include <mutex>
 #include <stack>
+#include <algorithm>
+#include <queue>
+#include <functional>
 
 #include "hetu/impl/communication/comm_group.h"
 
@@ -957,11 +960,24 @@ class Graph {
 inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
                                  std::function<bool(const Operator&)> stop_at) {
   std::unordered_map<OpId, int32_t> in_degrees;
+  std::unordered_map<OpId, int32_t> heuristic_deps;
   std::unordered_set<OpId> visited;
   std::unordered_map<OpId, OpIdSet> extra_edges;
   OpRefList inplace_ops;
+
   OpRefDeque traverse_queue;
-  OpRefDeque topo_queue;
+  // OpRefDeque topo_queue;
+  // 按照heuristic_dep从小到大的优先队列比较器
+  auto cmp = [&heuristic_deps](const OpRef& lhs, const OpRef& rhs) {
+    HT_ASSERT(heuristic_deps.find(lhs.get()->id()) != heuristic_deps.end())
+      << "cannot find " << lhs << " in heuristic deps";
+    HT_ASSERT(heuristic_deps.find(rhs.get()->id()) != heuristic_deps.end())
+      << "cannot find " << rhs << " in heuristic deps";
+    return heuristic_deps[lhs.get()->id()] > heuristic_deps[rhs.get()->id()];
+  };
+  // std::priority_queue<OpRef, std::vector<OpRef>, decltype(cmp)> traverse_queue(cmp);
+  std::priority_queue<OpRef, std::vector<OpRef>, decltype(cmp)> topo_queue(cmp);
+
   OpRefList ret;
   if (num_ops_hint != -1) {
     in_degrees.reserve(num_ops_hint);
@@ -969,15 +985,16 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
     ret.reserve(num_ops_hint);
   }
 
+  // traverse all ops that are connected with the target ops
+  // and enqueue source ops into the topo queue
+  /*
   for (auto& op_ref : ops) {
     if (visited.find(op_ref.get()->id()) == visited.end()) {
+      heuristic_deps[op_ref.get()->id()] = 0;
       traverse_queue.push_back(op_ref);
       visited.insert(op_ref.get()->id());
     }
   }
-
-  // traverse all ops that are connected with the target ops
-  // and enqueue source ops into the topo queue
   while (!traverse_queue.empty()) {
     auto& op_ref = traverse_queue.front();
     traverse_queue.pop_front();
@@ -985,25 +1002,62 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
     auto op_in_degrees = (stop_at && stop_at(op)) ? 0 : op->in_degrees();
     if (op_in_degrees != op->in_degrees()) {
       HT_LOG_DEBUG << "make topo: " << op << " is forced to be stopped "
-      << op_in_degrees << " " << op->in_degrees();
+        << op_in_degrees << " " << op->in_degrees();
     }
     in_degrees[op->id()] = op_in_degrees;
     if (op_in_degrees == 0) {
-      topo_queue.push_back(op_ref);
+      topo_queue.push(op_ref);
     } else {
       Operator::for_each_input_tensor(op, [&](Tensor& tensor) {
         if (visited.find(tensor->producer_id()) == visited.end()) {
+          heuristic_deps[tensor->producer()->id()] = heuristic_deps[op->id()] + 1;
           traverse_queue.push_back(std::ref(tensor->producer()));
           visited.insert(tensor->producer_id());
         }
       });
     }
   }
+  */
+  OpRefList zero_in_degree_ops;
+  std::function<void(OpRef)> traverse_dfs = [&](OpRef op_ref) -> void {
+    auto& op = op_ref.get();
+    auto op_in_degrees = (stop_at && stop_at(op)) ? 0 : op->in_degrees();
+    if (op_in_degrees != op->in_degrees()) {
+      HT_LOG_DEBUG << "make topo: " << op << " is forced to be stopped "
+        << op_in_degrees << " " << op->in_degrees();
+    }
+    in_degrees[op->id()] = op_in_degrees;
+    if (op_in_degrees == 0) {
+      if (visited.find(op->id()) == visited.end()) {
+        zero_in_degree_ops.push_back(op_ref);
+        visited.insert(op->id());
+      }
+      return;
+    }
+    Operator::for_each_input_tensor(op, [&](Tensor& tensor) {
+      auto producer_id = tensor->producer_id();
+      if (heuristic_deps.find(tensor->producer()->id()) == heuristic_deps.end()
+          || heuristic_deps[tensor->producer()->id()] < heuristic_deps[op->id()] + 1) {
+        heuristic_deps[tensor->producer()->id()] = heuristic_deps[op->id()] + 1;
+        traverse_dfs(std::ref(tensor->producer()));
+      }
+    });
+  };
+  for (auto& op_ref : ops) {
+    if (heuristic_deps.find(op_ref.get()->id()) != heuristic_deps.end()) {
+      continue;
+    }
+    heuristic_deps[op_ref.get()->id()] = 0;
+    traverse_dfs(op_ref);
+  }
+  for (auto& op_ref : zero_in_degree_ops) {
+    topo_queue.push(op_ref);
+  }
 
   // iteratively find the topo order
   while (!topo_queue.empty()) {
-    auto& op_ref = topo_queue.back();
-    topo_queue.pop_back();
+    auto op_ref = topo_queue.top();
+    topo_queue.pop();
     ret.push_back(op_ref);
     Operator::for_each_output_tensor(op_ref.get(), [&](Tensor& tensor) {
       // Place inplace ops after other ops
@@ -1044,30 +1098,32 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
         });
       }
       // Step 3. Check extra_edges and decrease in_degrees of inplace ops.
-      OpRefList dfs_list;
+      // OpRefList dfs_list;
       Tensor::for_each_consumer(tensor, [&](Operator& consumer_op) {
         if (in_degrees.find(consumer_op->id()) == in_degrees.end())
           return;
         if ((--in_degrees[consumer_op->id()]) == 0) {
-          // topo_queue.push_back(std::ref(consumer_op));
-          dfs_list.push_back(std::ref(consumer_op));
+          topo_queue.push(std::ref(consumer_op));
+          // dfs_list.push_back(std::ref(consumer_op));
           if (has_extra_edge && !is_inplace_op(std::ref(consumer_op))) {
             for (auto inplace_id : extra_edges[consumer_op->id()]) {
               if (--in_degrees[inplace_id] == 0) {
                 auto inplace_op = std::find_if(inplace_ops.begin(), inplace_ops.end(),
                   [&](const OpRef& op_ref) { return op_ref.get()->id() == inplace_id; });
-                // if (inplace_op != inplace_ops.end())
-                //   topo_queue.push_back(*inplace_op);
-                if (inplace_op != inplace_ops.end())
-                  dfs_list.push_back(*inplace_op);
+                if (inplace_op != inplace_ops.end()) {
+                  topo_queue.push(*inplace_op);
+                  // dfs_list.push_back(*inplace_op);
+                }
               }
             }
           }
         }
       });
+      /*
       for (auto it = dfs_list.rbegin(); it != dfs_list.rend(); ++it) {
         topo_queue.push_back(*it);
       }
+      */
     });
   }
 
