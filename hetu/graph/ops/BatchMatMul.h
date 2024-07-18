@@ -11,7 +11,7 @@ class BatchMatMulOpImpl;
 class BatchMatMulOpImpl : public OpInterface {
  private:
   friend class BatchMatMulOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   BatchMatMulOpImpl(bool trans_a = false, bool trans_b = false,

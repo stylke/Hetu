@@ -51,7 +51,7 @@ class ExecutableGraph : public Graph {
   : Graph(name, init_capacity) {}
 
  public:
-  ExecutableGraph(const constrcutor_access_key&, GraphName name,
+  ExecutableGraph(const constructor_access_key&, GraphName name,
                   size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
   : ExecutableGraph(name, init_capacity) {}
 

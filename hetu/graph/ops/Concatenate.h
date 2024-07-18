@@ -14,7 +14,7 @@ class ConcatenateGradientOp;
 class ConcatenateOpImpl final : public OpInterface {
  private:
   friend class ConcatenateOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   ConcatenateOpImpl(size_t axis = 0, OpMeta op_meta = OpMeta())

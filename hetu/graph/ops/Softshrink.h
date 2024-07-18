@@ -15,7 +15,7 @@ class SoftshrinkGradientOp;
 class SoftshrinkOpImpl final : public UnaryOpImpl {
  private:
   friend class SoftshrinkOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   SoftshrinkOpImpl(double lambda)

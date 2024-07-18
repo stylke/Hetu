@@ -13,7 +13,7 @@ class PowTensorAndConstOp;
 class PowTensorAndConstOpImpl final : public UnaryOpImpl {
  private:
   friend class PowTensorAndConstOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   PowTensorAndConstOpImpl(double exponent, bool inplace)

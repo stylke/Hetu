@@ -15,7 +15,7 @@ class ReluGradientOp;
 class ReluOpImpl final : public UnaryOpImpl {
  private:
   friend class ReluOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   ReluOpImpl(bool inplace)

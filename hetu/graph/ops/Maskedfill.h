@@ -13,7 +13,7 @@ class MaskedfillOp;
 class MaskedfillOpImpl final : public UnaryOpImpl {
  private:
   friend class MaskedfillOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   MaskedfillOpImpl(double val)

@@ -422,7 +422,7 @@ NDArray OpInterface::DoAllocOutput(Operator& op, const NDArrayList& inputs,
   }
 }
 
-OpDef::OpDef(const constrcutor_access_key&, OpIdentifier ids,
+OpDef::OpDef(const constructor_access_key&, OpIdentifier ids,
              std::shared_ptr<OpInterface> body, TensorList inputs,
              OpMeta op_meta)
 : _ids{std::move(ids)},
@@ -677,7 +677,7 @@ size_t OpDef::inferred_local_placement_group_idx() const {
 Operator::Operator(OpIdentifier ids, std::shared_ptr<OpInterface> body,
                    TensorList inputs, OpMeta op_meta) {
   this->_ptr =
-    make_ptr<OpDef>(OpDef::constrcutor_access_key(), std::move(ids),
+    make_ptr<OpDef>(OpDef::constructor_access_key(), std::move(ids),
                     std::move(body), std::move(inputs), std::move(op_meta));
 }
 

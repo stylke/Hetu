@@ -11,7 +11,7 @@ void Dropout2dOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                 RuntimeContext& ctx) const {
   uint64_t seed = hetu::impl::GenNextRandomSeed();
   // record seed for recomputed dropout
-  if (op->op_meta().get_recompute(op->graph().CUR_STRATEGY_ID)) {
+  if (op->op_meta().get_recompute(op->graph().CUR_STRATEGY_ID, op->graph().SUGGESTED_HETERO_ID)) {
     ctx.get_or_create(op->id()).put_uint64("seed", seed);
   }
   // recomputed dropout

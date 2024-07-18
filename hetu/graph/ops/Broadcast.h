@@ -12,7 +12,7 @@ class BroadcastOp;
 class BroadcastOpImpl final : public OpInterface {
  private:
   friend class BroadcastOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   BroadcastOpImpl(OpMeta op_meta = OpMeta())

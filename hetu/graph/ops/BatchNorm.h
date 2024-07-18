@@ -12,7 +12,7 @@ class BatchNormGradientOpImpl;
 class BatchNormOpImpl final : public OpInterface {
  private:
   friend class BatchNormOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   BatchNormOpImpl(double momentum = 0.1, double eps = 1e-5,

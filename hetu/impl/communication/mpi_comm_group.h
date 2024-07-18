@@ -15,17 +15,17 @@ class MPICommunicationGroup;
 class MPICommunicationGroupDef : public CommunicationGroupDef {
  protected:
   friend class MPICommunicationGroup;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
   MPICommunicationGroupDef(const std::vector<int>& world_ranks,
                            const Stream& stream);
 
  public:
-  MPICommunicationGroupDef(const constrcutor_access_key&,
+  MPICommunicationGroupDef(const constructor_access_key&,
                            const std::vector<int>& world_ranks,
                            const Stream& stream)
   : MPICommunicationGroupDef(world_ranks, stream) {}
 
-  MPICommunicationGroupDef(const constrcutor_access_key&,
+  MPICommunicationGroupDef(const constructor_access_key&,
                            const std::vector<int>& world_ranks)
   : MPICommunicationGroupDef(
       world_ranks,
@@ -87,13 +87,13 @@ class MPICommunicationGroup final
   MPICommunicationGroup(const std::vector<int>& world_ranks)
   : CommGroupWrapper<MPICommunicationGroupDef>(
       make_ptr<MPICommunicationGroupDef>(
-        MPICommunicationGroupDef::constrcutor_access_key(), world_ranks)) {}
+        MPICommunicationGroupDef::constructor_access_key(), world_ranks)) {}
 
   MPICommunicationGroup(const std::vector<int>& world_ranks,
                         const Stream& stream)
   : CommGroupWrapper<MPICommunicationGroupDef>(
       make_ptr<MPICommunicationGroupDef>(
-        MPICommunicationGroupDef::constrcutor_access_key(), world_ranks,
+        MPICommunicationGroupDef::constructor_access_key(), world_ranks,
         stream)) {}
 
  public:

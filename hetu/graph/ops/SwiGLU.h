@@ -15,7 +15,7 @@ class SwiGLUGradientOp;
 class SwiGLUOpImpl final : public UnaryOpImpl {
  private:
   friend class SwiGLUOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   SwiGLUOpImpl()

@@ -15,7 +15,7 @@ class AbsGradientOp;
 class AbsOpImpl final : public UnaryOpImpl {
  private:
   friend class AbsOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   AbsOpImpl(bool inplace)

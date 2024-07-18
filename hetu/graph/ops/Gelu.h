@@ -15,7 +15,7 @@ class GeluGradientOp;
 class GeluOpImpl final : public UnaryOpImpl {
  private:
   friend class GeluOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   GeluOpImpl()

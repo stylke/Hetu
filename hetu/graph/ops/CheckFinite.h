@@ -14,7 +14,7 @@ class CheckNumericOp;
 class CheckFiniteOpImpl final : public OpInterface {
  private:
   friend class CheckFiniteOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   CheckFiniteOpImpl()
@@ -51,7 +51,7 @@ Tensor MakeCheckFiniteOp(Tensor input, OpMeta op_meta = OpMeta());
 class CheckNumericOpImpl final : public OpInterface {
  private:
   friend class CheckNumericOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   CheckNumericOpImpl()

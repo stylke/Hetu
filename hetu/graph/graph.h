@@ -233,7 +233,7 @@ class Graph {
   friend class TensorDef;
   friend class SwitchExecGraph;
   
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
   Graph(GraphName name, size_t init_capacity)
   : _id{_next_graph_id()}, _name(name) {
@@ -930,7 +930,7 @@ class Graph {
   static std::shared_ptr<T>& _make_new_graph(Args&&... args) {
     static_assert(std::is_base_of<Graph, T>::value,
                   "Template class is not derived from Graph");
-    auto graph = std::make_shared<T>(Graph::constrcutor_access_key(),
+    auto graph = std::make_shared<T>(Graph::constructor_access_key(),
                                      std::forward<Args>(args)...);
     HT_LOG_DEBUG << "device = " << hetu::impl::comm::GetLocalDevice() << ": make a new graph named " 
       << graph->name() << ", whose id is " << graph->id();

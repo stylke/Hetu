@@ -15,7 +15,7 @@ class LogsigmoidGradientOp;
 class LogsigmoidOpImpl final : public UnaryOpImpl {
  private:
   friend class LogsigmoidOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   LogsigmoidOpImpl()

@@ -78,7 +78,7 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, a
         blocks_json = ds_parallel_config['gpt']['blocks']
         blocks_json[f'blocks{block_id}'] = {
             'range': [block_id,],
-            'recompute': True if block_id in recompute_layers else False,
+            'recompute': [(True if block_id in recompute_layers[i] else False) for i in range(dp)],
             'layernorm1': {
                 'split': {},
                 'dup': [tp_union_list[block_id][i] * dp for i in range(dp)],
@@ -189,7 +189,10 @@ if __name__ == '__main__':
     else:
         rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
         
-    ds_parallel_config = generate_gpt_3d_config(rank_to_device_mapping, ast.literal_eval(args.unused_rank), hetero_layers, accumulate_hetero_stages, ast.literal_eval(args.recompute_layers), num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    recompute_layers = ast.literal_eval(args.recompute_layers)
+    assert len(recompute_layers) == args.dp, "recompute layers state should align to dp num"  
+        
+    ds_parallel_config = generate_gpt_3d_config(rank_to_device_mapping, ast.literal_eval(args.unused_rank), hetero_layers, accumulate_hetero_stages, recompute_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
     
     save_folder = './ds_parallel_config/hetero'
     if args.file_name == "":

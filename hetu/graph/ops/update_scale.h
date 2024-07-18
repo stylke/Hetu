@@ -11,7 +11,7 @@ class UpdateScaleOp;
 class UpdateScaleOpImpl final : public OpInterface {
  private:
   friend class UpdateScaleOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   UpdateScaleOpImpl(double growth_factor,

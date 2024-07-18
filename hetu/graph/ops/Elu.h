@@ -15,7 +15,7 @@ class EluGradientOp;
 class EluOpImpl final : public UnaryOpImpl {
  private:
   friend class EluOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   EluOpImpl(double alpha, double scale)

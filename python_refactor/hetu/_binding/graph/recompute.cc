@@ -11,11 +11,11 @@ namespace graph {
 PyObject* PyPushRecomputeCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "push_recompute_ctx(List[bool] multi_recompute)",
+    "push_recompute_ctx(List[List[bool]] multi_recompute)",
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
-    Recompute::push_recompute_enabled(parsed_args.get_bool_list(0));
+    Recompute::push_recompute_enabled(parsed_args.get_bool_list_list(0));
     Py_RETURN_NONE;
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);

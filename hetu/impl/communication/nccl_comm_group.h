@@ -16,12 +16,12 @@ class NCCLCommunicationGroup;
 class NCCLCommunicationGroupDef : public CommunicationGroupDef {
  protected:
   friend class NCCLCommunicationGroup;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
   NCCLCommunicationGroupDef(const std::vector<int>& world_ranks,
                             const Stream& stream);
 
  public:
-  NCCLCommunicationGroupDef(const constrcutor_access_key&,
+  NCCLCommunicationGroupDef(const constructor_access_key&,
                             const std::vector<int>& world_ranks,
                             const Stream& stream)
   : NCCLCommunicationGroupDef(world_ranks, stream) {}
@@ -89,7 +89,7 @@ class NCCLCommunicationGroup final
                          const Stream& stream)
   : CommGroupWrapper<NCCLCommunicationGroupDef>(
       make_ptr<NCCLCommunicationGroupDef>(
-        NCCLCommunicationGroupDef::constrcutor_access_key(), world_ranks,
+        NCCLCommunicationGroupDef::constructor_access_key(), world_ranks,
         stream)) {}
 
  public:

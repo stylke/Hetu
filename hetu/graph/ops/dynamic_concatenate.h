@@ -12,7 +12,7 @@ class DynamicConcatenateOp;
 class DynamicConcatenateOpImpl final : public OpInterface {
  private:
   friend class DynamicConcatenateOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   DynamicConcatenateOpImpl(size_t axis = 0, OpMeta op_meta = OpMeta())

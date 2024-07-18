@@ -14,7 +14,7 @@ class SoftmaxGradientOp;
 class SoftmaxOpImpl final : public OpInterface {
  private:
   friend class SoftmaxOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   SoftmaxOpImpl(int64_t dim)
@@ -67,7 +67,7 @@ Tensor MakeSoftmaxOp(Tensor input, int64_t dim, OpMeta op_meta = OpMeta());
 class SoftmaxGradientOpImpl final : public OpInterface {
  private:
   friend class SoftmaxGradientOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   SoftmaxGradientOpImpl(int64_t dim)

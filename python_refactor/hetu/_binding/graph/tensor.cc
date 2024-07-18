@@ -99,15 +99,15 @@ PyObject* PyTensor_make_subclass(PyObject*, PyObject* args, PyObject* kwargs) {
 PyObject* PyTensor_make_recompute(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "_make_recompute(bool is_recompute=True)",
-    "_make_recompute(List[bool] is_recompute=[True])"
+    "_make_recompute(List[bool] is_recompute=[True])",
+    "_make_recompute(List[List[bool]] is_recompute=[[True]])"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
-    bool is_recompute = parsed_args.get_bool_or_default(0);
+    std::vector<bool> is_recompute = parsed_args.get_bool_list_or_default(0);
     self->tensor->producer()->op_meta().set_multi_recompute({is_recompute});
   } else if (parsed_args.signature_index() == 1) {
-    std::vector<bool> multi_is_recompute = parsed_args.get_bool_list_or_default(0);
+    std::vector<std::vector<bool>> multi_is_recompute = parsed_args.get_bool_list_list_or_default(0);
     self->tensor->producer()->op_meta().set_multi_recompute(multi_is_recompute);
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);

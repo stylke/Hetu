@@ -15,7 +15,7 @@ class HardtanhGradientOp;
 class HardtanhOpImpl final : public UnaryOpImpl {
  private:
   friend class HardtanhOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   HardtanhOpImpl(double min_val, double max_val)

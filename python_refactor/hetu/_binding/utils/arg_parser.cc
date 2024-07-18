@@ -18,6 +18,8 @@ std::string ArgType2Str(ArgType type) {
       return "string";
     case ArgType::BOOL_LIST:
       return "List[bool]";
+    case ArgType::BOOL_LIST_LIST:
+      return "List[List[bool]]";
     case ArgType::INT64_LIST:
       return "List[int]";
     case ArgType::FLOAT64_LIST:
@@ -96,6 +98,9 @@ ArgType Str2ArgType(const std::string& type) {
       type == "std::vector<bool>" || type == "vector<bool>" || 
       type == "HTKeepDims")
     return ArgType::BOOL_LIST;
+  if (type == "List[List[bool]]" || type == "BoolListList" ||
+      type == "std::vector<std::vector<bool>>" || type == "vector<vector<bool>>")
+    return ArgType::BOOL_LIST_LIST;
   if (type == "std::unordered_map<int,int>")
     return ArgType::DICT;
   if (type == "List[int]" || type == "IntList" ||
@@ -263,6 +268,15 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
           _default_repr = default_str;
         }
         break;
+      case ArgType::BOOL_LIST_LIST:
+        if (!_default_as_none) {
+          auto err_msg = parse_bool_list_list_slow_but_safe(
+            default_str, _default_bool_list_list);
+          if (!err_msg.empty())
+            HT_VALUE_ERROR << "Cannot parse default List[bool]: " << err_msg;
+          _default_repr = default_str;
+        }
+        break;
       case ArgType::INT64_LIST:
         if (!_default_as_none) {
           auto err_msg = parse_int64_list_slow_but_safe(
@@ -330,6 +344,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       // return CheckPyDict(obj);
     case ArgType::BOOL_LIST:
       return CheckPyBoolList(obj);
+    case ArgType::BOOL_LIST_LIST:
+      return CheckPyBoolListList(obj);
     case ArgType::INT64_LIST:
       return CheckPyIntList(obj);
     case ArgType::FLOAT64_LIST:

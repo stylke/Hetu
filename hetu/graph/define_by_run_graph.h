@@ -21,7 +21,7 @@ class DefineByRunGraph : public Graph {
   }
 
  public:
-  DefineByRunGraph(const constrcutor_access_key&, GraphName name,
+  DefineByRunGraph(const constructor_access_key&, GraphName name,
                    size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
   : DefineByRunGraph(name, init_capacity) {}
 

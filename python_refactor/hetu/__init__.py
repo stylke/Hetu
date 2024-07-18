@@ -200,11 +200,24 @@ class _RecomputeContext(object):
         for recompute_context in cur_recompute_contexts:
             assert self.multi_len == len(recompute_context.multi_recompute), "all multi len should be equal"
         for i in range(self.multi_len):
-            cur_recompute = False
+            pipeline_num = 1
             for recompute_context in cur_recompute_contexts:
-                if recompute_context.multi_recompute[i] == True:
-                    cur_recompute = True
-                    break
+                if pipeline_num == 1:
+                    pipeline_num = len(recompute_context.multi_recompute[i])
+                else:
+                    assert len(recompute_context.multi_recompute[i]) == 1 or len(recompute_context.multi_recompute[i]) == pipeline_num \
+                        , "recompute state len should be 1 or equal to the pipeline num"
+            cur_recompute = [False] * pipeline_num
+            for j in range(pipeline_num):
+                for recompute_context in cur_recompute_contexts:
+                    if len(recompute_context.multi_recompute[i]) == 1:
+                        if recompute_context.multi_recompute[i][0] == True:
+                            cur_recompute = [True] * pipeline_num
+                            break
+                    else:
+                        if recompute_context.multi_recompute[i][j] == True:
+                            cur_recompute[j] = True
+                            break
             cur_multi_recompute.append(cur_recompute)
         _hetu_core._internal_context.push_recompute_ctx(cur_multi_recompute)
         return self

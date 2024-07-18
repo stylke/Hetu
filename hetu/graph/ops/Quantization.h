@@ -15,7 +15,7 @@ class DeQuantizationOp;
 class QuantizationOpImpl final : public OpInterface {
  private:
   friend class QuantizationOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   QuantizationOpImpl(DataType qtype, int64_t blocksize, bool stochastic)
@@ -79,7 +79,7 @@ TensorList MakeQuantizationOp(Tensor input, DataType qtype,
 class DeQuantizationOpImpl final : public OpInterface {
  private:
   friend class DeQuantizationOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   DeQuantizationOpImpl(DataType dqtype, int64_t blocksize)

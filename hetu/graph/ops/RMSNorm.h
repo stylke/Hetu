@@ -14,7 +14,7 @@ class RMSNormGradientOp;
 class RMSNormOpImpl final : public OpInterface {
  private:
   friend class RMSNormOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   RMSNormOpImpl(const float dropout_p, const float epsilon,

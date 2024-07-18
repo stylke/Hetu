@@ -15,7 +15,7 @@ class LogGradientOp;
 class LogOpImpl final : public UnaryOpImpl {
  private:
   friend class LogOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   LogOpImpl(bool inplace)

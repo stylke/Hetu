@@ -13,7 +13,7 @@ SERVER_PORT=${9:-"23457"}
 HOST_FILE_PATH=${10:-"./scripts/host.yaml"}
 ENV_FILE_PATH=${11:-"./scripts/env_A100.sh"}
 
-CASE=4
+CASE=3
 if [[ ${CASE} -eq 1 ]]; then
 	# 单机同构
 	# setting 1
@@ -36,7 +36,7 @@ elif [[ ${CASE} -eq 2 ]]; then
 	MICRO_BATCH_NUM_LIST="[30,34]"
 	UNUSED_RANK="[4]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7}"
-	RECOMPUTE_LAYERS="[30]"
+	RECOMPUTE_LAYERS="[[30],[]]"
 elif [[ ${CASE} -eq 3 ]]; then
 	# 多机同构
 	# setting 3
@@ -59,7 +59,7 @@ elif [[ ${CASE} -eq 4 ]]; then
 	MICRO_BATCH_NUM_LIST="[28,36]"
 	UNUSED_RANK="[1]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:14,7:15,8:8,9:9,10:10,11:11,12:12,13:13,14:6,15:7}"
-	RECOMPUTE_LAYERS="[9,10,11]"
+	RECOMPUTE_LAYERS="[[9,10,11],[30,31]]"
 else
     echo unknown CASE
 	exit 1

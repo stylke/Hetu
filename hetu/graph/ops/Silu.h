@@ -15,7 +15,7 @@ class SiluGradientOp;
 class SiluOpImpl final : public UnaryOpImpl {
  private:
   friend class SiluOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   SiluOpImpl()

@@ -18,7 +18,7 @@ class FusedLayerNormGradientOp;
 class LayerNormOpImpl final : public OpInterface {
  private:
   friend class LayerNormOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   LayerNormOpImpl(const HTShape& normalized_shape, double eps = 0.01)
@@ -151,7 +151,7 @@ TensorList MakeLayerNormGradientOp(Tensor output_grad, Tensor input, Tensor bn_s
 class FusedLayerNormOpImpl final : public OpInterface {
  private:
   friend class FusedLayerNormOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   FusedLayerNormOpImpl(const HTShape& normalized_shape, double eps = 0.01, bool inplace = false)

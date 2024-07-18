@@ -12,7 +12,7 @@ class RangeMaskOp;
 class RangeMaskOpImpl : public OpInterface {
  private:
   friend class RangeMaskOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   // input value∈[min, max], mask set to 0, otherwise set to 1 

@@ -15,7 +15,7 @@ class CosOp;
 class SinOpImpl final : public UnaryOpImpl {
  private:
   friend class SinOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   SinOpImpl(bool inplace)

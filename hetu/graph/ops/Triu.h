@@ -12,7 +12,7 @@ class TriuTrilOp;
 class TriuTrilOpImpl final : public OpInterface {
  private:
   friend class TriuTrilOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   TriuTrilOpImpl(bool lower = false, int64_t diagonal = 0)

@@ -13,7 +13,7 @@ class CeilOp;
 class CeilOpImpl final : public UnaryOpImpl {
  private:
   friend class CeilOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   CeilOpImpl(bool inplace)

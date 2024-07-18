@@ -169,6 +169,33 @@ inline std::vector<bool> BoolList_FromPyBoolList(PyObject* obj) {
   return ret;
 }
 
+inline bool CheckPyBoolListList(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  if (is_tuple || PyList_Check(obj)) {
+    size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+    if (size > 0) {
+      // only check for the first item for efficiency
+      auto* item = is_tuple ? PyTuple_GET_ITEM(obj, 0) \
+                            : PyList_GET_ITEM(obj, 0);
+      if (!CheckPyBoolList(item))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+inline std::vector<std::vector<bool>> BoolListList_FromPyBoolListList(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  std::vector<std::vector<bool>> ret(size);
+  for (size_t i = 0; i < size; i++) {
+    auto* item = is_tuple ? PyTuple_GET_ITEM(obj, i) : PyList_GET_ITEM(obj, i);
+    ret[i] = BoolList_FromPyBoolList(item);
+  }
+  return ret;
+}
+
 inline bool CheckPyStringList(PyObject* obj) {
   bool is_tuple = PyTuple_Check(obj);
   if (is_tuple || PyList_Check(obj)) {

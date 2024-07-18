@@ -15,7 +15,7 @@ class HardsigmoidGradientOp;
 class HardsigmoidOpImpl final : public UnaryOpImpl {
  private:
   friend class HardsigmoidOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   HardsigmoidOpImpl()

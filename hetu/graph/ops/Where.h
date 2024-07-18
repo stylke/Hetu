@@ -12,7 +12,7 @@ class WhereOp;
 class WhereOpImpl final : public OpInterface {
  private:
   friend class WhereOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   WhereOpImpl(bool inplace)

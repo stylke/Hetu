@@ -82,22 +82,32 @@ class OpMeta {
     return *this;
   }
 
-  inline OpMeta& set_multi_recompute(const std::vector<bool>& multi_recompute) {
+  inline OpMeta& set_multi_recompute(const std::vector<std::vector<bool>>& multi_recompute) {
     multi_is_recompute = multi_recompute;
     return *this;
   }
 
-  bool get_recompute(size_t strategy_id) {
+  bool get_recompute(size_t strategy_id, size_t hetero_id) {
+    std::vector<bool> is_recompute;
     size_t multi_len = multi_is_recompute.size();
     HT_ASSERT(multi_len > 0)
       << name << " multi recompute is empty, something wrong";
     if (multi_is_recompute.size() == 1) {
-      return multi_is_recompute.at(0);
+      is_recompute = multi_is_recompute.at(0);
+    } else {
+      HT_ASSERT(multi_len > strategy_id)
+        << name << " multi recompute size is wrong"
+        << ", can't fetch strategy id " << strategy_id << " within len " << multi_len;
+      is_recompute = multi_is_recompute.at(strategy_id);
     }
-    HT_ASSERT(multi_len > strategy_id)
-      << name << " multi recompute size is wrong"
-      << ", can't fetch strategy id " << strategy_id << " within len " << multi_len;
-    return multi_is_recompute.at(strategy_id);
+    size_t hetero_len = is_recompute.size();
+    if (is_recompute.size() == 1) {
+      return is_recompute.at(0);
+    }
+    HT_ASSERT(hetero_len > hetero_id)
+      << name << " hetero recompute size is wrong"
+      << ", can't fetch hetero id " << hetero_id << " within len " << hetero_len;
+    return is_recompute.at(hetero_id); 
   }
 
   // TODO: support multi-strategies offload
@@ -154,7 +164,7 @@ class OpMeta {
   DeviceGroupHierarchy device_group_hierarchy{}; // for multi ds multi hetero-dp deduce
   TensorList extra_deps;
   OpId origin_op_id{-1}; // for recomputation only
-  std::vector<bool> multi_is_recompute{{false}}; // for multi recomputation
+  std::vector<std::vector<bool>> multi_is_recompute{{false}}; // for multi recomputation strategy multi pipeline
   // TODO: support multi-strategies offload
   bool is_cpu_offload{false};
   bool is_offload{false}; // for offload D2H op only
@@ -472,10 +482,10 @@ class OpDef : public shared_ptr_target {
   friend class DefineAndRunGraph;
   friend class ExecutableGraph;
   friend class Recompute;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
-  OpDef(const constrcutor_access_key&, OpIdentifier ids,
+  OpDef(const constructor_access_key&, OpIdentifier ids,
         std::shared_ptr<OpInterface> body, TensorList inputs, OpMeta op_meta);
 
   ~OpDef() = default;

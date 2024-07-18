@@ -85,7 +85,7 @@ class DefineAndRunGraph : public Graph {
   }
 
  public:
-  DefineAndRunGraph(const constrcutor_access_key&, GraphName name,
+  DefineAndRunGraph(const constructor_access_key&, GraphName name,
                     size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
   : DefineAndRunGraph(name, init_capacity) {}
 

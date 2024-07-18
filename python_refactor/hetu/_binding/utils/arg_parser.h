@@ -31,6 +31,7 @@ enum class ArgType : uint8_t {
   
   /* Python sequences of primitives */
   BOOL_LIST,
+  BOOL_LIST_LIST,
   INT64_LIST, 
   FLOAT64_LIST, 
   STRING_LIST, 
@@ -113,6 +114,7 @@ class FnArg {
   std::vector<int64_t> _default_int64_list;
   std::vector<double> _default_float64_list;
   std::vector<bool> _default_bool_list;
+  std::vector<std::vector<bool>> _default_bool_list_list;
 };
 
 class FnSignature {
@@ -237,6 +239,14 @@ class ParsedPyArgs {
 
   inline std::vector<bool> get_bool_list_or_default(size_t i) const {
     return has(i) ? get_bool_list(i) : signature_arg(i)._default_bool_list;
+  }
+
+  inline std::vector<std::vector<bool>> get_bool_list_list(size_t i) const {
+    return BoolListList_FromPyBoolListList(_args[i]);
+  }
+
+  inline std::vector<std::vector<bool>> get_bool_list_list_or_default(size_t i) const {
+    return has(i) ? get_bool_list_list(i) : signature_arg(i)._default_bool_list_list;
   }
 
   inline std::vector<int64_t> get_int64_list(size_t i) const {

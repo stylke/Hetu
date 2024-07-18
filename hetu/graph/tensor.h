@@ -24,10 +24,10 @@ class TensorDef : public shared_ptr_target {
   friend class Tensor;
   friend class Graph;
   friend class ExecutableGraph;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
-  TensorDef(const constrcutor_access_key&, TensorIdentifier ids,
+  TensorDef(const constructor_access_key&, TensorIdentifier ids,
             TensorName name, bool requires_grad, NDArrayMeta meta);
 
   ~TensorDef() = default;

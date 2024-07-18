@@ -63,7 +63,7 @@ def generate_gpt_3d_config(recompute_layers, num_layers=32, num_gpus=8, dp=2, tp
             blocks_json = ds_parallel_config['gpt']['blocks']
             blocks_json[f'blocks{block_id}'] = {
                 'range': [block_id,],
-                'recompute': True if block_id in recompute_layers else False,
+                'recompute': [True if block_id in recompute_layers else False],
                 'layernorm1': {
                     'split': {},
                     'dup': [dp * tp],

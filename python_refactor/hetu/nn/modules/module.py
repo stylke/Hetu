@@ -316,11 +316,11 @@ class Module(object):
             
             # multi-strategies of recompute  
             if self._recompute:
-                mutli_recompute = [True for i in range(1 if self.ds_parallel_configs is None else len(self.ds_parallel_configs))]  
+                mutli_recompute = [[True] for i in range(1 if self.ds_parallel_configs is None else len(self.ds_parallel_configs))]  
             elif self.ds_parallel_configs is not None:
-                mutli_recompute = [False if 'recompute' not in self.ds_parallel_configs[i] else self.ds_parallel_configs[i]['recompute'] for i in range(len(self.ds_parallel_configs))]  
+                mutli_recompute = [[False] if 'recompute' not in self.ds_parallel_configs[i] else self.ds_parallel_configs[i]['recompute'] for i in range(len(self.ds_parallel_configs))]  
             else:
-                mutli_recompute = [False]  
+                mutli_recompute = [[False]]  
                 print(f"Warning: {self.__class__.__name__} does not have ds_parallel_configs attribute, undefined behavior may happen")
                 
             # for name, child in self.named_children():

@@ -721,7 +721,7 @@ NCCLCommunicationGroup::GetOrCreate(const std::vector<int>& world_ranks,
       // double check for thread-safety
       it = nccl_comm_groups[stream_id + 1][device_id].find(world_ranks);
       if (it == nccl_comm_groups[stream_id + 1][device_id].end()) {
-        HT_LOG_INFO << "Create NCCLCommunicationGroup for world ranks " << world_ranks;
+        HT_LOG_INFO << "Create NCCLCommunicationGroup for world ranks " << world_ranks << " on stream " << stream;
         NCCLCommunicationGroup comm_group(world_ranks, stream);
         auto insertion = nccl_comm_groups[stream_id + 1][device_id].insert(
           {comm_group->world_ranks(), comm_group});

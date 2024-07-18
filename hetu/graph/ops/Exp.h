@@ -15,7 +15,7 @@ class ExpGradientOp;
 class ExpOpImpl final : public UnaryOpImpl {
  private:
   friend class ExpOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   ExpOpImpl(bool inplace)

@@ -19,7 +19,7 @@ class ArrayReshapeGradientOp;
 class ArrayReshapeOpImpl final : public OpInterface {
  private:
   friend class ArrayReshapeOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   // symbolic shape constructor

@@ -15,7 +15,7 @@ class LeakyReluGradientOp;
 class LeakyReluOpImpl final : public UnaryOpImpl {
  private:
   friend class LeakyReluOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   LeakyReluOpImpl(double alpha, bool inplace)
@@ -56,7 +56,7 @@ Tensor MakeLeakyReluInplaceOp(Tensor input, double alpha, OpMeta op_meta = OpMet
 class LeakyReluGradientOpImpl final : public UnaryGradientOpImpl {
  private:
   friend class LeakyReluGradientOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   LeakyReluGradientOpImpl(double alpha, bool is_result,

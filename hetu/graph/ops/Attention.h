@@ -18,7 +18,7 @@ class AttentionVarlenGradientOp;
 class AttentionOpImpl final : public OpInterface {
  private:
   friend class AttentionOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   AttentionOpImpl(double p_dropout, double softmax_scale, 
@@ -175,7 +175,7 @@ TensorList MakeAttentionGradientOp(Tensor grad_out, Tensor q, Tensor k, Tensor v
 class AttentionVarlenOpImpl final : public OpInterface {
  private:
   friend class AttentionVarlenOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   AttentionVarlenOpImpl(int max_seqlen_q, int max_seqlen_k, 

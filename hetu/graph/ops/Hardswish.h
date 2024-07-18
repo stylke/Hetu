@@ -15,7 +15,7 @@ class HardswishGradientOp;
 class HardswishOpImpl final : public UnaryOpImpl {
  private:
   friend class HardswishOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   HardswishOpImpl()

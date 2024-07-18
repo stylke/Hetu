@@ -13,7 +13,7 @@ class FloorOp;
 class FloorOpImpl final : public UnaryOpImpl {
  private:
   friend class FloorOp;
-  struct constrcutor_access_key {};
+  struct constructor_access_key {};
 
  public:
   FloorOpImpl(bool inplace)

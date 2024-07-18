@@ -49,21 +49,21 @@ HTShapeList AttentionOpImpl::DoInferShape(Operator& op,
   for (int i = 0; i < 3; ++i) {
     padded_shape = input_shapes.at(i);
     padded_shape[3] += pad_len;
-    out_shapes.emplace_back(padded_shape); //q_padded, k_padded, v_padded.
+    out_shapes.emplace_back(padded_shape); // q_padded, k_padded, v_padded.
   }
   padded_shape = input_shapes.at(0);
   padded_shape[3] += pad_len;
-  out_shapes.emplace_back(padded_shape); //out_padded
+  out_shapes.emplace_back(padded_shape); // out_padded
   HTShape lse_shape = {batch_size, num_heads, seqlen_q},
           p_shape = {batch_size, num_heads, seqlen_q + pad_len, seqlen_k + pad_len},
           rng_shape = {2};
-  out_shapes.emplace_back(lse_shape); //softmax_lse
-  out_shapes.emplace_back(p_shape); //p
-  out_shapes.emplace_back(rng_shape); //rng_state
+  out_shapes.emplace_back(lse_shape); // softmax_lse
+  out_shapes.emplace_back(p_shape); // p
+  out_shapes.emplace_back(rng_shape); // rng_state
   return out_shapes;
 }
 
-void AttentionGradientOpImpl::DoCompute(Operator& op,const NDArrayList& inputs,
+void AttentionGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                         NDArrayList& outputs, RuntimeContext& ctx) const {
   double softmax_scale_ = softmax_scale() >= 0 ? softmax_scale() : std::pow(inputs.at(1)->shape(3), -0.5);
   HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),

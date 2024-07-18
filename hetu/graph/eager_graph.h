@@ -16,7 +16,7 @@ class EagerGraph : public Graph {
   }
 
  public:
-  EagerGraph(const constrcutor_access_key&, GraphName name,
+  EagerGraph(const constructor_access_key&, GraphName name,
              size_t init_capacity = DEFAULT_GRAPH_INITIAL_CAPACITY)
   : EagerGraph(name, init_capacity) {}
 
