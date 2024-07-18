@@ -514,7 +514,7 @@ CommOpImpl::DoInferMeta(const TensorList& inputs) const {
   input->producer()->graph().USE_HETERO_ID = false;
   HTShape shape(input_shape.size());
   /*
-  HT_LOG_INFO << "src ds union is " << input->cur_ds_union().ds_union_info()
+  HT_LOG_DEBUG << "src ds union is " << input->cur_ds_union().ds_union_info()
     << ", src ds is " << src_ds.ds_info()
     << ", dst ds union is " << get_dst_ds_union(input->producer()).ds_union_info()
     << ", dst ds is " << dst_ds.ds_info();

@@ -44,9 +44,9 @@ def pssh(args):
     clients = []
     outputs = []
     for hostname, cmd in zip(hostnames, cmd_list):
-        # client = ParallelSSHClient([hostname])
+        client = ParallelSSHClient([hostname])
         # workaround: 4090 need password
-        client = ParallelSSHClient([hostname], port=60001, password="gehao1602")
+        # client = ParallelSSHClient([hostname], port=60001, password="gehao1602")
         output = client.run_command(cmd)
         clients.append(client)
         outputs.append(output)

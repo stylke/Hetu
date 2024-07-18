@@ -143,7 +143,7 @@ class CommOpImpl final: public OpInterface {
       if (_dst_ds_hierarchy.size() == 1) { // for comm op created in exec_graph, without multi ds
         return _dst_ds_hierarchy.get(0).is_hetero() ? _dst_ds_hierarchy.get(0).get(graph.CUR_HETERO_ID) : _dst_ds_hierarchy.get(0).get(0);
       } else { // for comm op created in define_and_run_graph, with multi ds
-        // HT_LOG_WARN << "get " << graph.CUR_HETERO_ID << " from " << _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID).ds_union_info();
+        // HT_LOG_DEBUG << "get " << graph.CUR_HETERO_ID << " from " << _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID).ds_union_info();
         const auto& ds_union = _dst_ds_hierarchy.get(graph.CUR_STRATEGY_ID);
         return ds_union.is_hetero() ? ds_union.get(graph.CUR_HETERO_ID) : ds_union.get(0);
       }

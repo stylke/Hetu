@@ -17,9 +17,9 @@ add_library(hetu_C SHARED ${HETU_SRC})
 
 # Set CMake prefix path
 # A100
-# set(CMAKE_PREFIX_PATH /home/pkuhetu/Hetu-dev/fused_kernel/.local)
+set(CMAKE_PREFIX_PATH /home/pkuhetu/Hetu-dev/fused_kernel/.local)
 # 4090
-set(CMAKE_PREFIX_PATH /home/gehao/lhy/local)
+# set(CMAKE_PREFIX_PATH /home/gehao/lhy/local)
 include(../cmake/grpc.cmake)
 
 # Get proto file paths

@@ -102,6 +102,7 @@ bool Recompute::HasFilterOpInPath(const Operator& op, std::function<bool(const O
 Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2OpRefMap& filtered_recomputed_ops,
                                            const TensorList& first_mapped_grad_inputs, Op2OpMap& origin_to_recomputed_map,
                                            ExecutableGraph& cur_exec_graph) {
+  auto& local_device = hetu::impl::comm::GetLocalDevice();
   auto iter = origin_to_recomputed_map.find(origin_op->id());
   if (iter != origin_to_recomputed_map.end()) {
     return iter->second;
@@ -135,8 +136,20 @@ Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2O
   if (!has_recomputed_input) {
     new_op_meta.set_extra_deps(first_mapped_grad_inputs);
   }
+  // HT_LOG_DEBUG << "making a duplicate op for " << origin_op;
+  // 注意MakeCommOp在InferMeta时不得不特殊处理
+  // 需要从外面把CUR_HETERO_ID传进去
+  if (is_comm_op(origin_op)) {
+    HT_ASSERT(origin_op->placement_group_union().has(local_device))
+      << "something wrong, new duplicated op should all be local";
+    origin_op->graph().CUR_HETERO_ID = origin_op->placement_group_union().get_index(local_device);
+  }
   auto& new_op = Graph::MakeOp(origin_op->_body, std::move(new_inputs),
                                std::move(new_op_meta), cur_exec_graph);
+  if (is_comm_op(origin_op)) {
+    origin_op->graph().CUR_HETERO_ID = 0;
+  }
+  // HT_LOG_DEBUG << "make op done, the output 0 shape is " << new_op->output(0)->shape();
   for (size_t i = 0; i < new_op->num_outputs(); i++) {
     const auto& new_output = new_op->output(i);
     const auto& old_output = origin_op->output(i);

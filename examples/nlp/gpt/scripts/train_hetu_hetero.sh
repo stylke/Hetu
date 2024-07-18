@@ -7,13 +7,13 @@ GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
 # FFN_HIDDEN_SIZE=${7:-11008}
 FFN_HIDDEN_SIZE=${7:-2752}
-SERVER_ADDR=${8:-"172.24.183.105"} # master-0
-SERVER_ADDR=${8:-"127.0.0.1"} # 216
-SERVER_PORT=${9:-"23456"}
+SERVER_ADDR=${8:-"172.24.183.81"} # master-0
+# SERVER_ADDR=${8:-"127.0.0.1"} # 216
+SERVER_PORT=${9:-"23457"}
 HOST_FILE_PATH=${10:-"./scripts/host.yaml"}
-ENV_FILE_PATH=${11:-"./scripts/env_4090.sh"}
+ENV_FILE_PATH=${11:-"./scripts/env_A100.sh"}
 
-CASE=2
+CASE=4
 if [[ ${CASE} -eq 1 ]]; then
 	# 单机同构
 	# setting 1
@@ -36,7 +36,7 @@ elif [[ ${CASE} -eq 2 ]]; then
 	MICRO_BATCH_NUM_LIST="[30,34]"
 	UNUSED_RANK="[4]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7}"
-	RECOMPUTE_LAYERS="[15,16]"
+	RECOMPUTE_LAYERS="[30]"
 elif [[ ${CASE} -eq 3 ]]; then
 	# 多机同构
 	# setting 3
@@ -45,7 +45,7 @@ elif [[ ${CASE} -eq 3 ]]; then
 	TP=2
 	PP=2
 	HETERO=false
-	RECOMPUTE_LAYERS="[]"
+	RECOMPUTE_LAYERS="[15,16]"
 elif [[ ${CASE} -eq 4 ]]; then	
 	# 多机异构
 	# setting 4
@@ -54,12 +54,12 @@ elif [[ ${CASE} -eq 4 ]]; then
 	TP=2
 	PP=4
 	HETERO=true
-	LAYERS_NUM_LIST="1,10,11,10,8,8,8,8"
+	LAYERS_NUM_LIST="10,1,11,10,8,8,8,8"
 	STAGES_NUM_LIST="[4,4]"
 	MICRO_BATCH_NUM_LIST="[28,36]"
 	UNUSED_RANK="[1]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:14,7:15,8:8,9:9,10:10,11:11,12:12,13:13,14:6,15:7}"
-	RECOMPUTE_LAYERS="[15,16]"
+	RECOMPUTE_LAYERS="[9,10,11]"
 else
     echo unknown CASE
 	exit 1
