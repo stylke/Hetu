@@ -121,7 +121,7 @@ NDArray EagerGraph::GetOrCompute(Tensor& tensor) {
 }
 
 NDArrayList EagerGraph::Run(const TensorList& fetches,
-                            const Tensor2NDArrayMap&) {
+                            const FeedDict&) {
   NDArrayList ret;
   ret.reserve(fetches.size());
   std::unordered_set<OpId> to_sync_op_ids;

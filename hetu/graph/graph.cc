@@ -202,7 +202,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
                 || (!is_homo && src_ds_union.hetero_dim() == -2 && dst_ds_union.hetero_dim() == 0)) {
               reduce_scatter_num += 1;
             }
-          } 
+          }
         }
         HT_ASSERT ((all_allreduce_num == filtered.size() || all_allreduce_num == 0)
                     && (reduce_scatter_num == filtered.size() || reduce_scatter_num == 0))
@@ -220,18 +220,31 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
       Tensor grad_sum;
       if (is_need_sum_before_reduce) {
         TensorList partial_grad_list;
+        OpName name_of_sum_op_for = "";
         for (const auto& grad : filtered) {
-          Tensor partial_grad = grad->producer()->input(0);
-          partial_grad_list.push_back(partial_grad);
+          if (is_slice_op(grad->producer()) && is_comm_op(grad->producer()->input(0)->producer())) {
+            ReplaceInput(grad->producer(), 0, grad->producer()->input(0)->producer()->input(0));
+            Tensor partial_grad = grad;
+            partial_grad_list.push_back(partial_grad);
+            name_of_sum_op_for += (partial_grad->name() + ", ");
+          } else {
+            Tensor partial_grad = grad->producer()->input(0);
+            partial_grad_list.push_back(partial_grad);
+            name_of_sum_op_for += (partial_grad->name() + ", ");
+          }
         }
         // if allreduce/reduce-scatter group is different between input grads,
         // then assert error in placement group deduce process.
-        Tensor partial_grad_sum = MakeSumOp(partial_grad_list, OpMeta().set_name("sum_op_for_partial_grad"));
+        Tensor partial_grad_sum = MakeSumOp(partial_grad_list, OpMeta().set_name("sum_op_for_partial_[" + name_of_sum_op_for + "]"));
         partial_grad_sum->set_is_grad(true);
         // 原地的comm
         grad_sum = MakeCommOp(partial_grad_sum, dst_ds_hierarchy, OpMeta().set_name("comm_op_after_partial_grad_sum"));
       } else {
-        grad_sum = MakeSumOp(filtered, OpMeta().set_name("sum_op_for_partial_grad"));
+        OpName name_of_sum_op_for = "";
+        for (const auto& grad : filtered) {
+          name_of_sum_op_for += (grad->name() + ", ");
+        }
+        grad_sum = MakeSumOp(filtered, OpMeta().set_name("sum_op_for_[" + name_of_sum_op_for + "]"));
       }
       grad_sum->set_is_grad(true);
       return grad_sum;

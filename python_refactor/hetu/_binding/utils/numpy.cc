@@ -189,13 +189,13 @@ NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape, DataType d
   return NDArray(meta, storage);
 }
 
-NDArrayList NDArrayListFromNumpyList(PyObject* obj) {
+NDArrayList NDArrayListFromNumpyList(PyObject* obj, const HTShape& dynamic_shape, DataType datatype) {
   bool is_tuple = PyTuple_Check(obj);
   size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   NDArrayList ret(size);
   for (size_t i = 0; i < size; i++) {
     auto* item = is_tuple ? PyTuple_GET_ITEM(obj, i) : PyList_GET_ITEM(obj, i);
-    ret[i] = NDArrayFromNumpy(item);
+    ret[i] = NDArrayFromNumpy(item, dynamic_shape, datatype);
   }
   return ret;  
 }

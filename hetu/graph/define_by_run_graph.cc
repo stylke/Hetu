@@ -254,7 +254,7 @@ DefineByRunGraph::GenerateExecutionTargets(const TensorList& fetches,
       exec_feed_dict[exec_output->id()] = feed_dict.at(output->id());
     } else if (_preserved_data.find(output->id()) != _preserved_data.end()) {
       auto& exec_output = _tensor_to_exec_tensor_mapping[output->id()];
-      exec_feed_dict[exec_output->id()] = _preserved_data[output->id()];
+      exec_feed_dict[exec_output->id()] = {_preserved_data[output->id()]};
     } else {
       auto ref_cnt = Graph::get_tensor_referrence_count(output);
       if (ref_cnt > 0) {

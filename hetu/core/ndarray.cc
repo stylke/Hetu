@@ -1031,7 +1031,7 @@ NDArrayList NDArray::split(const NDArray& input, size_t num_chunks,
                            int64_t axis, StreamIndex stream_id) {
   auto parsed_axis = NDArrayMeta::ParseAxis(axis, input->ndim());
   HT_ASSERT(parsed_axis == 0) << "Currently we only support split on axis 0.";
-  HT_ASSERT(num_chunks <= static_cast<size_t>(input->shape(parsed_axis)))
+  HT_ASSERT(num_chunks <= static_cast<size_t>(input->shape(parsed_axis)) || input->shape(parsed_axis) == 0)
     << "Cannot split axis " << axis << " of shape " << input->shape()
     << " into " << num_chunks << " chunks";
   auto avg_chunk_size = DIVUP(input->shape(parsed_axis), num_chunks);
@@ -1046,7 +1046,7 @@ NDArrayList NDArray::split(const NDArray& input, const HTShape& chunks,
   auto parsed_axis = NDArrayMeta::ParseAxis(axis, input->ndim());
   if (parsed_axis == 0) {
     auto split_shapes = NDArrayMeta::Split(input->shape(), chunks, 0);
-    size_t interval = input->numel() / input->shape(0);
+    size_t interval = input->shape(0) == 0 ? 0 : input->numel() / input->shape(0);
     NDArrayList ret;
     ret.reserve(split_shapes.size());
     auto offset = input->storage_offset();
@@ -1355,6 +1355,10 @@ NDArray NDArray::linear(const NDArray& a, const NDArray& b, const NDArray& bias,
     ? output
     : NDArray::empty({a->shape(trans_a ? 1 : 0), b->shape(trans_b ? 0 : 1)},
                      a->device(), a->dtype(), stream_id);
+  if (a->shape(trans_a ? 0 : 1) == 0) {
+    NDArray::zeros_(out, stream_id);
+    return out;
+  }
   Stream stream(a->device(), stream_id);
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(a->device().type(), __FUNCTION__, hetu::impl::Linear,
                                   a, trans_a, b, trans_b,
@@ -1582,6 +1586,10 @@ NDArray NDArray::slice(const NDArray& input, const HTShape& begin_pos,
     }
     storage_offset += start_val * in_stride[i];
     out_shape[i] = end_val - start_val;
+  }
+
+  if (input->numel() == 0) {
+    storage_offset = 0;
   }
   
   auto output_meta = NDArrayMeta().set_dtype(input->dtype())

@@ -100,6 +100,12 @@ class ArrayReshapeOpImpl final : public OpInterface {
           o_size *= output_shape[--dim_o];
         }
       }
+      while (dim_i >= 1 && input_shape[dim_i - 1] == 1) {
+        dim_i--;
+      }
+      while (dim_o >= 1 && output_shape[dim_o - 1] == 1) {
+        dim_o--;
+      }
       // shape[dim_i~last_dim_i] == shape[dim_o~last_dim_o]
       // case 0: 1 to 1
       if (dim_i == last_dim_i && dim_o == last_dim_o) {
@@ -126,7 +132,7 @@ class ArrayReshapeOpImpl final : public OpInterface {
       // case 3: many to many
       else {
         for (int d = dim_i; d <= last_dim_i; d++) {
-          HT_ASSERT(ds_input.get_dim(d) == 1)
+          HT_ASSERT(ds_input.get_dim(d) == 1 || d == dim_o)
             << "ReshapeOp: dimension " << d << " shouldn't be splited!";
         }
       }

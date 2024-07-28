@@ -92,12 +92,48 @@ class ExecutableGraph : public Graph {
     _active_shape_plan = num;
   }
 
+  void SetShapePlanList(std::vector<size_t>&& micro_batch_plan_list) {
+    for (auto micro_batch_plan_idx : micro_batch_plan_list) {
+      HT_ASSERT(micro_batch_plan_idx < _shape_plan_pool.size())
+        << "plan number shouldn't exceed the size of the plan pool";
+    }
+    _active_shape_plan_list = std::move(micro_batch_plan_list);
+  }
+
   void AddShapePlan(const Tensor2ShapeMap& shape_plan) {
     _shape_plan_pool.emplace_back(shape_plan);
   }
 
   void AddShapePlan(Tensor2ShapeMap&& shape_plan) {
     _shape_plan_pool.emplace_back(std::move(shape_plan));
+  }
+
+  void UpdateExecShapePlan(RuntimeContext& runtime_ctx) {
+    auto& exec_shape_plan = runtime_ctx.shape_plan();
+    for (const auto& exec_tensor : _record_exec_tensors) {
+      if (exec_shape_plan.find(exec_tensor->id()) != exec_shape_plan.end())
+        continue;
+      auto& exec_op = exec_tensor->producer();
+      HTShapeList exec_input_shapes;
+      exec_input_shapes.reserve(exec_op->num_inputs());
+      for (const auto& exec_input : exec_op->inputs()) {
+        auto it = exec_shape_plan.find(exec_input->id());
+        HT_ASSERT(it != exec_shape_plan.end()) 
+          << "Something wrong, can't find the input shape of " << exec_input
+          << " from the current exec shape plan!";
+        exec_input_shapes.push_back(it->second);
+      }
+      HTShapeList exec_output_shapes = exec_op->InferShape(exec_input_shapes, runtime_ctx);
+      auto exec_output_shapes_size = exec_output_shapes.size();
+      for (size_t i = 0; i < exec_output_shapes_size; i++) {
+        if (exec_op->output(i)->symbolic()) {
+          if (is_SyShape_leaf(exec_op->output(i)->symbolic_shape())) {
+            exec_op->output(i)->set_symbolic_shape(exec_output_shapes[i]);
+          }
+        }
+        exec_shape_plan.insert(std::make_pair(exec_op->output(i)->id(), std::move(exec_output_shapes[i]))); // move constructor
+      }
+    }
   }
 
   // 目前主要功能是
@@ -155,7 +191,7 @@ class ExecutableGraph : public Graph {
   std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
   GenerateGpipeSchedule(size_t num_stages, size_t num_micro_batches, bool is_inference);
 
-  std::unordered_map<size_t, std::vector<std::pair<bool, size_t>>>
+  std::unordered_map<size_t, std::vector<std::pair<int32_t, size_t>>>
   GeneratePipedreamFlushSchedule(size_t num_stages, size_t num_micro_batches, bool is_inference);
 
   void ComputeFunc(size_t& micro_batch_id, const OpRefList& topo, RuntimeContext& runtime_ctx,
@@ -220,6 +256,7 @@ class ExecutableGraph : public Graph {
   ExecutePlan _execute_plan;
   std::vector<Tensor2ShapeMap> _shape_plan_pool;
   size_t _active_shape_plan;
+  std::vector<size_t> _active_shape_plan_list;
   std::vector<Tensor> _record_exec_tensors;
 
   // run相关
@@ -242,6 +279,8 @@ class ExecutableGraph : public Graph {
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _transfer_param_buffer_map;
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _current_grad_buffer_map;
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _accumulate_grad_buffer_map;
+  std::unordered_map<DataType, bool> _is_partial_accumulate_grad_buffer_map;
+  std::unordered_map<DataType, bool> _has_accumulate_grad_value_map;
   Tensor2TensorMap _transfer_map; // origin param到transfer param的映射
   Tensor2TensorMap _grad_map; // origin param到未substitue comm op前的grad的映射
   Tensor2TensorMap _grad_grad_map; // 未substitue comm op前的grad到substitue comm op后的grad的映射

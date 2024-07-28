@@ -584,10 +584,12 @@ void CUDACachingMemoryPool::EmptyCache() {
 DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
                                                DataPtrDeleter deleter,
                                                const Stream& stream) {
-  HT_VALUE_ERROR_IF(ptr == nullptr || num_bytes == 0)
+  HT_VALUE_ERROR_IF(ptr == nullptr)
     << "Borrowing an empty storage is not allowed";
   HT_VALUE_ERROR_IF(!deleter)
     << "Deleter must not be empty when borrowing storages";
+  if (num_bytes == 0)
+    return DataPtr{nullptr, 0, device(), static_cast<DataPtrId>(-1)};
 
   std::lock_guard<std::mutex> lock(_mtx);
   WatchEvents();

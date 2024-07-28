@@ -44,6 +44,10 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
   const NDArray& preds = inputs.at(0);
   const NDArray& labels = inputs.at(1);
 
+  if (inputs.at(0)->numel() == 0) {
+    NDArray::zeros_(outputs.at(0), op->instantiation_ctx().stream_index);
+    return;
+  }
   if (op->input(0)->get_local_distributed_states().get_dim(1) == 1) {
     // no tp vocab parallel, just pure dp
     NDArray::sceloss(preds, labels, ignored_index(), reduction(),
@@ -171,6 +175,9 @@ void VocabParallelCrossEntropyGradientOpImpl::DoCompute(
   const NDArray& grad_output = inputs.at(2);
 
   HTShape output_shape = {preds->shape(0), 1}; // [batch_size*seq_len, 1]
+  if (output_shape[0] == 0) {
+    return;
+  }
   NDArray broadcasted =
       reduction() == kNONE ? grad_output : NDArray::empty(output_shape, 
                                            preds->device(), preds->dtype());

@@ -210,6 +210,9 @@ void NCCLCommunicationGroupDef::AllReduce(const NDArray& input, NDArray& output,
   auto numel = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
              ? (input->numel() + 1) / 2
              : input->numel();
+  if (numel == 0) {
+    return;
+  }
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
   auto nccl_red_op = to_NCCL_Op(red_type);
   {
@@ -376,6 +379,9 @@ void NCCLCommunicationGroupDef::AllGather(const NDArray& input,
   output_size = (output->dtype() == kNFloat4 || output->dtype() == kFloat4)  
               ? (output_size + 1) / 2
               : output_size;
+  if (output_size == 0) {
+    return;
+  }
   void* send_buf = input->raw_data_ptr();
   void* recv_buf = output->raw_data_ptr();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
@@ -410,6 +416,9 @@ void NCCLCommunicationGroupDef::ReduceScatter(const NDArray& input,
   output_size = (output->dtype() == kNFloat4 || output->dtype() == kFloat4)  
               ? (output_size + 1) / 2
               : output_size;
+  if (output_size == 0) {
+    return;
+  }
   void* send_buf = input->raw_data_ptr();
   void* recv_buf = output->raw_data_ptr();
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
@@ -446,6 +455,9 @@ void NCCLCommunicationGroupDef::Gather(const NDArray& input, NDArray& output,
   input_size = (input->dtype() == kNFloat4 || input->dtype() == kFloat4)  
               ? (input_size + 1) / 2
               : input_size;
+  if (output->numel() == 0) {
+    return;
+  }
   auto nccl_dtype = to_NCCL_Datatype(input->dtype());
   {
     CUDAStream cuda_stream(_stream);
@@ -494,6 +506,10 @@ void NCCLCommunicationGroupDef::Scatter(const NDArray& input, NDArray& output,
   output_size = (output->dtype() == kNFloat4 || output->dtype() == kFloat4)  
               ? (output_size + 1) / 2
               : output_size;
+
+  if (output_size == 0) {
+    return;
+  }
   auto nccl_dtype = to_NCCL_Datatype(output->dtype());
   {
     CUDAStream cuda_stream(_stream);

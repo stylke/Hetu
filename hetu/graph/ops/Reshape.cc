@@ -8,14 +8,14 @@ namespace graph {
 NDArrayList ArrayReshapeOpImpl::DoCompute(Operator& op,
                                           const NDArrayList& inputs,
                                           RuntimeContext& ctx) const {
-  auto output_shape = DoInferShape(op, {inputs.at(0)->shape()}, ctx).at(0);
+  auto output_shape = ctx.get_runtime_shape(op->output(0)->id());
   NDArray output = NDArray::reshape(inputs.at(0), output_shape, op->instantiation_ctx().stream_index);
   return {output};
 }
 
 void ArrayReshapeOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                    NDArrayList& outputs, RuntimeContext& ctx) const {
-  auto output_shape = DoInferShape(op, {inputs.at(0)->shape()}, ctx).at(0);
+  auto output_shape = ctx.get_runtime_shape(op->output(0)->id());
   outputs.at(0) = NDArray::reshape(inputs.at(0), output_shape, op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
@@ -135,7 +135,7 @@ void ArrayReshapeOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_he
 NDArrayList ArrayReshapeGradientOpImpl::DoCompute(Operator& op,
                                                   const NDArrayList& inputs,
                                                   RuntimeContext& ctx) const {
-  NDArray output = NDArray::reshape(inputs.at(0), get_input_shape(), op->instantiation_ctx().stream_index);
+  NDArray output = NDArray::reshape(inputs.at(0), inputs.at(1)->shape(), op->instantiation_ctx().stream_index);
   return {output};
 }
 

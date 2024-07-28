@@ -36,6 +36,9 @@ void LinearCuda(const NDArray& a, bool trans_a, const NDArray& b, bool trans_b,
   HT_ASSERT_SAME_DTYPE(a, output);
 
   size_t size = output->numel();
+  if (size == 0) {
+    return;
+  }
   dim3 blocks, threads;
   threads.x = MIN(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);
   blocks.x = DIVUP(size, HT_DEFAULT_NUM_THREADS_PER_BLOCK);

@@ -656,7 +656,7 @@ class NDArrayDef : public shared_ptr_target {
              int64_t storage_offset = 0)
   : _meta(meta), _storage(storage) {
     HT_ASSERT(_meta.dtype != kUndeterminedDataType &&
-              _meta.device != kUndeterminedDevice && meta.numel() > 0)
+              _meta.device != kUndeterminedDevice)
       << "Invalid meta: " << _meta;
     HT_VALUE_ERROR_IF(_storage == nullptr) << "Storage is not provided";
     size_t bytes_per_value = DataType2Size(meta.dtype);

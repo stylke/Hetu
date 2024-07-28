@@ -7,8 +7,8 @@ namespace hetu {
 namespace graph {
 
 std::pair<HTAxes, HTKeepDims> GradInfer(const HTShapeList& input_shapes) {
-  HTShape output_shape = input_shapes[3];
-  HTShape input_shape = input_shapes[2];
+  HTShape output_shape = input_shapes[1];
+  HTShape input_shape = input_shapes[0];
   size_t ndim = output_shape.size();
   HT_ASSERT(input_shape.size() <= ndim);
   size_t diff = ndim - input_shape.size();
@@ -100,14 +100,22 @@ void AddElewiseOpImpl::DoCompute(Operator& op,
                op->instantiation_ctx().stream_index, outputs.at(0));
 }
 
+NDArrayList AddElewiseOpImpl::DoCompute(Operator& op,
+                                        const NDArrayList& inputs,
+                                        RuntimeContext& ctx) const {
+  NDArrayList outputs = inplace() ? inputs : DoAllocOutputs(op, inputs, ctx);
+  DoCompute(op, inputs, outputs, ctx);
+  return outputs;
+}
+
 TensorList AddElewiseOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_a = op->requires_grad(0) ? MakeAddElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
+  auto grad_a = op->requires_grad(0) ? MakeAddElewiseGradientOp(grad_outputs.at(0), op->input(0),
                                       op->output(0), 0,
                                       g_op_meta.set_name(op->grad_name(0)))
                                     : Tensor();
-  auto grad_b = op->requires_grad(1) ? MakeAddElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
+  auto grad_b = op->requires_grad(1) ? MakeAddElewiseGradientOp(grad_outputs.at(0), op->input(1),
                                       op->output(0), 1,
                                       g_op_meta.set_name(op->grad_name(1)))
                                     : Tensor();
@@ -154,11 +162,11 @@ void SubElewiseOpImpl::DoCompute(Operator& op,
 TensorList SubElewiseOpImpl::DoGradient(Operator& op,
                                         const TensorList& grad_outputs) const {
   auto g_op_meta = op->grad_op_meta();
-  auto grad_a = op->requires_grad(0) ? MakeSubElewiseGradientOp(grad_outputs.at(0), op->input(1), op->input(0),
+  auto grad_a = op->requires_grad(0) ? MakeSubElewiseGradientOp(grad_outputs.at(0), op->input(0),
                                       op->output(0), 0,
                                       g_op_meta.set_name(op->grad_name(0)))
                                     : Tensor();
-  auto grad_b = op->requires_grad(1) ? MakeSubElewiseGradientOp(grad_outputs.at(0), op->input(0), op->input(1),
+  auto grad_b = op->requires_grad(1) ? MakeSubElewiseGradientOp(grad_outputs.at(0), op->input(1),
                                       op->output(0), 1,
                                       g_op_meta.set_name(op->grad_name(1)))
                                     : Tensor();
@@ -410,12 +418,12 @@ void AddElewiseGradientOpImpl::DoCompute(Operator& op,
 HTShapeList AddElewiseGradientOpImpl::DoInferShape(Operator& op,
                                                    const HTShapeList& input_shapes,
                                                    RuntimeContext& ctx) const {
-  return {input_shapes.at(2)};
+  return {input_shapes.at(1)};
 }
 
 void AddElewiseGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                               const OpMeta& op_meta) const {
-  DistributedStates ds_output = inputs.at(2)->get_distributed_states();
+  DistributedStates ds_output = inputs.at(1)->get_distributed_states();
   if (axes().size() > 0) 
     ds_output = ReduceOpImpl::StatesForDistributedReduce(inputs.at(0), axes(), keep_dims());
   outputs.at(0)->set_distributed_states(ds_output);
@@ -445,12 +453,12 @@ void SubElewiseGradientOpImpl::DoCompute(Operator& op,
 HTShapeList SubElewiseGradientOpImpl::DoInferShape(Operator& op,
                                                    const HTShapeList& input_shapes,
                                                    RuntimeContext& ctx) const {
-  return {input_shapes.at(2)};
+  return {input_shapes.at(1)};
 }
 
 void SubElewiseGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                               const OpMeta& op_meta) const {
-  DistributedStates ds_output = inputs.at(2)->get_distributed_states();
+  DistributedStates ds_output = inputs.at(1)->get_distributed_states();
   if (axes().size() > 0) 
     ds_output = ReduceOpImpl::StatesForDistributedReduce(inputs.at(0), axes(), keep_dims());
   outputs.at(0)->set_distributed_states(ds_output);
@@ -690,36 +698,36 @@ Tensor MakeDivFromConstInplaceOp(double value, Tensor input, OpMeta op_meta) {
            std::move(op_meta))->output(0);
 }
 
-Tensor MakeAddElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
+Tensor MakeAddElewiseGradientOp(Tensor a, Tensor input, Tensor output, int index, 
                                 OpMeta op_meta) {
-  auto grad_pair = GradInfer({a->shape(), b->shape(), input->shape(), output->shape()});
+  auto grad_pair = GradInfer({input->shape(), output->shape()});
   return Graph::MakeOp(
            std::make_shared<AddElewiseGradientOpImpl>(grad_pair.first, grad_pair.second, index),
-           {std::move(a), std::move(b), std::move(input), std::move(output)},
+           {std::move(a), std::move(input)},
            std::move(op_meta))->output(0);
 }
 
-Tensor MakeSubElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
+Tensor MakeSubElewiseGradientOp(Tensor a, Tensor input, Tensor output, int index, 
                                 OpMeta op_meta) {
-  auto grad_pair = GradInfer({a->shape(), b->shape(), input->shape(), output->shape()});
+  auto grad_pair = GradInfer({input->shape(), output->shape()});
   return Graph::MakeOp(
            std::make_shared<SubElewiseGradientOpImpl>(grad_pair.first, grad_pair.second, index),
-           {std::move(a), std::move(b), std::move(input), std::move(output)},
+           {std::move(a), std::move(input), std::move(output)},
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeMulElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
                                 OpMeta op_meta) {
-  auto grad_pair = GradInfer({a->shape(), b->shape(), input->shape(), output->shape()});
+  auto grad_pair = GradInfer({input->shape(), output->shape()});
   return Graph::MakeOp(
            std::make_shared<MulElewiseGradientOpImpl>(grad_pair.first, grad_pair.second, index),
-           {std::move(a), std::move(b), std::move(input), std::move(output)},
+           {std::move(a), std::move(b), std::move(input)},
            std::move(op_meta))->output(0);
 }
 
 Tensor MakeDivElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
                                 OpMeta op_meta) {
-  auto grad_pair = GradInfer({a->shape(), b->shape(), input->shape(), output->shape()});
+  auto grad_pair = GradInfer({input->shape(), output->shape()});
   return Graph::MakeOp(
            std::make_shared<DivElewiseGradientOpImpl>(grad_pair.first, grad_pair.second, index),
            {std::move(a), std::move(b), std::move(input), std::move(output)},

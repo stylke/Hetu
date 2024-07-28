@@ -1131,7 +1131,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
           HT_ASSERT(comm_input->shape() == comm_input_data_it->second->shape())
             << "comm graph placeholder shape " << comm_input->shape() << " should be equal to"
             << " the shape of the preserved data " << comm_input_data_it->second->shape();
-          _comm_feed_dict.insert(std::make_pair(comm_input->id(), comm_input_data_it->second));
+          _comm_feed_dict.insert(std::make_pair(comm_input->id(), NDArrayList({comm_input_data_it->second})));
         }    
         _comm_feed_dict_mapping.insert(std::make_pair(comm_input->id(), before_param));
       }
@@ -1526,7 +1526,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
       HT_ASSERT(comm_input_data_it != _switch_graph_pair.first->_preserved_data.end())
         << "something wrong, the data to transfer in the before graph is not available";
       // 给feed_dict赋上NDArray
-      _comm_feed_dict[kv.first] = comm_input_data_it->second;
+      _comm_feed_dict[kv.first] = {comm_input_data_it->second};
     }
   } else {
     TIK(switch_params_making);
@@ -1692,7 +1692,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
       HT_ASSERT(is_placeholder_op(op))
         << "feed dict op must be a placeholder in the comm graph";
       auto tensor_id = op->output(0)->id();
-      tensor2data[tensor_id] = _comm_feed_dict[tensor_id];
+      tensor2data[tensor_id] = _comm_feed_dict[tensor_id][0];
       // 清feed_dict
       _comm_feed_dict.erase(tensor_id);
       // 清before_graph的_preserved_data

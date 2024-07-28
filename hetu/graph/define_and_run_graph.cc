@@ -517,6 +517,8 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> transfer_param_buffer_map;
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> current_grad_buffer_map;
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> accumulate_grad_buffer_map;
+  std::unordered_map<DataType, bool> is_partial_accumulate_grad_buffer_map;
+  std::unordered_map<DataType, bool> has_accumulate_grad_value_map;
   Tensor2TensorMap transfer_map;
   Tensor2TensorMap grad_map;
   Tensor2TensorMap dequantization_tensor_map;
@@ -537,6 +539,8 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     transfer_param_buffer_map[dtype] = std::make_shared<ParamBuffer>("transfer_param_buffer_" + DataType2Str(dtype));
     current_grad_buffer_map[dtype] = std::make_shared<ParamBuffer>("current_grad_buffer_" + DataType2Str(dtype));
     accumulate_grad_buffer_map[dtype] = std::make_shared<ParamBuffer>("accumulate_grad_buffer_" + DataType2Str(dtype));
+    is_partial_accumulate_grad_buffer_map[dtype] = false;
+    has_accumulate_grad_value_map[dtype] = false;
   }  
 
   // initializations of the exec graph
@@ -623,12 +627,13 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     // 6)、assign param & optimizer states
     // 目前只是记录而并不会alloc
     if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
-        && exec_tensor->producer()->placement_group_union().has(local_device)) {
+        && exec_tensor->producer()->placement_group_union().has(local_device)
+        && tensor->requires_grad()) {
       // origin_param_buffer->AddTensor(exec_tensor);
     }
     if ((_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
          || _optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end())
-        && exec_tensor->producer()->placement_group_union().has(local_device)) {
+        && tensor->requires_grad() && exec_tensor->producer()->placement_group_union().has(local_device)) {
       // origin_param_and_optimizer_buffer->AddTensor(exec_tensor); // deprecated
       // origin_param_and_optimizer_buckets->AddTensor(exec_tensor);
       // TODO: better compatibility with hot switch and quantization
@@ -881,6 +886,8 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   exec_graph->_transfer_param_buffer_map = std::move(transfer_param_buffer_map);
   exec_graph->_current_grad_buffer_map = std::move(current_grad_buffer_map);
   exec_graph->_accumulate_grad_buffer_map = std::move(accumulate_grad_buffer_map);
+  exec_graph->_is_partial_accumulate_grad_buffer_map = std::move(is_partial_accumulate_grad_buffer_map);
+  exec_graph->_has_accumulate_grad_value_map = std::move(has_accumulate_grad_value_map);
   exec_graph->_transfer_map = std::move(transfer_map);
   exec_graph->_grad_map = std::move(grad_map);
   
@@ -922,18 +929,27 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   HT_LOG_DEBUG << local_device << ": [Graph Plan] obtain exec graph begin...";
 
   // get feed dict shape
-  Tensor2ShapeMap feed_dict_shape;
+  Tensor2ShapeMapList feed_dict_shape_list(num_micro_batches);
   for (const auto& kv : feed_dict) {
-    if (!kv.second.is_defined()) 
+    if (kv.second.size() == 0) 
       continue; 
-    // TODO: use NDArrayMeta::split instead, but currently no support for arg chunk_num
-    auto micro_batches = NDArray::split(kv.second, num_micro_batches);
-    // currently assume that all micro batches have the same shape
-    feed_dict_shape[kv.first] = micro_batches[0]->shape();
+    if (kv.second.size() == 1) {
+      // all micro batches have the same shape
+      auto micro_batches = NDArray::split(kv.second[0], num_micro_batches);
+      for (auto& feed_dict_shape : feed_dict_shape_list) {
+        feed_dict_shape[kv.first] = micro_batches[0]->shape();
+      }
+    } else {
+      HT_ASSERT(kv.second.size() == num_micro_batches);
+      for (int i = 0; i < num_micro_batches; i++) {
+        feed_dict_shape_list[i][kv.first] = kv.second[i]->shape();
+      }
+    }
   }
 
   size_t next_active_exec_plan;
-  size_t next_active_shape_plan;
+  std::vector<size_t> next_active_shape_plan_list(num_micro_batches);
+  int64_t micro_batch_idx = 0;
   size_t exec_plan_pool_size = _exec_graph_plan_pool.size();
   bool in_exec_plan_pool = false;
   for (size_t i = 0; i < exec_plan_pool_size; i++)  {
@@ -984,7 +1000,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     Tensor2ShapeMap shape_plan;
     // 后续会由feed_dict的shape在MakeOp时推导出所有的shape
     for (const auto& kv : feed_dict) {
-      shape_plan[kv.first] = feed_dict_shape[kv.first];
+      shape_plan[kv.first] = feed_dict_shape_list[micro_batch_idx][kv.first];
     }
     auto is_feed_dict_op = [&](const Operator& op) -> bool {
       return Operator::all_output_tensors_of(op, [&](const Tensor& tensor) {
@@ -1010,14 +1026,15 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
     // 新的exec plan就是exec plan pool中的最后一个
     next_active_exec_plan = _exec_graph_plan_pool.size() - 1;
     // 新的shape plan就是shape plan pool中的第一个
-    next_active_shape_plan = 0; 
+    next_active_shape_plan_list[micro_batch_idx] = 0;
+    micro_batch_idx++; 
     HT_LOG_DEBUG << local_device << ": [Graph Plan] add a new shape plan and an exec graph to the pool end...";
   } 
   // 命中pool中已有的exec graph
   // 但可能feed dict不一样
   // 这种情况下我们不需要生成新的exec graph
   // 但需要推导新的shape plan
-  else {
+  for (auto idx = micro_batch_idx; idx < num_micro_batches; idx++) {
     auto& exec_graph_plan = _exec_graph_plan_pool[next_active_exec_plan];
     auto shape_plan_pool_size = exec_graph_plan.shape_plan_pool.size();
     bool in_shape_plan_pool = false;
@@ -1025,29 +1042,29 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       const auto& shape_plan = exec_graph_plan.shape_plan_pool[i];
       bool shape_plan_matched = true;
       for (const auto& kv : feed_dict) {
-        if (!kv.second.is_defined()) continue;
+        if (kv.second.size() == 0) continue;
         auto it = shape_plan.find(kv.first);
         // 1、有可能是feed_dict发生了改变（在依据global topo生成的shape plan中没有feed dict）
         // 2、有可能是feed_dict的shape发生了改变（shape对不上）
         HT_LOG_TRACE << local_device << ": shape plan is " << shape_plan << " and key to match is "
-          << kv.first << ":" << feed_dict_shape[kv.first];
-        if (it == shape_plan.end() || it->second != feed_dict_shape[kv.first]) {
+          << kv.first << ":" << feed_dict_shape_list[idx][kv.first];
+        if (it == shape_plan.end() || it->second != feed_dict_shape_list[idx][kv.first]) {
           shape_plan_matched = false;
           break;
         }
       }
       if (shape_plan_matched) {
         in_shape_plan_pool = true;
-        next_active_shape_plan = i;
+        next_active_shape_plan_list[idx] = i;
         break;
       }
     }
     // 如果不在shape_plan_pool中
     // 需要推导新的shape plan
     if (!in_shape_plan_pool) {
-      DeduceShapePlan(exec_graph_plan, feed_dict, feed_dict_shape);                                            
+      DeduceShapePlan(exec_graph_plan, feed_dict, feed_dict_shape_list[idx]);
       // 新的shape plan就是shape plan pool中的最后一个
-      next_active_shape_plan = exec_graph_plan.shape_plan_pool.size() - 1;
+      next_active_shape_plan_list[idx] = exec_graph_plan.shape_plan_pool.size() - 1;
     }
   }
 
@@ -1095,8 +1112,9 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
                   || old_exec_graph->_run_level == RunLevel::UPDATE) 
           << "graph with RunLevel::ALLOC should only follow behind graph with RunLevel::TOPO or RunLevel::ALLOC or RunLevel::UPDATE right now";
       }
-      if (old_exec_graph->_run_level == RunLevel::GRAD) {
+      if (old_exec_graph->_run_level == RunLevel::GRAD || old_exec_graph->_run_level == RunLevel::LOCAL_GRAD) {
         HT_ASSERT(_run_level == RunLevel::GRAD
+                  || _run_level == RunLevel::LOCAL_GRAD
                   || _run_level == RunLevel::UPDATE) 
           << "graph with RunLevel::GRAD should only followed by graph with RunLevel::GRAD or RunLevel::UPDATE right now";
       }
@@ -1147,7 +1165,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 那么热切换需要释放之前的current grad buffer
       // 如果旧的exec graph是update
       // 那么热切换需要释放之前的transfer param buffer和current grad buffer
-      if (old_exec_graph->_run_level == RunLevel::GRAD) {
+      if (old_exec_graph->_run_level == RunLevel::GRAD || _run_level == RunLevel::LOCAL_GRAD) {
         if (old_exec_graph->_use_current_grad_buffer) {
           for (auto it = old_exec_graph->_current_grad_buffer_map.begin(); 
                it != old_exec_graph->_current_grad_buffer_map.end(); ++it) {
@@ -1280,8 +1298,9 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
   FeedDict exec_feed_dict;
 
   // 设置shape plan
-  HT_LOG_DEBUG << exec_graph->name() << " use shape plan " << next_active_shape_plan;
-  exec_graph->SetShapePlan(next_active_shape_plan);
+  HT_LOG_DEBUG << exec_graph->name() << " use shape plan " << next_active_shape_plan_list;
+  exec_graph->SetShapePlan(next_active_shape_plan_list[0]);
+  exec_graph->SetShapePlanList(std::move(next_active_shape_plan_list));
 
   exec_fetches.reserve(fetches.size());
   for (const auto& fetch : fetches) {

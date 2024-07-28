@@ -120,7 +120,7 @@ Tensor AdamOptimizer::ApplyDense(const GradAndVar& grad_and_var, const Tensor& i
                                   .set_eager_device(kCPU)
                                   .set_name(var->name() + "_step")
                                   .set_is_deduce_states(false)
-                                  .set_is_step(true));
+                                  .set_is_cpu(true));
   if (state_dict.find(var->id()) == state_dict.end()) {
     state_dict[var->id()] = {};
   }
