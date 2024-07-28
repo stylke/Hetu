@@ -67,4 +67,31 @@ inline SyShape SyShape_FromPyObject(PyObject* obj) {
   return ret;
 }
 
+inline bool CheckPySyShapeList(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  if (is_tuple || PyList_Check(obj)) {
+    size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+    if (size > 0) {
+      // only check for the first item for efficiency
+      auto* item = is_tuple ? PyTuple_GET_ITEM(obj, 0) \
+                            : PyList_GET_ITEM(obj, 0);
+      if (!CheckPySyShape(item))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+inline SyShapeList SyShapeList_FromPyObject(PyObject* obj) {
+  bool is_tuple = PyTuple_Check(obj);
+  size_t size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  SyShapeList ret(size);
+  for (size_t i = 0; i < size; i++) {
+    auto* item = is_tuple ? PyTuple_GET_ITEM(obj, i) : PyList_GET_ITEM(obj, i);
+    ret[i] = SyShape_FromPyObject(item);
+  }
+  return ret;
+}
+
 } // namespace hetu

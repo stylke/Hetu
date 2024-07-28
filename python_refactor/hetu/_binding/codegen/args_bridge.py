@@ -30,7 +30,8 @@ class ArgType:
     DS_HIERARCHY = 24; DS_HIERARCHY_STR = ("List[hetu.DistributedStatesUnion]", "List[DistributedStatesUnion]", "DistributedStatesHierarchy") 
     INT_SYMBOL = 25; INT_SYMBOL_STR = ("hetu.IntSymbol", "IntSymbol")
     SYMBOLIC_SHAPE = 26; SYMBOLIC_SHAPE_STR = ("List[hetu.IntSymbol]", "List[IntSymbol]", "SyShape")
-    INITIALIZER = 27; INITIALIZER_STR = ("hetu.Initializer", "Initializer")
+    SYMBOLIC_SHAPE_LIST = 27; SYMBOLIC_SHAPE_LIST_STR = ("List[List[[hetu.IntSymbol]]", "List[List[IntSymbol]]", "List[SyShape]")
+    INITIALIZER = 28; INITIALIZER_STR = ("hetu.Initializer", "Initializer")
 
     # None is for returning type rather than argument type. 
     # We slightly abuse the notation here.
@@ -70,6 +71,7 @@ class ArgType:
         ArgType.type_to_type_str_mapping[ArgType.DS_HIERARCHY] = ArgType.DS_HIERARCHY_STR
         ArgType.type_to_type_str_mapping[ArgType.INT_SYMBOL] = ArgType.INT_SYMBOL_STR
         ArgType.type_to_type_str_mapping[ArgType.SYMBOLIC_SHAPE] = ArgType.SYMBOLIC_SHAPE_STR
+        ArgType.type_to_type_str_mapping[ArgType.SYMBOLIC_SHAPE_LIST] = ArgType.SYMBOLIC_SHAPE_LIST_STR
         ArgType.type_to_type_str_mapping[ArgType.INITIALIZER] = ArgType.INITIALIZER_STR
         
         for t, ss in ArgType.type_to_type_str_mapping.items():
@@ -374,6 +376,12 @@ def get_arg_getter_fn(arg_type, default_str, has_default, type_str, args):
             return "get_symbolic_shape_or_empty"
         else:
             return "get_symbolic_shape"
+    elif arg_type == ArgType.SYMBOLIC_SHAPE_LIST:
+        if has_default:
+            assert_default_is_none(type_str, default_str)
+            return "get_symbolic_shape_list_or_empty"
+        else:
+            return "get_symbolic_shape_list"
     elif arg_type == ArgType.INITIALIZER:
         return "get_initializer"
     else:

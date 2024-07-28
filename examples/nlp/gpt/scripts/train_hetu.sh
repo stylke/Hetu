@@ -7,18 +7,20 @@ GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
 # FFN_HIDDEN_SIZE=${7:-11008}
 FFN_HIDDEN_SIZE=${7:-2752}
-SERVER_ADDR=${8:-"172.24.183.81"} # master-0
+# SERVER_ADDR=${8:-"172.24.63.12"} # master-0
+SERVER_ADDR=${8:-"172.24.140.146"} # worker-0
 # SERVER_ADDR=${8:-"127.0.0.1"} # 216
-SERVER_PORT=${9:-"23457"}
+SERVER_PORT=${9:-"23459"}
 HOST_FILE_PATH=${10:-"./scripts/host.yaml"}
 ENV_FILE_PATH=${11:-"./scripts/env_A100.sh"}
 
-CASE=3
+CASE=2
 if [[ ${CASE} -eq 1 ]]; then
 	# 单机同构
 	# setting 1
 	NUM_GPUS=8
-	DP=2
+	DP=1
+	CP=2
 	TP=2
 	PP=2
 	HETERO=false
@@ -28,20 +30,23 @@ elif [[ ${CASE} -eq 2 ]]; then
 	# setting 2
 	NUM_GPUS=8
 	DP=2
-	TP=2
+	CP_LIST="[1,3]"
+	TP=1
 	PP=2
 	HETERO=true
-	LAYERS_NUM_LIST="17,15,8,24"
-	STAGES_NUM_LIST="[2,2]"
-	MICRO_BATCH_NUM_LIST="[30,34]"
-	UNUSED_RANK="[4]"
+	LAYERS_NUM_LIST="17,15,8,24,16,16,16,16"
+	STAGES_NUM_LIST="[2,2,2,2]"
+	MICRO_BATCH_NUM_LIST="[34,30]"
+	UNUSED_RANK="[]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7}"
-	RECOMPUTE_LAYERS="[[30],[]]"
+	RECOMPUTE_LAYERS="[[],[],[30],[]]"
+	SEQ_LEN_LIST="[1024, 341, 341, 342]"
 elif [[ ${CASE} -eq 3 ]]; then
 	# 多机同构
 	# setting 3
 	NUM_GPUS=16
-	DP=4
+	DP=2
+	CP=2
 	TP=2
 	PP=2
 	HETERO=false
@@ -51,21 +56,41 @@ elif [[ ${CASE} -eq 4 ]]; then
 	# setting 4
 	NUM_GPUS=16
 	DP=2
+	CP_LIST="[1,3]"
 	TP=2
-	PP=4
+	PP=2
 	HETERO=true
-	LAYERS_NUM_LIST="10,1,11,10,8,8,8,8"
-	STAGES_NUM_LIST="[4,4]"
+	LAYERS_NUM_LIST="16,16,12,20,16,16,16,16"
+	STAGES_NUM_LIST="[2,2,2,2]"
 	MICRO_BATCH_NUM_LIST="[28,36]"
-	UNUSED_RANK="[1]"
+	UNUSED_RANK="[4]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:14,7:15,8:8,9:9,10:10,11:11,12:12,13:13,14:6,15:7}"
-	RECOMPUTE_LAYERS="[[9,10,11],[30,31]]"
+	RECOMPUTE_LAYERS="[[9,10,11],[30,31],[],[]]"
+	SEQ_LEN_LIST="[1024, 341, 341, 342]"
 else
     echo unknown CASE
 	exit 1
 fi
 
-echo dp=${DP}, tp=${TP}, pp=${PP}, num_gpus=${NUM_GPUS} 
+if [ "${HETERO}" = false ]; then
+	CP_LIST="["
+	for ((i=1; i<=DP; i++)); do
+		if [ $i -ne 1 ]; then
+			CP_LIST="$CP_LIST,"
+		fi
+		CP_LIST="$CP_LIST$CP"
+	done
+	CP_LIST="$CP_LIST]"
+fi
+
+trimmed_list=${CP_LIST:1:-1}
+IFS=',' read -r -a array <<< "$trimmed_list"
+DCP=0
+for element in "${array[@]}"; do
+  DCP=$((DCP + element))
+done
+
+echo dcp=${DCP}, tp=${TP}, pp=${PP}, num_gpus=${NUM_GPUS} 
 
 if [[ ${NUM_LAYERS} -eq 32 && ${HIDDEN_SIZE} -eq 4096 && ${NUM_HEADS} -eq 32 ]]; then
 	MODEL_SIZE=7b
@@ -86,7 +111,7 @@ fi
 echo use seq_len = ${SEQ}
 
 # 请注意log编号目前并不等于rank编号
-LOG_FOLDER=logs/gpus${NUM_GPUS}_${MODEL_SIZE}_seq${SEQ}_gbs${GLOBAL_BATCH_SIZE}_mbs${MICRO_BATCH_SIZE}_dp${DP}_tp${TP}_pp${PP}
+LOG_FOLDER=logs/gpus${NUM_GPUS}_${MODEL_SIZE}_seq${SEQ}_gbs${GLOBAL_BATCH_SIZE}_mbs${MICRO_BATCH_SIZE}_dcp${DCP}_tp${TP}_pp${PP}
 mkdir -p ${LOG_FOLDER}
 echo logs will save to ${LOG_FOLDER}...
 
@@ -96,20 +121,24 @@ JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json
 MERGE_FILE=${ROOT_FOLDER}/merges.txt
 
+if [ "${HETERO}" = false ]; then
+
 python ./ds_parallel_config/generate_gpt_3d_config.py \
 	--num_layers $NUM_LAYERS \
 	--num_gpus $NUM_GPUS \
 	--dp $DP \
+	--cp $CP \
 	--tp $TP \
 	--pp $PP \
 	--zero \
 	--recompute_layers $RECOMPUTE_LAYERS
 
-CMD="python3 -u train_hetu_hetero.py \
+CMD="python3 -u train_hetu.py \
 --num_strategy=1 \
---ds_parallel_config ds_parallel_config/homo/dp${DP}_tp${TP}_pp${PP}.json \
+--ds_parallel_config ds_parallel_config/homo/dcp${DCP}_tp${TP}_pp${PP}.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --micro_batch_size $MICRO_BATCH_SIZE \
+--global_seq_len $SEQ_LEN \
 --json_file $JSON_FILE \
 --json_key $JSON_KEY \
 --vocab_file $VOCAB_FILE \
@@ -119,7 +148,6 @@ CMD="python3 -u train_hetu_hetero.py \
 --ffn_hidden_size $FFN_HIDDEN_SIZE \
 --num_hidden_layers $NUM_LAYERS \
 --num_attention_heads $NUM_HEADS \
---seq_length $SEQ_LEN \
 --epochs 4 \
 --steps 40 \
 --lr 1e-4 \
@@ -130,7 +158,10 @@ CMD="python3 -u train_hetu_hetero.py \
 --use_flash_attn \
 --server_addr ${SERVER_ADDR} \
 --server_port ${SERVER_PORT} \
---ngpus ${NUM_GPUS}"
+--ngpus ${NUM_GPUS} \
+--cp_list \"${CP_LIST}\""
+
+fi
 
 if [ "${HETERO}" = true ]; then
 
@@ -138,6 +169,7 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--num_layers $NUM_LAYERS \
 	--num_gpus $NUM_GPUS \
 	--dp $DP \
+	--cp_list $CP_LIST \
 	--tp $TP \
 	--pp $PP \
 	--zero \
@@ -147,11 +179,12 @@ python ./ds_parallel_config/generate_gpt_hetero_3d_config.py \
 	--unused_rank $UNUSED_RANK \
 	--recompute_layers $RECOMPUTE_LAYERS
 
-CMD="python3 -u train_hetu_hetero.py \
+CMD="python3 -u train_hetu.py \
 --num_strategy=1 \
---ds_parallel_config ds_parallel_config/hetero/dp${DP}_tp${TP}_pp${PP}.json \
+--ds_parallel_config ds_parallel_config/hetero/dcp${DCP}_tp${TP}_pp${PP}.json \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --micro_batch_size $MICRO_BATCH_SIZE \
+--global_seq_len $SEQ_LEN \
 --json_file $JSON_FILE \
 --json_key $JSON_KEY \
 --vocab_file $VOCAB_FILE \
@@ -161,7 +194,6 @@ CMD="python3 -u train_hetu_hetero.py \
 --ffn_hidden_size $FFN_HIDDEN_SIZE \
 --num_hidden_layers $NUM_LAYERS \
 --num_attention_heads $NUM_HEADS \
---seq_length $SEQ_LEN \
 --epochs 4 \
 --steps 40 \
 --lr 1e-4 \
@@ -170,16 +202,17 @@ CMD="python3 -u train_hetu_hetero.py \
 --dropout_prob 0.1 \
 --bf16 \
 --use_flash_attn \
---hetero_pipeline \
---hetero_data \
+--server_addr ${SERVER_ADDR} \
+--server_port ${SERVER_PORT} \
+--ngpus ${NUM_GPUS} \
+--cp_list \"${CP_LIST}\" \
+--hetero \
+--seq_len_list \"${SEQ_LEN_LIST}\" \
 --hetero_stage_gpus ${TP} \
 --hetero_stages \"${STAGES_NUM_LIST}\" \
 --micro_batch_num_list \"${MICRO_BATCH_NUM_LIST}\" \
 --rank_to_device_mapping \"${RANK_TO_DEVICE_MAPPING}\" \
---unused_rank \"${UNUSED_RANK}\" \
---server_addr ${SERVER_ADDR} \
---server_port ${SERVER_PORT} \
---ngpus ${NUM_GPUS}"
+--unused_rank \"${UNUSED_RANK}\""
 
 fi
 

@@ -3,6 +3,7 @@
 #include "hetu/graph/ops/Arithmetics.h"
 #include "hetu/graph/ops/AsStrided.h"
 #include "hetu/graph/ops/Attention.h"
+#include "hetu/graph/ops/ParallelAttention.h"
 #include "hetu/graph/ops/AvgPool.h"
 #include "hetu/graph/ops/BatchMatMul.h"
 #include "hetu/graph/ops/BatchNorm.h"

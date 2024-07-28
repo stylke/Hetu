@@ -266,15 +266,15 @@ class HtMultiVocabParallelEmbedding(Module):
             ds_union_dup_split0, device_group_union = config2ds(ds_parallel_config) # for embedding table
             self.device_group_unions.append(device_group_union)
             hetero_size = len(device_group_union)
-            dp_union = [ds_union_dup_split0.get(i).get_dim(-1) for i in range(hetero_size)]
+            dcp_union = [ds_union_dup_split0.get(i).get_dim(-1) for i in range(hetero_size)]
             tp_union = [ds_union_dup_split0.get(i).get_dim(0) for i in range(hetero_size)]
             hetero_dim = ds_union_dup_split0.hetero_dim
             assert hetero_dim == -1 or hetero_dim == -3, "VocabParallelEmbedding only support hetero on dup"
-            assert np.array_equal(np.array(dp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union]) 
+            assert np.array_equal(np.array(dcp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union]) 
                 , f'VocabParallelEmbedding get wrong ds_parallel_config: {ds_parallel_config}!')
             device_group_index, device_index = get_local_index(device_group_union)
             self.device_index.append(device_index)
-            ds_list_split0_dup = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: tp_union[i], 0: dp_union[i]}, [0, -1])
+            ds_list_split0_dup = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: tp_union[i], 0: dcp_union[i]}, [0, -1])
                 for i in range(hetero_size)] # for data
             ds_union_split0_dup = hetu.DistributedStatesUnion(ds_list_split0_dup, 0 if hetero_dim != -3 else -3)
             self.ds_union_map['split0_dup'].append(ds_union_split0_dup)
@@ -333,20 +333,20 @@ class HtMultiColumnParallelLinear(Module):
             self.device_group_unions.append(device_group_union)
             zero = ds_parallel_config['zero']
             hetero_size = len(device_group_union)
-            dp_union = [ds_union_dup_split1.get(i).get_dim(-1) for i in range(hetero_size)]
+            dcp_union = [ds_union_dup_split1.get(i).get_dim(-1) for i in range(hetero_size)]
             tp_union = [ds_union_dup_split1.get(i).get_dim(1) for i in range(hetero_size)]
             hetero_dim = ds_union_dup_split1.hetero_dim
             assert hetero_dim == -1 or hetero_dim == -3, "ColumnParallelLinear only support hetero on dup"
-            assert np.array_equal(np.array(dp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union])
+            assert np.array_equal(np.array(dcp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union])
                 , f'ColumnParallelLinear get wrong ds_parallel_config: {ds_parallel_config}!')        
             device_group_index, device_index = get_local_index(device_group_union)
             self.device_index.append(device_index)
             # assume num_devices=8, there exists 4 cases: dp=1 tp=8, dp=2 tp=4, dp=4 tp=2, dp=8 tp=1
             # when dp=1 tp=8, weights: ds_dup_split0->ds_split0, data: ds_split0_dup->ds_dup
             # when dp=8 tp=1, weights: ds_dup_split0->ds_dup, data: ds_split0_dup->ds_split0
-            ds_list_dup_split0 = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: dp_union[i], 0: tp_union[i]}, [-1, 0], zero)
+            ds_list_dup_split0 = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: dcp_union[i], 0: tp_union[i]}, [-1, 0], zero)
                 for i in range(hetero_size)] # for weights with trans_b
-            ds_list_split0_dup = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: tp_union[i], 0: dp_union[i]}, [0, -1])
+            ds_list_split0_dup = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: tp_union[i], 0: dcp_union[i]}, [0, -1])
                 for i in range(hetero_size)] # for data
             ds_union_dup_split0 = hetu.DistributedStatesUnion(ds_list_dup_split0, -1 if hetero_dim != -3 else -3) # for weights with trans_b
             ds_union_split0_dup = hetu.DistributedStatesUnion(ds_list_split0_dup, 0 if hetero_dim != -3 else -3) # for data
@@ -424,24 +424,24 @@ class HtMultiRowParallelLinear(Module):
             self.device_group_unions.append(device_group_union)
             zero = ds_parallel_config['zero']
             hetero_size = len(device_group_union)
-            dp_union = [ds_union_dup_split0.get(i).get_dim(-1) for i in range(hetero_size)]
+            dcp_union = [ds_union_dup_split0.get(i).get_dim(-1) for i in range(hetero_size)]
             tp_union = [ds_union_dup_split0.get(i).get_dim(0) for i in range(hetero_size)]
             hetero_dim = ds_union_dup_split0.hetero_dim
             assert hetero_dim == -1 or hetero_dim == -3, "RowParallelLinear only support hetero on dup"
-            assert np.array_equal(np.array(dp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union])
+            assert np.array_equal(np.array(dcp_union) * np.array(tp_union) / hetero_size, np.array([device_group.num_devices for device_group in device_group_union])
                 , f'RowParallelLinear get wrong ds_parallel_config: {ds_parallel_config}!')        
             device_group_index, device_index = get_local_index(device_group_union)
             self.device_index.append(device_index)
             # assume num_devices=8, there exists 4 cases: dp=1 tp=8, dp=2 tp=4, dp=4 tp=2, dp=8 tp=1
-            ds_list_dup_split1 = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: dp_union[i], 1: tp_union[i]}, [-1, 1], zero)
+            ds_list_dup_split1 = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: dcp_union[i], 1: tp_union[i]}, [-1, 1], zero)
                 for i in range(hetero_size)] # for weight with trans_b
-            ds_list_dup = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: dp_union[i] * tp_union[i]}, [-1], zero)
+            ds_list_dup = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {-1: dcp_union[i] * tp_union[i]}, [-1], zero)
                 for i in range(hetero_size)] # for bias
-            ds_list_split0 = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {0: dp_union[i] * tp_union[i]}, [0])
+            ds_list_split0 = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {0: dcp_union[i] * tp_union[i]}, [0])
                 for i in range(hetero_size)] # for sp data
-            ds_list_split01 = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {0: dp_union[i], 1: tp_union[i]}, [0, 1])
+            ds_list_split01 = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {0: dcp_union[i], 1: tp_union[i]}, [0, 1])
                 for i in range(hetero_size)] # for data split in dimension 1
-            ds_list_split0_dup = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {0: dp_union[i], -1: tp_union[i]}, [0, -1])
+            ds_list_split0_dup = [hetu.DistributedStates(device_group_union[i].num_devices * hetero_size, {0: dcp_union[i], -1: tp_union[i]}, [0, -1])
                 for i in range(hetero_size)] # for data reduce partial to dup
             ds_union_dup_split1 = hetu.DistributedStatesUnion(ds_list_dup_split1, -1 if hetero_dim != -3 else -3) # for weight with trans_b
             ds_union_dup = hetu.DistributedStatesUnion(ds_list_dup, -1 if hetero_dim != -3 else -3) # for bias

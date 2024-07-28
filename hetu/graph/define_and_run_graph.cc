@@ -749,7 +749,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     // only deduce ds hierarchy for define_and_run_graph, and copy directly for executable_graph
     // 注意MakeCommOp在InferMeta时不得不特殊处理
     // 需要从外面把CUR_HETERO_ID传进去
-    if (is_comm_op(op)) {
+    if (is_comm_op(op) || is_parallel_attn_op(op)) {
       if (pg_union.has(local_device)) {
         exec_graph->CUR_HETERO_ID = pg_union.get_index(local_device);
       } else if (exec_inputs.at(0)->producer()->placement_group_union().has(local_device)) {
@@ -772,7 +772,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
       op->_body, std::move(exec_inputs),
       OpMeta().set(op->op_meta()).set_is_deduce_states(false).set_extra_deps(std::move(exec_in_deps)),
       *exec_graph);
-    if (is_comm_op(op)) {
+    if (is_comm_op(op) || is_parallel_attn_op(op)) {
       /*
       HT_LOG_WARN << exec_op << " output shape is " << exec_op->output(0)->shape()
         << " input shape is " << exec_op->input(0)->shape()

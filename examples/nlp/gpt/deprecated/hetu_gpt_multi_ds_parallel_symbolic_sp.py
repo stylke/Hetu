@@ -1,23 +1,35 @@
 import hetu as ht
 import numpy as np
 import torch
+from queue import Queue
 
-from hetu.nn.modules.parallel_multi_ds import parallel_data_provider, parallel_multi_data_provider, get_multi_ds_parallel_config
+from hetu.nn.modules.parallel_multi_ds import parallel_data_provider, parallel_multi_data_provider
 
-def generate_cos_sin(seqlen, rotary_dim, dtype):
-    assert rotary_dim % 2 == 0
-    angle = np.random.rand(seqlen * 2, rotary_dim // 2) * 2 * np.pi
-    cos = np.cos(angle).astype(dtype)
-    sin = np.sin(angle).astype(dtype)
-    return cos, sin
+def get_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
+    multi_ds_parallel_config = []
+    for ds_parallel_config in ds_parallel_configs:
+        config_queue = Queue()
+        config_queue.put(ds_parallel_config)
+        while (not config_queue.empty()):
+            config = config_queue.get()
+            if module_name in config:
+                multi_ds_parallel_config.append(config[module_name])
+                break
+            else:
+                for value in config.values():
+                    if type(value) == dict:
+                        if "range" in value and (_range < value["range"][0] or _range > value["range"][-1]):
+                            continue
+                        config_queue.put(value)
+    assert len(multi_ds_parallel_config) == len(ds_parallel_configs), 'ds_parallel_configs parse error!'
+    return multi_ds_parallel_config
   
 # self-attn
-class LLamaAttention(ht.nn.Module):
+class GPTAttention(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs, layer_idx, name='attn'):
         super().__init__()
 
         self.config = config
-        self.ds_parallel_configs = ds_parallel_configs
         self.use_flash_attn = config.use_flash_attn
         # self.add_bias = True
         self.add_bias = False
@@ -129,31 +141,12 @@ class LLamaAttention(ht.nn.Module):
         # q,k,v shape=[micro_batch_size, seq_len, num_heads, head_dim]
         query, key, value = ht.split(qkv, 3, qkv.ndim - 1)
 
-        # apply relative positional encoding (rotary embedding)
-        # TODO: 支持动态seq_len
-        def apply_rotary_pos_emb(x, _name='q'):
-            cos_np, sin_np = generate_cos_sin(self.config.seq_len_symbol.data, int(0.5 * self.head_dim), np.float32)
-            device_group_hierarchy = self.qkv_dense.device_group_unions
-            ds_hierarchy = self.dense.ds_union_map['dup']
-            # 去除zero
-            ds_hierarchy = [
-                ht.DistributedStatesUnion([ht.DistributedStates(ds.device_num, {-1: ds.device_num}, [-1]) for ds in ds_union.ds_list], ds_union.hetero_dim)
-                    for ds_union in ds_hierarchy
-            ]
-            sin_global = ht.from_numpy_parallel(sin_np, ds_hierarchy, device_group_hierarchy=device_group_hierarchy, requires_grad=False, name=f'sin_{_name}')
-            cos_global = ht.from_numpy_parallel(cos_np, ds_hierarchy, device_group_hierarchy=device_group_hierarchy, requires_grad=False, name=f'cos_{_name}')
-            out = ht.rotary(x, cos_global, sin_global, inplace=True)
-            return out
-        
-        # query = apply_rotary_pos_emb(query, _name='q')
-        # key = apply_rotary_pos_emb(key, _name='k')
-        
         if self.use_flash_attn:
             attn_output = ht.attn(query, key, value, 0, -1, True)[0]
         else:
             # [micro_batch_size, num_heads, seq_len, head_dim]
             query = query.transpose([0, 2, 1, 3], name="AttentionOp_query")
-            value = value.transpose([0, 2, 1, 3], name="AttentionOp_value")
+            value = value.transpose([0, 2, 1, 3], name="_value")
             # [micro_batch_size, num_heads, head_dim, seq_len]
             key_t = key.transpose([0, 2, 3, 1], name="AttentionOp_key") # k^T
 
@@ -177,18 +170,12 @@ class ParallelMLP(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs, layer_idx, name='mlp'):
         super(ParallelMLP, self).__init__()
         self.config = config
-        self.ds_parallel_configs = ds_parallel_configs
         # self.add_bias = True
         self.add_bias = False
-        
-        self.swiglu = True
-        ffn_hidden_size = config.ffn_hidden_size # 2.7*h
-        if self.swiglu:
-            ffn_hidden_size *= 2 # for swiglu: h -> 2 * 2.7*h
 
         self.dense_h_to_4h = ht.nn.HtMultiColumnParallelLinear(
             config.hidden_size,
-            ffn_hidden_size,
+            config.ffn_hidden_size,
             get_multi_ds_parallel_config(ds_parallel_configs, 'dense_h_to_4h', layer_idx),
             bias=self.add_bias,
             gather_output=False,
@@ -215,18 +202,17 @@ class ParallelMLP(ht.nn.Module):
         # [b*seq_len, h] -> [b*seq_len, 4h]
         intermediate_parallel = self.dense_h_to_4h(hidden_states)
         # intermediate_parallel = self.activation_func(intermediate_parallel)
-        intermediate_parallel = ht.swiglu(intermediate_parallel)
+        intermediate_parallel = ht.relu(intermediate_parallel)
 
         # [b*seq_len, 4h] -> [b*seq_len, h]
         output = self.dense_4h_to_h(intermediate_parallel)
         # output = self.dropout(output)
         return output
 
-class LLamaMLP(ht.nn.Module):
+class GPTMLP(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs, layer_idx, name='mlp'):
-        super(LLamaMLP, self).__init__()
+        super(GPTMLP, self).__init__()
         self.config = config
-        self.ds_parallel_configs = ds_parallel_configs
         self.parallel_mlp = ParallelMLP(config, ds_parallel_configs, layer_idx, name)
 
     def forward(self, hidden_states):
@@ -244,27 +230,30 @@ class LLamaMLP(ht.nn.Module):
         '''
         return hidden_states
 
-class LLamaBlock(ht.nn.Module):
+class GPTBlock(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs, layer_idx):
         super().__init__()
         self.config = config
-        self.ds_parallel_configs = ds_parallel_configs
         self.layer_idx = layer_idx
         hidden_size = config.hidden_size
 
         # sequence parallel: layernorm前做reduce-scatter(这一部分由row prallel的reduce-scatter完成); layernorm后做allgather
-        self.rmsnorm_1 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm1', layer_idx), sp=True, name=f'rmsnorm1_block{layer_idx}')
-        self.attn = LLamaAttention(config, get_multi_ds_parallel_config(ds_parallel_configs, "attn", layer_idx), layer_idx=layer_idx, name=f'attn_block{layer_idx}')
-        self.rmsnorm_2 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm2', layer_idx), sp=True, name=f'rmsnorm2_block{layer_idx}')
-        self.mlp = LLamaMLP(config, get_multi_ds_parallel_config(ds_parallel_configs, "mlp", layer_idx), layer_idx=layer_idx, name=f'mlp_block{layer_idx}')
+        self.ln_1 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm1', layer_idx), sp=True, eps=config.layer_norm_epsilon, name=f'ln1_block{layer_idx}')
+        self.attn = GPTAttention(config, ds_parallel_configs, layer_idx=layer_idx, name=f'attn_block{layer_idx}')
+        self.ln_2 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm2', layer_idx), sp=True, eps=config.layer_norm_epsilon, name=f'ln2_block{layer_idx}')
+        self.mlp = GPTMLP(config, ds_parallel_configs, layer_idx=layer_idx, name=f'mlp_block{layer_idx}')
 
     def forward(
         self,
         hidden_states,
         attention_mask=None,
     ):
+        if self.ln_1.sp:
+            hidden_states = ht.comm(hidden_states, self.ln_1.ds_union_map['split0'], self.ln_1.device_group_unions, name=f"pipeline_layer_{self.layer_idx}_comm")
+        else:
+            hidden_states = ht.comm(hidden_states, self.attn.qkv_dense.ds_union_map['split0_dup'], self.ln_1.device_group_unions, name=f"pipeline_layer_{self.layer_idx}_comm")
         residual = hidden_states
-        hidden_states = self.rmsnorm_1(hidden_states)
+        hidden_states = self.ln_1(hidden_states)
         attn_output = self.attn(
             hidden_states, # [b, seq_len, hidden_size]
             attention_mask=attention_mask, # [b, 1, 1, seq_len]
@@ -273,7 +262,7 @@ class LLamaBlock(ht.nn.Module):
         hidden_states = attn_output + residual
 
         residual = hidden_states
-        hidden_states = self.rmsnorm_2(hidden_states)
+        hidden_states = self.ln_2(hidden_states)
         feed_forward_hidden_states = self.mlp(hidden_states)
         # residual connection
         # hidden_states =  feed_forward_hidden_states + residual
@@ -282,27 +271,26 @@ class LLamaBlock(ht.nn.Module):
         return hidden_states
 
 
-class LLamaModel(ht.nn.Module):
+class GPTModel(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs):
-        super(LLamaModel, self).__init__()
+        super(GPTModel, self).__init__()
         self.config = config
-        self.ds_parallel_configs = ds_parallel_configs
         self.dtype = ht.float32
 
         self.embed_dim = config.hidden_size
         self.wte = ht.nn.HtMultiVocabParallelEmbedding(config.vocab_size, self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'wte'), name='wte')
-        # self.wpe = ht.nn.HtMultiParallelEmbedding(config.max_position_embeddings, self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'wpe'), name='wpe')
+        self.wpe = ht.nn.HtMultiParallelEmbedding(config.max_position_embeddings, self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'wpe'), name='wpe')
 
         self.drop = ht.nn.Dropout(config.embd_pdrop)
         blocks = []
         for i in range(config.num_hidden_layers):
-            blocks.append(LLamaBlock(config, get_multi_ds_parallel_config(ds_parallel_configs, f'blocks{i}'), layer_idx=i))
+            blocks.append(GPTBlock(config, ds_parallel_configs, layer_idx=i))
             # for _, block_config in ds_parallel_config['blocks'].items():
             #     if i >= block_config['range'][0] and i <= block_config['range'][1]:
             #         blocks.append(GPTBlock(config, block_config, layer_idx=i))
             #         break
         self.h = ht.nn.ModuleList(blocks)
-        self.rmsnorm_f = ht.nn.HtMultiParallelLayerNorm(self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm_final'), sp=True, name='rmsnorm_final')
+        self.ln_f = ht.nn.HtMultiParallelLayerNorm(self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm_final'), sp=True, eps=config.layer_norm_epsilon, name='ln_final')
 
     def forward(
         self,
@@ -330,10 +318,9 @@ class LLamaModel(ht.nn.Module):
 
         # embeddding: [b, seq_len, embed_dim]
         inputs_embeds = self.wte(input_ids) # [b, seq_len, embed_dim]
-        # position_embeds = self.wpe(position_ids) # [b, seq_len, embed_dim]
+        position_embeds = self.wpe(position_ids) # [b, seq_len, embed_dim]
         # todo: fix backward grad tensor reduce bug for add(extension dims)
-        # hidden_states = inputs_embeds + position_embeds # [b, seq_len, embed_dim]
-        hidden_states = inputs_embeds
+        hidden_states = inputs_embeds + position_embeds # [b, seq_len, embed_dim]
         if token_type_ids is not None:
             token_type_embeds = self.wte(token_type_ids) # [b, seq_len, embed_dim]
             hidden_states = hidden_states + token_type_embeds
@@ -368,24 +355,15 @@ class LLamaModel(ht.nn.Module):
                 hidden_states, # [b, seq_len, embed_dim]
                 attention_mask=attention_mask, # [b, 1, 1, seq_len]
             )
-            # hetero需要显示地插入通信算子
-            if i != len(self.h) - 1:
-                next_block = self.h[i + 1]
-                if next_block.rmsnorm_1.sp:
-                    hidden_states = ht.comm(hidden_states, next_block.rmsnorm_1.ds_union_map['split0'], next_block.rmsnorm_1.device_group_unions, name=f"pipeline_layer_{i}_comm")
-                else:
-                    hidden_states = ht.comm(hidden_states, next_block.attn.qkv_dense.ds_union_map['split0_dup'], next_block.rmsnorm_1.device_group_unions, name=f"pipeline_layer_{i}_comm")
         # layernorm
-        hidden_states = self.rmsnorm_f(hidden_states)
+        hidden_states = self.ln_f(hidden_states)
         return hidden_states
 
-class LLamaLMHeadModel(ht.nn.Module):
+class GPTLMHeadModel(ht.nn.Module):
 
     def __init__(self, config, ds_parallel_configs):
-        super(LLamaLMHeadModel, self).__init__()
-        self.config = config
-        self.ds_parallel_configs = ds_parallel_configs
-        self.transformer = LLamaModel(config, get_multi_ds_parallel_config(ds_parallel_configs, 'gpt'))
+        super(GPTLMHeadModel, self).__init__()
+        self.transformer = GPTModel(config, ds_parallel_configs)
         self.lm_head = ht.nn.HtMultiColumnParallelLinear(
             config.n_embd,
             config.vocab_size,
@@ -397,7 +375,7 @@ class LLamaLMHeadModel(ht.nn.Module):
         # share embedding table
         # we manually add comm op here
         # because we don't know if it is a P2P or a BatchedIsendIrecv in hetero settings
-        # self.lm_head.weight = ht.comm(self.transformer.wte.embedding_table, self.lm_head.ds_union_map['dup_split0'], self.lm_head.device_group_unions, name="share_weight_comm") 
+        self.lm_head.weight = ht.comm(self.transformer.wte.embedding_table, self.lm_head.ds_union_map['dup_split0'], self.lm_head.device_group_unions, name="share_weight_comm") 
         self.config = config
     
     def forward(

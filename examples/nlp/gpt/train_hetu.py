@@ -2,7 +2,7 @@ import os
 import signal
 import math
 import hetu as ht
-from hetu_llama_multi_ds_parallel_symbolic_sp import LLamaLMHeadModel
+from hetu_llama import LLamaLMHeadModel
 from hetu.nn.modules.parallel_multi_ds import config2ds
 from gpt_config import GPTConfig
 from data_utils import GPTJsonDataset, get_mask_and_position_ids, build_pretraining_data_loader
@@ -23,7 +23,7 @@ def distributed_init(args):
     global local_device, all_devices
     hostname = socket.gethostname()
     os.environ['HETU_LOCAL_HOSTNAME'] = hostname
-    ht.init_comm_group(args.ngpus, server_address=args.server_addr+":"+args.server_port)
+    ht.init_comm_group(args.ngpus, server_address = args.server_addr + ":" + args.server_port)
     local_device = ht.local_device()
     all_devices = ht.global_device_group()
     if local_device.index == 0:
@@ -37,7 +37,7 @@ def read_ds_parallel_config(args):
     print(f'{local_device}: load ds_parallel_config from: {args.ds_parallel_config}')
     config_paths = args.ds_parallel_config.split(',')
     assert len(config_paths) == args.num_strategy, \
-      f'ds_parallel_config num should equal to num_strategy {args.num_strategy}'
+        f'ds_parallel_config num should equal to num_strategy {args.num_strategy}'
     ds_parallel_configs = []
     for config_path in config_paths:
         ds_parallel_config = json.load(open(config_path, 'r'))
@@ -88,11 +88,10 @@ def parse_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
     return ds_hierarchy, dg_hierarchy
 
 def train_dataset_provider(args):
-    """Build train dataset."""
     train_dataset = GPTJsonDataset(
         json_file=args.json_file,
         key=args.json_key,
-        max_seq_len=args.seq_length,
+        max_seq_len=args.global_seq_len,
         vocab_file=args.vocab_file,
         merge_file=args.merge_file)
     return train_dataset
@@ -102,9 +101,9 @@ def get_position_ids(gbs_per_dp, seq_len):
     position_ids = np.tile(position_ids, [gbs_per_dp, 1]) # [dp_size, seq_len]
     return position_ids
 
-def train_data_iterator(dataset, consumed_samples, mbs, dp_rank, dp_size):
+def train_data_iterator(dataset, consumed_samples, mbs, data_dp_rank, dp_size):
     # print(f'new dataloader: consumed_samples = {consumed_samples}')
-    train_dataloader = build_pretraining_data_loader(dataset, consumed_samples, mbs, dp_rank, dp_size)
+    train_dataloader = build_pretraining_data_loader(dataset, consumed_samples, mbs, data_dp_rank, dp_size)
     train_data_iterator = iter(train_dataloader)
     return train_data_iterator
 
@@ -131,82 +130,88 @@ def get_dg_from_union(device, dg_union):
 def pretrain(args):
     ds_parallel_configs = read_ds_parallel_config(args)
 
-    config = GPTConfig(vocab_size=args.vocab_size, 
-                       n_positions=args.seq_length,
-                       n_ctx=args.seq_length,
-                       n_embd=args.hidden_size,
-                       ffn_hidden_size=args.ffn_hidden_size,
-                       n_layer=args.num_hidden_layers, 
-                       n_head=args.num_attention_heads, 
-                       seq_len=args.seq_length,
-                       resid_pdrop=args.dropout_prob,
-                       embd_pdrop=args.dropout_prob,
-                       attn_pdrop=args.dropout_prob,
-                       activation_function=args.hidden_act,
-                       global_batch_size=args.global_batch_size,
-                       use_flash_attn=args.use_flash_attn,
-                       )
+    config = GPTConfig(
+        vocab_size=args.vocab_size, 
+        n_positions=args.global_seq_len,
+        n_ctx=args.global_seq_len,
+        n_embd=args.hidden_size,
+        ffn_hidden_size=args.ffn_hidden_size,
+        n_layer=args.num_hidden_layers, 
+        n_head=args.num_attention_heads, 
+        seq_len=args.global_seq_len,
+        resid_pdrop=args.dropout_prob,
+        embd_pdrop=args.dropout_prob,
+        attn_pdrop=args.dropout_prob,
+        activation_function=args.hidden_act,
+        global_batch_size=args.global_batch_size,
+        use_flash_attn=args.use_flash_attn
+    )
     
     # simple check for gpt blocks range
     ranges = []
     for _, block_config in ds_parallel_configs[0]['gpt']['blocks'].items():
         ranges.append(block_config['range'])
     assert ranges[0][0] == 0 and ranges[-1][-1] == config.num_hidden_layers-1, \
-        f"gpt blocks range: {ranges} is conflict with num_hidden_layers: {config.num_hidden_layers}!"
+        f'gpt blocks range: {ranges} is conflict with num_hidden_layers: {config.num_hidden_layers}!'
 
     # Hetu model definition
     model = LLamaLMHeadModel(config=config, ds_parallel_configs=ds_parallel_configs)
     
     input_ds_hierarchy, input_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'input')
     label_ds_hierarchy, label_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'label')
-    # print(f'input_ds: {input_ds}, label_ds: {label_ds}')
     
-    # mbs_times_dp = args.global_batch_size // config.num_micro_batches
-    dp_size = input_ds_hierarchy[0].get(0).get_dim(0)
-    mbs_times_dp = args.micro_batch_size * dp_size
+    config.multi_seq_lens_symbol = []
+    config.multi_cp_group_symbol = []
+    for i in range(len(input_ds_hierarchy)):
+        dcp_size = input_ds_hierarchy[i].get(0).get_dim(0)
+        # 例如[32, 32, 32, 48, 48, 32, 32, 32]
+        # 表示各个dcp分到的seq len
+        config.multi_seq_lens_symbol.append([ht.IntSymbol(1) for _ in range(dcp_size)])
+        # 例如[0, 0, 0, 1, 1, 2, 2, 2] 
+        # 相同编号的在一个cp group中
+        config.multi_cp_group_symbol.append([ht.IntSymbol(1) for _ in range(dcp_size)])
         
-    # todo: assign multi dg_hierarchy, and instantiate only one placement_group
-    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='input_ids')
-    # position_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='position_ids')
-    # token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='token_type_ids')
-    # attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='attention_mask')
-    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[mbs_times_dp, config.seq_len], ds_hierarchy=label_ds_hierarchy, device_group_hierarchy=label_dg_hierarchy, name='masked_lm_labels')
-
-    config.mbs_times_dp_symbol = ht.IntSymbol(mbs_times_dp)
-    config.seq_len_symbol = input_ids.symbolic_shape[1]
+    # todo: remove the global_shape
+    # now just offer a shape that can be divided by dcp size
+    input_ids = ht.parallel_placeholder(ht.int64, global_shape=[dcp_size], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='input_ids')
+    # position_ids = ht.parallel_placeholder(ht.int64, global_shape=[dcp_size], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='position_ids')
+    # token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[dcp_size], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='token_type_ids')
+    # attention_mask = ht.parallel_placeholder(ht.float32, global_shape=[dcp_size], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='attention_mask')
+    masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[dcp_size], ds_hierarchy=label_ds_hierarchy, device_group_hierarchy=label_dg_hierarchy, name='masked_lm_labels')
 
     print(f'{local_device}: build model begin...')
-    loss = model(input_ids=input_ids,
-                 # position_ids=position_ids,
-                 # attention_mask=attention_mask,
-                 # token_type_ids=token_type_ids,
-                 labels=masked_lm_labels)
+    loss = model(
+        input_ids=input_ids,
+        # position_ids=position_ids,
+        # attention_mask=attention_mask,
+        # token_type_ids=token_type_ids,
+        labels=masked_lm_labels
+    )
     print(f'{local_device}: build model end...')
-
-    loss_mean = loss
 
     print(f'{local_device}: optimizer minimize begin...')
     # opt = ht.SGDOptimizer(lr=args.lr, momentum = 0.0)
     opt = ht.AdamOptimizer(lr=args.lr)
-    train_op = opt.minimize(loss_mean)
+    train_op = opt.minimize(loss)
     print(f'{local_device}: optimizer minimize end...')
     
     print(f'{local_device}: build dataset begin...')
     train_dataset = train_dataset_provider(args)
     print(f'{local_device}: build dataset end...')
-    # return
 
-    def run_plan(epoch = 0,
-                 steps = args.steps,
-                 consumed_samples = 0,
-                 global_batch_size = args.global_batch_size,
-                 micro_batch_size = args.micro_batch_size,
-                 seq_len = args.seq_length,
-                 strategy_id = 0, 
-                 run_level = 0):       
-        if global_batch_size != args.global_batch_size or seq_len != args.seq_length:
-            assert config.use_flash_attn == True, "symbolic shape can only used when flash attn is on for now"
-        
+    def run_plan(
+        cp_list,
+        epoch = 0,
+        steps = args.steps,
+        consumed_samples = 0,
+        global_batch_size = args.global_batch_size,
+        micro_batch_size = args.micro_batch_size,
+        global_seq_len = args.global_seq_len,
+        strategy_id = 0, 
+        run_level = 0
+    ):  
+             
+        assert config.use_flash_attn == True, "symbolic shape can only used when flash attn is on for now"
         input_ds_union = input_ds_hierarchy[strategy_id]
         input_device_group_union = input_dg_hierarchy[strategy_id]
         label_ds_union = label_ds_hierarchy[strategy_id]
@@ -214,55 +219,56 @@ def pretrain(args):
         assert input_ds_union.hetero_dim == 0 or input_ds_union.hetero_dim == -3, "input hetero dim unsupported"
         assert label_ds_union.hetero_dim == 0 or label_ds_union.hetero_dim == -3, "label hetero dim unsupported"
 
-        # device in same dp_group will read the same batch data, idx=-1 means no need to read data
-        dup_group_idx, dup_group_num = -1, -1
+        dp_size = len(cp_list)
+        dcp_size = sum(cp_list)
+        data_union_idx, data_dcp_rank, data_dp_rank = -1, -1, -1
         input_union_idx, input_device_group = get_dg_from_union(local_device, input_device_group_union)
         label_union_idx, label_device_group = get_dg_from_union(local_device, label_device_group_union)
         if input_device_group != None:
-            local_device_idx = input_device_group.get_index(local_device)
-            dup_group_idx = input_union_idx
-            dup_group_num = len(input_device_group_union)
-            if input_ds_union.hetero_dim == -3:
-                dup_group_idx = input_ds_union.get(0).get_dup_group_index(local_device_idx)
-                dup_group_num = input_ds_union.get(0).get_dim(0)
+            data_union_idx = input_union_idx
         elif label_device_group != None:
-            local_device_idx = label_device_group.get_index(local_device)
-            dup_group_idx = label_union_idx
-            dup_group_num = len(label_device_group_union)
-            if label_ds_union.hetero_dim == -3:
-                dup_group_idx = label_ds_union.get(0).get_dup_group_index(local_device_idx)
-                dup_group_num = label_ds_union.get(0).get_dim(0)
+            data_union_idx = label_union_idx
+        if data_union_idx != -1:
+            data_dcp_rank = data_union_idx
+            accumulate_cp = 0
+            for i, cp in enumerate(cp_list):
+                accumulate_cp += cp
+                if accumulate_cp > data_dcp_rank:
+                    data_dp_rank = i
+                    break
+        
+        pipeline_id, dp_group_id = None, None
+        gbs_per_dp, num_micro_batches = None, None
+        seq_len, seq_lens, inner_group_seq_lens = None, None, None
+        # 兼容传统的同构策略
+        if not args.hetero:
+            gbs_per_dp = global_batch_size // dp_size
+            assert gbs_per_dp % micro_batch_size == 0, \
+                f'gbs_per_dp={gbs_per_dp} must be divided by mbs={micro_batch_size}'
+            num_micro_batches = gbs_per_dp // micro_batch_size
+            for cp in (cp_list):
+                assert cp == cp_list[0], "homo setting should have the same cp degree"
+            assert global_seq_len % cp_list[0] == 0, \
+                f'gsl={global_seq_len} must be divided by cp={cp_list[0]}'
+            seq_len = global_seq_len // cp_list[0]
+            seq_lens = [seq_len] * dcp_size
+            inner_group_seq_lens = [seq_len] * cp_list[0]
+        # 异构策略
         else:
-            # 其余local device都在中间stage上
-            dup_group_num = len(input_device_group_union)
-            if input_ds_union.hetero_dim == -3:
-                dup_group_num = input_ds_union.get(0).get_dim(0)
-            # raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
-
-        dp_rank = dup_group_idx
-        dp_size = dup_group_num
-        gbs_per_dp = global_batch_size // dp_size
-        mbs_times_dp = micro_batch_size * dp_size
-        assert global_batch_size % mbs_times_dp == 0, \
-            f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
-        num_micro_batches = global_batch_size // mbs_times_dp
-        
-        # heterogenous tp
-        rank_to_device_mapping = {}
-        if args.rank_to_device_mapping == "":
-            for idx in range(all_devices.num_devices):
-                rank_to_device_mapping[idx] = idx
-        else:   
-            rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
-        unused_rank_list = ast.literal_eval(args.unused_rank)
-        for unused_rank in unused_rank_list:
-            if rank_to_device_mapping[unused_rank] == all_devices.get_index(local_device):
-                pass
-                # TODO: 不运行
-                # 目前是进入到exec graph阶段发现不在pipeline中才不运行的
-        
-        # heterogenous pipeline 
-        if args.hetero_data:
+            # ---- hetero tp ----
+            rank_to_device_mapping = {}
+            if args.rank_to_device_mapping == "":
+                # 默认identity映射
+                for idx in range(all_devices.num_devices):
+                    rank_to_device_mapping[idx] = idx
+            else:   
+                rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
+            unused_rank_list = ast.literal_eval(args.unused_rank)
+            for unused_rank in unused_rank_list:
+                if rank_to_device_mapping[unused_rank] == all_devices.get_index(local_device):
+                    pass
+                    # TODO: 不运行
+                    # 目前是进入到exec graph阶段发现不在pipeline中才不运行的
             curr_rank_id = -1
             for rank_id, device_id in rank_to_device_mapping.items():
                 if device_id == all_devices.get_index(local_device):
@@ -270,60 +276,99 @@ def pretrain(args):
                         assert False, "rank_to_device_mapping has duplicate keys"
                     curr_rank_id = rank_id
             assert curr_rank_id != -1, f"can't find device {all_devices.get_index(local_device)} in rank_to_device_mapping"
+            # ---- hetero pipeline ----
             if args.hetero_stages == "[]":
-                pp = all_devices.num_devices // dp_size // args.hetero_stage_gpus
-                hetero_stages = [pp for _ in range(dp_size)]
+                # 默认均分stage
+                pp = all_devices.num_devices // dcp_size // args.hetero_stage_gpus
+                hetero_stages = [pp for _ in range(dcp_size)]
             else:
                 hetero_stages = ast.literal_eval(args.hetero_stages)
+                assert len(hetero_stages) == dcp_size, f"len of hetero_stages should be equal to dcp={dcp_size}"
             accumulate_ranks = 0
-            hetero_pipeline_num = -1
             for i, stage_num in enumerate(hetero_stages):
                 accumulate_ranks += stage_num * args.hetero_stage_gpus
                 if accumulate_ranks > curr_rank_id:
-                    hetero_pipeline_num = i
+                    pipeline_id = i
                     break
-            # assert hetero_pipeline_num != -1, "can't figure out pipeline num"
+            # assert pipeline_id != -1, "can't figure out pipeline num"
             # 说明是没有被用到的靠后的rank
             # 随便给一个pipeline编号即可
-            if hetero_pipeline_num == -1:
-                hetero_pipeline_num = 0
-            # hetero_pipeline_num = curr_rank_id % (dp_size * args.hetero_stage_gpus) // args.hetero_stage_gpus
-            # adjust micro_batch_size
-            '''
-            batch_ratio = 8
-            if hetero_pipeline_num == 0:
-                micro_batch_size = int(global_batch_size // num_micro_batches / batch_ratio)
+            if pipeline_id == None:
+                pipeline_id = 0
+            accumulate_cp = 0
+            for i, cp in enumerate(cp_list):
+                accumulate_cp += cp
+                if accumulate_cp > pipeline_id:
+                    dp_group_id = i
+                    break
+            # ---- hetero batch ----
+            if args.micro_batch_num_list == "[]":
+                # 默认均分micro batch
+                num_micro_batches = global_batch_size // micro_batch_size // dp_size
             else:
-                micro_batch_size = global_batch_size // num_micro_batches - int(global_batch_size // num_micro_batches / batch_ratio)
-            '''
-            # adjust num_micro_batches
-            if args.normal_micro_batches != -1:
-                normal_micro_batches = args.normal_micro_batches
-                if hetero_pipeline_num == 0:
-                    num_micro_batches = global_batch_size // micro_batch_size - normal_micro_batches * (dp_size - 1)
-                    assert num_micro_batches > 0, f"straggler num_micro_batches should > 0, but find it is {num_micro_batches}"
-                else:
-                    num_micro_batches = normal_micro_batches
-            else:
-                num_micro_batches = ast.literal_eval(args.micro_batch_num_list)[hetero_pipeline_num]
+                micro_batch_num_list = ast.literal_eval(args.micro_batch_num_list)
+                assert len(micro_batch_num_list) == dp_size, f"len of micro_batch_num_list should be equal to dp={dp_size}"
+                num_micro_batches = micro_batch_num_list[dp_group_id]
             # re-assign
             gbs_per_dp = micro_batch_size * num_micro_batches
-            mbs_times_dp = micro_batch_size * dp_size
-                
-        config.mbs_times_dp_symbol.set_data(mbs_times_dp)
-        config.seq_len_symbol.set_data(seq_len)
-        print(f'{local_device}: dp_rank={dp_rank}, dp_size={dp_size}, gbs={global_batch_size}, mbs={micro_batch_size}, num_micro_batches={num_micro_batches}')
+            # ---- hetero seqlen ----
+            if args.seq_len_list == "[]":
+                # 默认均分seq len
+                seq_lens = []
+                for cp in cp_list:
+                    assert global_seq_len % cp == 0, \
+                        f'gsl={global_seq_len} must be divided by cp={cp}'
+                    seq_lens.extend([global_seq_len // cp] * cp)
+                seq_len = seq_lens[pipeline_id]
+                inner_group_seq_lens = [seq_len] * cp_list[dp_group_id]
+            else:
+                seq_lens = ast.literal_eval(args.seq_len_list)
+                assert len(seq_lens) == dcp_size, f"len of seq_len_list should be equal to dcp={dcp_size}"
+                seq_len = seq_lens[pipeline_id]
+                inner_group_seq_lens = seq_lens[sum(cp_list[:dp_group_id]): sum(cp_list[:dp_group_id + 1])]
+            # 检测含有data的哪些device的属性是否一致
+            if data_dp_rank != -1:
+                assert data_dp_rank == dp_group_id, f"data_dp_rank={data_dp_rank} should be equal to dp_group_id={dp_group_id}"
+            if data_dcp_rank != -1:
+                assert data_dcp_rank == pipeline_id, f"data_dcp_rank={data_dcp_rank} should be equal to pipeline_id={pipeline_id}"
+        
+        print(
+            f"{local_device}:" + \
+            f"rank={all_devices.get_index(local_device)}, dp_size={dp_size}, dcp_size={dcp_size}, " + \
+            f"data_dp_rank={data_dp_rank}, data_dcp_rank={data_dcp_rank}, " + \
+            f"dp_group_id={dp_group_id}, pipeline_id={pipeline_id}, " + \
+            f"gbs={global_batch_size}, mbs={micro_batch_size}, gsl={global_seq_len}, " + \
+            f"num_micro_batches={num_micro_batches}, seq_len={seq_len}" \
+        )
 
-        # if dp_size * mbs changes, then should use the new dataloader
+        # if data formation (batch or seqlen) changes, then should use the new dataloader
         # start_time = time.time()
-        if dp_rank != -1:
-            train_iter = train_data_iterator(train_dataset, consumed_samples, micro_batch_size, dp_rank, dp_size) # need cache?
+        if data_dp_rank != -1:
+            train_iter = train_data_iterator(train_dataset, consumed_samples, micro_batch_size, data_dp_rank, dp_size) # need cache?
         else:
             train_iter = None
         # end_time = time.time()
         # print(f'{local_device}: create dataloader cost {end_time - start_time} s')
 
         # profile_memory()
+        # 设置runtime symbol   
+        print("runtime seq_lens:", seq_lens, ", and runtime cp list:", cp_list)    
+        for i, symbol in enumerate(config.multi_seq_lens_symbol[strategy_id]):
+            symbol.set_data(seq_lens[i])
+        accumulate_cp = cp_list[0]
+        cp_cnt = 0
+        for i, symbol in enumerate(config.multi_cp_group_symbol[strategy_id]):
+            if i < accumulate_cp:
+                symbol.set_data(cp_cnt)
+            else:
+                cp_cnt += 1
+                accumulate_cp += cp_list[cp_cnt]
+                
+        inner_group_accumulate_seq_lens = []
+        inner_group_accumulate_length = 0
+        for length in inner_group_seq_lens:
+            inner_group_accumulate_seq_lens.append(inner_group_accumulate_length) 
+            inner_group_accumulate_length += length
 
         for step in range(steps):
             # load data for each dp
@@ -334,12 +379,13 @@ def pretrain(args):
                     micro_batches.append(micro_batch)
                 micro_batches = np.concatenate(micro_batches, axis=0) # [num_micro_batches, micro_batch_size, max_seq_len + 1]
                 # padding sequence
-                micro_batches = micro_batches.reshape(gbs_per_dp, -1) # [gbs_per_dp, seq_len + 1]
-                labels = micro_batches[:, 1:] # [gbs_per_dp, seq_len]
-                tokens = micro_batches[:, :-1] # [gbs_per_dp, seq_len]
-                _attention_mask, _position_ids = get_mask_and_position_ids(tokens, train_dataset.encoder.pad_id())
-                _token_type_ids = np.zeros([gbs_per_dp, seq_len])
-
+                micro_batches = micro_batches.reshape(gbs_per_dp, -1) # [gbs_per_dp, global_seq_len + 1]
+                inner_group_seq_idx = data_dcp_rank - sum(cp_list[:data_dp_rank])
+                begin_seq_len = inner_group_accumulate_seq_lens[inner_group_seq_idx]
+                labels = micro_batches[:, begin_seq_len + 1: begin_seq_len + seq_len + 1].reshape(-1) # [gbs_per_dp, seq_len]
+                tokens = micro_batches[:, begin_seq_len: begin_seq_len + seq_len].reshape(-1) # [gbs_per_dp, seq_len]
+                # _attention_mask, _position_ids = get_mask_and_position_ids(tokens, train_dataset.encoder.pad_id())
+                # _token_type_ids = np.zeros([gbs_per_dp, seq_len])
                 feed_dict = {
                     input_ids: tokens.astype(np.int64),
                     # position_ids: _position_ids.astype(np.int64), 
@@ -347,28 +393,33 @@ def pretrain(args):
                     # attention_mask: _attention_mask.astype(np.int64),
                     masked_lm_labels: labels.astype(np.int64),
                 }
-            else: # fake data; feed_dict={} will cause segment fault?
+            else: 
+                # fake data, feed_dict is empty will cause segment fault
+                # need to infer the shape plan
+                # so the shape is must be correct
                 feed_dict = {
-                    input_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    input_ids: np.zeros([gbs_per_dp * seq_len]).astype(np.int64),
                     # position_ids: get_position_ids(gbs_per_dp, seq_len).astype(np.int64), 
                     # token_type_ids: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
                     # attention_mask: np.zeros([gbs_per_dp, seq_len]).astype(np.float32),
-                    masked_lm_labels: np.zeros([gbs_per_dp, seq_len]).astype(np.int64),
+                    masked_lm_labels: np.zeros([gbs_per_dp * seq_len]).astype(np.int64),
                 }
             # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
             start_time = time.time()
             try:
-                results = train_op.graph.run(loss_mean, 
-                                                [loss_mean, train_op], 
-                                                feed_dict = feed_dict, 
-                                                num_micro_batches = num_micro_batches, 
-                                                cur_strategy_id = strategy_id,
-                                                run_level = run_level,
-                                                grad_scale = 1.0)
+                results = train_op.graph.run(
+                    loss, 
+                    [loss, train_op], 
+                    feed_dict = feed_dict, 
+                    num_micro_batches = num_micro_batches, 
+                    cur_strategy_id = strategy_id,
+                    run_level = run_level,
+                    grad_scale = 1.0
+                )
             except RuntimeError as e:
                 print(e)
                 with open("./logs/exception.txt", 'w') as file:
-                    print("device index:", local_device.index, file=file)
+                    print("device rank:", all_devices.get_index(local_device), file=file)
                     print(e, file=file)
                 os.killpg(0, signal.SIGTERM)
             end_time = time.time()
@@ -385,29 +436,39 @@ def pretrain(args):
     # 单轮样例 
     def test_single_round(): 
         strategy_id = 0
+        cp_list = ast.literal_eval(args.cp_list)
+        assert len(cp_list) >= 1, "cp list shouldn't be empty"
         consumed_samples = 0 # should be reset when run next epoch
-        consumed_samples = run_plan(epoch = 0,
-                                    steps = args.steps,
-                                    consumed_samples = consumed_samples, 
-                                    global_batch_size = args.global_batch_size, 
-                                    micro_batch_size = args.micro_batch_size, 
-                                    seq_len = args.seq_length, 
-                                    strategy_id = strategy_id, 
-                                    run_level = ht.run_level("update"))
+        consumed_samples = run_plan(
+            cp_list,
+            epoch = 0,
+            steps = args.steps,
+            consumed_samples = consumed_samples, 
+            global_batch_size = args.global_batch_size, 
+            micro_batch_size = args.micro_batch_size, 
+            global_seq_len = args.global_seq_len,
+            strategy_id = strategy_id, 
+            run_level = ht.run_level("update")
+        )
     
     # 多轮样例
     def test_multi_round():
         strategy_id = 0
+        cp_list = ast.literal_eval(args.cp_list)
+        assert len(cp_list) >= 1, "cp list shouldn't be empty"
         for epoch in range(args.epochs):
             consumed_samples = 0 # should be reset when run next epoch
-            consumed_samples = run_plan(epoch = epoch,
-                                        steps = args.steps,
-                                        consumed_samples = consumed_samples, 
-                                        global_batch_size = args.global_batch_size, 
-                                        micro_batch_size = args.micro_batch_size, 
-                                        seq_len = args.seq_length, 
-                                        strategy_id = strategy_id, 
-                                        run_level = ht.run_level("update"))
+            consumed_samples = run_plan(
+                cp_list,
+                epoch = epoch,
+                steps = args.steps,
+                consumed_samples = consumed_samples, 
+                global_batch_size = args.global_batch_size, 
+                micro_batch_size = args.micro_batch_size, 
+                global_seq_len = args.global_seq_len,  
+                strategy_id = strategy_id, 
+                run_level = ht.run_level("update")
+            )
             print(f"epoch {epoch} finished, consumed_samples = {consumed_samples}")
     
     test_single_round()
@@ -417,22 +478,13 @@ if __name__ == '__main__':
     print("Run hetu training")
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
+        "--hetero", action="store_true", help="use hetero training strategy."
+    )
+    parser.add_argument(
+        '--hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage (to degree)'
     )
     parser.add_argument(
         '--hetero_stages', type=str, default="[]", help='hetero stages.'
-    )
-    parser.add_argument(
-        "--hetero_pipeline", action="store_true", help="use heterogenous pipeline."
-    )
-    parser.add_argument(
-        "--hetero_data", action="store_true", help="use heterogenous data for each heterogenous pipeline."
-    )
-    parser.add_argument(
-        "--normal_micro_batches", type=int, default=-1, help='homo micro batch num.'
-    )
-    parser.add_argument(
-        "--micro_batch_num_list", type=str, help='micro batch num list.'
     )
     parser.add_argument(
         "--rank_to_device_mapping", type=str, default="", help='rank to device mapping.'
@@ -441,13 +493,22 @@ if __name__ == '__main__':
         "--unused_rank", type=str, default="[]", help='unused rank.'
     )
     parser.add_argument(
-        '--gpu_id', type=int, default=0, help='Id of GPU to run.'
+        "--cp_list", type=str, default="[]", help='cp list.'
+    )
+    parser.add_argument(
+        "--seq_len_list", type=str, default="[]", help='seq len list.'
+    )
+    parser.add_argument(
+        "--micro_batch_num_list", type=str, default="[]", help='micro batch num list.'
     )
     parser.add_argument(
         "--ds_parallel_config", default="ds_parallel_config/dp2_tp2_pp2.json", type=str, help="ds parallel config json file"
     )
     parser.add_argument(
         "--num_strategy", type=int, default=1, help="multi ds num"
+    )
+    parser.add_argument(
+        "-s", "--global_seq_len", type=int, default=128, help="Maximum sequence len"
     )
     parser.add_argument(
         "--global_batch_size", type=int, default=64, help="Training batch size global"
@@ -488,9 +549,6 @@ if __name__ == '__main__':
         type=int,
         default=12,
         help="Number of attention heads",
-    )
-    parser.add_argument(
-        "-s", "--seq_length", type=int, default=128, help="Maximum sequence len"
     )
     parser.add_argument(
         "-e", "--epochs", type=int, default=4, help="Number of epochs"

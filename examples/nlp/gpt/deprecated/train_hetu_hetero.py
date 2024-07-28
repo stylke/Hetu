@@ -175,13 +175,13 @@ def pretrain(args):
     config.mbs_times_dp_symbol = ht.IntSymbol(mbs_times_dp)
     config.seq_len_symbol = input_ids.symbolic_shape[1]
 
-    # print(f'{local_device}: build model begin...')
+    print(f'{local_device}: build model begin...')
     loss = model(input_ids=input_ids,
                  # position_ids=position_ids,
                  # attention_mask=attention_mask,
                  # token_type_ids=token_type_ids,
                  labels=masked_lm_labels)
-    # print(f'{local_device}: build model end...')
+    print(f'{local_device}: build model end...')
 
     loss_mean = loss
 
@@ -248,7 +248,12 @@ def pretrain(args):
         num_micro_batches = global_batch_size // mbs_times_dp
         
         # heterogenous tp
-        rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
+        rank_to_device_mapping = {}
+        if args.rank_to_device_mapping == "":
+            for idx in range(all_devices.num_devices):
+                rank_to_device_mapping[idx] = idx
+        else:   
+            rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
         unused_rank_list = ast.literal_eval(args.unused_rank)
         for unused_rank in unused_rank_list:
             if rank_to_device_mapping[unused_rank] == all_devices.get_index(local_device):
@@ -278,7 +283,10 @@ def pretrain(args):
                     hetero_pipeline_num = i
                     break
             # assert hetero_pipeline_num != -1, "can't figure out pipeline num"
-            # -1说明是没有被用到的靠后的rank
+            # 说明是没有被用到的靠后的rank
+            # 随便给一个pipeline编号即可
+            if hetero_pipeline_num == -1:
+                hetero_pipeline_num = 0
             # hetero_pipeline_num = curr_rank_id % (dp_size * args.hetero_stage_gpus) // args.hetero_stage_gpus
             # adjust micro_batch_size
             '''
@@ -289,16 +297,15 @@ def pretrain(args):
                 micro_batch_size = global_batch_size // num_micro_batches - int(global_batch_size // num_micro_batches / batch_ratio)
             '''
             # adjust num_micro_batches
-            '''
-            normal_micro_batches = args.normal_micro_batches
-            if hetero_pipeline_num == 0:
-                num_micro_batches = global_batch_size // micro_batch_size - normal_micro_batches * (dp_size - 1)
-                assert num_micro_batches > 0, f"straggler num_micro_batches should > 0, but find it is {num_micro_batches}"
+            if args.normal_micro_batches != -1:
+                normal_micro_batches = args.normal_micro_batches
+                if hetero_pipeline_num == 0:
+                    num_micro_batches = global_batch_size // micro_batch_size - normal_micro_batches * (dp_size - 1)
+                    assert num_micro_batches > 0, f"straggler num_micro_batches should > 0, but find it is {num_micro_batches}"
+                else:
+                    num_micro_batches = normal_micro_batches
             else:
-                num_micro_batches = normal_micro_batches
-            '''
-            # hetero_pipeline_num是-1的话data随便取都无关紧要
-            num_micro_batches = ast.literal_eval(args.micro_batch_num_list)[hetero_pipeline_num]
+                num_micro_batches = ast.literal_eval(args.micro_batch_num_list)[hetero_pipeline_num]
             # re-assign
             gbs_per_dp = micro_batch_size * num_micro_batches
             mbs_times_dp = micro_batch_size * dp_size
@@ -309,7 +316,7 @@ def pretrain(args):
 
         # if dp_size * mbs changes, then should use the new dataloader
         # start_time = time.time()
-        if dp_rank != -1 and hetero_pipeline_num != -1:
+        if dp_rank != -1:
             train_iter = train_data_iterator(train_dataset, consumed_samples, micro_batch_size, dp_rank, dp_size) # need cache?
         else:
             train_iter = None
@@ -373,46 +380,48 @@ def pretrain(args):
                 if label_device_group != None:
                     loss_out = results[0].numpy(force=True).mean()
                     print(f"{local_device}: [Epoch {epoch}] (step {step}, consumed_samples = {consumed_samples}): loss = {loss_out:.3f}, time = {end_time - start_time:.4f}")
-                # switch只跑一个iter
-                return consumed_samples
         return consumed_samples
-            
-    # 热切换
-    def test_switch(): 
+    
+    # 单轮样例 
+    def test_single_round(): 
+        strategy_id = 0
         consumed_samples = 0 # should be reset when run next epoch
-        args.hetero_data = True
-        args.hetero_stage_gpus = args.before_hetero_stage_gpus
-        args.hetero_stages = args.before_hetero_stages
-        args.micro_batch_num_list = args.before_micro_batch_num_list
-        args.rank_to_device_mapping = args.before_rank_to_device_mapping
-        args.unused_rank = args.before_unused_rank
         consumed_samples = run_plan(epoch = 0,
                                     steps = args.steps,
                                     consumed_samples = consumed_samples, 
                                     global_batch_size = args.global_batch_size, 
                                     micro_batch_size = args.micro_batch_size, 
                                     seq_len = args.seq_length, 
-                                    strategy_id = 0, 
-                                    run_level = ht.run_level("update"))
-        args.hetero_stage_gpus = args.after_hetero_stage_gpus
-        args.hetero_stages = args.after_hetero_stages
-        args.micro_batch_num_list = args.after_micro_batch_num_list
-        args.rank_to_device_mapping = args.after_rank_to_device_mapping
-        args.unused_rank = args.after_unused_rank
-        consumed_samples = run_plan(epoch = 0,
-                                    steps = args.steps,
-                                    consumed_samples = consumed_samples, 
-                                    global_batch_size = args.global_batch_size, 
-                                    micro_batch_size = args.micro_batch_size, 
-                                    seq_len = args.seq_length, 
-                                    strategy_id = 1, 
+                                    strategy_id = strategy_id, 
                                     run_level = ht.run_level("update"))
     
-    test_switch()
+    # 多轮样例
+    def test_multi_round():
+        strategy_id = 0
+        for epoch in range(args.epochs):
+            consumed_samples = 0 # should be reset when run next epoch
+            consumed_samples = run_plan(epoch = epoch,
+                                        steps = args.steps,
+                                        consumed_samples = consumed_samples, 
+                                        global_batch_size = args.global_batch_size, 
+                                        micro_batch_size = args.micro_batch_size, 
+                                        seq_len = args.seq_length, 
+                                        strategy_id = strategy_id, 
+                                        run_level = ht.run_level("update"))
+            print(f"epoch {epoch} finished, consumed_samples = {consumed_samples}")
+    
+    test_single_round()
+    # test_multi_round()
 
 if __name__ == '__main__':
-    print("Run hetu single switch training")
+    print("Run hetu training")
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
+    )
+    parser.add_argument(
+        '--hetero_stages', type=str, default="[]", help='hetero stages.'
+    )
     parser.add_argument(
         "--hetero_pipeline", action="store_true", help="use heterogenous pipeline."
     )
@@ -420,34 +429,16 @@ if __name__ == '__main__':
         "--hetero_data", action="store_true", help="use heterogenous data for each heterogenous pipeline."
     )
     parser.add_argument(
-        '--before_hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
+        "--normal_micro_batches", type=int, default=-1, help='homo micro batch num.'
     )
     parser.add_argument(
-        '--after_hetero_stage_gpus', type=int, default=2, help='num of gpus of a single stage'
+        "--micro_batch_num_list", type=str, help='micro batch num list.'
     )
     parser.add_argument(
-        '--before_hetero_stages', type=str, default="[]", help='hetero stages.'
+        "--rank_to_device_mapping", type=str, default="", help='rank to device mapping.'
     )
     parser.add_argument(
-        '--after_hetero_stages', type=str, default="[]", help='hetero stages.'
-    )
-    parser.add_argument(
-        "--before_micro_batch_num_list", type=str, help='micro batch num list.'
-    )
-    parser.add_argument(
-        "--after_micro_batch_num_list", type=str, help='micro batch num list.'
-    )
-    parser.add_argument(
-        "--before_rank_to_device_mapping", type=str, help='rank to device mapping.'
-    )
-    parser.add_argument(
-        "--after_rank_to_device_mapping", type=str, help='rank to device mapping.'
-    )
-    parser.add_argument(
-        "--before_unused_rank", type=str, help='unused rank.'
-    )
-    parser.add_argument(
-        "--after_unused_rank", type=str, help='unused rank.'
+        "--unused_rank", type=str, default="[]", help='unused rank.'
     )
     parser.add_argument(
         '--gpu_id', type=int, default=0, help='Id of GPU to run.'
@@ -538,6 +529,7 @@ if __name__ == '__main__':
     pynvml.nvmlInit()
     print("Hetu distributed init")
     distributed_init(args)
+    print("Local device world rank is", all_devices.get_index(local_device))
     with ht.graph("define_and_run", num_strategy=args.num_strategy):
         if args.bf16:
             precision = "ht.bfloat16"

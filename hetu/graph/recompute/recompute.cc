@@ -141,14 +141,14 @@ Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2O
   // HT_LOG_DEBUG << "making a duplicate op for " << origin_op;
   // 注意MakeCommOp在InferMeta时不得不特殊处理
   // 需要从外面把CUR_HETERO_ID传进去
-  if (is_comm_op(origin_op)) {
+  if (is_comm_op(origin_op) || is_parallel_attn_op(origin_op)) {
     HT_ASSERT(origin_op->placement_group_union().has(local_device))
       << "something wrong, new duplicated op should all be local";
     origin_op->graph().CUR_HETERO_ID = origin_op->placement_group_union().get_index(local_device);
   }
   auto& new_op = Graph::MakeOp(origin_op->_body, std::move(new_inputs),
                                std::move(new_op_meta), cur_exec_graph);
-  if (is_comm_op(origin_op)) {
+  if (is_comm_op(origin_op) || is_parallel_attn_op(origin_op)) {
     origin_op->graph().CUR_HETERO_ID = 0;
   }
   // HT_LOG_DEBUG << "make op done, the output 0 shape is " << new_op->output(0)->shape();

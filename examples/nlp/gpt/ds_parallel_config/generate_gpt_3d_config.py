@@ -3,7 +3,7 @@ import json
 import os
 import ast
 
-def generate_gpt_3d_config(recompute_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+def generate_gpt_3d_config(recompute_layers, num_layers=32, num_gpus=8, dp=2, cp=1, tp=2, pp=2, zero=True):
     if dp == 1:
         zero = False
     num_layers_per_stage = num_layers // pp
@@ -14,7 +14,7 @@ def generate_gpt_3d_config(recompute_layers, num_layers=32, num_gpus=8, dp=2, tp
         'zero': zero,
         'devices': list(range(num_gpus)),
         'input': {
-            'split': {'0': [dp]},
+            'split': {'0': [dp * cp]},
             'dup': [tp],
             'device_group_union': [device_groups[0]],
             'type': 'placeholder'
@@ -22,13 +22,13 @@ def generate_gpt_3d_config(recompute_layers, num_layers=32, num_gpus=8, dp=2, tp
         'gpt': {
             'wte': {
                 'split': {'0': [tp]},
-                'dup': [dp],
+                'dup': [dp * cp],
                 'device_group_union': [device_groups[0]],
                 'type': 'variable'
             },
             'wpe': {
                 'split': {},
-                'dup': [dp * tp],
+                'dup': [dp * cp * tp],
                 'device_group_union': [device_groups[0]],
                 'type': 'variable'
             },
@@ -37,19 +37,19 @@ def generate_gpt_3d_config(recompute_layers, num_layers=32, num_gpus=8, dp=2, tp
             },
             'layernorm_final': {
                 'split': {},
-                'dup': [dp * tp],
+                'dup': [dp * cp * tp],
                 'device_group_union': [device_groups[-1]],
                 'type': 'variable'
             }
         },
         'lm_head': {
             'split': {'1': [tp]},
-            'dup': [dp],
+            'dup': [dp * cp],
             'device_group_union': [device_groups[-1]],
             'type': 'variable'
         },
         'label': {
-            'split': {'0': [dp]},
+            'split': {'0': [dp * cp]},
             'dup': [tp],
             'device_group_union': [device_groups[-1]],
             'type': 'placeholder'
@@ -66,40 +66,40 @@ def generate_gpt_3d_config(recompute_layers, num_layers=32, num_gpus=8, dp=2, tp
                 'recompute': [True if block_id in recompute_layers else False],
                 'layernorm1': {
                     'split': {},
-                    'dup': [dp * tp],
+                    'dup': [dp * cp * tp],
                     'device_group_union': [device_groups[stage_id]],
                     'type': 'variable'
                 },
                 'attn': {
                     'qkv': {
                         'split': {'1': [tp]},
-                        'dup': [dp],
+                        'dup': [dp * cp],
                         'device_group_union': [device_groups[stage_id]],
                         'type': 'variable'
                     },
                     'dense': {
                         'split': {'0': [tp]},
-                        'dup': [dp],
+                        'dup': [dp * cp],
                         'device_group_union': [device_groups[stage_id]],
                         'type': 'variable'
                     }
                 },
                 'layernorm2': {
                     'split': {},
-                    'dup': [dp * tp],
+                    'dup': [dp * cp * tp],
                     'device_group_union': [device_groups[stage_id]],
                     'type': 'variable'
                 },
                 'mlp': {
                     'dense_h_to_4h': {
                         'split': {'1': [tp]},
-                        'dup': [dp],
+                        'dup': [dp * cp],
                         'device_group_union': [device_groups[stage_id]],
                         'type': 'variable'
                     },
                     'dense_4h_to_h': {
                         'split': {'0': [tp]},
-                        'dup': [dp],
+                        'dup': [dp * cp],
                         'device_group_union': [device_groups[stage_id]],
                         'type': 'variable'
                     }
@@ -119,6 +119,9 @@ if __name__ == '__main__':
         '--dp', type=int, default=2, help='dp.'
     )
     parser.add_argument(
+        '--cp', type=int, default=1, help='cp.'
+    )
+    parser.add_argument(
         '--tp', type=int, default=2, help='tp.'
     )
     parser.add_argument(
@@ -133,13 +136,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
     num_layers = args.num_layers
         
-    assert args.dp * args.tp * args.pp == args.num_gpus, \
-            f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
+    assert args.dp * args.cp * args.tp * args.pp == args.num_gpus, \
+            f'dp * cp * tp * pp = {args.dp * args.cp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
     
-    ds_parallel_config = generate_gpt_3d_config(ast.literal_eval(args.recompute_layers), num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    ds_parallel_config = generate_gpt_3d_config(ast.literal_eval(args.recompute_layers), num_layers, args.num_gpus, args.dp, args.cp, args.tp, args.pp, args.zero)
     
     save_folder = './ds_parallel_config/homo'
-    file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
+    file_name = f'dcp{args.dp * args.cp}_tp{args.tp}_pp{args.pp}.json'
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
     with open(f'{save_folder}/{file_name}', 'w') as f:

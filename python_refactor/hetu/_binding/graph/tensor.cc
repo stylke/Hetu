@@ -353,6 +353,21 @@ PyObject* PyTensor_check_ds_hierarchy_equal(PyTensor* self, PyObject* args, PyOb
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_check_ds_hierarchy_equal_except_split(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "check_ds_hierarchy_equal_except_split(List[DistributedStatesUnion] ds_hierarchy)"
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    Py_RETURN_BOOLEAN_COND(self->tensor->check_ds_hierarchy_equal_except_split(parsed_args.get_ds_hierarchy(0)));
+  } else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }  
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_from_numpy(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   auto* unsafe_self = PyTensor_Type->tp_alloc(PyTensor_Type, 0);
@@ -638,6 +653,7 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"get_data", (PyCFunction) PyTensor_get_data, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_device_group_union", (PyCFunction) PyTensor_get_device_group_union, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"check_ds_hierarchy_equal", (PyCFunction) PyTensor_check_ds_hierarchy_equal, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"check_ds_hierarchy_equal_except_split", (PyCFunction) PyTensor_check_ds_hierarchy_equal_except_split, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_or_compute", (PyCFunction) PyTensor_get_or_compute, METH_NOARGS, nullptr }, 
     {"symbolic", (PyCFunction) PyTensor_symbolic, METH_NOARGS, nullptr }, 
     {"set_requires_grad", (PyCFunction) PyTensor_set_requires_grad, METH_VARARGS | METH_KEYWORDS, nullptr },

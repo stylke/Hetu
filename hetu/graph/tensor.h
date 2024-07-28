@@ -277,6 +277,30 @@ class TensorDef : public shared_ptr_target {
     return true;
   }
 
+  // used in context parallel
+  bool check_ds_hierarchy_equal_except_split(const DistributedStatesHierarchy& ds_hierarchy) {
+    if (_ds_hierarchy.size() != ds_hierarchy.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < _ds_hierarchy.size(); i++) {
+      if (_ds_hierarchy.get(i).size() != ds_hierarchy.get(i).size()) {
+        return false;
+      }
+      for (size_t j = 0; j < _ds_hierarchy.get(i).size(); j++) {
+        if (_ds_hierarchy.get(i).get(j).get_device_num() != ds_hierarchy.get(i).get(j).get_device_num()) {
+          return false;
+        }
+        if (_ds_hierarchy.get(i).get(j).states(-1) != ds_hierarchy.get(i).get(j).states(-1)) {
+          return false;
+        }
+        if (_ds_hierarchy.get(i).get(j).states(-2) != ds_hierarchy.get(i).get(j).states(-2)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   bool has_distributed_states() {
     if (has_cur_ds_union())
       return true;

@@ -704,6 +704,11 @@
   args: Tensor input
   self: input
 
+- name: parallel_attn
+  op: ParallelAttentionOp
+  args: Tensor qkv, int64_t head_dim, List[List[IntSymbol]] multi_seq_lens_symbol, List[List[IntSymbol]] multi_cp_group_symbol, double p_dropout=0, double softmax_scale=-1, bool is_causal=True, bool return_softmax=False
+  self: qkv
+
 - name: attn
   op: AttentionOp
   args: Tensor q, Tensor k, Tensor v, double p_dropout=0, double softmax_scale=-1, bool is_causal=False, bool return_softmax=False

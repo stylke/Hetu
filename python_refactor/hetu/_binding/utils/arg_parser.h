@@ -65,6 +65,7 @@ enum class ArgType : uint8_t {
   DS_HIERARCHY,
   INT_SYMBOL,
   SYMBOLIC_SHAPE,
+  SYMBOLIC_SHAPE_LIST,
   INITIALIZER,
   SGDOPTIMIZER,
   ADAMOPTIMIZER,
@@ -468,6 +469,14 @@ class ParsedPyArgs {
 
   inline SyShape get_symbolic_shape(size_t i) {
     return SyShape_FromPyObject(_args[i]);
+  }
+
+  inline SyShapeList get_symbolic_shape_list_or_empty(size_t i) {
+    return has(i) ? SyShapeList_FromPyObject(_args[i]) : SyShapeList();
+  }
+
+  inline SyShapeList get_symbolic_shape_list(size_t i) {
+    return SyShapeList_FromPyObject(_args[i]);
   }
 
   inline std::shared_ptr<Initializer> get_initializer(size_t i) {

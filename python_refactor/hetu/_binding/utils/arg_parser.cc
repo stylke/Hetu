@@ -76,6 +76,8 @@ std::string ArgType2Str(ArgType type) {
       return "hetu.IntSymbol";
     case ArgType::SYMBOLIC_SHAPE:
       return "List[hetu.IntSymbol]";
+    case ArgType::SYMBOLIC_SHAPE_LIST:
+      return "List[List[hetu.IntSymbol]]";
     case ArgType::INITIALIZER:
       return "hetu.Initializer";
     default:
@@ -178,6 +180,8 @@ ArgType Str2ArgType(const std::string& type) {
     return ArgType::INT_SYMBOL;
   if (type == "List[hetu.IntSymbol]" || type == "List[IntSymbol]" || type == "SyShape")
     return ArgType::SYMBOLIC_SHAPE;
+  if (type == "List[List[hetu.IntSymbol]]" || type == "List[List[IntSymbol]]" || type == "List[SyShape]")
+    return ArgType::SYMBOLIC_SHAPE_LIST;
   if (type == "hetu.Initializer" || type == "Initializer")
     return ArgType::INITIALIZER;
   HT_VALUE_ERROR << "Unknown argument type: " << type;
@@ -400,6 +404,8 @@ bool FnArg::check_arg(PyObject* obj) const {
       return CheckPyIntSymbol(obj);
     case ArgType::SYMBOLIC_SHAPE:
       return CheckPySyShape(obj);
+    case ArgType::SYMBOLIC_SHAPE_LIST:
+      return CheckPySyShapeList(obj);
     case ArgType::INITIALIZER:
       return CheckPyInitializer(obj);
     default:

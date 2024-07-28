@@ -1,3 +1,7 @@
+# 2024.7.28: need to support cp
+echo "*** this script is currently deprecated ***"
+exit 1
+
 NUM_LAYERS=${1:-32}
 # HIDDEN_SIZE=${2:-4096}
 HIDDEN_SIZE=${2:-512}

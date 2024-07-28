@@ -770,8 +770,8 @@ class NDArrayDef : public shared_ptr_target {
   int64_t stride(int64_t axis) const {
     int64_t ndim_ = ndim();
     HT_ASSERT(axis >= -ndim_ && axis < ndim_)
-    << "stride should in range [" << -ndim_ << ","
-    << ndim_ << "), but it's" << axis;
+      << "stride should in range [" << -ndim_ << ","
+      << ndim_ << "), but it's " << axis;
     axis = axis < 0 ? axis + ndim_ : axis;
     return _meta.stride[axis];
   }

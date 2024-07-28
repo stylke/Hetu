@@ -3,17 +3,22 @@ import json
 import os
 import ast
 
-def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, accumulate_hetero_stages, recompute_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
+def generate_gpt_3d_config(cp_list, rank_to_device_mapping, unused_rank, hetero_layers, accumulate_hetero_stages, recompute_layers, num_layers=32, num_gpus=8, dp=2, tp=2, pp=2, zero=True):
     if dp == 1:
         zero = False
     
-    dp_union = [dp for _ in range(dp)]
+    assert len(cp_list) == dp, "len of cp list should be equal to dp"
+    dp_cp = sum(cp_list)
+    # dp_union = [dp for _ in range(dp_cp)]
+    # cp_union = [cp_list[i] for _ in range(cp_list[i]) for i in range(dp)]
+    dp_cp_union = [dp_cp for _ in range(dp_cp)]
+    
     tp_union_list = []
     dg_union_list = []
     for block_id in range(num_layers):
         hybrid_tp_degree = []
         hybrid_device_group = []
-        for pipeline_id in range(dp):
+        for pipeline_id in range(dp_cp):
             device_group_num = 0
             cnt = 0
             for hetero_layer in hetero_layers[pipeline_id]:
@@ -32,7 +37,7 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, a
         'zero': zero,
         'devices': list(range(num_gpus)),
         'input': {
-            'split': {'0': dp_union},
+            'split': {'0': dp_cp_union},
             'dup': tp_union_list[0],
             'device_group_union': dg_union_list[0],
             'type': 'placeholder'
@@ -40,13 +45,13 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, a
         'gpt': {
             'wte': {
                 'split': {'0': tp_union_list[0]},
-                'dup': dp_union,
+                'dup': dp_cp_union,
                 'device_group_union': dg_union_list[0],
                 'type': 'variable'
             },
             'wpe': {
                 'split': {},
-                'dup': [tp_union_list[0][i] * dp for i in range(dp)],
+                'dup': [tp_union_list[0][i] * dp_cp for i in range(dp_cp)],
                 'device_group_union': dg_union_list[0],
                 'type': 'variable'
             },
@@ -55,19 +60,19 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, a
             },
             'layernorm_final': {
                 'split': {},
-                'dup': [tp_union_list[-1][i] * dp for i in range(dp)],
+                'dup': [tp_union_list[-1][i] * dp_cp for i in range(dp_cp)],
                 'device_group_union': dg_union_list[-1],
                 'type': 'variable'
             }
         },
         'lm_head': {
             'split': {'1': tp_union_list[-1]},
-            'dup': dp_union,
+            'dup': dp_cp_union,
             'device_group_union': dg_union_list[-1],
             'type': 'variable'
         },
         'label': {
-            'split': {'0': dp_union},
+            'split': {'0': dp_cp_union},
             'dup': tp_union_list[-1],
             'device_group_union': dg_union_list[-1],
             'type': 'placeholder'
@@ -78,43 +83,43 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, a
         blocks_json = ds_parallel_config['gpt']['blocks']
         blocks_json[f'blocks{block_id}'] = {
             'range': [block_id,],
-            'recompute': [(True if block_id in recompute_layers[i] else False) for i in range(dp)],
+            'recompute': [(True if block_id in recompute_layers[i] else False) for i in range(dp_cp)],
             'layernorm1': {
                 'split': {},
-                'dup': [tp_union_list[block_id][i] * dp for i in range(dp)],
+                'dup': [tp_union_list[block_id][i] * dp_cp for i in range(dp_cp)],
                 'device_group_union': dg_union_list[block_id],
                 'type': 'variable'
             },
             'attn': {
                 'qkv': {
                     'split': {'1': tp_union_list[block_id]},
-                    'dup': dp_union,
+                    'dup': dp_cp_union,
                     'device_group_union': dg_union_list[block_id],
                     'type': 'variable'
                 },
                 'dense': {
                     'split': {'0': tp_union_list[block_id]},
-                    'dup': dp_union,
+                    'dup': dp_cp_union,
                     'device_group_union': dg_union_list[block_id],
                     'type': 'variable'
                 }
             },
             'layernorm2': {
                 'split': {},
-                'dup': [tp_union_list[block_id][i] * dp for i in range(dp)],
+                'dup': [tp_union_list[block_id][i] * dp_cp for i in range(dp_cp)],
                 'device_group_union': dg_union_list[block_id],
                 'type': 'variable'
             },
             'mlp': {
                 'dense_h_to_4h': {
                     'split': {'1': tp_union_list[block_id]},
-                    'dup': dp_union,
+                    'dup': dp_cp_union,
                     'device_group_union': dg_union_list[block_id],
                     'type': 'variable'
                 },
                 'dense_4h_to_h': {
                     'split': {'0': tp_union_list[block_id]},
-                    'dup': dp_union,
+                    'dup': dp_cp_union,
                     'device_group_union': dg_union_list[block_id],
                     'type': 'variable'
                 }
@@ -133,6 +138,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--dp', type=int, default=2, help='dp.'
+    )
+    parser.add_argument(
+        '--cp_list', type=str, default="[]", help='cp list.'
     )
     parser.add_argument(
         '--tp', type=int, default=2, help='tp.'
@@ -162,12 +170,18 @@ if __name__ == '__main__':
         '--file_name', type=str, default=""
     )
     args = parser.parse_args()
+    
+    if args.cp_list == "[]":
+        cp_list = [1 for _ in range(args.dp)]
+    else:
+        cp_list = ast.literal_eval(args.cp_list)
+        assert len(cp_list) == args.dp, "len of cp list should be equal to dp"
+    
     num_layers = args.num_layers
-        
     hetero_layers = args.hetero_layers.split(",")
     # assert len(hetero_layers) == args.dp * args.pp, "size of heterogenous layers list should be equal to dp * pp"
     if args.hetero_stages == "[]":
-        hetero_stages = [args.pp for _ in range(args.dp)]
+        hetero_stages = [args.pp for _ in range(sum(cp_list))]
     else:
         hetero_stages = ast.literal_eval(args.hetero_stages)
     accumulate_val = 0
@@ -175,12 +189,12 @@ if __name__ == '__main__':
     for val in hetero_stages:
         accumulate_val += val
         accumulate_hetero_stages.append(accumulate_val)
-    hetero_layers = [[int(hetero_layers[j]) for j in range(accumulate_hetero_stages[i], accumulate_hetero_stages[i + 1])] for i in range(args.dp)]
+    hetero_layers = [[int(hetero_layers[j]) for j in range(accumulate_hetero_stages[i], accumulate_hetero_stages[i + 1])] for i in range(sum(cp_list))]
     for pipeline in hetero_layers:
         assert sum(pipeline) == num_layers, "sum of heterogenous layers of a single pipeline should be equal to the num of total layers"
         
-    assert args.dp * args.tp * args.pp == args.num_gpus, \
-            f'dp * tp * pp = {args.dp * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
+    assert sum(cp_list) * args.tp * args.pp == args.num_gpus, \
+        f'dcp * tp * pp = {sum(cp_list) * args.tp * args.pp} is not equal to num_gpus {args.num_gpus}!'
      
     rank_to_device_mapping = {}       
     if args.rank_to_device_mapping == "":
@@ -190,13 +204,13 @@ if __name__ == '__main__':
         rank_to_device_mapping = ast.literal_eval(args.rank_to_device_mapping)
         
     recompute_layers = ast.literal_eval(args.recompute_layers)
-    assert len(recompute_layers) == args.dp, "recompute layers state should align to dp num"  
+    assert len(recompute_layers) == sum(cp_list), "recompute layers state should align to dp&cp num"  
         
-    ds_parallel_config = generate_gpt_3d_config(rank_to_device_mapping, ast.literal_eval(args.unused_rank), hetero_layers, accumulate_hetero_stages, recompute_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
+    ds_parallel_config = generate_gpt_3d_config(cp_list, rank_to_device_mapping, ast.literal_eval(args.unused_rank), hetero_layers, accumulate_hetero_stages, recompute_layers, num_layers, args.num_gpus, args.dp, args.tp, args.pp, args.zero)
     
     save_folder = './ds_parallel_config/hetero'
     if args.file_name == "":
-        file_name = f'dp{args.dp}_tp{args.tp}_pp{args.pp}.json'
+        file_name = f'dcp{sum(cp_list)}_tp{args.tp}_pp{args.pp}.json'
     else:
         file_name = args.file_name
     if not os.path.exists(save_folder):
