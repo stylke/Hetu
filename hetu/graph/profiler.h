@@ -40,7 +40,7 @@ class CUDAProfiler {
   public:
     CUDAProfiler(const Device& device)
     : _device(device) {
-      _mempool =  std::dynamic_pointer_cast<hetu::impl::CUDACachingMemoryPool>(GetMemoryPool(device));  
+      _mempool = std::dynamic_pointer_cast<hetu::impl::CUDACachingMemoryPool>(GetMemoryPool(device));  
     }
     
     // profile memory

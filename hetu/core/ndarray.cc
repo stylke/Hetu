@@ -452,13 +452,14 @@ NDArray NDArray::hardswish(const NDArray& input,
   return out;
 }
 
-NDArray NDArray::logsigmoid(const NDArray& input,
+// Used for softmax_lse correctness in parallel-attn op only
+NDArray NDArray::logsigmoid(const NDArray& input, bool inverse,
                             StreamIndex stream_id,
                             NDArray& output) {
   NDArray out = output.is_defined() ? output : NDArray::empty_like(input);
   Stream stream(input->device(), stream_id);
   HT_DISPATCH_KERNEL_CUDA_ONLY(input->device().type(), __FUNCTION__,
-                               hetu::impl::Logsigmoid, input, out, stream);
+                               hetu::impl::Logsigmoid, input, out, inverse, stream);
   return out;
 }
 
@@ -841,7 +842,8 @@ NDArray NDArray::reshape(const NDArray& input, const HTShape& new_shape,
   if (output.is_defined()) {
     output = NDArray::view(output, input->shape());
     NDArray::contiguous(input, stream_id, output);
-    return NDArray::view(output, new_shape);
+    output = NDArray::view(output, new_shape);
+    return output;
   }
   else {
     NDArray out = NDArray::contiguous(input, stream_id);

@@ -1,30 +1,30 @@
 NUM_LAYERS=${1:-32}
 # HIDDEN_SIZE=${2:-4096}
-HIDDEN_SIZE=${2:-512}
+HIDDEN_SIZE=${2:-256}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-1024}
 GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
 # FFN_HIDDEN_SIZE=${7:-11008}
 FFN_HIDDEN_SIZE=${7:-2752}
-# SERVER_ADDR=${8:-"172.24.63.12"} # master-0
-SERVER_ADDR=${8:-"172.24.140.146"} # worker-0
+# SERVER_ADDR=${8:-"172.24.19.127"} # master-0
+SERVER_ADDR=${8:-"172.24.71.238"} # worker-0
 # SERVER_ADDR=${8:-"127.0.0.1"} # 216
 SERVER_PORT=${9:-"23459"}
 HOST_FILE_PATH=${10:-"./scripts/host.yaml"}
 ENV_FILE_PATH=${11:-"./scripts/env_A100.sh"}
 
-CASE=2
+CASE=1
 if [[ ${CASE} -eq 1 ]]; then
 	# 单机同构
 	# setting 1
 	NUM_GPUS=8
 	DP=1
-	CP=2
+	CP=4
 	TP=2
-	PP=2
+	PP=1
 	HETERO=false
-	RECOMPUTE_LAYERS="[]"
+	RECOMPUTE_LAYERS="[0,1]"
 elif [[ ${CASE} -eq 2 ]]; then
 	# 单机异构
 	# setting 2

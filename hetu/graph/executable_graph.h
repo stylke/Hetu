@@ -4,6 +4,7 @@
 #include "hetu/graph/profiler.h"
 #include "hetu/graph/init/initializer.h"
 #include "hetu/graph/ops/Communication.h"
+#include "hetu/graph/ops/ParallelAttention.h"
 #include "hetu/graph/ops/group.h"
 
 namespace hetu {
@@ -46,6 +47,7 @@ class ExecutableGraph : public Graph {
   friend class Tensor;
   friend class DefineAndRunGraph;
   friend class SwitchExecGraph;
+  friend class AttnCommRing;
 
   ExecutableGraph(GraphName name, size_t init_capacity)
   : Graph(name, init_capacity) {}
@@ -72,6 +74,10 @@ class ExecutableGraph : public Graph {
 
   void SetPipeline(const Device2PipelineMap& pipeline_map) {
     _pipeline_map = pipeline_map;
+  }
+
+  const std::vector<int>& GetUsedRanks() const {
+    return _used_ranks;
   }
 
   void SetUsedRanks(const std::vector<int>& used_ranks) {
@@ -268,6 +274,8 @@ class ExecutableGraph : public Graph {
   MEMORY_PROFILE_LEVEL _memory_profile_level;
   std::string _memory_log_file_path;
   std::vector<std::shared_ptr<MicroBatchMemoryInfo>> _all_micro_batches_memory_info;
+  int32_t _parallel_attn_flag;
+  std::string _parallel_attn_log_file_path;
 };
 
 } // namespace graph

@@ -706,7 +706,7 @@
 
 - name: parallel_attn
   op: ParallelAttentionOp
-  args: Tensor qkv, int64_t head_dim, List[List[IntSymbol]] multi_seq_lens_symbol, List[List[IntSymbol]] multi_cp_group_symbol, double p_dropout=0, double softmax_scale=-1, bool is_causal=True, bool return_softmax=False
+  args: Tensor qkv, int64_t head_dim, int64_t group_query_ratio, List[List[IntSymbol]] multi_seq_lens_symbol, List[List[IntSymbol]] multi_cp_group_symbol, double p_dropout=0, double softmax_scale=-1, bool is_causal=True, bool return_softmax=False
   self: qkv
 
 - name: attn

@@ -218,8 +218,7 @@ NDArray& ExecutableGraph::AllocVariableDataInner(const Tensor& tensor,
                                                  uint64_t seed,
                                                  const HTShape& global_shape) {
   if (_preserved_data.find(tensor->id()) != _preserved_data.end()) {
-    HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": exec variable " << tensor 
-      << " already has the data, so we directly return it";
+    // HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": exec variable " << tensor << " already has the data, so we directly return it";
     return _preserved_data[tensor->id()];
   }
   HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << ": alloc exec variable " << tensor;
@@ -1534,6 +1533,17 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       // HT_LOG_INFO << local_device << ": nccl group end";
     }
 
+    // parallel attn op算子手动实现且比较复杂
+    // 目前单独维护attn ctx
+    // 这里需要从外部传入micro batch id来确定 fwd存/bwd取 哪个attn ctx
+    if (is_parallel_attn_op(op) || is_parallel_attn_grad_op(op)) {
+      if (is_parallel_attn_op(op)) {
+        dynamic_cast<ParallelAttentionOpImpl&>(op->body()).set_attn_ctx_num(micro_batch_id);
+      } else {
+        dynamic_cast<ParallelAttentionGradientOpImpl&>(op->body()).set_attn_ctx_num(micro_batch_id);
+      }
+    }
+
     // variable can be directly fetched, needn't save in tensor2data
     // AMP data transfer can be directly fetched, needn't save in tensor2data
     NDArrayList input_vals;
@@ -1670,6 +1680,28 @@ void ExecutableGraph::GetExecEnvs() {
   } else {
     // 默认不对memory打log
     _memory_log_file_path = "";
+  }
+
+  env = std::getenv("HETU_PARALLEL_ATTN");
+  if (env != nullptr) {
+    if (std::string(env) == "ANALYSIS") {
+      _parallel_attn_flag = 1;
+    } else if (std::string(env) == "EXP") {
+      _parallel_attn_flag = 2;
+    } else {
+      HT_RUNTIME_ERROR << "Unknown hetu parallel attn level: " + std::string(env);
+    }
+  } else {
+    // 默认不分析parallel attn
+    _parallel_attn_flag = 0;
+  }
+
+  env = std::getenv("HETU_PARALLEL_ATTN_LOG_FILE");
+  if (env != nullptr) {
+    _parallel_attn_log_file_path = std::string(env);
+  } else {
+    // 默认不对parallel attn打log
+    _parallel_attn_log_file_path = "";
   }
 }
 
@@ -2615,12 +2647,14 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       std::pair<int64_t, int64_t>& op_t1, std::pair<int64_t, int64_t>& op_t2) {
         return op_t1.second > op_t2.second;
       });
-    double compute_time = 0;
+    double attn_fwd_time = 0;
+    double attn_bwd_time = 0;
+    double optimizer_time = 0;
+    double other_compute_time = 0;
     double tp_p2p_time = 0;
     double pp_p2p_time = 0;
     double tp_collective_time = 0;
     double dp_grad_reduce_time = 0;
-    double optimizer_time = 0;
     double blocking_time = 0;
     double other_time = 0;
     std::ostringstream out;
@@ -2643,8 +2677,12 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         if (op->stream_index() == kComputingStream) {
           if (is_optimizer_update_op(op)) {
             optimizer_time += op_time.second * 1.0 / 1e6;
+          } else if (is_parallel_attn_op(op)) {
+            attn_fwd_time += op_time.second * 1.0 / 1e6;
+          } else if (is_parallel_attn_grad_op(op)) {
+            attn_bwd_time += op_time.second * 1.0 / 1e6;
           } else {
-            compute_time += op_time.second * 1.0 / 1e6;
+            other_compute_time += op_time.second * 1.0 / 1e6;
           }
         } else if (op->stream_index() == kP2PStream) {
           tp_p2p_time += op_time.second * 1.0 / 1e6;
@@ -2679,12 +2717,14 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (is_analysis_perf) {
       HT_LOG_INFO << local_device << ": " 
                   << "\ntotal run time: " << COST_MSEC(run) << " ms, "
-                  << "compute time: " << compute_time << " ms, "
+                  << "attn fwd time: " << attn_fwd_time << " ms, "
+                  << "attn bwd time: " << attn_bwd_time << " ms, "
+                  << "optimizer time: " << optimizer_time << " ms, "
+                  << "other compute time: " << other_compute_time << " ms, "
                   << "tp p2p time: " << tp_p2p_time << " ms, "
                   << "tp collective time: " << tp_collective_time << " ms, "
                   << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
                   << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
-                  << "optimizer time: " << optimizer_time << " ms, "
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms" << std::endl
                   << out.str();
@@ -2692,19 +2732,21 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     if (_straggler_flag) {
       HT_LOG_WARN << local_device << ": " 
                   << "\ntotal run time: " << COST_MSEC(run) << " ms, "
-                  << "compute time: " << compute_time << " ms, "
+                  << "attn fwd time: " << attn_fwd_time << " ms, "
+                  << "attn bwd time: " << attn_bwd_time << " ms, "
+                  << "optimizer time: " << optimizer_time << " ms, "
+                  << "other compute time: " << other_compute_time << " ms, "
                   << "tp p2p time: " << tp_p2p_time << " ms, "
                   << "tp collective time: " << tp_collective_time << " ms, "
                   << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
                   << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
-                  << "optimizer time: " << optimizer_time << " ms, "
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms" << std::endl;
       if (_straggler_log_file_path != "") {
         if (_straggler_flag == 1) {
           ofstream_sync file(_straggler_log_file_path, std::ios_base::app);
           if (file.is_open()) {
-            file << compute_time << std::endl;
+            file << other_compute_time << std::endl;
           } else {
             HT_RUNTIME_ERROR << "Error opening the file";
           }
@@ -2712,7 +2754,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           ofstream_sync file(_straggler_log_file_path + "_" + std::to_string(hetu::impl::comm::GetWorldRank()) + ".txt", std::ios_base::app);
           if (file.is_open()) {
             file << "total run time: " << COST_MSEC(run) << " ms" << std::endl;
-            file << "compute time: " << compute_time << " ms" << std::endl;
+            file << "compute time: " << other_compute_time << " ms" << std::endl;
           } else {
             HT_RUNTIME_ERROR << "Error opening the file";
           }

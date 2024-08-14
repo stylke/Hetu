@@ -395,7 +395,7 @@ DECLARE_KERNEL_CUDA(Hardswish, const NDArray&, NDArray&,
                     const Stream&);
 DECLARE_KERNEL_CUDA(HardswishGradient, const NDArray&, const NDArray&,
                     NDArray&, const Stream&);
-DECLARE_KERNEL_CUDA(Logsigmoid, const NDArray&, NDArray&,
+DECLARE_KERNEL_CUDA(Logsigmoid, const NDArray&, NDArray&, bool,
                     const Stream&);
 DECLARE_KERNEL_CUDA(LogsigmoidGradient, const NDArray&, const NDArray&,
                     NDArray&, const Stream&);

@@ -225,7 +225,7 @@ void HardswishGradientCuda(const NDArray& input, const NDArray& output_grad,
   NDArray::MarkUsedBy({input, output_grad, input_grad}, stream);
 }
 
-void LogsigmoidCuda(const NDArray& input, NDArray& output, const Stream& stream) {
+void LogsigmoidCuda(const NDArray& input, NDArray& output, bool inverse, const Stream& stream) {
   HT_ASSERT_CUDA_DEVICE(input);
   HT_ASSERT_SAME_DEVICE(input, output);
   HT_ASSERT_EXCHANGABLE(input, output);
@@ -233,16 +233,30 @@ void LogsigmoidCuda(const NDArray& input, NDArray& output, const Stream& stream)
   size_t size = output->numel();
   if (size == 0)
     return;
-  HT_DISPATCH_FLOATING_TYPES(
+  if (!inverse) {
+    HT_DISPATCH_FLOATING_TYPES(
+      input->dtype(), spec_t, "LogsigmoidCuda", [&]() {
+        spec_t zero = spec_t(0);
+        launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
+                                          [=] __device__ (spec_t x) -> spec_t {
+                                              spec_t min_x_0 = hetu::cuda::cuda_min(x, zero);
+                                              spec_t z = hetu::cuda::cuda_exp(-hetu::cuda::cuda_abs(x));
+                                              return min_x_0 - (hetu::cuda::cuda_log(1 + z));
+                                          });
+    });
+  }
+  else {
+    HT_DISPATCH_FLOATING_TYPES(
     input->dtype(), spec_t, "LogsigmoidCuda", [&]() {
       spec_t zero = spec_t(0);
       launch_loop_kernel<spec_t, spec_t>(input, output, size, stream,
                                          [=] __device__ (spec_t x) -> spec_t {
-                                            spec_t min_x_0 = hetu::cuda::cuda_min(x, zero);
-                                            spec_t z = hetu::cuda::cuda_exp(-hetu::cuda::cuda_abs(x));
+                                            spec_t min_x_0 = hetu::cuda::cuda_min(-x, zero);
+                                            spec_t z = hetu::cuda::cuda_exp(-hetu::cuda::cuda_abs(-x));
                                             return min_x_0 - (hetu::cuda::cuda_log(1 + z));
                                          });
     });
+  }
   NDArray::MarkUsedBy({input, output}, stream);
 }
 

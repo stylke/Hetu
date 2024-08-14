@@ -54,7 +54,7 @@ class LogsigmoidGradientOpImpl final : public UnaryGradientOpImpl {
 };
 
 Tensor MakeLogsigmoidGradientOp(Tensor input, Tensor grad_output,
-                               OpMeta op_meta = OpMeta());
+                                OpMeta op_meta = OpMeta());
 
 } // namespace graph
 } // namespace hetu

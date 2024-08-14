@@ -1314,8 +1314,9 @@ void SwitchExecGraph::BufferBatchedIsendIrecvExec(const hetu::impl::comm::NCCLCo
     recv_data_list.push_back(std::move(recv_data));
   }
   comm_nccl_group->BatchedISendIRecv(tasks);
-  NDArray::MarkUsedBy(send_data_list, Stream(local_device, kSwitchCollectiveStream));
-  NDArray::MarkUsedBy(recv_data_list, Stream(local_device, kSwitchCollectiveStream));
+  // 在BatchedIsendIrecv中以及mark过了
+  // NDArray::MarkUsedBy(send_data_list, Stream(local_device, kSwitchCollectiveStream));
+  // NDArray::MarkUsedBy(recv_data_list, Stream(local_device, kSwitchCollectiveStream));
   HT_LOG_DEBUG << local_device << ": BufferBatchedIsendIrecvExec is done";
 }
 

@@ -8,7 +8,6 @@ namespace hetu {
 
 class NDArrayStorage {
  public:
-  
   NDArrayStorage(DataPtr ptr, bool in_mempool = true): 
     _ptr(ptr), 
     _in_mempool(in_mempool) {

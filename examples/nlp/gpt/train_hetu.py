@@ -352,7 +352,7 @@ def pretrain(args):
 
         # profile_memory()
         # 设置runtime symbol   
-        print("runtime seq_lens:", seq_lens, ", and runtime cp list:", cp_list)    
+        print("runtime seq_lens is", seq_lens, "and runtime cp list is", cp_list)    
         for i, symbol in enumerate(config.multi_seq_lens_symbol[strategy_id]):
             symbol.set_data(seq_lens[i])
         accumulate_cp = cp_list[0]

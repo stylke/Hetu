@@ -205,7 +205,7 @@ class NDArray : public shared_ptr_wrapper<NDArrayDef> {
                            StreamIndex stream_id = DEFAULT_STREAM,
                            NDArray& output = EMPTY);
 
-  static NDArray logsigmoid(const NDArray& input,
+  static NDArray logsigmoid(const NDArray& input, bool inverse = false, 
                             StreamIndex stream_id = DEFAULT_STREAM,
                             NDArray& output = EMPTY);
 

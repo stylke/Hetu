@@ -96,6 +96,7 @@ class LLamaAttention(ht.nn.Module):
         attn_output = ht.parallel_attn(
             qkv,             
             self.head_dim, 
+            1, # group_query_ratio = q heads / k(v) heads, 1 means MHA and >1 means GQA
             self.config.multi_seq_lens_symbol, 
             self.config.multi_cp_group_symbol
         )[0]

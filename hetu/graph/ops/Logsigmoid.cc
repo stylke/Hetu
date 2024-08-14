@@ -8,7 +8,7 @@ namespace graph {
 void LogsigmoidOpImpl::DoCompute(Operator& op, 
                           const NDArrayList& inputs, NDArrayList& outputs,
                           RuntimeContext& ctx) const {
-  NDArray::logsigmoid(inputs.at(0),
+  NDArray::logsigmoid(inputs.at(0), false,
                       op->instantiation_ctx().stream_index, 
                       outputs.at(0));
 }
