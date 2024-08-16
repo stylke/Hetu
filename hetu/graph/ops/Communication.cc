@@ -140,7 +140,11 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
           _comm_type = BATCHED_ISEND_IRECV_OP;
           HT_LOG_DEBUG << "BATCHED_ISEND_IRECV_OP";
         } else {
-          HT_RUNTIME_ERROR << "Not supported yet";
+          HT_RUNTIME_ERROR << "Comm type not supported yet"
+            << ", src ds is " << info.src_ds.ds_info()
+            << ", and dst ds is " << info.dst_ds.ds_info()
+            << ", src group is " << info.src_group
+            << ", and dst group is " << info.dst_group;
         }
       }
     }

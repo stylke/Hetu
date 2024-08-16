@@ -670,7 +670,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
 
     // HT_LOG_WARN << local_device << ": deduce placement group union for " << op;
     auto pg_union = DeducePlacementGroup(op, op_to_pg_union_mapping);
-    // HT_LOG_WARN << local_device << ": placement group union for " << op << " is " << pg_union;
+    HT_LOG_DEBUG << local_device << ": placement group union for " << op << " is " << pg_union;
 
     auto autocast_id = AutoCast::cur_autocast_ctx();
     if (autocast_id != UINT64_MAX) {

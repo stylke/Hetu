@@ -2,6 +2,7 @@
 
 #include "hetu/graph/common.h"
 #include <functional>
+#include <algorithm>
 
 namespace hetu {
 namespace graph {
@@ -538,14 +539,19 @@ class DeviceGroupUnion {
     auto size = x.size();
     DeviceGroupList ret;
     for (size_t i = 0; i < size; i++) {
-      std::set<Device> merged_devices;
+      // 2024.8.16: fix a bug
+      // 注意这里不能使用set而是要用vector
+      // device的顺序很重要
+      std::vector<Device> merged_devices;
       for (const auto& device : x.get(i).devices()) {
-        merged_devices.insert(device);
+        merged_devices.emplace_back(device);
       }
       for (const auto& device : y.get(i).devices()) {
-        merged_devices.insert(device);
+        if (std::find(merged_devices.begin(), merged_devices.end(), device) == merged_devices.end()) {
+          merged_devices.emplace_back(device);
+        }
       }
-      ret.emplace_back(std::vector<Device>(merged_devices.begin(), merged_devices.end()));
+      ret.emplace_back(merged_devices);
     }
     return DeviceGroupUnion(ret);
   }

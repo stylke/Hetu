@@ -266,9 +266,9 @@ def pretrain(args):
             unused_rank_list = ast.literal_eval(args.unused_rank)
             for unused_rank in unused_rank_list:
                 if rank_to_device_mapping[unused_rank] == all_devices.get_index(local_device):
-                    pass
-                    # TODO: 不运行
-                    # 目前是进入到exec graph阶段发现不在pipeline中才不运行的
+                    # 进入到exec graph阶段发现不在pipeline中才不运行的
+                    # 目前改成直接在此处返回不去run
+                    return
             curr_rank_id = -1
             for rank_id, device_id in rank_to_device_mapping.items():
                 if device_id == all_devices.get_index(local_device):
@@ -290,11 +290,13 @@ def pretrain(args):
                 if accumulate_ranks > curr_rank_id:
                     pipeline_id = i
                     break
-            # assert pipeline_id != -1, "can't figure out pipeline num"
+            assert pipeline_id != None, "can't figure out pipeline num"
+            '''
             # 说明是没有被用到的靠后的rank
             # 随便给一个pipeline编号即可
             if pipeline_id == None:
                 pipeline_id = 0
+            '''
             accumulate_cp = 0
             for i, cp in enumerate(cp_list):
                 accumulate_cp += cp
@@ -333,7 +335,7 @@ def pretrain(args):
                 assert data_dcp_rank == pipeline_id, f"data_dcp_rank={data_dcp_rank} should be equal to pipeline_id={pipeline_id}"
         
         print(
-            f"{local_device}:" + \
+            f"{local_device}: " + \
             f"rank={all_devices.get_index(local_device)}, dp_size={dp_size}, dcp_size={dcp_size}, " + \
             f"data_dp_rank={data_dp_rank}, data_dcp_rank={data_dcp_rank}, " + \
             f"dp_group_id={dp_group_id}, pipeline_id={pipeline_id}, " + \

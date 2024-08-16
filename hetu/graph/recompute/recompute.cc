@@ -163,8 +163,10 @@ Operator& Recompute::DuplicateRecomputedOp(const Operator& origin_op, const Op2O
     }
     cur_exec_graph.RecordExecTensor(new_output);
   }
-  if (origin_op->placement_group_union().size() != 0)
+  if (origin_op->placement_group_union().size() != 0) {
     new_op->MapToParallelDevices(origin_op->placement_group_union());
+    HT_LOG_DEBUG << "[Recompute] make recompute op " << new_op << " with pg union = " << new_op->placement_group_union();
+  }
   new_op->Instantiate(origin_op->instantiation_ctx().placement, 
                       origin_op->instantiation_ctx().stream_index);
   for (auto i = 0; i < origin_op->num_outputs(); i++) {

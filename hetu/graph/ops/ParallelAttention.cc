@@ -249,14 +249,18 @@ void AttnCommRing::PrepareKVBlocks(const NDArray& local_k, const NDArray& local_
   }
   HT_ASSERT(_kv_storage_list.empty())
     << "_kv_storage_list should be empty";
+  // already support support cp degree not divided by num of storage
+  /*
   // TODO: let KVBlock 0 and KVBlock _ring_size (on rank 0) be two KVBlocks
   // and we should use KVBlock _ring_size to SaveCtx 
   HT_ASSERT(_ring_size % _kv_storage_size == 0)
     << "Currently only support that cp degree could be divided by num of storage"
     << ", otherwise one KVBlock may have two possible storage when doing the ring attn";
+  */
   for (size_t i = 0; i < _kv_storage_size; i++) {
     auto kv_max_seq_len = kv_max_seq_len_list.at(i);
     auto dkv_max_seq_len = dkv_max_seq_len_list.at(i);
+    // HT_LOG_DEBUG << "[ParallelAttn]: attn storage " << i << " kv_max_seq_len is " << kv_max_seq_len << " and dkv_max_seq_len (if piggyback grad) is " << dkv_max_seq_len;
     auto numel = (kv_max_seq_len + (piggyback_grad ? dkv_max_seq_len : 0)) * skip_seq_len_numel;
     auto size = (dtype == kFloat4 || dtype == kNFloat4) ? ((numel + 1) / 2) * DataType2Size(dtype) : numel * DataType2Size(dtype);
     if (reuse_local_kv_storage && (_ring_idx % _kv_storage_size == i)) {
@@ -283,6 +287,7 @@ void AttnCommRing::PrepareKVBlocks(const NDArray& local_k, const NDArray& local_
                                                 "KVBlock_" + std::to_string(i),
                                                 piggyback_grad,
                                                 HTShape{_batch_size * 2, dkv_seq_len, _kv_num_heads, _head_dim});
+    // HT_LOG_DEBUG << "[ParallelAttn]: " << _local_device << " KVBlock " << i << " has kv_seq_len = " << kv_seq_len << " and dkv_seq_len = " << dkv_seq_len << ", bind to storage " << storage_idx;
     kv_block->bind_attn_storage(_kv_storage_list.at(storage_idx));
     _kv_block_list.emplace_back(kv_block);
   }
@@ -504,14 +509,14 @@ void AttnCommRing::ExecFlashAttn(int64_t q_idx, int64_t kv_idx,
   }
   NDArray empty_ndarray = NDArray();
   if (!is_bwd) {
-    // HT_LOG_DEBUG << "[ParallelAttn]: FlashAttnCuda begin";
+    // HT_LOG_DEBUG << "[ParallelAttn]: FlashAttnCuda begin, q idx = " << q_idx << " and kv idx = " << kv_idx << ", q_slice is " << q_slice << " and k_slice (similar to v_slice) is " << k_slice;
     // 这里的softmax_lse与out都是一个block的局部的输出
     HT_DISPATCH_KERNEL_CUDA_ONLY(DeviceType::CUDA, "FlashAttn", hetu::impl::FlashAttn,
                                  q_slice, k_slice, v_slice, out, empty_ndarray,
                                  empty_ndarray, empty_ndarray, empty_ndarray, softmax_lse,
                                  empty_ndarray, rng_state, _p_dropout, _softmax_scale,
                                  is_causal, false, Stream(_local_device, _stream_idx));
-    // HT_LOG_DEBUG << "[ParallelAttn]: FlashAttnCuda end";
+    // HT_LOG_DEBUG << "[ParallelAttn]: FlashAttnCuda end, out is " << out;
   } else {
     // HT_LOG_DEBUG << "[ParallelAttn]: FlashAttnGradientCuda begin";
     // 这里的softmax_lse与out则是全部block累积的
@@ -753,8 +758,8 @@ void AttnCommRing::Run(bool is_bwd) {
       auto dv = NDArray();
       if (!empty_round) {
         dq = NDArray::empty_like(_local_q, _stream_idx);
-        dk = NDArray::empty_like(cur_kv_block->get_4d_acc_dk(), _stream_idx);
-        dv = NDArray::empty_like(cur_kv_block->get_4d_acc_dv(), _stream_idx);
+        dk = NDArray::empty_like(cur_kv_block->get_4d_k(), _stream_idx);
+        dv = NDArray::empty_like(cur_kv_block->get_4d_v(), _stream_idx);
       }
       // 计算时当前的cur_kv_block所在的storage必须已经完成了通信
       if (!empty_round) cur_kv_block->wait_until_comm_done(comp_stream);

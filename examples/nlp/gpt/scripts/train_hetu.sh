@@ -7,22 +7,24 @@ GLOBAL_BATCH_SIZE=${5:-256}
 MICRO_BATCH_SIZE=${6:-4}
 # FFN_HIDDEN_SIZE=${7:-11008}
 FFN_HIDDEN_SIZE=${7:-2752}
-# SERVER_ADDR=${8:-"172.24.19.127"} # master-0
-SERVER_ADDR=${8:-"172.24.71.238"} # worker-0
+SERVER_ADDR=${8:-"172.24.19.127"} # master-0
+# SERVER_ADDR=${8:-"172.24.71.238"} # worker-0
 # SERVER_ADDR=${8:-"127.0.0.1"} # 216
 SERVER_PORT=${9:-"23459"}
 HOST_FILE_PATH=${10:-"./scripts/host.yaml"}
 ENV_FILE_PATH=${11:-"./scripts/env_A100.sh"}
 
-CASE=1
+# 注意目前属于同一CP的几条pipeline的layer与stage的划分以及recompute的layers必须一致
+# 否则会由于topo序和pipeline的scheduler不一致而出现死锁
+CASE=2
 if [[ ${CASE} -eq 1 ]]; then
 	# 单机同构
 	# setting 1
 	NUM_GPUS=8
-	DP=1
-	CP=4
-	TP=2
-	PP=1
+	DP=2
+	CP=2
+	TP=1
+	PP=2
 	HETERO=false
 	RECOMPUTE_LAYERS="[0,1]"
 elif [[ ${CASE} -eq 2 ]]; then
@@ -31,16 +33,16 @@ elif [[ ${CASE} -eq 2 ]]; then
 	NUM_GPUS=8
 	DP=2
 	CP_LIST="[1,3]"
-	TP=1
-	PP=2
+	TP=2
+	PP=1
 	HETERO=true
-	LAYERS_NUM_LIST="17,15,8,24,16,16,16,16"
-	STAGES_NUM_LIST="[2,2,2,2]"
+	LAYERS_NUM_LIST="32,32,32,32"
+	STAGES_NUM_LIST="[1,1,1,1]"
 	MICRO_BATCH_NUM_LIST="[34,30]"
-	UNUSED_RANK="[]"
-	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:6,7:7}"
-	RECOMPUTE_LAYERS="[[],[],[30],[]]"
-	SEQ_LEN_LIST="[1024, 341, 341, 342]"
+	UNUSED_RANK="[1,3]"
+	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:7,3:6,4:4,5:5,6:3,7:2}"
+	RECOMPUTE_LAYERS="[[],[30],[30],[30]]"
+	SEQ_LEN_LIST="[1024, 340, 341, 343]"
 elif [[ ${CASE} -eq 3 ]]; then
 	# 多机同构
 	# setting 3
@@ -56,17 +58,17 @@ elif [[ ${CASE} -eq 4 ]]; then
 	# setting 4
 	NUM_GPUS=16
 	DP=2
-	CP_LIST="[1,3]"
+	CP_LIST="[2,2]"
 	TP=2
 	PP=2
 	HETERO=true
-	LAYERS_NUM_LIST="16,16,12,20,16,16,16,16"
-	STAGES_NUM_LIST="[2,2,2,2]"
+	LAYERS_NUM_LIST="32,32,10,16,6,10,16,6"
+	STAGES_NUM_LIST="[1,1,3,3]"
 	MICRO_BATCH_NUM_LIST="[28,36]"
-	UNUSED_RANK="[4]"
+	UNUSED_RANK="[0,5]"
 	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:2,3:3,4:4,5:5,6:14,7:15,8:8,9:9,10:10,11:11,12:12,13:13,14:6,15:7}"
-	RECOMPUTE_LAYERS="[[9,10,11],[30,31],[],[]]"
-	SEQ_LEN_LIST="[1024, 341, 341, 342]"
+	RECOMPUTE_LAYERS="[[9,10,11],[9,10,11],[30,31],[30,31]]"
+	SEQ_LEN_LIST="[514, 510, 342, 682]"
 else
     echo unknown CASE
 	exit 1
