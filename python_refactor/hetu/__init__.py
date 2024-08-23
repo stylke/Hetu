@@ -97,6 +97,7 @@ class _GraphContext(object):
             # print(f'before set num_startegy: {self.graph.num_strategy}')
             self.graph.set_num_strategy(num_strategy)
             # print(f'after set num_startegy: {self.graph.num_strategy}, cur_strategy_id: {self.graph.cur_strategy_id}')
+        # print(f"Enter graph {self.graph}")
 
     def __enter__(self):
         if len(cur_graph_contexts) > 0:

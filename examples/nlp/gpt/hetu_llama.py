@@ -23,8 +23,8 @@ class LLamaAttention(ht.nn.Module):
         self.add_bias = False
 
         max_positions = config.max_position_embeddings
-        self.bias = np.tril(np.ones((max_positions, max_positions), dtype=np.int64).reshape(
-                    1, 1, max_positions, max_positions))
+        # self.bias = np.tril(np.ones((max_positions, max_positions), dtype=np.int64).reshape(
+        #             1, 1, max_positions, max_positions))
         self.masked_value = -1e4
 
         self.embed_dim = config.hidden_size
@@ -93,12 +93,18 @@ class LLamaAttention(ht.nn.Module):
         '''
         
         assert self.use_flash_attn, "currently only support flash attn"
+        # TODO: support packing api
         attn_output = ht.parallel_attn(
             qkv,             
             self.head_dim, 
             1, # group_query_ratio = q heads / k(v) heads, 1 means MHA and >1 means GQA
             self.config.multi_seq_lens_symbol, 
-            self.config.multi_cp_group_symbol
+            self.config.multi_cp_group_symbol,
+            False,
+            None,
+            None,
+            None,
+            None
         )[0]
         
         '''

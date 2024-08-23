@@ -15,6 +15,7 @@ cmake/config.cmake
 examples/nlp/gpt/_cache.pkl
 examples/nlp/gpt/experiments/
 examples/malleus/data/
+examples/efficiency/exp
 third_party/nccl/
 
 # Python

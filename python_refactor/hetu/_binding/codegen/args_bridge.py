@@ -369,7 +369,7 @@ def get_arg_getter_fn(arg_type, default_str, has_default, type_str, args):
             assert_default_is_none(type_str, default_str)
             return "get_int_symbol_or_empty"
         else:
-            return "get_int_symbolic"
+            return "get_int_symbol"
     elif arg_type == ArgType.SYMBOLIC_SHAPE:
         if has_default:
             assert_default_is_none(type_str, default_str)

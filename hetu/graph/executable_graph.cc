@@ -1640,7 +1640,13 @@ void ExecutableGraph::GetExecEnvs() {
     if (std::string(env) == "ANALYSIS") {
       _straggler_flag = 1;
     } else if (std::string(env) == "EXP") {
+      // 每个GPU都会profile
       _straggler_flag = 2;
+    } else if (std::string(env) == "EXP_NEW") {
+      // 只在0号GPU上profile
+      // 并且信息更全
+      // 还包含memory信息
+      _straggler_flag = 3;
     } else {
       HT_RUNTIME_ERROR << "Unknown hetu straggler level: " + std::string(env);
     }
@@ -2741,7 +2747,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
                   << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
                   << "blocking time: " << blocking_time << " ms, "
-                  << "other time: " << other_time << " ms" << std::endl;
+                  << "other time: " << other_time << " ms";
       if (_straggler_log_file_path != "") {
         if (_straggler_flag == 1) {
           ofstream_sync file(_straggler_log_file_path, std::ios_base::app);
@@ -2757,6 +2763,29 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
             file << "compute time: " << other_compute_time << " ms" << std::endl;
           } else {
             HT_RUNTIME_ERROR << "Error opening the file";
+          }
+        } else if (_straggler_flag == 3) {
+          if (hetu::impl::comm::GetWorldRank() == 0) {
+            ofstream_sync file(_straggler_log_file_path, std::ios_base::app);
+            if (file.is_open()) {
+              file << "total run time: " << COST_MSEC(run) << " ms, "
+                << "attn fwd time: " << attn_fwd_time << " ms, "
+                << "attn bwd time: " << attn_bwd_time << " ms, "
+                << "optimizer time: " << optimizer_time << " ms, "
+                << "other compute time: " << other_compute_time << " ms, "
+                << "tp p2p time: " << tp_p2p_time << " ms, "
+                << "tp collective time: " << tp_collective_time << " ms, "
+                << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
+                << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                << "blocking time: " << blocking_time << " ms, "
+                << "other time: " << other_time << " ms" << std::endl;
+              auto memory_info = GetCUDAProfiler(local_device)->GetCurrMemoryInfo();
+              file << "all reserved: " << memory_info.all_reserved << " mb, "
+                << "mempool reserved: " << memory_info.mempool_reserved << " mb, "
+                << "mempool allocated: " << memory_info.mempool_allocated << " mb" << std::endl;
+            } else {
+              HT_RUNTIME_ERROR << "Error opening the file";
+            }
           }
         }
       }

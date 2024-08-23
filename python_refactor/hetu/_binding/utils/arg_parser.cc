@@ -320,6 +320,9 @@ FnArg::FnArg(const std::string& fmt, size_t equal_sign_hint) {
       case ArgType::DISTRIBUTED_STATES:
       case ArgType::DISTRIBUTED_STATES_LIST:
       case ArgType::DS_HIERARCHY:
+      case ArgType::INT_SYMBOL:
+      case ArgType::SYMBOLIC_SHAPE:
+      case ArgType::SYMBOLIC_SHAPE_LIST:
       case ArgType::INITIALIZER:
         if (!_default_as_none) {
           HT_VALUE_ERROR << "Default " << _arg_type << " can only be None";

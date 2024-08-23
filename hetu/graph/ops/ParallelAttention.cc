@@ -12,6 +12,12 @@ namespace graph {
 
 static int64_t get_local_seq_len(const Tensor& input, const SyShapeList& multi_seq_lens_symbol) {
   auto& graph = input->producer()->graph();
+  if (graph.type() == GraphType::EAGER) {
+    HT_ASSERT(multi_seq_lens_symbol.size() == 1 && multi_seq_lens_symbol.at(0).size() == 1)
+      << "eager graph should only have one strategy"
+      << ", and currently not support cp";
+    return multi_seq_lens_symbol.at(0).at(0)->get_val();
+  }
   HT_ASSERT(multi_seq_lens_symbol.size() == graph.NUM_STRATEGY 
             && graph.CUR_STRATEGY_ID < multi_seq_lens_symbol.size())
     << "strategy num should be matched";
@@ -54,8 +60,15 @@ static int64_t get_local_dcp_idx(const Tensor& input) {
 }
 
 static std::tuple<int64_t, DeviceGroupList, std::vector<int64_t>> get_local_ring(const Tensor& input, const SyShapeList& multi_seq_lens_symbol, const SyShapeList& multi_cp_group_symbol) {
-  auto local_device = hetu::impl::comm::GetLocalDevice();
   auto& graph = input->producer()->graph();
+  if (graph.type() == GraphType::EAGER) {
+    HT_ASSERT(multi_seq_lens_symbol.size() == 1 && multi_seq_lens_symbol.at(0).size() == 1
+              && multi_cp_group_symbol.size() == 1 && multi_cp_group_symbol.at(0).size() == 1)
+      << "eager graph should only have one strategy"
+      << ", and currently not support cp";
+    return std::make_tuple(0, DeviceGroupList{DeviceGroup{{input->producer()->eager_device()}}}, std::vector<int64_t>{multi_seq_lens_symbol.at(0).at(0)->get_val()});
+  }
+  auto local_device = hetu::impl::comm::GetLocalDevice();
   HT_ASSERT(multi_seq_lens_symbol.size() == multi_cp_group_symbol.size() 
             && multi_seq_lens_symbol.size() == graph.NUM_STRATEGY 
             && graph.CUR_STRATEGY_ID < multi_seq_lens_symbol.size())
@@ -883,7 +896,8 @@ std::vector<NDArrayMeta> ParallelAttentionOpImpl::DoInferMeta(const TensorList& 
   auto& input = inputs.at(0); // packed qkv
   NDArrayMeta base = input->meta();
   HT_ASSERT(input->shape().size() == 2)
-    << "ParallelAttentionOp only support input shape [batch_size * seq_len, num_head * head_dim]";
+    << "ParallelAttentionOp only support input shape [batch_size * seq_len, num_head * head_dim]"
+    << ", but found " << input->shape();
   int64_t batch_size_mul_seq_len = input->shape(0);
   int64_t num_heads_mul_head_dim = input->shape(1);
   // workaround 
@@ -924,12 +938,11 @@ void ParallelAttentionOpImpl::DoCompute(Operator& op,
     << ", so that it will be released but the splitted output (q, k, v) remains";
   */
   // 拿到qkv先做reshape和split
-  // runtime时一定要从ctx中取shape信息
   const auto& qkv = inputs.at(0);
   auto& output = outputs.at(0);
   // auto& softmax_lse = outputs.at(1);
   // auto& rng_state = outputs.at(2);
-  HTShape input_shape = ctx.get_runtime_shape(op->input(0)->id());
+  HTShape input_shape = qkv->shape();
   HT_ASSERT(input_shape.size() == 2)
     << "ParallelAttentionOp only support input shape [batch_size * seq_len, num_heads * head_dim * 3]";
   int64_t batch_size_mul_seq_len = input_shape.at(0);
@@ -948,8 +961,8 @@ void ParallelAttentionOpImpl::DoCompute(Operator& op,
   HT_ASSERT(_head_dim <= 256 && _head_dim % 8 == 0)
     << "ParallelFlashAttention forward only supports head dimension at most 256 and must be divided by 8";
   auto stream_idx = op->instantiation_ctx().stream_index;
-  auto reshaped_qkv = NDArray::reshape(qkv, {batch_size, seq_len, total_num_heads, _head_dim}, stream_idx);
-  auto reshaped_output = NDArray::reshape(output, {batch_size, seq_len, q_num_heads, _head_dim}, stream_idx);
+  auto reshaped_qkv = NDArray::view(qkv, {batch_size, seq_len, total_num_heads, _head_dim});
+  auto reshaped_output = NDArray::view(output, {batch_size, seq_len, q_num_heads, _head_dim});
   // self-attn
   HTShape q_shape = {batch_size, seq_len, q_num_heads, _head_dim};
   HTShape k_shape = {batch_size, seq_len, kv_num_heads, _head_dim};
@@ -966,11 +979,13 @@ void ParallelAttentionOpImpl::DoCompute(Operator& op,
   DeviceGroupList tp_group_list;
   std::vector<int64_t> seq_len_list;
   std::tie(ring_idx, tp_group_list, seq_len_list) = get_local_ring(op->input(0), _multi_seq_lens_symbol, _multi_cp_group_symbol);
-  auto used_ranks = dynamic_cast<ExecutableGraph&>(op->graph()).GetUsedRanks();
-  auto local_device = hetu::impl::comm::GetLocalDevice();
   // HT_LOG_DEBUG << "[ParallelAttn]: the tp group list is " << tp_group_list << " and seq len list is " << seq_len_list;
   // 开cp
   if (tp_group_list.size() >= 2) {
+    HT_ASSERT(!_packing)
+      << "currently not support Ring-Attn w/ Packing";
+    auto used_ranks = dynamic_cast<ExecutableGraph&>(op->graph()).GetUsedRanks();
+    auto local_device = hetu::impl::comm::GetLocalDevice();
     auto& nccl_comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(used_ranks, local_device);
     // HT_LOG_DEBUG << "[ParallelAttn]: construct fwd comm ring for " << local_device;
     auto attn_comm_ring = AttnCommRing(op,
@@ -1004,25 +1019,50 @@ void ParallelAttentionOpImpl::DoCompute(Operator& op,
                                                  stream_idx)};
     // *注意softmax_lse是fp32的
     attn_ctx()->acc_softmax_lse = NDArray::empty(HTShape{batch_size, q_num_heads, seq_len_list[ring_idx]},
-                                                 local_device,
+                                                 q->device(),
                                                  kFloat,
                                                  stream_idx);
     attn_ctx()->acc_out = reshaped_output;
     NDArray empty_ndarray = NDArray();
     // HT_LOG_DEBUG << "[ParallelAttn]: fwd (no cp), acc_softmax_lse shape is " << attn_ctx()->acc_softmax_lse->shape() << ", acc_out shape is " << attn_ctx()->acc_out->shape();
-    HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::FlashAttn,
-                                 q, k, v, attn_ctx()->acc_out, empty_ndarray,
-                                 empty_ndarray, empty_ndarray, empty_ndarray, attn_ctx()->acc_softmax_lse,
-                                 empty_ndarray, attn_ctx()->rng_state_list.at(0), p_dropout(), softmax_scale_,
-                                 true, return_softmax(), op->instantiation_ctx().stream());
+    if (!_packing) {
+      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::FlashAttn,
+                                   q, k, v, attn_ctx()->acc_out, empty_ndarray,
+                                   empty_ndarray, empty_ndarray, empty_ndarray, attn_ctx()->acc_softmax_lse,
+                                   empty_ndarray, attn_ctx()->rng_state_list.at(0), p_dropout(), softmax_scale_,
+                                   true, return_softmax(), op->instantiation_ctx().stream());
+    } else {
+      HT_ASSERT(inputs.size() == 3)
+        << "packing should have 3 inputs: qkv, cu_seqlens_q and cu_seqlens_k";
+      auto cu_seqlens_q = inputs.at(1);
+      auto cu_seqlens_k = inputs.at(2);
+      q = NDArray::view(q, {batch_size * seq_len, q_num_heads, _head_dim});
+      k = NDArray::view(k, {batch_size * seq_len, kv_num_heads, _head_dim});
+      v = NDArray::view(v, {batch_size * seq_len, kv_num_heads, _head_dim});
+      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::FlashAttnVarlen, 
+                                   q, k, v, cu_seqlens_q, cu_seqlens_k, attn_ctx()->acc_out, empty_ndarray,
+                                   empty_ndarray, empty_ndarray, empty_ndarray, attn_ctx()->acc_softmax_lse,
+                                   empty_ndarray, attn_ctx()->rng_state_list.at(0), 
+                                   max_seqlen_q(), max_seqlen_k(), 
+                                   p_dropout(), softmax_scale_, false,
+                                   true, return_softmax(), op->instantiation_ctx().stream());
+    }
   }
 }
 
 TensorList ParallelAttentionOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
   TensorList empty = {Tensor()};
+  Tensor cu_seqlens_q = Tensor(), cu_seqlens_k = Tensor();
+  if (_packing) {
+    HT_ASSERT(op->num_inputs() == 3)
+      << "packing should have 3 inputs: qkv, cu_seqlens_q and cu_seqlens_k";
+    cu_seqlens_q = op->input(1);
+    cu_seqlens_k = op->input(2);
+  }
   return op->requires_grad(0) ? MakeParallelAttentionGradientOp(_attn_ctx_list, grad_outputs.at(0),  
                                                                 _head_dim, _group_query_ratio, 
                                                                 _multi_seq_lens_symbol, _multi_cp_group_symbol, 
+                                                                _packing, cu_seqlens_q, cu_seqlens_k, _max_seqlen_q, _max_seqlen_k,
                                                                 p_dropout(), softmax_scale(), is_causal(), op->grad_op_meta().set_name(op->grad_name()))
                               : empty;
 }
@@ -1075,7 +1115,7 @@ void ParallelAttentionGradientOpImpl::DoCompute(Operator& op, const NDArrayList&
   const auto& rng_state = inputs.at(4);
   */
   auto& grad_input = outputs.at(0);
-  HTShape grad_output_shape = ctx.get_runtime_shape(op->input(0)->id());
+  HTShape grad_output_shape = grad_output->shape();
   HT_ASSERT(grad_output_shape.size() == 2)
     << "ParallelAttentionGradientOp only support input shape [batch_size * seq_len, q_num_heads * head_dim]";
   int64_t batch_size_mul_seq_len = grad_output_shape.at(0);
@@ -1094,8 +1134,8 @@ void ParallelAttentionGradientOpImpl::DoCompute(Operator& op, const NDArrayList&
   HT_ASSERT(_head_dim <= 256 && _head_dim % 8 == 0)
     << "ParallelFlashAttention backward only supports head dimension at most 256 and must be divided by 8";
   auto stream_idx = op->instantiation_ctx().stream_index;
-  auto reshaped_grad_output = NDArray::reshape(grad_output, {batch_size, seq_len, q_num_heads, _head_dim}, stream_idx);
-  auto reshaped_grad_input = NDArray::reshape(grad_input, {batch_size, seq_len, total_num_heads, _head_dim}, stream_idx);
+  auto reshaped_grad_output = NDArray::view(grad_output, {batch_size, seq_len, q_num_heads, _head_dim});
+  auto reshaped_grad_input = NDArray::view(grad_input, {batch_size, seq_len, total_num_heads, _head_dim});
   HTShape dq_shape = {batch_size, seq_len, q_num_heads, _head_dim};
   HTShape dk_shape = {batch_size, seq_len, kv_num_heads, _head_dim};
   HTShape dv_shape = {batch_size, seq_len, kv_num_heads, _head_dim};
@@ -1112,6 +1152,8 @@ void ParallelAttentionGradientOpImpl::DoCompute(Operator& op, const NDArrayList&
   std::tie(ring_idx, tp_group_list, seq_len_list) = get_local_ring(op->input(0), _multi_seq_lens_symbol, _multi_cp_group_symbol);
   // 开cp
   if (tp_group_list.size() >= 2) {
+    HT_ASSERT(!_packing)
+      << "currently not support Ring-Attn w/ Packing";
     auto used_ranks = dynamic_cast<ExecutableGraph&>(op->graph()).GetUsedRanks();
     auto& nccl_comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(used_ranks, hetu::impl::comm::GetLocalDevice());
     auto attn_comm_ring = AttnCommRing(op,
@@ -1139,25 +1181,41 @@ void ParallelAttentionGradientOpImpl::DoCompute(Operator& op, const NDArrayList&
     HT_ASSERT(attn_ctx()->rng_state_list.size() == 1)
       << "there should only be one single rng_state when cp is off"
       << ", but for attn ctx of mirco batch " << _attn_ctx_num << ", the rng_state num is " << attn_ctx()->rng_state_list.size();
-    HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-                                 hetu::impl::FlashAttnGradient, reshaped_grad_output,
-                                 attn_ctx()->q, attn_ctx()->k, attn_ctx()->v, attn_ctx()->acc_out,
-                                 attn_ctx()->acc_softmax_lse, attn_ctx()->rng_state_list.at(0), 
-                                 dq, dk, dv, p_dropout(), softmax_scale_,
-                                 true, op->instantiation_ctx().stream());
-    // flash-attn already supports uncontiguous outputs
-    /*
-    // concat dq, dk, dv to reshaped_grad_input
-    HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-                                 hetu::impl::Concatenate, dq,
-                                 reshaped_grad_input, 2, 0, op->instantiation_ctx().stream());
-    HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-                                 hetu::impl::Concatenate, dk,
-                                 reshaped_grad_input, 2, q_num_heads, op->instantiation_ctx().stream());
-    HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-                                 hetu::impl::Concatenate, dv,
-                                 reshaped_grad_input, 2, q_num_heads + kv_num_heads, op->instantiation_ctx().stream());
-    */
+    if (!_packing) {
+      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                   hetu::impl::FlashAttnGradient, reshaped_grad_output,
+                                   attn_ctx()->q, attn_ctx()->k, attn_ctx()->v, attn_ctx()->acc_out,
+                                   attn_ctx()->acc_softmax_lse, attn_ctx()->rng_state_list.at(0), 
+                                   dq, dk, dv, p_dropout(), softmax_scale_,
+                                   true, op->instantiation_ctx().stream());
+      // flash-attn already supports uncontiguous outputs
+      /*
+      // concat dq, dk, dv to reshaped_grad_input
+      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                  hetu::impl::Concatenate, dq,
+                                  reshaped_grad_input, 2, 0, op->instantiation_ctx().stream());
+      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                  hetu::impl::Concatenate, dk,
+                                  reshaped_grad_input, 2, q_num_heads, op->instantiation_ctx().stream());
+      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                  hetu::impl::Concatenate, dv,
+                                  reshaped_grad_input, 2, q_num_heads + kv_num_heads, op->instantiation_ctx().stream());
+      */
+    } else {
+      HT_ASSERT(inputs.size() == 3)
+        << "packing should have 3 inputs: grad_output, cu_seqlens_q and cu_seqlens_k";
+      auto cu_seqlens_q = inputs.at(1);
+      auto cu_seqlens_k = inputs.at(2);
+      auto q = NDArray::view(attn_ctx()->q, {batch_size * seq_len, q_num_heads, _head_dim});
+      auto k = NDArray::view(attn_ctx()->k, {batch_size * seq_len, kv_num_heads, _head_dim});
+      auto v = NDArray::view(attn_ctx()->v, {batch_size * seq_len, kv_num_heads, _head_dim});
+      HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                   hetu::impl::FlashAttnVarlenGradient, reshaped_grad_output,
+                                   q, k, v, cu_seqlens_q, cu_seqlens_k, 
+                                   attn_ctx()->acc_out, attn_ctx()->acc_softmax_lse, attn_ctx()->rng_state_list.at(0), 
+                                   dq, dk, dv, max_seqlen_q(), max_seqlen_k(), p_dropout(), softmax_scale_, false,
+                                   true, op->instantiation_ctx().stream());
+    }
   }
   // 清空该micro batch的ctx
   attn_ctx()->release();
@@ -1174,13 +1232,19 @@ HTShapeList ParallelAttentionGradientOpImpl::DoInferShape(Operator& op,
 
 TensorList MakeParallelAttentionOp(Tensor qkv, int64_t head_dim, int64_t group_query_ratio,
                                    SyShapeList multi_seq_lens_symbol, SyShapeList multi_cp_group_symbol, 
+                                   bool packing, Tensor cu_seqlens_q, Tensor cu_seqlens_k, IntSymbol max_seqlen_q, IntSymbol max_seqlen_k,
                                    double p_dropout, double softmax_scale, 
                                    bool is_causal, bool return_softmax, OpMeta op_meta) {
   HT_ASSERT(is_causal)
     << "Currently only support causal attn";
   TensorList inputs = {std::move(qkv)};
+  if (packing) {
+    inputs.emplace_back(std::move(cu_seqlens_q));
+    inputs.emplace_back(std::move(cu_seqlens_k));
+  }
   return Graph::MakeOp(
     std::make_shared<ParallelAttentionOpImpl>(head_dim, group_query_ratio, std::move(multi_seq_lens_symbol), std::move(multi_cp_group_symbol), 
+      packing, max_seqlen_q, max_seqlen_k,
       p_dropout, softmax_scale, is_causal, return_softmax),
     std::move(inputs),
     std::move(op_meta))->outputs();
@@ -1189,13 +1253,19 @@ TensorList MakeParallelAttentionOp(Tensor qkv, int64_t head_dim, int64_t group_q
 TensorList MakeParallelAttentionGradientOp(const std::vector<std::shared_ptr<AttnCtx>>& attn_ctx_list, 
                                            Tensor grad_out, int64_t head_dim, int64_t group_query_ratio,
                                            SyShapeList multi_seq_lens_symbol, SyShapeList multi_cp_group_symbol,
+                                           bool packing, Tensor cu_seqlens_q, Tensor cu_seqlens_k, IntSymbol max_seqlen_q, IntSymbol max_seqlen_k,
                                            double p_dropout, double softmax_scale,
                                            bool is_causal, OpMeta op_meta) {
   HT_ASSERT(is_causal)
     << "Currently only support causal attn";
   TensorList inputs = {std::move(grad_out)};
+  if (packing) {
+    inputs.emplace_back(std::move(cu_seqlens_q));
+    inputs.emplace_back(std::move(cu_seqlens_k));
+  }
   return Graph::MakeOp(
-    std::make_shared<ParallelAttentionGradientOpImpl>(attn_ctx_list, head_dim, group_query_ratio, std::move(multi_seq_lens_symbol), std::move(multi_cp_group_symbol), 
+    std::make_shared<ParallelAttentionGradientOpImpl>(attn_ctx_list, head_dim, group_query_ratio, std::move(multi_seq_lens_symbol), std::move(multi_cp_group_symbol),
+      packing, max_seqlen_q, max_seqlen_k,
       p_dropout, softmax_scale, is_causal),
     std::move(inputs),
     std::move(op_meta))->outputs();

@@ -43,8 +43,7 @@ void Graph::Init() {
     HT_LOG_DEBUG << "Destructed all graphs";
   });
   HT_ASSERT(status == 0)
-      << "Failed to register the exit function for memory pools.";
-
+    << "Failed to register the exit function for memory pools.";
   auto concurrency = std::thread::hardware_concurrency();
   Graph::_global_graphs.reserve(MIN(concurrency, 16) * 2);
   Graph::_name_to_graphs.reserve(MIN(concurrency, 16) * 2);

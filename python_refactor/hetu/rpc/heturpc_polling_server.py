@@ -351,5 +351,5 @@ if __name__ == "__main__":
             # print("Interval of Rank ", i, " is ", interval)
         # print("Arr0:", arr[0], "SumExit:", sum(exit_arr))
                       
-    print("Server Stopped.")
+    print("Server is stopped")
     p.terminate()

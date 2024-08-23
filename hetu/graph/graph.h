@@ -932,8 +932,7 @@ class Graph {
                   "Template class is not derived from Graph");
     auto graph = std::make_shared<T>(Graph::constructor_access_key(),
                                      std::forward<Args>(args)...);
-    HT_LOG_DEBUG << "device = " << hetu::impl::comm::GetLocalDevice() << ": make a new graph named " 
-      << graph->name() << ", whose id is " << graph->id();
+    HT_LOG_DEBUG << "make a new graph named " << graph->name() << ", whose id is " << graph->id();
     HT_VALUE_ERROR_IF(Graph::_global_graphs.size() != graph->id())
       << "Graph must be initialized using the `_make_new_graph` function";
     HT_VALUE_ERROR_IF(Graph::_name_to_graphs.find(graph->name()) !=

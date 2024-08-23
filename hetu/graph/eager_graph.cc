@@ -8,8 +8,7 @@ namespace graph {
 Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
                                   TensorList inputs, OpMeta op_meta) {
   _check_all_inputs_in_graph(inputs, op_meta.extra_deps);
-  auto& op =
-    MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
+  auto& op = MakeAndAddOp(std::move(body), std::move(inputs), std::move(op_meta));
 
   // Eager instantiation and execution
   Device placement = op->eager_device();
@@ -28,11 +27,10 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   }
   StreamIndex stream_id = get_suggested_stream_index(op);
 
-  HT_LOG_TRACE << "Instantiating op " << op << " (placement=" << placement
-                 << ", stream_index=" << stream_id << ")";
+  HT_LOG_DEBUG << "Instantiating op " << op << " (placement=" << placement
+    << ", stream_index=" << stream_id << ")";
   bool ok = op->Instantiate(placement, stream_id);
-  HT_RUNTIME_ERROR_IF(!ok) << "Failed to place op " << op->name()
-                           << " on device " << placement;
+  HT_RUNTIME_ERROR_IF(!ok) << "Failed to place op " << op->name() << " on device " << placement;
   
   NDArrayList input_arrays;
   input_arrays.reserve(op->num_inputs());
@@ -51,7 +49,8 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
     for (auto& input : op->inputs())
       input_arrays.push_back(_preserved_data[input->id()]);
   }
-  // HT_LOG_INFO << op << "\nInputs:" << input_arrays;
+
+  HT_LOG_DEBUG << op << " inputs: " << input_arrays;
   auto output_arrays = op->Compute(input_arrays, _runtime_ctxs);
   auto profiler_optional = hetu::impl::Profile::get_cur_profile();
   if (profiler_optional) {
@@ -64,9 +63,7 @@ Operator& EagerGraph::MakeOpInner(std::shared_ptr<OpInterface> body,
   NDArray::MarkUsedBy(output_arrays, op->instantiation_ctx().stream());
   for (size_t i = 0; i < op->num_outputs(); i++)
     _preserved_data[op->output(i)->id()] = output_arrays[i];
-
-  // HT_LOG_INFO << op << "\nOutputs:" << output_arrays;
-
+  HT_LOG_DEBUG << op << " outputs: " << output_arrays;
   return _op_indexing[op->id()];
 }
 

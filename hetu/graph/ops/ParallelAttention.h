@@ -430,10 +430,12 @@ class ParallelAttentionOpImpl final : public OpInterface {
  public:
   ParallelAttentionOpImpl(int64_t head_dim, int64_t group_query_ratio,
                           SyShapeList multi_seq_lens_symbol, SyShapeList multi_cp_group_symbol,
+                          bool packing, IntSymbol max_seqlen_q, IntSymbol max_seqlen_k,
                           double p_dropout, double softmax_scale, 
                           bool is_causal, bool return_softmax)
   : OpInterface(quote(ParallelAttentionOp)), 
     _head_dim(head_dim), _group_query_ratio(group_query_ratio), _multi_seq_lens_symbol(std::move(multi_seq_lens_symbol)), _multi_cp_group_symbol(std::move(multi_cp_group_symbol)),
+    _packing(packing), _max_seqlen_q(std::move(max_seqlen_q)), _max_seqlen_k(std::move(max_seqlen_k)),
     _p_dropout(p_dropout), _softmax_scale(softmax_scale), _is_causal(is_causal), _return_softmax(return_softmax) {
     _attn_ctx_list.reserve(HT_MAX_NUM_MICRO_BATCHES);
     for (size_t i = 0; i < HT_MAX_NUM_MICRO_BATCHES; i++) {
@@ -451,6 +453,14 @@ class ParallelAttentionOpImpl final : public OpInterface {
 
   inline const std::shared_ptr<AttnCtx>& attn_ctx() const {
     return _attn_ctx_list.at(_attn_ctx_num);
+  }
+  
+  inline int64_t max_seqlen_q() const {
+    return _max_seqlen_q->get_val();
+  }
+
+  inline int64_t max_seqlen_k() const {
+    return _max_seqlen_k->get_val();
   }
 
   inline int64_t head_dim() const {
@@ -493,6 +503,9 @@ class ParallelAttentionOpImpl final : public OpInterface {
   int64_t _group_query_ratio;
   SyShapeList _multi_seq_lens_symbol;
   SyShapeList _multi_cp_group_symbol;
+  bool _packing;
+  IntSymbol _max_seqlen_q;
+  IntSymbol _max_seqlen_k;
   double _p_dropout;
   double _softmax_scale;
   bool _is_causal;
@@ -520,6 +533,7 @@ class ParallelAttentionOpImpl final : public OpInterface {
 
 TensorList MakeParallelAttentionOp(Tensor qkv, int64_t head_dim, int64_t group_query_ratio,
                                    SyShapeList multi_seq_lens_symbol, SyShapeList multi_cp_group_symbol, 
+                                   bool packing, Tensor cu_seqlens_q, Tensor cu_seqlens_k, IntSymbol max_seqlen_q, IntSymbol max_seqlen_k,
                                    double p_dropout = 0.0, double softmax_scale = -1.0, 
                                    bool is_causal = false, bool return_softmax = false, OpMeta op_meta = OpMeta());
 
@@ -528,10 +542,12 @@ class ParallelAttentionGradientOpImpl final : public OpInterface {
  public:
   ParallelAttentionGradientOpImpl(const std::vector<std::shared_ptr<AttnCtx>>& attn_ctx_list, int64_t head_dim, int64_t group_query_ratio,
                                   SyShapeList multi_seq_lens_symbol, SyShapeList multi_cp_group_symbol,
+                                  bool packing, IntSymbol max_seqlen_q, IntSymbol max_seqlen_k,
                                   double p_dropout, double softmax_scale, bool is_causal)
   : OpInterface(quote(ParallelAttentionGradientOp)), 
     _attn_ctx_list(attn_ctx_list), _head_dim(head_dim), _group_query_ratio(group_query_ratio), 
     _multi_seq_lens_symbol(std::move(multi_seq_lens_symbol)), _multi_cp_group_symbol(std::move(multi_cp_group_symbol)),
+    _packing(packing), _max_seqlen_q(std::move(max_seqlen_q)), _max_seqlen_k(std::move(max_seqlen_k)),
     _p_dropout(p_dropout), _softmax_scale(softmax_scale), _is_causal(is_causal) {
   }
 
@@ -545,6 +561,14 @@ class ParallelAttentionGradientOpImpl final : public OpInterface {
 
   inline const std::shared_ptr<AttnCtx>& attn_ctx() const {
     return _attn_ctx_list.at(_attn_ctx_num);
+  }
+
+  inline int64_t max_seqlen_q() const {
+    return _max_seqlen_q->get_val();
+  }
+
+  inline int64_t max_seqlen_k() const {
+    return _max_seqlen_k->get_val();
   }
 
   inline int64_t head_dim() const {
@@ -581,6 +605,9 @@ class ParallelAttentionGradientOpImpl final : public OpInterface {
   int64_t _group_query_ratio;
   SyShapeList _multi_seq_lens_symbol;
   SyShapeList _multi_cp_group_symbol;
+  bool _packing;
+  IntSymbol _max_seqlen_q;
+  IntSymbol _max_seqlen_k;
   double _p_dropout;
   double _softmax_scale;
   bool _is_causal;
@@ -607,6 +634,7 @@ class ParallelAttentionGradientOpImpl final : public OpInterface {
 TensorList MakeParallelAttentionGradientOp(const std::vector<std::shared_ptr<AttnCtx>>& attn_ctx_list, 
                                            Tensor grad_out, int64_t head_dim, int64_t group_query_ratio,
                                            SyShapeList multi_seq_lens_symbol, SyShapeList multi_cp_group_symbol, 
+                                           bool packing, Tensor cu_seqlens_q, Tensor cu_seqlens_k, IntSymbol max_seqlen_q, IntSymbol max_seqlen_k,
                                            double p_dropout = 0.0, double softmax_scale = -1.0,
                                            bool is_causal = false, OpMeta op_meta = OpMeta());
 
