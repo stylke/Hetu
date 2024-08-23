@@ -25,7 +25,7 @@ DataType GetNumpyArrayDataType(PyObject* obj);
 
 NDArray NDArrayFromNumpy(PyObject* obj, const HTShape& dynamic_shape = {}, DataType datatype = kUndeterminedDataType);
 
-NDArrayList NDArrayListFromNumpyList(PyObject* obj);
+NDArrayList NDArrayListFromNumpyList(PyObject* obj, const HTShape& dynamic_shape = {}, DataType datatype = kUndeterminedDataType);
 
 PyObject* NDArrayToNumpy(NDArray ndarray, bool force, bool save = false);
 

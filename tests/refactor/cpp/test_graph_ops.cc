@@ -114,7 +114,7 @@ void static_run(Graph& graph) {
     auto x_val = NDArray::full({10, 5}, i * 0.01, Device(kCPU));
     auto y_val = NDArray::zeros({10,1}, Device(kCPU));
     auto ret = graph.Run({loss, pred, w},
-                         {{x->id(), x_val}, {y->id(), y_val}});
+                         {{x->id(), NDArrayList({x_val})}, {y->id(), NDArrayList({y_val})}});
     HT_LOG_INFO << "loss = " << ret[0];
     HT_LOG_INFO << "pred = " << ret[1];
     HT_LOG_INFO << "w = " << ret[2];

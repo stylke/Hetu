@@ -180,20 +180,16 @@ PyObject* PyProfileSummary(PyProfile* self, PyObject* args, PyObject* kwargs) {
       Py_DECREF(py_list_optype_with_inputs_view);
     }
     auto graph_view = profiler->get_graph_view();
-    if(graph_view.size() == 0)
+    if (graph_view.size() == 0)
       return py_dict;
-    PyObject* py_list_graph_view = PyList_New((int)graph_view.size());
-    for (int i = 0; i < graph_view.size(); i++) {
-      auto record = graph_view[i];
-      tmp_list = PyList_New(2);
+    PyObject* py_dict_graph_view = PyDict_New();
+    for (auto& record : graph_view) {
       PyObject* type = PyUnicode_FromString(record.first);
       PyObject* total_time = PyFloat_FromDouble(record.second);
-      PyList_SET_ITEM(tmp_list, 0, type);
-      PyList_SET_ITEM(tmp_list, 1, total_time);
-      PyList_SET_ITEM(py_list_graph_view, i, tmp_list);
+      PyDict_SetItem(py_dict_graph_view, type, total_time);
     }
-    PyDict_SetItemString(py_dict, "graph_view", py_list_graph_view);
-    Py_DECREF(py_list_graph_view);
+    PyDict_SetItemString(py_dict, "graph_view", py_dict_graph_view);
+    Py_DECREF(py_dict_graph_view);
     return py_dict;
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);

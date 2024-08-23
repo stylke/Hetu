@@ -50,7 +50,8 @@ inline bool CheckPyFeedDict(PyObject* obj) {
     while (PyDict_Next(obj, &pos, &key, &value)) {
       if (!CheckPyTensor(key))
         return false;
-      if (!CheckPyNDArray(value) && !CheckNumpyArray(value))
+      if (!CheckPyNDArray(value) && !CheckNumpyArray(value) &&
+          !CheckPyNDArrayList(value) && !CheckNumpyArrayList(value))
         return false;
     }
     return true;
@@ -99,8 +100,14 @@ inline FeedDict FeedDict_FromPyObject(PyObject* obj) {
   while (PyDict_Next(obj, &pos, &key, &value)) {
     HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << ": processing element " << cnt++ << " in FeedDict...";
     TensorId k = Tensor_FromPyObject(key)->id();
-    NDArray v = CheckPyNDArray(value) ? NDArray_FromPyObject(value)
-                                      : NDArrayFromNumpy(value, {}, Tensor_FromPyObject(key)->dtype());
+    NDArrayList v;
+    if (PyList_Check(value)) {
+      v = CheckPyNDArrayList(value) ? NDArrayList_FromPyObject(value)
+                                    : NDArrayListFromNumpyList(value, {}, Tensor_FromPyObject(key)->dtype());
+    } else {
+      v = {CheckPyNDArray(value) ? NDArray_FromPyObject(value)
+                                 : NDArrayFromNumpy(value, {}, Tensor_FromPyObject(key)->dtype())};
+    }
     feed_dict.insert({k, v});
   }
   return feed_dict;

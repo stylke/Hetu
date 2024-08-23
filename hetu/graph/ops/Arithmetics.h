@@ -161,6 +161,10 @@ class AddElewiseOpImpl final : public BinaryOpImpl {
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
 
+  NDArrayList DoCompute(Operator& op,
+                        const NDArrayList& inputs,
+                        RuntimeContext& ctx) const override;
+
  public:
   bool operator==(const OpInterface& rhs) const override {
     return BinaryOpImpl::operator==(rhs);
@@ -571,6 +575,13 @@ class AddElewiseGradientOpImpl final : public BinaryGradientOpImpl {
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
+  
+  std::vector<NDArrayMeta> 
+  DoInferMeta(const TensorList& inputs) const override {
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    NDArrayMeta output_meta = inputs[1]->meta();
+    return {output_meta};
+  }
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -592,6 +603,13 @@ class SubElewiseGradientOpImpl final : public BinaryGradientOpImpl {
 
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& runtime_ctx) const override;
+
+  std::vector<NDArrayMeta> 
+  DoInferMeta(const TensorList& inputs) const override {
+    // HT_ASSERT_TENSORS_SAME_DTYPE(inputs);
+    NDArrayMeta output_meta = inputs[1]->meta();
+    return {output_meta};
+  }
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -713,10 +731,10 @@ Tensor MakeDivByConstInplaceOp(Tensor input, double value,
 Tensor MakeDivFromConstInplaceOp(double value, Tensor input,
                           OpMeta op_meta = OpMeta());
 
-Tensor MakeAddElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
+Tensor MakeAddElewiseGradientOp(Tensor a, Tensor input, Tensor output, int index, 
                                 OpMeta op_meta = OpMeta());
 
-Tensor MakeSubElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 
+Tensor MakeSubElewiseGradientOp(Tensor a, Tensor input, Tensor output, int index, 
                                 OpMeta op_meta = OpMeta());
 
 Tensor MakeMulElewiseGradientOp(Tensor a, Tensor b, Tensor input, Tensor output, int index, 

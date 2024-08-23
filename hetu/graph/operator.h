@@ -72,8 +72,8 @@ class OpMeta {
     return *this;
   }
 
-  inline OpMeta& set_is_step(bool step) {
-    is_step = step;
+  inline OpMeta& set_is_cpu(bool _is_cpu) {
+    is_cpu = _is_cpu;
     return *this;
   }
 
@@ -169,7 +169,7 @@ class OpMeta {
   bool is_cpu_offload{false};
   bool is_offload{false}; // for offload D2H op only
   bool is_deduce_states{true};  
-  bool is_step{false};
+  bool is_cpu{false};
   ParameterDict parameter_dict;
 };
 
@@ -235,7 +235,7 @@ class RuntimeContext {
     return it->second;
   }
   
-  const Tensor2ShapeMap& shape_plan() const {
+  Tensor2ShapeMap& shape_plan() {
     return _shape_plan;
   }
 

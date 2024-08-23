@@ -135,7 +135,7 @@ void ArrayReshapeOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_he
 NDArrayList ArrayReshapeGradientOpImpl::DoCompute(Operator& op,
                                                   const NDArrayList& inputs,
                                                   RuntimeContext& ctx) const {
-  NDArray output = NDArray::reshape(inputs.at(0), get_input_shape(), op->instantiation_ctx().stream_index);
+  NDArray output = NDArray::reshape(inputs.at(0), inputs.at(1)->shape(), op->instantiation_ctx().stream_index);
   return {output};
 }
 

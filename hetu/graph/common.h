@@ -55,10 +55,12 @@ using TensorIdSet = std::unordered_set<TensorId>;
 using Tensor2TensorMap = std::unordered_map<TensorId, Tensor>;
 using Tensor2TensorListMap = std::unordered_map<TensorId, TensorList>;
 using Tensor2NDArrayMap = std::unordered_map<TensorId, NDArray>;
+using Tensor2NDArrayListMap = std::unordered_map<TensorId, NDArrayList>;
 using Tensor2IntMap = std::unordered_map<TensorId, int>;
 using Tensor2StringMap = std::unordered_map<TensorId, std::string>;
 using Tensor2ShapeMap = std::unordered_map<TensorId, HTShape>;
 using StateDict = std::unordered_map<OpName, Tensor>;
+using Tensor2ShapeMapList = std::vector<Tensor2ShapeMap>;
 
 using GradAndVar = std::pair<Tensor, Tensor>;
 using GradAndVarList = std::vector<GradAndVar>;
@@ -70,7 +72,7 @@ struct is_tensor_list<TensorList> : std::true_type {};
 
 using GraphId = uint64_t;
 using GraphName = std::string;
-using FeedDict = Tensor2NDArrayMap;
+using FeedDict = Tensor2NDArrayListMap;
 using ParameterDict = std::unordered_map<std::string, int64_t>;
 using MemoryBlock = std::pair<size_t, size_t>;
 using MemoryBlockList = std::vector<MemoryBlock>;

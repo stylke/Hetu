@@ -26,7 +26,12 @@ inline int64_t NumEl(const HTShape& shape) {
 }
 
 inline HTStride Shape2Stride(const HTShape& shape) {
-  HTStride stride(shape.size());
+  HTStride stride(shape.size(), 0);
+  for (auto& _shape : shape) {
+    if (_shape == 0) {
+      return stride;
+    }
+  }
   if (shape.size() > 0) {
     stride[shape.size() - 1] = 1;
     for (auto d = shape.size() - 1; d > 0; d--) {

@@ -512,7 +512,8 @@ class PyArgParser {
   "int stream_index=None, "                                                    \
   "List[List[DeviceGroup]] device_group_hierarchy=None, "                                     \
   "List[Tensor] extra_deps=None, "                                             \
-  "OpName name=None"
+  "OpName name=None, "                                                         \
+  "bool is_cpu=False"
 
 inline OpMeta parse_op_meta(const ParsedPyArgs& parsed_args, size_t offset) {
   OpMeta ret = CurrentOpMetaCtx();
@@ -522,6 +523,8 @@ inline OpMeta parse_op_meta(const ParsedPyArgs& parsed_args, size_t offset) {
     ret.set_extra_deps(parsed_args.get_tensor_list(offset + 2));
   if (parsed_args.has(offset + 3))
     ret.set_name(parsed_args.get_string(offset + 3));
+  if (parsed_args.has(offset + 4))
+    ret.set_is_cpu(parsed_args.get_bool(offset + 4));
   return ret;
 }
 

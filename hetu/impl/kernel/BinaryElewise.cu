@@ -326,6 +326,9 @@ void launch_broadcast_loop_kernel(const NDArray& inputA, const NDArray& inputB, 
     HT_ASSERT_SAME_DEVICE(inputB, output);                                     \
     size_t sizeA = inputA->numel();                                            \
     size_t sizeB = inputB->numel();                                            \
+    if (output->numel() == 0) {                                                \
+      return;                                                                  \
+    }                                                                          \
     if (sizeA == sizeB) {                                                      \
       auto size = sizeA;                                                       \
       if (inputA->dtype() == inputB->dtype()) {                                \

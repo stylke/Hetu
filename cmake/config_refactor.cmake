@@ -3,7 +3,11 @@
 ######################
 
 # CUDA version >= 10.1
-set(CUDAToolkit_ROOT /usr/local/cuda)
+if(DEFINED ENV{CUDA_HOME})
+  set(CUDAToolkit_ROOT $ENV{CUDA_HOME})
+else()
+  set(CUDAToolkit_ROOT /usr/local/cuda)
+endif()
 
 # CUDNN >= 7.5
 # - CUDNN_ROOT: root directory of cudnn

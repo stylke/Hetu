@@ -70,12 +70,14 @@ DataPtr CPUMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
 DataPtr CPUMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
                                        DataPtrDeleter deleter,
                                        const Stream& stream) {
-  HT_VALUE_ERROR_IF(ptr == nullptr || num_bytes == 0)
+  HT_VALUE_ERROR_IF(ptr == nullptr)
     << "Borrowing an empty storage is not allowed";
   HT_VALUE_ERROR_IF(!deleter)
     << "Deleter must not be empty when borrowing storages";
   HT_VALUE_ERROR_IF(stream.is_defined() && !stream.is_blocking())
     << "Stream must be blocking if provided";
+  if (num_bytes == 0)
+    return DataPtr{nullptr, 0, Device(kCPU), static_cast<DataPtrId>(-1)};
   
   std::lock_guard<std::mutex> lock(_mtx);
   // Note: The borrowed memory must be ready, so we use blocking stream here
@@ -217,6 +219,8 @@ void CPUMemoryPool::MarkDataSpacesUsedByStream(DataPtrList& data_ptrs,
     __builtin_unreachable();
   }
   for (auto& data_ptr : data_ptrs) {
+    if (data_ptr.ptr == nullptr || data_ptr.size == 0)
+      continue;
     auto it = _data_ptr_info.find(data_ptr.id);
     HT_RUNTIME_ERROR_IF(it == _data_ptr_info.end())
       << "Cannot find data " << data_ptr << " from info";

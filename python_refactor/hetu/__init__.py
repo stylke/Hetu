@@ -148,12 +148,14 @@ class _RunLevel(object):
     def __init__(self, type):
         if type == "update":
             self.type = 0
-        elif type == "grad":
+        elif type == "local_grad":
             self.type = 1
-        elif type == "alloc":
+        elif type == "grad":
             self.type = 2
-        elif type == "topo":
+        elif type == "alloc":
             self.type = 3
+        elif type == "topo":
+            self.type = 4
         else:
             raise ValueError(f"No level for '{type}' in hetu.Graph")
         
