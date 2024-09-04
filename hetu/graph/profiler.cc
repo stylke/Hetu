@@ -39,6 +39,7 @@ static void NVML_Init_Once() {
 std::ostream& operator<<(std::ostream& os, const CUDAMemoryInfo& memory_info) {
   os << "{";
   os << "\"mempool reserved\": " << memory_info.mempool_reserved
+    << "\"mempool peak reserved\": " << memory_info.mempool_peak_reserved
     << ", \"mempool allocated\": " << memory_info.mempool_allocated
     << ", \"all reserved\": " << memory_info.all_reserved
     << ", \"limit\": " << memory_info.limit;
@@ -83,6 +84,7 @@ CUDAMemoryInfo CUDAProfiler::GetCurrMemoryInfo() {
   cuda_memory_info.all_reserved = memory.used / (1024 * 1024);
   cuda_memory_info.mempool_allocated = _mempool->GetCurrAllocated() / (1024 * 1024);
   cuda_memory_info.mempool_reserved = _mempool->GetCurrReserved() / (1024 * 1024);
+  cuda_memory_info.mempool_peak_reserved = _mempool->GetPeakReserved() / (1024 * 1024);
   return cuda_memory_info;
 }
 
@@ -92,6 +94,7 @@ void CUDAProfiler::PrintCurrMemoryInfo(const std::string& prefix) {
   HT_LOG_INFO << "[" << prefix << "] " << _device << ": "
     << "all reserved memory (nvidia-smi) = " << cuda_memory_info.all_reserved << " MiB"
     << ", mempool reserved memory = " << cuda_memory_info.mempool_reserved << " MiB"
+    << ", mempool peak reserved memory = " << cuda_memory_info.mempool_peak_reserved << " MiB"
     << ", mempool allocated memory = " << cuda_memory_info.mempool_allocated << " MiB";
 }
 

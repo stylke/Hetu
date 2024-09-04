@@ -14,11 +14,17 @@ cmake/config.cmake
 .hypothesis/
 examples/nlp/gpt/_cache.pkl
 examples/nlp/gpt/experiments/
+examples/nlp/gpt/data/
 examples/malleus/data/
 examples/efficiency/exp
 third_party/nccl/
 
+examples/hydraulis/data/
+examples/hydraulis/_cache.pkl
+examples/hydraulis/_counter.pkl
+
 # Python
+*.png
 *.json
 *.txt
 */elastic.egg-info/

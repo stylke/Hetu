@@ -67,6 +67,10 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     return _reserved;
   }
 
+  size_t GetPeakReserved() {
+    return _peak_reserved;
+  }
+
   DataPtr AllocDataSpace(size_t num_bytes,
                          const Stream& stream = Stream()) override;
 

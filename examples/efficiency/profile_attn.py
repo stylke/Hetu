@@ -24,7 +24,7 @@ def attn(eager_device, seq_len, num_heads, head_dim, packing_num):
     qkv = ht.from_numpy(qkv_np)
     qkv = ht.data_transfer(ht.bfloat16, qkv, eager_device) 
     # warm up
-    for i in range(5):     
+    for i in range(10):     
         attn_output = ht.parallel_attn(
             qkv,
             head_dim, 
@@ -35,8 +35,9 @@ def attn(eager_device, seq_len, num_heads, head_dim, packing_num):
         )[0]
      
     time = 0
+    profile_cnt = 1
     with ht.profiler(enabled = True, record_shapes = True) as profiler:   
-        for i in range(5): 
+        for i in range(profile_cnt): 
             attn_output = ht.parallel_attn(
                 qkv,
                 head_dim, 
@@ -49,7 +50,7 @@ def attn(eager_device, seq_len, num_heads, head_dim, packing_num):
         assert op_types == 1, f"length mismatch, find {op_types} op types"
         for item in profiler.summary()['optype_with_inputs_view']:
             time = time + item[2]
-    return time / 5
+    return time / profile_cnt
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

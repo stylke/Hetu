@@ -1,6 +1,7 @@
 TP=${1:-2}
 PP=${2:-2}
 EXP_FILE=${3:-"./experiments/scale/tp2_pp2.txt"}
+DP=${4:-1}
 
 NUM_LAYERS=32
 HIDDEN_SIZE=4096
@@ -8,18 +9,24 @@ NUM_HEADS=32
 MICRO_BATCH_SIZE=1
 GLOBAL_BATCH_SIZE=16
 FFN_HIDDEN_SIZE=11008
-SERVER_ADDR="172.24.19.127"
-# SERVER_ADDR="172.24.71.238" # worker-0
+SERVER_ADDR="172.24.10.109"
+# SERVER_ADDR="172.24.93.179" # worker-0
 # SERVER_ADDR="127.0.0.1" # 216
-SERVER_PORT="23461"
+SERVER_PORT="23462"
 HOST_FILE_PATH="./scripts/host.yaml"
 ENV_FILE_PATH="./scripts/env_A100.sh"
 
-NUM_GPUS=$(expr $TP \* $PP)
-DP=1
+NUM_GPUS=$(expr $TP \* $PP \* $DP)
 CP=1
-CP_LIST="[1]"
-DCP=1
+DCP=${DP}
+CP_LIST="["
+for ((i=1; i<=DP; i++)); do
+	if [ $i -ne 1 ]; then
+		CP_LIST="$CP_LIST,"
+	fi
+	CP_LIST="$CP_LIST$CP"
+done
+CP_LIST="$CP_LIST]"
 RECOMPUTE_LAYERS="[]"
 
 echo run exp: tp=${TP}, pp=${PP}, num_gpus=${NUM_GPUS} 
@@ -62,21 +69,15 @@ if [ ! -e "$EXP_FILE" ]; then
 	> "$EXP_FILE"
 fi
 
-if (( TP == 2 && PP == 8 )); then
-	START_SEQ=8960
-elif (( TP == 4 && PP == 2 )); then
-	START_SEQ=6912
-elif (( TP == 4 && PP == 4 )); then
-	START_SEQ=6912
-elif (( TP == 8 && PP == 1 )); then
-	START_SEQ=6912
+if (( TP == 4 && PP == 4 )); then
+	START_SEQ=16640
 elif (( TP == 8 && PP == 2 )); then
-	START_SEQ=7168
+	START_SEQ=33024
 else
 	START_SEQ=256
 fi
 
-for i in $(seq ${START_SEQ} 256 16384); do
+for i in $(seq ${START_SEQ} 256 65536); do
 
 content=$(<"$EXP_FILE")
 length=${#content}

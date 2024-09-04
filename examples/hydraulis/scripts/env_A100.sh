@@ -1,6 +1,6 @@
 source /home/pkuhetu/lhy/bashrc
 conda activate hetu-grpc
-source ../../../hetu_refactor.exp
+source ../../hetu_refactor.exp
 
 export PATH="/home/pkuhetu/envs/miniconda3/envs/hetu-grpc/bin:${PATH}"
 
@@ -9,7 +9,6 @@ export HETU_SWITCH_PROFILE=TIME
 export HETU_INTERNAL_LOG_LEVEL=INFO
 export HETU_STRAGGLER=ANALYSIS
 
-# export HETU_MEMORY_PROFILE=INFO
 export HETU_MEMORY_PROFILE=WARN
 # export HETU_MAX_SPLIT_SIZE_MB=200
 # export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=20

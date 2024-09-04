@@ -2858,7 +2858,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "tp p2p time: " << tp_p2p_time << " ms, "
                   << "tp collective time: " << tp_collective_time << " ms, "
                   << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
-                  << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                  << "pp p2p time (include bubble): " << pp_p2p_time << " ms, "
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms" << std::endl
                   << out.str();
@@ -2873,7 +2873,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                   << "tp p2p time: " << tp_p2p_time << " ms, "
                   << "tp collective time: " << tp_collective_time << " ms, "
                   << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
-                  << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                  << "pp p2p time (include bubble): " << pp_p2p_time << " ms, "
                   << "blocking time: " << blocking_time << " ms, "
                   << "other time: " << other_time << " ms";
       if (_straggler_log_file_path != "") {
@@ -2904,12 +2904,13 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
                 << "tp p2p time: " << tp_p2p_time << " ms, "
                 << "tp collective time: " << tp_collective_time << " ms, "
                 << "dp grad reduce time: " << dp_grad_reduce_time << " ms, "
-                << "pp p2p time(include bubble): " << pp_p2p_time << " ms, "
+                << "pp p2p time (include bubble): " << pp_p2p_time << " ms, "
                 << "blocking time: " << blocking_time << " ms, "
                 << "other time: " << other_time << " ms" << std::endl;
               auto memory_info = GetCUDAProfiler(local_device)->GetCurrMemoryInfo();
               file << "all reserved: " << memory_info.all_reserved << " mb, "
                 << "mempool reserved: " << memory_info.mempool_reserved << " mb, "
+                << "mempool peak reserved: " << memory_info.mempool_peak_reserved << " mb, "
                 << "mempool allocated: " << memory_info.mempool_allocated << " mb" << std::endl;
             } else {
               HT_RUNTIME_ERROR << "Error opening the file";

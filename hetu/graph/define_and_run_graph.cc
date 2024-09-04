@@ -631,9 +631,9 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
         && tensor->requires_grad()) {
       // origin_param_buffer->AddTensor(exec_tensor);
     }
-    if ((_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
+    if ((_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end() && tensor->requires_grad()
          || _optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end())
-        && tensor->requires_grad() && exec_tensor->producer()->placement_group_union().has(local_device)) {
+        && exec_tensor->producer()->placement_group_union().has(local_device)) {
       // origin_param_and_optimizer_buffer->AddTensor(exec_tensor); // deprecated
       // origin_param_and_optimizer_buckets->AddTensor(exec_tensor);
       // TODO: better compatibility with hot switch and quantization

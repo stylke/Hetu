@@ -21,6 +21,7 @@ class CUDAMemoryInfo {
   public:
     // 单位都是MiB
     size_t mempool_reserved{0};
+    size_t mempool_peak_reserved{0};
     size_t mempool_allocated{0};
     size_t all_reserved{0};
     size_t limit{0};

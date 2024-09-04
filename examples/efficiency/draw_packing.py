@@ -43,7 +43,7 @@ def process_and_plot(file_paths, names, ranges):
 
     plt.xlabel('sequence length (token)')
     plt.ylabel('time (s)')
-    plt.ylim(0, 45)
+    # plt.ylim(0, 45)
     plt.title('Pure Linear Regression of Variable Length Attention')
     plt.legend()
     plt.savefig("./fig_packing.png")
