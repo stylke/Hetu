@@ -801,7 +801,7 @@ void FlashAttnGradientCuda(
 }
 
 void FlashAttnVarlenGradientCuda(
-  const NDArray& dout, // total_q x num_heads, x head_size
+  const NDArray& dout, // total_q x num_heads x head_size
   const NDArray& q, // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
   const NDArray& k, // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
   const NDArray& v, // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -901,7 +901,8 @@ auto q_dtype = q->dtype();
   const int seqlen_k_rounded = round_multiple(max_seqlen_k, 128);
 
   HT_ASSERT(head_size == round_multiple(head_size_og, 8))
-    << "head_size must be head_size_og rounded to a multiple of 8";
+    << "head_size must be head_size_og rounded to a multiple of 8"
+    << ", but found head_size = " << head_size << " and head_size_og = " << head_size_og;
 
   CUDAStream cuda_stream(stream);
   hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());

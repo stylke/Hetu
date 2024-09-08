@@ -1,3 +1,5 @@
+import hetu
+
 class LLaMAConfig(object):
     def __init__(
         self,

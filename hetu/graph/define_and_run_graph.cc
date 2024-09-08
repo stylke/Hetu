@@ -287,7 +287,7 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
     // 设置placeholder（也有可能是中间的算子——具体要看feed_dict喂的是什么算子）的symbolic shape
     bool handle_feed_dict_op = Operator::all_output_tensors_of(op, [&](Tensor& tensor) {
       auto it = feed_dict.find(tensor->id());
-      HT_LOG_INFO << op << " " << tensor->id() << " " << feed_dict;
+      // HT_LOG_INFO << op << " " << tensor->id() << " " << feed_dict;
       if (it != feed_dict.end()) {
         if (tensor->symbolic() && is_SyShape_leaf(tensor->symbolic_shape())) {
           tensor->set_symbolic_shape(feed_dict_shape[tensor->id()]);
@@ -299,7 +299,7 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
       }
       return false;
     });
-    HT_LOG_DEBUG << op << " " << handle_feed_dict_op;
+    // HT_LOG_DEBUG << op << " " << handle_feed_dict_op;
     if (handle_feed_dict_op || is_placeholder_op(op)) {
       continue;
     }
@@ -320,6 +320,7 @@ void DefineAndRunGraph::DeduceShapePlan(ExecGraphPlan& exec_graph_plan,
     // 因为exec op已经具有placement group union
     // 因此可以得到local device对应的ds
     HTShapeList exec_output_shapes = exec_op->InferShape(input_shapes, runtime_ctx);
+    // HT_LOG_INFO << exec_op << " output shapes are " << exec_output_shapes;
     auto exec_output_shapes_size = exec_output_shapes.size();
     for (size_t i = 0; i < exec_output_shapes_size; i++) {
       // 设置symbolic shape叶子节点的shape
@@ -1059,9 +1060,11 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         break;
       }
     }
+    HT_LOG_DEBUG << next_active_shape_plan_list[idx] << "-th shape plan is matched for micro batch " << idx;
     // 如果不在shape_plan_pool中
     // 需要推导新的shape plan
     if (!in_shape_plan_pool) {
+      HT_LOG_DEBUG << "DeduceShapePlan needed for micro batch " << idx;
       DeduceShapePlan(exec_graph_plan, feed_dict, feed_dict_shape_list[idx]);
       // 新的shape plan就是shape plan pool中的最后一个
       next_active_shape_plan_list[idx] = exec_graph_plan.shape_plan_pool.size() - 1;

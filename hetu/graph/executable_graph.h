@@ -189,6 +189,10 @@ class ExecutableGraph : public Graph {
     return it->second;
   }
 
+  void AddLeafSymbolicTensor(const Tensor& tensor) {
+    _leaf_symbolic_tensor_list.emplace_back(tensor);
+  }
+
  protected:
   DeviceGroup GetPrevStage();
 
@@ -287,6 +291,7 @@ class ExecutableGraph : public Graph {
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _accumulate_grad_buffer_map;
   std::unordered_map<DataType, bool> _is_partial_accumulate_grad_buffer_map;
   std::unordered_map<DataType, bool> _has_accumulate_grad_value_map;
+  TensorList _leaf_symbolic_tensor_list;
   Tensor2TensorMap _transfer_map; // origin param到transfer param的映射
   Tensor2TensorMap _grad_map; // origin param到未substitue comm op前的grad的映射
   Tensor2TensorMap _grad_grad_map; // 未substitue comm op前的grad到substitue comm op后的grad的映射

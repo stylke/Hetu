@@ -179,13 +179,13 @@ using OpRuntimeContext = ContextStore;
 
 class RuntimeContext {
  public:
-  RuntimeContext() {}
+  RuntimeContext(): _shape_plan(std::nullopt) {}
 
-  RuntimeContext(size_t init_capacity) {
+  RuntimeContext(size_t init_capacity): _shape_plan(std::nullopt) {
     _ctxs.reserve(init_capacity);
   }
   
-  RuntimeContext(size_t init_capacity, const Tensor2ShapeMap& shape_plan): _shape_plan(shape_plan) {
+  RuntimeContext(size_t init_capacity, Tensor2ShapeMap& shape_plan): _shape_plan(shape_plan) {
     _ctxs.reserve(init_capacity);
   }
 
@@ -227,16 +227,24 @@ class RuntimeContext {
   }
 
   const HTShape& get_runtime_shape(const TensorId& tensor_id) const {
-    HT_ASSERT(!_shape_plan.empty())
-      << "The shape plan is empty, ensure that you've used a define graph to instantiate a exec graph";
-    auto it = _shape_plan.find(tensor_id);
-    HT_ASSERT(it != _shape_plan.end())
+    HT_ASSERT(_shape_plan)
+      << "The shape plan is null, ensure that you've used a define graph to instantiate a exec graph";
+    auto it = _shape_plan->get().find(tensor_id);
+    HT_ASSERT(it != _shape_plan->get().end())
       << "Tensor " << tensor_id << " is not existed in runtime shape plan";
     return it->second;
   }
   
   Tensor2ShapeMap& shape_plan() {
-    return _shape_plan;
+    HT_ASSERT(_shape_plan)
+      << "The shape plan is null, ensure that you've used a define graph to instantiate a exec graph";
+    return _shape_plan->get();
+  }
+
+  bool has_shape_plan() {
+    if (_shape_plan)
+      return true;
+    return false;
   }
 
   const Tensor2NDArrayMap& allocation_plan() const {
@@ -274,7 +282,7 @@ class RuntimeContext {
 
  private:
   std::unordered_map<OpId, OpRuntimeContext*> _ctxs; // 初始化时进行赋值
-  Tensor2ShapeMap _shape_plan; // 初始化时进行赋值，每个tensor必须有一个对应的shape，没有则报错
+  std::optional<std::reference_wrapper<Tensor2ShapeMap>> _shape_plan; // 初始化时进行赋值，每个tensor必须有一个对应的shape，没有则报错
   Tensor2NDArrayMap _allocation_plan; // 初始化后进行赋值，部分tensor可以有一个对应的allocation，没有则临时分配
   std::unordered_set<OpId> _skipped_plan; // 初始化后进行赋值，部分op不需要sync
 };
@@ -556,20 +564,6 @@ class OpDef : public shared_ptr_target {
       << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
       << ", got micro batch id: " << micro_batch_id;
     BlockOrSyncAllInputs(runtime_ctx, micro_batch_id);
-    // set symbolic shape at input time will cost more
-    /*
-    for (size_t i = 0; i < inputs.size(); i++) {
-      if (input(i)->symbolic()) {
-        HT_LOG_INFO << "exec op " << name()
-          << " input " << i << " has " << input(i)->symbolic_shape();
-        if (is_SyShape_leaf(input(i)->symbolic_shape())) {
-          input(i)->set_symbolic_shape(inputs[i]->shape());
-          HT_LOG_TRACE << "set symbolic shape of exec op " << name()
-            << " input " << i << " to " << inputs[i]->shape();
-        }
-      }
-    }
-    */
     // correctness debug
     /*
     HTShapeList input_shapes;
@@ -611,6 +605,9 @@ class OpDef : public shared_ptr_target {
       << ", the return shapes are " << ret_shapes;
     */
     // for some ops that rely on symbolic shape
+    // 2024.9.5 Update:
+    // now move this part into executable graph before ComputeFunc
+    /*
     auto output_size = num_outputs();
     for (size_t i = 0; i < output_size; i++) {
       if (output(i)->symbolic()) {
@@ -623,6 +620,7 @@ class OpDef : public shared_ptr_target {
         }
       }
     }
+    */
     return rets;
   }
 

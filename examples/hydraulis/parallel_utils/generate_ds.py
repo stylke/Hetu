@@ -9,7 +9,7 @@ class GPUPos:
         self.dp_id = dp_id
         self.stage_id = stage_id
         
-    def __str__(self):
+    def __repr__(self):
         attrs = vars(self)
         attrs_str = ', '.join(f'{key} = {value}' for key, value in attrs.items())
         return f'{self.__class__.__name__}({attrs_str})'

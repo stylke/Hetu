@@ -12,7 +12,7 @@ export HETU_STRAGGLER=ANALYSIS
 export HETU_MEMORY_PROFILE=WARN
 # export HETU_MAX_SPLIT_SIZE_MB=200
 # export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=20
-export HETU_MAX_SPLIT_SIZE_MB=0
+export HETU_MAX_SPLIT_SIZE_MB=1024
 export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=0
 
 # Using multi-stream cuda event to watch time elaspe is inaccurate!

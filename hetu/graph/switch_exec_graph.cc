@@ -282,7 +282,7 @@ void ParamBuffer::Alloc(const Stream& stream,
   _is_allocated = true;
   TOK(alloc_time);
   _alloc_time = COST_MSEC(alloc_time);
-  HT_LOG_DEBUG  << _name << " param buffer"
+  HT_LOG_INFO  << _name << " param buffer"
     << " alloc " << (double)_buffer_size / (1024 * 1024) << " MiB and cost " << _alloc_time << " ms";  
 }
 

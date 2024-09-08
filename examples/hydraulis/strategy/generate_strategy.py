@@ -20,7 +20,7 @@ if __name__ == '__main__':
     memory_B = 195
     memory_alpha = 0.5
     memory_gap = {'gpu4': 7.5 * (1024 ** 3), 'node': 12.5 * (1024 ** 3)}
-    memory_safe_bound = 2 * (1024 ** 3)
+    memory_safe_bound = 4 * (1024 ** 3)
     gpus_per_node = 8
     gpu_memory_bound = 40536 * 1024 * 1024
     # 生成json

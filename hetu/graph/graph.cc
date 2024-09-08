@@ -510,6 +510,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
           dst_ds_hierarchy.add(dst_ds_union);
         }
         graph.CUR_STRATEGY_ID = 0;
+        HT_LOG_TRACE << grad_inputs[i] << " need_comm_op is " << is_need_comm_op;
         if (is_need_comm_op) {
           final_grad = MakeCommOp(grad_inputs[i], dst_ds_hierarchy, 
             OpMeta().set_name("comm_op_after_" + grad_op->name())); // allreduce

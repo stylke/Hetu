@@ -26,8 +26,8 @@ void OpInterface::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
       default_ds.set_distributed_states(input_ds);
     } else {
       HT_ASSERT(default_ds.check_equal(input_ds))
-        << op_meta.name << ": in Default DoDeduceStates: distributed states of all input tensor must be same!"
-        << ", " << default_ds.ds_info() << " vs " << input_ds.ds_info();
+        << op_meta.name << ": in Default DoDeduceStates: distributed states of all input tensor must be same"
+        << ", but found at least two different ds: " << default_ds.ds_info() << " vs. " << input_ds.ds_info();
     }
   }
   for (auto& output : outputs) {
@@ -261,7 +261,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     // 动态图
     // 无runtime_ctx
     // 现推output_shapes
-    if (runtime_ctx.shape_plan().empty()) {
+    if (!runtime_ctx.has_shape_plan()) {
       HTShapeList input_shapes;
       input_shapes.reserve(op->num_inputs());
       for (auto& input : inputs) {
@@ -332,7 +332,7 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
     // 动态图
     // 无runtime_ctx
     // 现推output_shapes
-    if (runtime_ctx.shape_plan().empty()) {
+    if (!runtime_ctx.has_shape_plan()) {
       HTShapeList input_shapes;
       input_shapes.reserve(op->num_inputs());
       for (auto& input : inputs) {
@@ -386,7 +386,7 @@ NDArray OpInterface::DoAllocOutput(Operator& op, const NDArrayList& inputs,
   // 动态图
   // 无runtime_ctx
   // 现推output_shapes
-  if (runtime_ctx.shape_plan().empty()) {
+  if (!runtime_ctx.has_shape_plan()) {
     HTShapeList input_shapes;
     input_shapes.reserve(op->num_inputs());
     for (auto& input : inputs) {

@@ -326,6 +326,7 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
   for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
     auto& op = op_ref.get();
     if (is_variable_op(op)) {
+      // HT_LOG_INFO << "handling variable " << op << " allocation...";
       // 是param且存在data transfer的情况需要单独处理
       // 因为有可能是热切换过来的而不需要再计算
       if (_parameter_ops.find(op->id()) != _parameter_ops.end()
@@ -392,6 +393,7 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
           runtime_ctx.add_runtime_skipped(op->id());
         }
       }
+    // HT_LOG_INFO << "handling variable " << op << " allocation done";
     }
   } 
   // ---------- grad ----------
@@ -963,9 +965,10 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
       // HT_LOG_WARN << comm_op << ": " << info;
       uint64_t comm_type = comm_op_impl.get_comm_type(comm_op, local_device, info);
       Tensor& input = comm_op->input(0);
-      // 标记通信算子的输入具有symbolic shape
+      // *标记通信算子的输入具有symbolic shape
       if (!input->symbolic()) {
         input->init_symbolic_shape();
+        AddLeafSymbolicTensor(input);
       }
       bool ignore_flag = false, local_comm_flag = false, determine_flag = false;
       Tensor result = input;
@@ -1677,9 +1680,8 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
         auto& data = it->second;
         if (data->device() != input->placement() ||
             data->dtype() != input->dtype()) {
-          tensor2data[input->id()] =
-            NDArray::to(data, input->placement(), input->dtype(),
-                        op->instantiation_ctx().stream_index);
+          tensor2data[input->id()] = NDArray::to(data, input->placement(), input->dtype(),
+                                                 op->instantiation_ctx().stream_index);
         }
         input_val = tensor2data[input->id()];
         // should free memory until op aync compute complete!!!
@@ -1853,20 +1855,20 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       */
      
       // instantiate ops
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] Instantiate begin...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] Instantiate begin...";
       Instantiate(fetches, local_device);
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] Instantiate end...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] Instantiate end...";
 
       // init instantiated topo
       OpRefList topo_before_recompute = Graph::TopoSort(fetches, num_ops(), is_op_computed);
       HT_LOG_DEBUG << local_device << ": global topo before recompute pass: " << topo_before_recompute;
 
       // add recompute pass
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] recompute pass begin...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] recompute pass begin...";
       Graph::push_graph_ctx(id());
       Recompute::InsertRecomputedOps(topo_before_recompute);
       Graph::pop_graph_ctx();
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] recompute pass end...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] recompute pass end...";
 
       // init topo with recomputed ops
       OpRefList topo_before_activation_offload = Graph::TopoSort(fetches, num_ops(), is_op_computed);
@@ -1874,33 +1876,33 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
       // insert activation offload ops
       // TODO: need code review, offload may have bugs
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] activation offload pass begin...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] activation offload pass begin...";
       Graph::push_graph_ctx(id());
       ActivationCPUOffload::OffloadToCPU(topo_before_activation_offload);
       Graph::pop_graph_ctx();
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] activation offload pass end...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] activation offload pass end...";
 
       // init topo contains comm_op
       OpRefList topo_before_substitute_comm = Graph::TopoSort(fetches, num_ops(), is_op_computed);
       HT_LOG_DEBUG << local_device << ": global topo before substitute comm_op: " << topo_before_substitute_comm;
 
       // substitute comm_op
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op begin...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] substitute comm_op begin...";
       Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
       SubstituteCommOp(topo_before_substitute_comm);
       Graph::pop_graph_ctx();
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] substitute comm_op end...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] substitute comm_op end...";
 
       // update topo with substituted comm_ops
       OpRefList topo_before_contiguous = Graph::TopoSort(fetches, num_ops(), is_op_computed);
       HT_LOG_DEBUG << local_device << ": global topo before add contiguous op: " << topo_before_contiguous;
 
       // insert contiguous ops
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] insert contiguous op begin...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] insert contiguous op begin...";
       Graph::push_graph_ctx(id()); // ensure the new ops created in execute_graph
       InsertContiguousOp(topo_before_contiguous);
       Graph::pop_graph_ctx();
-      HT_LOG_DEBUG << local_device << ": [Execution Plan] insert contiguous op end...";
+      HT_LOG_INFO << local_device << ": [Execution Plan] insert contiguous op end...";
       is_execute_plan_changed = true;
       break;
     }
@@ -2085,6 +2087,16 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     HT_LOG_DEBUG << local_device  << ": local placeholder & variable ops: " << local_placeholder_variable_ops
                  << "\nlocal fw topo: " << local_fw_topo << "\nlocal bw topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo end...";
+
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get leaf symbolic tensor list begin...";
+    for (auto& op_ref : updated_topo) {
+      for (auto& output : op_ref.get()->outputs()) {
+        if (output->symbolic() && is_SyShape_leaf(output->symbolic_shape())) {
+          AddLeafSymbolicTensor(output);
+        }
+      }
+    }
+    HT_LOG_DEBUG << local_device << ": [Execution Plan] get leaf symbolic tensor list end...";
 
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get grad to grad map begin...";
     for (auto& op_ref : local_bw_topo) {
@@ -2389,7 +2401,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   // get task schedule table for pipedream-flush, also suitable for non-pipeline cases
   auto schedule = GeneratePipedreamFlushSchedule(
     num_stages, num_micro_batches, is_inference);
-  // // get task schedule table for gpipe    
+  // get task schedule table for gpipe    
   // auto schedule = generate_gpipe_schedule(num_stages, num_micro_batches);
   // get tasks for current stage
   // int stage_id = local_device.index() / _stages.at(0).num_devices();
@@ -2469,7 +2481,14 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     auto& tensor2data = tensor2data_list[micro_batch_id];
     auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
     auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
+    // set arithmetic shape
     SetShapePlan(_active_shape_plan_list[micro_batch_id]);
+    // set symbolic shape
+    for (auto& tensor: _leaf_symbolic_tensor_list) {
+      // HT_LOG_INFO << local_device << ": leaf symbolic tensor " << tensor; 
+      tensor->set_symbolic_shape(GetTensorShape(tensor));
+    }
+    // some tensor (inserted just now) may need to infer shape again
     UpdateExecShapePlan(runtime_ctx);
     // micro batch i>0 reuse: 
     // 0. shared weight which was recved in micro batch 0

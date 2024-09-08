@@ -94,7 +94,7 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
         HT_ASSERT(info.src_group.num_devices() == info.dst_group.num_devices())
           << "Something wrong in deducing ds union or dg union";
         _comm_type = P2P_OP; 
-        HT_LOG_DEBUG << "P2P_OP";
+        HT_LOG_TRACE << "P2P_OP";
       } else {
         /*
         // hetero pp can't guanrantee that
@@ -102,7 +102,7 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
           << "Something wrong in deducing ds union or dg union";
         */
         _comm_type = UNUSED_OP; 
-        HT_LOG_DEBUG << "UNUSED_OP";
+        HT_LOG_TRACE << "UNUSED_OP";
       }
     } 
     // 1-2、src ds和dst ds不一样
@@ -112,19 +112,19 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
       if (info.src_group == info.dst_group) {
         if (info.src_ds.check_pure_duplicate()) {
           _comm_type = COMM_SPLIT_OP;
-          HT_LOG_DEBUG << "COMM_SPLIT_OP";
+          HT_LOG_TRACE << "COMM_SPLIT_OP";
         } else if (info.src_ds.check_scatter(info.dst_ds)) {
           _comm_type = SCATTER_OP;
-          HT_LOG_DEBUG << "SCATTER_OP";
+          HT_LOG_TRACE << "SCATTER_OP";
         } else if (info.src_ds.check_allreduce(info.dst_ds)) {
           _comm_type = ALL_REDUCE_OP;
-          HT_LOG_DEBUG << "ALL_REDUCE_OP";
+          HT_LOG_TRACE << "ALL_REDUCE_OP";
         } else if (info.src_ds.check_allgather(info.dst_ds)) {
           _comm_type = ALL_GATHER_OP;
-          HT_LOG_DEBUG << "ALL_GATHER_OP";
+          HT_LOG_TRACE << "ALL_GATHER_OP";
         } else if (info.src_ds.check_reducescatter(info.dst_ds)) {
           _comm_type = REDUCE_SCATTER_OP;
-          HT_LOG_DEBUG << "REDUCE_SCATTER_OP";
+          HT_LOG_TRACE << "REDUCE_SCATTER_OP";
         } else {
           HT_RUNTIME_ERROR << "No matching comm type for " << op
             << ", src ds is " << info.src_ds.ds_info()
@@ -138,7 +138,7 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
         // 即src的partial和dst的partial一样
         if (info.src_ds.states(-2) == info.dst_ds.states(-2)) {
           _comm_type = BATCHED_ISEND_IRECV_OP;
-          HT_LOG_DEBUG << "BATCHED_ISEND_IRECV_OP";
+          HT_LOG_TRACE << "BATCHED_ISEND_IRECV_OP";
         } else {
           HT_RUNTIME_ERROR << "Comm type not supported yet"
             << ", src ds is " << info.src_ds.ds_info()
@@ -182,13 +182,13 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
     }
     if (info.src_ds_union.hetero_dim() == -2 && info.dst_ds_union.hetero_dim() == -1) {
       _comm_type = SPLIT_ALL_REDUCE_OP;
-      HT_LOG_DEBUG << "SPLIT_ALL_REDUCE_OP";
+      HT_LOG_TRACE << "SPLIT_ALL_REDUCE_OP";
     } else if (info.src_ds_union.hetero_dim() == -2 && info.dst_ds_union.hetero_dim() == 0) {
       _comm_type = SPLIT_REDUCE_SCATTER_OP;
-      HT_LOG_DEBUG << "SPLIT_REDUCE_SCATTER_OP";
+      HT_LOG_TRACE << "SPLIT_REDUCE_SCATTER_OP";
     } else if (info.src_ds_union.hetero_dim() == 0 && info.dst_ds_union.hetero_dim() == -1) {
       _comm_type = SPLIT_ALL_GATHER_OP;
-      HT_LOG_DEBUG << "SPLIT_ALL_GATHER_OP";
+      HT_LOG_TRACE << "SPLIT_ALL_GATHER_OP";
     } else {
       HT_RUNTIME_ERROR << "Currently not supported yet";
     }
@@ -196,19 +196,19 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
     if (!info.local_src_ds.check_equal(info.local_dst_ds)) {
       if (info.local_src_ds.check_pure_duplicate()) {
         _comm_type |= COMM_SPLIT_OP;
-        HT_LOG_DEBUG << "LOCAL_COMM_SPLIT_OP";
+        HT_LOG_TRACE << "LOCAL_COMM_SPLIT_OP";
       } else if (info.local_src_ds.check_scatter(info.local_dst_ds)) {
         _comm_type |= SCATTER_OP;
-        HT_LOG_DEBUG << "LOCAL_SCATTER_OP";
+        HT_LOG_TRACE << "LOCAL_SCATTER_OP";
       } else if (info.local_src_ds.check_allreduce(info.local_dst_ds)) {
         _comm_type |= ALL_REDUCE_OP;
-        HT_LOG_DEBUG << "LOCAL_ALL_REDUCE_OP";
+        HT_LOG_TRACE << "LOCAL_ALL_REDUCE_OP";
       } else if (info.local_src_ds.check_allgather(info.local_dst_ds)) {
         _comm_type |= ALL_GATHER_OP;
-        HT_LOG_DEBUG << "LOCAL_ALL_GATHER_OP";
+        HT_LOG_TRACE << "LOCAL_ALL_GATHER_OP";
       } else if (info.local_src_ds.check_reducescatter(info.local_dst_ds)) {
         _comm_type |= REDUCE_SCATTER_OP;
-        HT_LOG_DEBUG << "LOCAL_REDUCE_SCATTER_OP";
+        HT_LOG_TRACE << "LOCAL_REDUCE_SCATTER_OP";
       } else {
         HT_RUNTIME_ERROR << "No matching comm type for " << op
           << ", src ds is " << info.src_ds.ds_info()
@@ -391,7 +391,7 @@ std::tuple<size_t, std::vector<DeviceGroupList>> CommOpImpl::get_split_comm_grou
     }
     comm_groups_list.emplace_back(std::move(comm_groups));
   }
-  HT_LOG_DEBUG << "get comm groups list = " << comm_groups_list << ", split_num = " << micro_block_num;
+  HT_LOG_TRACE << "get comm groups list = " << comm_groups_list << ", split_num = " << micro_block_num;
   return {micro_block_num, comm_groups_list};
 }
 
@@ -518,7 +518,7 @@ CommOpImpl::DoInferMeta(const TensorList& inputs) const {
   input->producer()->graph().USE_HETERO_ID = false;
   HTShape shape(input_shape.size());
   /*
-  HT_LOG_DEBUG << "src ds union is " << input->cur_ds_union().ds_union_info()
+  HT_LOG_TRACE << "src ds union is " << input->cur_ds_union().ds_union_info()
     << ", src ds is " << src_ds.ds_info()
     << ", dst ds union is " << get_dst_ds_union(input->producer()).ds_union_info()
     << ", dst ds is " << dst_ds.ds_info();
@@ -538,12 +538,11 @@ HTShapeList CommOpImpl::DoInferShape(Operator& op,
   const auto& src_ds = input->get_distributed_states();
   const auto& dst_ds = get_dst_distributed_states(op);
   HTShape shape(input_shape.size());
-  HT_LOG_DEBUG << "CommOpImpl::DoInferShape, src_ds = " << src_ds.get_states()
-    << " and dst_ds = " << dst_ds.get_states();
+  // HT_LOG_TRACE << "CommOpImpl::DoInferShape, src_ds = " << src_ds.get_states() << " and dst_ds = " << dst_ds.get_states();
   for (size_t d = 0; d < input_shape.size(); d++) {
     shape[d] = input_shape[d] * src_ds.get_dim(d) / dst_ds.get_dim(d);
   }
-  HT_LOG_DEBUG << "CommOpImpl::DoInferShape, shape = " << shape;
+  // HT_LOG_TRACE << "CommOpImpl::DoInferShape, shape = " << shape;
   return {shape};
 }
 
@@ -876,15 +875,8 @@ NDArray AllGatherOpImpl::_buffer_for_allgather;
 NDArrayList AllGatherOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                        RuntimeContext& runtime_ctx) const {
   NDArrayList outputs;
-  //if (op->input(0)->producer()->type() == "FusedLayerNormOp" && _buffer_for_allgather.is_defined()) {
-  //   outputs = {_buffer_for_allgather};
-  //} else {
-  //  outputs = DoAllocOutputs(op, inputs, runtime_ctx);
-  //  if (op->input(0)->producer()->type() == "FusedLayerNormOp") {
-  //    _buffer_for_allgather = outputs[0];
-  //  }
-  //}
-  if (_buffer_for_allgather.is_defined()) {
+  auto cur_buffer_shape = runtime_ctx.get_runtime_shape(op->output(0)->id());
+  if (_buffer_for_allgather.is_defined() && _buffer_for_allgather->shape() == cur_buffer_shape) {
      outputs = {_buffer_for_allgather};
   } else {
     outputs = DoAllocOutputs(op, inputs, runtime_ctx);

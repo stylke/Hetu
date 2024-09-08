@@ -330,7 +330,7 @@ bool CUDACachingMemoryPool::FindAvailable(size_t num_bytes,
     if (it->size != num_bytes) {
       size_t remaining = it->size - num_bytes;
       // 只有两种情况允许使用cache的条目
-      // 1、该条目小于等于max_split_size小
+      // 1、该条目小于等于max_split_size
       // 后续会split该条目
       // 一部分用于新分配的而空余的那部分重新插入
       // 2、想分配的size要比max_split_size还大且剩余的内部碎片较少

@@ -63,7 +63,7 @@ def strategy_max_seqlen(data, strategy_id, D, unit_test=False):
     def predict_max_seqlen():
         max_activation_memory = gpu_memory_bound - safe_bound - p_g_os_memory - gap
         max_seqlen = max_activation_memory / (L * (H / tp) * A)
-        return max_seqlen 
+        return int(max_seqlen) 
     # test
     if unit_test:
         print(predict_memory(256) / (1024 * 1024))    

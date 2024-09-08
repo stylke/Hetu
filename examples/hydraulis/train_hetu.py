@@ -10,13 +10,14 @@ import numpy as np
 import hetu as ht
 from hetu_llama import LLamaLMHeadModel
 from llama_config import LLaMAConfig
-from data_utils import LLaMAJsonDataset, build_data_loader
+from data_utils import LLaMAJsonDataset, build_data_loader, get_sorted_batch_and_len, get_input_and_label_buckets
 from parallel_utils import read_ds_parallel_config, parse_multi_ds_parallel_config, convert_strategy, generate_ds_parallel_config
-from strategy import strategy_max_seqlen
+from strategy import strategy_max_seqlen, dynamic_strategy
 
 local_device = None
 all_devices = None
 ds_parallel_config_path = "./ds_parallel_config/"
+alignment = 128
 
 def distributed_init(args):
     global local_device, all_devices
@@ -32,7 +33,7 @@ def train_dataset_provider(args):
     train_dataset = LLaMAJsonDataset(
         json_file=args.json_file,
         key=args.json_key,
-        max_seq_len=args.global_seq_len,
+        max_seq_len=args.max_seq_len,
         vocab_file=args.vocab_file,
         merge_file=args.merge_file
     )
@@ -50,7 +51,6 @@ def get_dg_from_union(device, dg_union):
     return None, None
 
 def pretrain(args):
-    
     # Generate & read configs
     with open(args.strategy_pool, 'r') as f:
         strategy_pool = json.load(f)
@@ -75,7 +75,9 @@ def pretrain(args):
                     break
             assert match_id != None, f"can't find tp{tp}pp{pp} in the strategy pool, please use the strategy within the pool"
             match_id_list.append(match_id)
-            max_seqlen_list.append(strategy_max_seqlen(strategy_pool, match_id, multi_dp_size[strategy_id]))
+            max_seqlen = strategy_max_seqlen(strategy_pool, match_id, multi_dp_size[strategy_id])
+            aligned_max_seqlen = max_seqlen // alignment * alignment
+            max_seqlen_list.append(aligned_max_seqlen)
         multi_match_id_list.append(match_id_list)
         multi_max_seqlen_list.append(max_seqlen_list)
         # 获取GPU的位置
@@ -83,6 +85,7 @@ def pretrain(args):
         layers_tp_groups, gpu_pos = convert_strategy(multi_tp_pp_list[strategy_id], args.ngpus, args.num_hidden_layers)
         config_file_path = ds_parallel_config_path + f"strategy_{strategy_id}.txt"
         generate_ds_parallel_config(args.ngpus, layers_tp_groups, config_file_path)
+        print(f"Strategy {strategy_id}, gpu positions are: {gpu_pos}")
         multi_gpu_pos.append(gpu_pos)
         multi_config_file_path.append(config_file_path)
     
@@ -141,7 +144,7 @@ def pretrain(args):
         # 表示各个dp分到的seq len
         # Hydraulis中mbs恒等于1
         # 其即是input_ids的shape 0
-        config.multi_seq_lens_symbol.append([input_ids.symbolic_shape()[0] for _ in range(multi_dp_size[i])])
+        config.multi_seq_lens_symbol.append([input_ids.symbolic_shape[0] for _ in range(multi_dp_size[i])])
         # 例如[0, 0, 0, 1, 1, 2, 2, 2] 
         # 相同编号的在一个cp group中
         # Hydraulis中我们不使用cp
@@ -168,10 +171,33 @@ def pretrain(args):
     print(f'{local_device}: build dataset begin...')
     train_dataset = train_dataset_provider(args)
     print(f'{local_device}: build dataset end...')
+    
+    def hetu_train(
+        feed_dict,
+        num_micro_batches,
+        strategy_id
+    ):
+        try:
+            results = train_op.graph.run(
+                loss, 
+                [loss, train_op], 
+                feed_dict=feed_dict, 
+                num_micro_batches=num_micro_batches, 
+                cur_strategy_id=strategy_id,
+            )
+        except RuntimeError as e:
+            print(e)
+            with open("./logs/exception.txt", 'w') as file:
+                print(f"{local_device}:", file=file)
+                print(e, file=file)
+            os.killpg(0, signal.SIGTERM)
+        return results
 
     def run_plan(
         epoch = 0,
-        strategy_id = 0
+        consumed_samples = 0,
+        strategy_id = 0,
+        warm_up = False
     ):     
         assert strategy_id < num_strategy, "strategy out of range"
         tp_pp_list = multi_tp_pp_list[strategy_id]
@@ -182,51 +208,67 @@ def pretrain(args):
         dp_id, stage_id = None, None
         if gpu_id in gpu_pos:
             dp_id, stage_id = gpu_pos[gpu_id].dp_id, gpu_pos[gpu_id].stage_id
-        print(f"{local_device}: gpu_id={gpu_id}, dp_id={dp_id}, stage_id={stage_id}")
+        print(f"{local_device}: gpu_id = {gpu_id}, dp_id = {dp_id}, stage_id = {stage_id}")
 
-        # build dataloader and set max seqlen
+        # build dataloader and get sequence parallel degree
         train_iter = None
+        # sequence_parallel_degree = None
         if dp_id != None:
             train_iter = train_data_iterator(train_dataset, consumed_samples, args.global_batch_size)
-            config.max_seqlen_symbol.set_data(max_seqlen_list[dp_id])
+            # sequence_parallel_degree = tp_pp_list[dp_id][0] # sp = tp 
+            
+        if warm_up:
+            print(f"{local_device}: warm up begin...")
+            num_micro_batches = 32
+            if dp_id != None:
+                max_seqlen = max_seqlen_list[dp_id]
+                assert max_seqlen % alignment == 0, "max seqlen should already be aligned"
+                config.max_seqlen_symbol.set_data(max_seqlen)
+                packed_cu_seqlens_list = [np.array([0, max_seqlen], dtype=np.int32)] * num_micro_batches
+                input_list = [np.zeros((max_seqlen,), dtype=np.int64)] * num_micro_batches
+                label_list = [np.zeros((max_seqlen,), dtype=np.int64)] * num_micro_batches
+                feed_dict = {
+                    input_ids: input_list,
+                    masked_lm_labels: label_list
+                }
+                for i in range(config.n_layer):
+                    feed_dict[config.cu_seqlens_list[i]] = packed_cu_seqlens_list
+                hetu_train(feed_dict, num_micro_batches, strategy_id)
+                print(f"{local_device}: warm up end")
+                return
+            else:
+                raise NotImplementedError("currently not support GPUs with no data")
             
         for step in range(args.steps):
             # load data for each dp
             packed_batch = None
-            if train_iter:
-                global_batch = next(train_iter)
+            if dp_id != None:
+                global_batch = next(train_iter).numpy()
                 sorted_batch, sorted_len = get_sorted_batch_and_len(global_batch, train_dataset.pad_id())
-                batch_indices = dynamic_strategy(strategy_pool, match_id_list, max_seqlen_list, dp_id, sorted_len)
-                bucket = get_bucket(sorted_batch, train_dataset.pad_id(), batch_indices, max_seqlen_list[dp_id])
-                packed_batch = bucket.packed_batch()
-            if packed_batch == None or len(packed_batch) < 1: 
+                batch_indices = dynamic_strategy(strategy_pool, match_id_list, max_seqlen_list, match_id_list[dp_id], sorted_len)
+                print(f"{local_device}: {dp_id}-th dp local batch indices is {batch_indices}")
+                # Question: 每个micro batch的实际的max_seqlen都不一样
+                # FlashAttn的这一属性的设置是否对性能有明显的影响有待探究
+                # 目前暂时将其设置成当前轮次所处理的最大的seqlen
+                config.max_seqlen_symbol.set_data(sorted_len[batch_indices[-1]] - 1) 
+                input_bucket, label_bucket = get_input_and_label_buckets(sorted_batch, train_dataset.pad_id(), batch_indices, max_seqlen_list[dp_id], alignment)
+                input_packed_batch, label_packed_batch = input_bucket.packed_batch(), label_bucket.packed_batch()
+                print(f"{local_device}: {dp_id}-th dp seqlens after packed is {[len(seq) for seq in input_packed_batch]}")
+            if input_packed_batch == None or len(input_packed_batch) < 1: 
                 raise NotImplementedError("currently not support GPUs with no data")
             else:
-                packed_cu_seqlens_list = bucket.packed_cu_seqlens()
-                labels_list = [packed_seq[1:].astype(np.int64) for packed_seq in packed_batch] # batch_size * [seq_len]
-                tokens_list = [packed_seq[:-1].astype(np.int64) for packed_seq in packed_batch] # batch_size * [seq_len]
+                packed_cu_seqlens_list = input_bucket.packed_cu_seqlens_list()
+                input_list = [packed_seq.astype(np.int64) for packed_seq in input_packed_batch] # batch_size * [seq_len]
+                label_list = [packed_seq.astype(np.int64) for packed_seq in label_packed_batch] # batch_size * [seq_len]
                 # key : value = tensor : NDArrayList
                 feed_dict = {
-                    input_ids: tokens_list,
-                    masked_lm_labels: labels_list
+                    input_ids: input_list,
+                    masked_lm_labels: label_list
                 }
                 for i in range(config.n_layer):
-                    feed_dict[config.cu_seqlens_list] = [x.astype(np.int32) for x in packed_cu_seqlens_list]
+                    feed_dict[config.cu_seqlens_list[i]] = [x.astype(np.int32) for x in packed_cu_seqlens_list]
             start_time = time.time()
-            try:
-                results = train_op.graph.run(
-                    loss, 
-                    [loss, train_op], 
-                    feed_dict = feed_dict, 
-                    num_micro_batches = len(packed_batch), 
-                    cur_strategy_id = strategy_id,
-                )
-            except RuntimeError as e:
-                print(e)
-                with open("./logs/exception.txt", 'w') as file:
-                    print(f"device {gpu_id}:", file=file)
-                    print(e, file=file)
-                os.killpg(0, signal.SIGTERM)
+            results = hetu_train(feed_dict, len(input_packed_batch), strategy_id)
             end_time = time.time()
             consumed_samples += args.global_batch_size
             # 如果在pipeline的最后一个stage上那么就打印loss
@@ -237,10 +279,15 @@ def pretrain(args):
     
     # 运行
     def test(): 
+        run_plan(warm_up=True)
         strategy_id = 0
         for epoch in range(args.epochs):
             consumed_samples = 0 # should be reset when run next epoch
-            consumed_samples = run_plan(epoch=epoch)
+            consumed_samples = run_plan(
+                epoch=epoch, 
+                consumed_samples=consumed_samples,
+                strategy_id=strategy_id
+            )
     
     test()
 
@@ -255,6 +302,9 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--global_batch_size", type=int, default=64, help="global training batch size"
+    )
+    parser.add_argument(
+        "--max_seq_len", type=int, default=4096, help="maximum sequence length in the whole dataset"
     )
     parser.add_argument(
         "--json_file", type=str, help='data json format file path'

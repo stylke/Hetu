@@ -909,8 +909,7 @@ std::vector<NDArrayMeta> ParallelAttentionOpImpl::DoInferMeta(const TensorList& 
   input->producer()->graph().USE_HETERO_ID = false;
   HT_ASSERT(batch_size_mul_seq_len % seq_len == 0)
     << "packed qkv dim 0 should be divided by seq len"
-    << ", but found dim 0 is " << batch_size_mul_seq_len
-    << ", and seq len is " << seq_len;
+    << ", but found batch_size_mul_seq_len = " << batch_size_mul_seq_len << " and seq_len = " << seq_len;
   int64_t batch_size = batch_size_mul_seq_len / seq_len;
   HT_ASSERT(num_heads_mul_head_dim % _head_dim == 0)
     << "packed qkv dim 1 should be divided by head dim";
@@ -926,6 +925,16 @@ std::vector<NDArrayMeta> ParallelAttentionOpImpl::DoInferMeta(const TensorList& 
   // out_metas.emplace_back(base.set_shape({batch_size, q_num_heads, seq_len}).set_dtype(kFloat)); // softmax_lse
   // out_metas.emplace_back(base.set_shape({2}).set_device(kCPU).set_dtype(kInt64)); // rng_state
   return out_metas;
+}
+
+void ParallelAttentionOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                             const OpMeta& op_meta) const {
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "ParallelAttentionOpImpl: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  outputs.at(0)->set_distributed_states(ds_input);    
 }
 
 void ParallelAttentionOpImpl::DoCompute(Operator& op, 
@@ -949,7 +958,8 @@ void ParallelAttentionOpImpl::DoCompute(Operator& op,
   int64_t num_heads_mul_head_dim = input_shape.at(1);
   int64_t seq_len = get_local_seq_len(op->input(0), _multi_seq_lens_symbol);
   HT_ASSERT(batch_size_mul_seq_len % seq_len == 0)
-    << "packed qkv dim 0 should be divided by seq len";
+    << "packed qkv dim 0 should be divided by seq len"
+    << ", but found batch_size_mul_seq_len = " << batch_size_mul_seq_len << " and seq_len = " << seq_len;
   int64_t batch_size = batch_size_mul_seq_len / seq_len;
     HT_ASSERT(num_heads_mul_head_dim % _head_dim == 0)
     << "packed qkv dim 1 should be divided by head dim";
@@ -1010,22 +1020,22 @@ void ParallelAttentionOpImpl::DoCompute(Operator& op,
   else {
     // no ring-attn
     // HT_LOG_DEBUG << "[ParallelAttn]: no fwd comm ring needed for " << local_device;
-    attn_ctx()->q = q;
-    attn_ctx()->k = k;
-    attn_ctx()->v = v;
     attn_ctx()->rng_state_list = {NDArray::empty(HTShape{2},
                                                  Device(kCPU),
                                                  kInt64,
                                                  stream_idx)};
-    // *注意softmax_lse是fp32的
-    attn_ctx()->acc_softmax_lse = NDArray::empty(HTShape{batch_size, q_num_heads, seq_len_list[ring_idx]},
-                                                 q->device(),
-                                                 kFloat,
-                                                 stream_idx);
-    attn_ctx()->acc_out = reshaped_output;
     NDArray empty_ndarray = NDArray();
     // HT_LOG_DEBUG << "[ParallelAttn]: fwd (no cp), acc_softmax_lse shape is " << attn_ctx()->acc_softmax_lse->shape() << ", acc_out shape is " << attn_ctx()->acc_out->shape();
     if (!_packing) {
+      attn_ctx()->q = q;
+      attn_ctx()->k = k;
+      attn_ctx()->v = v;
+      // *注意softmax_lse是fp32的
+      attn_ctx()->acc_softmax_lse = NDArray::empty(HTShape{batch_size, q_num_heads, seq_len_list[ring_idx]},
+                                                   q->device(),
+                                                   kFloat,
+                                                   stream_idx);
+      attn_ctx()->acc_out = reshaped_output;
       HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::FlashAttn,
                                    q, k, v, attn_ctx()->acc_out, empty_ndarray,
                                    empty_ndarray, empty_ndarray, empty_ndarray, attn_ctx()->acc_softmax_lse,
@@ -1036,11 +1046,20 @@ void ParallelAttentionOpImpl::DoCompute(Operator& op,
         << "packing should have 3 inputs: qkv, cu_seqlens_q and cu_seqlens_k";
       auto cu_seqlens_q = inputs.at(1);
       auto cu_seqlens_k = inputs.at(2);
-      q = NDArray::view(q, {batch_size * seq_len, q_num_heads, _head_dim});
-      k = NDArray::view(k, {batch_size * seq_len, kv_num_heads, _head_dim});
-      v = NDArray::view(v, {batch_size * seq_len, kv_num_heads, _head_dim});
+      int64_t packing_num = cu_seqlens_q->numel() - 1;
+      HT_ASSERT(packing_num == cu_seqlens_k->numel() - 1 && packing_num >= 1)
+        << "packing num (>= 1) mismatches";
+      attn_ctx()->q = NDArray::view(q, {batch_size_mul_seq_len, q_num_heads, _head_dim});
+      attn_ctx()->k = NDArray::view(k, {batch_size_mul_seq_len, kv_num_heads, _head_dim});
+      attn_ctx()->v = NDArray::view(v, {batch_size_mul_seq_len, kv_num_heads, _head_dim});
+      // *注意softmax_lse是fp32的
+      attn_ctx()->acc_softmax_lse = NDArray::empty(HTShape{packing_num, q_num_heads, max_seqlen_q()},
+                                                   q->device(),
+                                                   kFloat,
+                                                   stream_idx);
+      attn_ctx()->acc_out = NDArray::view(reshaped_output, {batch_size_mul_seq_len, q_num_heads, _head_dim});
       HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(), hetu::impl::FlashAttnVarlen, 
-                                   q, k, v, cu_seqlens_q, cu_seqlens_k, attn_ctx()->acc_out, empty_ndarray,
+                                   attn_ctx()->q, attn_ctx()->k, attn_ctx()->v, cu_seqlens_q, cu_seqlens_k, attn_ctx()->acc_out, empty_ndarray,
                                    empty_ndarray, empty_ndarray, empty_ndarray, attn_ctx()->acc_softmax_lse,
                                    empty_ndarray, attn_ctx()->rng_state_list.at(0), 
                                    max_seqlen_q(), max_seqlen_k(), 
@@ -1051,7 +1070,6 @@ void ParallelAttentionOpImpl::DoCompute(Operator& op,
 }
 
 TensorList ParallelAttentionOpImpl::DoGradient(Operator& op, const TensorList& grad_outputs) const {
-  TensorList empty = {Tensor()};
   Tensor cu_seqlens_q = Tensor(), cu_seqlens_k = Tensor();
   if (_packing) {
     HT_ASSERT(op->num_inputs() == 3)
@@ -1059,12 +1077,25 @@ TensorList ParallelAttentionOpImpl::DoGradient(Operator& op, const TensorList& g
     cu_seqlens_q = op->input(1);
     cu_seqlens_k = op->input(2);
   }
-  return op->requires_grad(0) ? MakeParallelAttentionGradientOp(_attn_ctx_list, grad_outputs.at(0),  
-                                                                _head_dim, _group_query_ratio, 
-                                                                _multi_seq_lens_symbol, _multi_cp_group_symbol, 
-                                                                _packing, cu_seqlens_q, cu_seqlens_k, _max_seqlen_q, _max_seqlen_k,
-                                                                p_dropout(), softmax_scale(), is_causal(), op->grad_op_meta().set_name(op->grad_name()))
-                              : empty;
+  if (op->requires_grad(0)) {
+    auto grads = MakeParallelAttentionGradientOp(_attn_ctx_list, grad_outputs.at(0),  
+                                                 _head_dim, _group_query_ratio, 
+                                                 _multi_seq_lens_symbol, _multi_cp_group_symbol, 
+                                                 _packing, cu_seqlens_q, cu_seqlens_k, _max_seqlen_q, _max_seqlen_k,
+                                                 p_dropout(), softmax_scale(), is_causal(), op->grad_op_meta().set_name(op->grad_name()));
+    HT_ASSERT(grads.size() == 1)
+      << "ParallelAttentionGradientOp should only have one output, that is the grad for the fused qkv";
+    if (_packing) {
+      grads.emplace_back(Tensor());
+      grads.emplace_back(Tensor());
+    }
+    return grads;
+  } else {
+    if (_packing) {
+      return {Tensor(), Tensor(), Tensor()};
+    }
+    return {Tensor()};
+  }
 }
 
 HTShapeList ParallelAttentionOpImpl::DoInferShape(Operator& op, 
@@ -1077,7 +1108,8 @@ HTShapeList ParallelAttentionOpImpl::DoInferShape(Operator& op,
   int64_t num_heads_mul_head_dim = input_shapes.at(0).at(1);
   int64_t seq_len = get_local_seq_len(op->input(0), _multi_seq_lens_symbol);
   HT_ASSERT(batch_size_mul_seq_len % seq_len == 0)
-    << "packed qkv dim 0 should be divided by seq len";
+    << "packed qkv dim 0 should be divided by seq len"
+    << ", but found batch_size_mul_seq_len = " << batch_size_mul_seq_len << " and seq_len = " << seq_len;
   int64_t batch_size = batch_size_mul_seq_len / seq_len;
   HT_ASSERT(num_heads_mul_head_dim % _head_dim == 0)
     << "packed qkv dim 1 should be divided by head dim";
@@ -1103,6 +1135,16 @@ std::vector<NDArrayMeta> ParallelAttentionGradientOpImpl::DoInferMeta(const Tens
   return {output_meta};
 }
 
+void ParallelAttentionGradientOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
+                                                     const OpMeta& op_meta) const {
+  const DistributedStates& ds_input = inputs.at(0)->get_distributed_states();
+  HT_ASSERT(ds_input.is_valid()) 
+    << "ParallelAttentionGradientOpImpl: distributed states for input must be valid!";
+  HT_ASSERT(ds_input.get_dim(-2) == 1)
+    << "Input tensor shouldn't be partial!";
+  outputs.at(0)->set_distributed_states(ds_input);    
+}
+
 void ParallelAttentionGradientOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                                                 NDArrayList& outputs, RuntimeContext& ctx) const {
   const auto& grad_output = inputs.at(0);
@@ -1122,7 +1164,8 @@ void ParallelAttentionGradientOpImpl::DoCompute(Operator& op, const NDArrayList&
   int64_t q_num_heads_mul_head_dim = grad_output_shape.at(1);
   int64_t seq_len = get_local_seq_len(op->input(0), _multi_seq_lens_symbol);
   HT_ASSERT(batch_size_mul_seq_len % seq_len == 0)
-    << "grad output dim 0 should be divided by seq len";
+    << "grad output dim 0 should be divided by seq len"
+    << ", but found batch_size_mul_seq_len = " << batch_size_mul_seq_len << " and seq_len = " << seq_len;
   int64_t batch_size = batch_size_mul_seq_len / seq_len;
   HT_ASSERT(q_num_heads_mul_head_dim % _head_dim == 0)
     << "grad output dim 1 should be divided by head dim";
@@ -1206,12 +1249,13 @@ void ParallelAttentionGradientOpImpl::DoCompute(Operator& op, const NDArrayList&
         << "packing should have 3 inputs: grad_output, cu_seqlens_q and cu_seqlens_k";
       auto cu_seqlens_q = inputs.at(1);
       auto cu_seqlens_k = inputs.at(2);
-      auto q = NDArray::view(attn_ctx()->q, {batch_size * seq_len, q_num_heads, _head_dim});
-      auto k = NDArray::view(attn_ctx()->k, {batch_size * seq_len, kv_num_heads, _head_dim});
-      auto v = NDArray::view(attn_ctx()->v, {batch_size * seq_len, kv_num_heads, _head_dim});
+      dq = NDArray::view(dq, {batch_size_mul_seq_len, q_num_heads, _head_dim});
+      dk = NDArray::view(dk, {batch_size_mul_seq_len, kv_num_heads, _head_dim});
+      dv = NDArray::view(dv, {batch_size_mul_seq_len, kv_num_heads, _head_dim});
+      reshaped_grad_output = NDArray::view(reshaped_grad_output, {batch_size_mul_seq_len, q_num_heads, _head_dim});
       HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
                                    hetu::impl::FlashAttnVarlenGradient, reshaped_grad_output,
-                                   q, k, v, cu_seqlens_q, cu_seqlens_k, 
+                                   attn_ctx()->q, attn_ctx()->k, attn_ctx()->v, cu_seqlens_q, cu_seqlens_k, 
                                    attn_ctx()->acc_out, attn_ctx()->acc_softmax_lse, attn_ctx()->rng_state_list.at(0), 
                                    dq, dk, dv, max_seqlen_q(), max_seqlen_k(), p_dropout(), softmax_scale_, false,
                                    true, op->instantiation_ctx().stream());

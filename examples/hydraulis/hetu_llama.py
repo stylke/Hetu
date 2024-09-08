@@ -22,7 +22,7 @@ class LLamaAttention(ht.nn.Module):
         # self.add_bias = True
         self.add_bias = False
 
-        max_positions = config.max_position_embeddings
+        # max_positions = config.max_position_embeddings
         # self.bias = np.tril(np.ones((max_positions, max_positions), dtype=np.int64).reshape(
         #             1, 1, max_positions, max_positions))
         self.masked_value = -1e4
