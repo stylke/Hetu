@@ -15,7 +15,7 @@ void OpInterface::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   // default: distributed states of output tensor directly copy from input tensor
   // check input states is valid & check distributed states of all input tensor are the same.
   HT_ASSERT(inputs.size() > 0) << op_meta.name << ": distributed states should be manually set when in_degree=0!";
-  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " " << op_meta.name << ": default copy states from inputs";
+  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " " << op_meta.name << ": default copy states from inputs";
   DistributedStates default_ds;
   for (auto& input : inputs) {
     const auto& input_ds = input->get_distributed_states(); 
@@ -39,7 +39,7 @@ void OpInterface::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_di
                                     TensorList& outputs, const OpMeta& op_meta) const {
   HT_ASSERT(inputs_hetero_dim.size() > 0) 
     << op_meta.name << ": distributed states hetero dim should be manually set when in_degree is 0";
-  HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " " << op_meta.name << ": default copy states hetero dim from inputs";
+  HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " " << op_meta.name << ": default copy states hetero dim from inputs";
   int32_t default_hetero_dim = -3;
   for (auto& hetero_dim : inputs_hetero_dim) {
     if (default_hetero_dim == -3) {
@@ -203,55 +203,6 @@ HTShapeList OpInterface::DoInferShape(Operator& op,
   __builtin_unreachable();
 }
 
-// deprecated: only used in gpt inference, before symbolic shape is realized
-/*
-NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
-                                        RuntimeContext& runtime_ctx) const {
-  NDArrayList outputs;
-  if (op->num_outputs() > 0) {
-    outputs.reserve(op->num_outputs());
-    HTShapeList input_shapes;
-    HTShapeList input_dynamic_shapes;
-    input_shapes.reserve(op->num_inputs());
-    input_dynamic_shapes.reserve(op->num_inputs());
-    bool is_dynamic = false;
-    for (auto& input : inputs) {
-      input_shapes.push_back(input->shape());
-      if (input->is_dynamic())
-        is_dynamic = true;
-      input_dynamic_shapes.push_back(input->dynamic_shape());
-    }
-    // Although we have inferred the meta of tensors,
-    // InferShape is still necessary in pipeline parallelism
-    HT_LOG_TRACE << hetu::impl::comm::GetLocalDevice() << " op: " << op->name() << ", DoInferShape...";
-    auto output_shapes = DoInferShape(op, input_shapes, runtime_ctx);
-    HTShapeList output_dynamic_shapes;
-    // deprecated: only used in gpt inference, before symbolic shape is realized
-    if (is_dynamic)
-      output_dynamic_shapes = DoInferDynamicShape(op, input_dynamic_shapes, runtime_ctx);
-    auto output_size = op->num_outputs();
-    for (size_t i = 0; i < output_size; i++) {
-      HT_LOG_DEBUG << hetu::impl::comm::GetLocalDevice() << " op: " << op->name() 
-        << ", output tensor shape: " << op->output(i)->shape() 
-        << ", output NDArray shape: " << output_shapes[i];
-      for (size_t j = 0; j < output_shapes[i].size(); j++) {
-        HT_ASSERT(output_shapes[i][j] == op->output(i)->shape(j));
-      outputs.push_back(NDArray::empty(output_shapes[i],
-                                       op->instantiation_ctx().placement,
-                                       op->output(i)->dtype(),
-                                       op->instantiation_ctx().stream_index,
-                                       is_dynamic ? output_dynamic_shapes[i] : HTShape()));
-    }
-    // deprecated: only used in gpt inference, before symbolic shape is realized
-    if (is_dynamic)
-      HT_LOG_TRACE_IF(hetu::impl::comm::GetLocalDevice().index() == 0U) << "op: " << op << " input_shapes: " << input_shapes   
-        << " input_dynamic_shapes: " << input_dynamic_shapes << " output_shapes: " << output_shapes 
-        << " output_dynamic_shapes: " << output_dynamic_shapes;
-  }
-  return outputs;
-}
-*/
-
 NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                                         RuntimeContext& runtime_ctx) const {
   NDArrayList outputs;
@@ -308,14 +259,6 @@ NDArrayList OpInterface::DoAllocOutputs(Operator& op, const NDArrayList& inputs,
                                        op->output(i)->dtype(),
                                        op->instantiation_ctx().stream_index);
           outputs.push_back(output);
-          // mempool debug use
-          // see whether it can reuse
-          /*
-          if (output->is_new_malloc()) {
-            HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": exec op " << op
-              << " malloc new output " << i << " shape = " << output_shape;
-          }
-          */
         }
       }
     }
@@ -380,8 +323,8 @@ NDArray OpInterface::DoAllocOutput(Operator& op, const NDArrayList& inputs,
                                    size_t idx, RuntimeContext& runtime_ctx) const {
   auto output_size = op->num_outputs();
   HT_ASSERT(idx < output_size)
-  << "Output index " << idx << " is out of range for op " << op
-  << " while allocating outputs";
+    << "Output index " << idx << " is out of range for op " << op
+    << " while allocating outputs";
 
   // 动态图
   // 无runtime_ctx
@@ -414,10 +357,11 @@ NDArray OpInterface::DoAllocOutput(Operator& op, const NDArrayList& inputs,
     } 
     // alloc on-the-fly
     else {
-      return NDArray::empty(output_shape,
-                            op->instantiation_ctx().placement,
-                            op->output(idx)->dtype(),
-                            op->instantiation_ctx().stream_index);
+      auto output = NDArray::empty(output_shape,
+                                   op->instantiation_ctx().placement,
+                                   op->output(idx)->dtype(),
+                                   op->instantiation_ctx().stream_index);
+      return output;
     }
   }
 }

@@ -24,8 +24,6 @@ def dynamic_programming(data, counter, N, D, S, S_STEP, K):
             for s in range(S_STEP, S + 1, S_STEP):
                 t[n][d][s] = t[n - 1][d][s]
                 trace[n][d][s] = trace[n - 1][d][s]
-                # 注意这里策略编号是从1开始往上数
-                # 实际要减去1
                 for k in range(K):
                     tp = data['strategies'][k]['tp']
                     pp = data['strategies'][k]['pp']
@@ -58,10 +56,10 @@ if __name__ == '__main__':
 
     # 示例调用
     N = 16
-    D_MAX = 4
+    D_MAX = 16
     S = 8192
     S_STEP = 128
-    K = 10
+    K = len(data['strategies'])
     
     best_t = float('inf')
     best_trace = None

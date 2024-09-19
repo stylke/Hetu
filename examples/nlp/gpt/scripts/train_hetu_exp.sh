@@ -9,8 +9,8 @@ NUM_HEADS=32
 MICRO_BATCH_SIZE=1
 GLOBAL_BATCH_SIZE=16
 FFN_HIDDEN_SIZE=11008
-SERVER_ADDR="172.24.10.109"
-# SERVER_ADDR="172.24.93.179" # worker-0
+# SERVER_ADDR="172.24.10.109"
+SERVER_ADDR="172.24.93.179" # worker-0
 # SERVER_ADDR="127.0.0.1" # 216
 SERVER_PORT="23462"
 HOST_FILE_PATH="./scripts/host.yaml"
@@ -69,10 +69,10 @@ if [ ! -e "$EXP_FILE" ]; then
 	> "$EXP_FILE"
 fi
 
-if (( TP == 4 && PP == 4 )); then
-	START_SEQ=16640
+if (( TP == 2 && PP == 4 )); then
+	START_SEQ=7168
 elif (( TP == 8 && PP == 2 )); then
-	START_SEQ=33024
+	START_SEQ=256
 else
 	START_SEQ=256
 fi

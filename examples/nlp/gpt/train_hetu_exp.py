@@ -465,7 +465,7 @@ def pretrain(args):
             micro_batch_size = args.micro_batch_size, 
             global_seq_len = args.global_seq_len,
             strategy_id = strategy_id, 
-            run_level = ht.run_level("update")
+            run_level = ht.run_level("compute_only")
         )
     
     # 多轮样例
@@ -484,7 +484,7 @@ def pretrain(args):
                 micro_batch_size = args.micro_batch_size, 
                 global_seq_len = args.global_seq_len,  
                 strategy_id = strategy_id, 
-                run_level = ht.run_level("update")
+                run_level = ht.run_level("compute_only")
             )
             print(f"epoch {epoch} finished, consumed_samples = {consumed_samples}")
     

@@ -4,12 +4,13 @@ import json
 # value是其所消耗的时间以及span内最大的seq长度
 cache = {}
 
-def quadratic_predict(s, a, b):
-    return a * s * s + b * s
+def quadratic_predict(s, a, b, c):
+    # return a * (s ** 2) + b * s + c
+    return a * (s ** 2) + b * s
 
 def dynamic_strategy_time_cost(data, strategy_id, s):
     strategy = data['strategies'][strategy_id]
-    return quadratic_predict(s, strategy['a'], strategy['b'])
+    return quadratic_predict(s, strategy['a'], strategy['b'], strategy['c'])
 
 # 策略编号为strategy_id数据并行维度为D的情况下处理数据集中长度在[s - l, s]区间范围内的所消耗的时间
 def static_strategy_time_cost(data, counter, strategy_id, s_begin, s_end, S_STEP):
@@ -28,13 +29,13 @@ def static_strategy_time_cost(data, counter, strategy_id, s_begin, s_end, S_STEP
         for s in range(span_begin, span_begin + S_STEP):
             if s in counter:
                 # 1F1B
-                span_sum_time += quadratic_predict(s, strategy['a'], strategy['b']) * counter[s]
+                span_sum_time += quadratic_predict(s, strategy['a'], strategy['b'], strategy['c']) * counter[s]
                 span_max_seq_len = s
         cache[cache_key] = (span_sum_time, span_max_seq_len)
         sum_time += span_sum_time
         max_seq_len = max(max_seq_len, span_max_seq_len)
     # warm-up + cool-down
-    sum_time += quadratic_predict(max_seq_len, strategy['a'], strategy['b']) * (strategy['pp'] - 1)
+    sum_time += quadratic_predict(max_seq_len, strategy['a'], strategy['b'], strategy['c']) * (strategy['pp'] - 1)
     return sum_time
 
 # 策略编号为strategy_id数据并行维度为D的情况下所能支持的最长seqlen
@@ -47,7 +48,8 @@ def strategy_max_seqlen(data, strategy_id, D, unit_test=False):
     B = data['memory_regression']['B']
     alpha = data['memory_regression']['alpha']
     # workaround: significant gap occurs on zhiyuan A100
-    gap = data['memory_regression']['gap']['node' if tp * pp * D >= gpus_per_node else f'gpu{tp * pp * D}']
+    # gap = data['memory_regression']['gap']['node' if tp * pp * D >= gpus_per_node else f'gpu{tp * pp * D}']
+    gap = data['memory_regression']['gap']['node']
     safe_bound = data['memory_regression']['safe_bound']
     L = data['model_config']['L']
     H = data['model_config']['H']

@@ -28,8 +28,8 @@ enum class GraphType : int8_t {
 
 enum class RunLevel : int8_t {
   UPDATE = 0,
-  LOCAL_GRAD,
   GRAD,
+  COMPUTE_ONLY,
   ALLOC,
   TOPO
 };

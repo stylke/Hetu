@@ -45,7 +45,8 @@ DataPtr CPUMemoryPool::AllocDataSpace(size_t num_bytes, const Stream& stream) {
   HT_BAD_ALLOC_IF(err != 0)
     << "Failed to allocate " << aligned_num_bytes
     << " bytes of host memory. Error: " << strerror(err);
-  DataPtr data_ptr{ptr, aligned_num_bytes, Device(kCPU), next_id(), true};
+  DataPtr data_ptr{ptr, aligned_num_bytes, Device(kCPU), next_id()};
+  data_ptr.is_new_malloc = true;
   _allocated += aligned_num_bytes;
   _peak_allocated = MAX(_peak_allocated, _allocated);
   _alloc_cnt++;

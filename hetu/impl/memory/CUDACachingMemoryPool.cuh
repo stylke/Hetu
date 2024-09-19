@@ -156,6 +156,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
     std::unordered_set<PackedStreamId> used_streams;
     DataPtrDeleter deleter;
     DataPtrId id;
+    DataPtrId split_from_id;
     
     OccupationStatus status;
     mempool_clock_t alloc_at;
@@ -174,6 +175,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
       alloc_at(alloc_at_), 
       id(id_),
       deleter(deleter_),
+      split_from_id(id_),
       free_at(0), 
       multi_stream_free_event_cnt(0) {
       if (!alloc_stream_.is_blocking())

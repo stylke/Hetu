@@ -181,7 +181,8 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
         // Wait until we can release some cached ptrs (maybe all cached ptrs) and accomplish the allocation.
         || WaitUntilAlloc(ptr, malloc_size)) {
       // ------ create new data ptr place 1 ------ 
-      data_ptr = DataPtr{ptr, malloc_size, device(), next_id(), true};
+      data_ptr = DataPtr{ptr, malloc_size, device(), next_id()};
+      data_ptr.is_new_malloc = true;
       // mempool debug use    
       // HT_LOG_INFO << "[Create] cudaMalloc new " << data_ptr;
       _reserved += malloc_size;
@@ -223,8 +224,14 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
     void* remaining_ptr = data_ptr.ptr + aligned_num_bytes;
     size_t remaining_size = data_ptr.size - aligned_num_bytes;
     size_t new_id = next_id();
+    // 修正之前的data ptr和info中的(cuda) data ptr 
+    data_ptr.size = aligned_num_bytes;
+    cur_info->num_bytes = aligned_num_bytes; 
+    HT_ASSERT(cur_info->split_from_id == data_ptr.split_from_id)
+      << "split_from_id of cur info should remain the same";
     // ------ create new data ptr place 2 ------ 
     auto remaining_data_ptr = DataPtr{remaining_ptr, remaining_size, device(), new_id};
+    remaining_data_ptr.split_from_id = data_ptr.split_from_id; // 始终往一个去溯源
     // 将remaining data ptr插入table
     HT_ASSERT(target_table)
       << "Target table is a nullptr";
@@ -238,12 +245,10 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
     new_info->status = target_table == _available_for_all_streams.get() ? 
                        OccupationStatus::AVAILABLE_FOR_ALL_STREAM : OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM;
     new_info->cached_pool = target_table;
+    new_info->split_from_id = remaining_data_ptr.split_from_id;
     auto info_insertion = _data_ptr_info.emplace(new_id, new_info);   
     HT_RUNTIME_ERROR_IF(!info_insertion.second)
       << "Failed to insert splitted (cuda) data ptr " << remaining_data_ptr << " to info"; 
-    // 修正之前的data ptr和info中的(cuda) data ptr 
-    cur_info->num_bytes = aligned_num_bytes; 
-    data_ptr.size = aligned_num_bytes;
     // 用链表连接split的info
     new_info->prev = cur_info;
     new_info->next = cur_info->next;
@@ -272,7 +277,7 @@ DataPtr CUDACachingMemoryPool::AllocDataSpace(size_t num_bytes,
   }
   _allocated += data_ptr.size;
   _alloc_cnt++;
-  HT_LOG_TRACE << "ptr: " << data_ptr << ", alloc: " << data_ptr.size << ", stream: " << stream;
+  HT_LOG_TRACE << "ptr: " << data_ptr.id << ", alloc: " << data_ptr.size << ", stream: " << stream << ", is new malloc: " << data_ptr.is_new_malloc;
   return data_ptr;
 }
 
@@ -390,6 +395,7 @@ void CUDACachingMemoryPool::MoveAvailable(std::shared_ptr<CudaDataPtrInfo>& info
   // Meta information of data_ptr might have change in TryMerge
   data_ptr.ptr = info->ptr;
   data_ptr.size = info->num_bytes;
+  data_ptr.split_from_id = info->split_from_id;
   info->cached_pool = target_table;
   InsertAvailable(data_ptr, *target_table);
 }
@@ -612,6 +618,7 @@ DataPtr CUDACachingMemoryPool::BorrowDataSpace(void* ptr, size_t num_bytes,
 }
 
 void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
+  data_ptr.is_new_malloc = false; // 先将new_malloc属性清空
   if (data_ptr.ptr == nullptr || data_ptr.size == 0)
     return;
   std::lock_guard<std::mutex> lock(_mtx);
@@ -706,7 +713,8 @@ void CUDACachingMemoryPool::FreeDataSpace(DataPtr data_ptr) {
       target_table = TryMerge(info, target_table); 
     // Meta information of data_ptr might have change in TryMerge
     data_ptr.size = info->num_bytes;
-    data_ptr.ptr = info->ptr; 
+    data_ptr.ptr = info->ptr;
+    data_ptr.split_from_id = info->split_from_id; 
     info->cached_pool = target_table;
     InsertAvailable(data_ptr, *target_table); 
     HT_ASSERT(data_ptr.id == info->id)
@@ -826,8 +834,11 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
   // 1、available table 以及 2、info
   // 中删去并重新合并（向now靠齐）
   // 同时也要处理三者的single stream free event
+  // 注意merge并不会导致split_from_id发生改变
   if (data_info->prev != nullptr && !data_info->prev->allocated()) {
     auto prev_info = data_info->prev; 
+    HT_ASSERT(prev_info->split_from_id == data_info->split_from_id)
+      << "split_from_id should always be consistent";
     HT_ASSERT(prev_info->status >= OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM)
       << "Prev info status should be available to alloc"
       << ", but found " << prev_info->status;
@@ -857,6 +868,8 @@ DataPtrLookupTable* CUDACachingMemoryPool::TryMerge(std::shared_ptr<CudaDataPtrI
   }
   if (data_info->next != nullptr && !data_info->next->allocated()) {
     auto next_info = data_info->next; 
+    HT_ASSERT(next_info->split_from_id == data_info->split_from_id)
+      << "split_from_id should always be consistent";
     HT_ASSERT(next_info->status >= OccupationStatus::AVAILABLE_FOR_ALLOC_STREAM)
       << "Next info status should be available to alloc"
       << ", but found " << next_info->status;
@@ -1008,6 +1021,7 @@ void CUDACachingMemoryPool::WatchEvents() {
           auto data_ptr = DataPtr{info->ptr, info->num_bytes, device(), data_ptr_id};
           HT_ASSERT(data_ptr_id == info->id)
             << "The data ptr id and the info id are mismatched"; 
+          data_ptr.split_from_id = info->split_from_id;
           info->cached_pool = target_table;
           InsertAvailable(data_ptr, *target_table); 
         }

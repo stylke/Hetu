@@ -75,10 +75,9 @@ PyObject* CommGroup_GetGlobalDeviceGroup(PyObject*, PyObject* args, PyObject* kw
 // workaround
 PyObject* CommGroup_GlobalCommBarrier(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
-  auto local_device = hetu::impl::comm::GetLocalDevice();
-  SynchronizeAllStreams(local_device);
-  auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreateWorldwide(local_device);
-  comm_group->Barrier(true);
+  std::vector<int> all_ranks(hetu::impl::comm::GetWorldSize());
+  std::iota(all_ranks.begin(), all_ranks.end(), 0);
+  hetu::impl::comm::GetLocalClient()->Barrier(0, all_ranks);
   Py_RETURN_NONE;
   HT_PY_FUNC_END
 }

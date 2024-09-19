@@ -52,6 +52,16 @@ class NDArrayStorage {
     return _ptr.is_new_malloc;
   }
 
+  // 将data_ptr的id暴露给外头并不是一个好的主意
+  // 但为了更方便的debug只好暂时这么做
+  inline uint64_t ptr_id() const {
+    return _ptr.id;
+  }
+
+  inline uint64_t split_from_ptr_id() const {
+    return _ptr.split_from_id;
+  }
+
  protected:
   DataPtr _ptr;
   bool _in_mempool;

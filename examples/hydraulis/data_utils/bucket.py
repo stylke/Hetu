@@ -11,43 +11,78 @@ class Bucket:
         self._cu_seqlens_list = []
         self._packed_batch = None
         self._packed_cu_seqlens_list = None
+        self._padded_batch = None
+        self._padded_cu_seqlens_list = None
 
     def add_data(self, padded_sequence, valid_tokens):
         self._batch.append(padded_sequence[:valid_tokens])
         self._cu_seqlens_list.append(np.array([0, valid_tokens], dtype=np.int32))
+        
+    def pad_data(self):
+        padded_batch = []
+        padded_cu_seqlens_list = []
+        for i in range(len(self._batch)):
+            pad_seqlen = self._max_seqlen - len(self._batch[i])
+            if pad_seqlen > 0:
+                padded_batch.append(np.concatenate([self._batch[i], np.array([self._pad_token] * pad_seqlen)]))
+            else:
+                padded_batch.append(self._batch[i])
+            padded_cu_seqlens_list.append(self._cu_seqlens_list[i])
+        self._padded_batch = padded_batch
+        self._padded_cu_seqlens_list = padded_cu_seqlens_list
 
-    # 简单的贪心packing策略
     # 已经默认batch中的数据按照从短到长排序
-    def pack_data(self):
-        is_visited = set()
+    def pack_data(self, batching_option_matrix):
         packed_batch = []
         packed_cu_seqlens_list = []
-        for i in range(len(self._batch)):
-            if i in is_visited:
-                continue
-            packed_seqs = [self._batch[i]]
-            cur_cu_seqlen = len(self._batch[i])
-            cu_seqlens = [0, cur_cu_seqlen]
-            is_visited.add(i)
-            for j in reversed(range(i + 1, len(self._batch))):
-                if j not in is_visited and cur_cu_seqlen + len(self._batch[j]) <= self._max_seqlen:
-                    packed_seqs.append(self._batch[j])
-                    cur_cu_seqlen += len(self._batch[j])
-                    cu_seqlens.append(cur_cu_seqlen)
-                    is_visited.add(j)
-            # already support multi shape micro batch
-            '''
-            # pad to max_seqlen
-            if cur_cu_seqlen < self._max_seqlen:
-                packed_seqs.append(np.array([self._pad_token] * (self._max_seqlen - cur_cu_seqlen)))
-            '''
-            # pad to the nearest number that the sequence parallel degree can divide evenly (considering input & label need -1)
-            if cur_cu_seqlen % self._alignment != 0:
-                pad_seqlen = self._alignment - (cur_cu_seqlen % self._alignment) 
-                packed_seqs.append(np.array([self._pad_token] * pad_seqlen))
-                # cu_seqlens[-1] += pad_seqlen
-            packed_batch.append(np.concatenate(packed_seqs))
-            packed_cu_seqlens_list.append(np.array(cu_seqlens, dtype=np.int32))
+        # 负载均衡的packing策略
+        # batching_option_matrix的第i行第j列表示是否将第i个seq放入第j个micro batch
+        if isinstance(batching_option_matrix, np.ndarray):
+            assert len(batching_option_matrix.shape) == 2, f"{batching_option_matrix} is not a 2 dim matrix"
+            for micro_batch_id in range(batching_option_matrix.shape[1]):
+                packed_seqs = []
+                cur_cu_seqlen = 0
+                cu_seqlens = [0]
+                for seq_id in range(batching_option_matrix.shape[0]):
+                    if batching_option_matrix[seq_id][micro_batch_id]:
+                        packed_seqs.append(self._batch[seq_id])
+                        cur_cu_seqlen += len(self._batch[seq_id])
+                        cu_seqlens.append(cur_cu_seqlen)
+                # pad to the nearest number that the sequence parallel degree can divide evenly
+                if cur_cu_seqlen % self._alignment != 0:
+                    pad_seqlen = self._alignment - (cur_cu_seqlen % self._alignment) 
+                    packed_seqs.append(np.array([self._pad_token] * pad_seqlen))
+                packed_batch.append(np.concatenate(packed_seqs))
+                packed_cu_seqlens_list.append(np.array(cu_seqlens, dtype=np.int32))   
+        # 简单的贪心packing策略
+        else:
+            is_visited = set()
+            for i in range(len(self._batch)):
+                if i in is_visited:
+                    continue
+                packed_seqs = [self._batch[i]]
+                cur_cu_seqlen = len(self._batch[i])
+                cu_seqlens = [0, cur_cu_seqlen]
+                is_visited.add(i)
+                for j in reversed(range(i + 1, len(self._batch))):
+                    if j not in is_visited and cur_cu_seqlen + len(self._batch[j]) <= self._max_seqlen:
+                        packed_seqs.append(self._batch[j])
+                        cur_cu_seqlen += len(self._batch[j])
+                        cu_seqlens.append(cur_cu_seqlen)
+                        is_visited.add(j)
+                # already support multi shape micro batch
+                '''
+                # pad to max_seqlen
+                if cur_cu_seqlen < self._max_seqlen:
+                    packed_seqs.append(np.array([self._pad_token] * (self._max_seqlen - cur_cu_seqlen)))
+                '''
+                # pad to the nearest number that the sequence parallel degree can divide evenly
+                if cur_cu_seqlen % self._alignment != 0:
+                    pad_seqlen = self._alignment - (cur_cu_seqlen % self._alignment) 
+                    packed_seqs.append(np.array([self._pad_token] * pad_seqlen))
+                    # cu_seqlens[-1] += pad_seqlen
+                packed_batch.append(np.concatenate(packed_seqs))
+                packed_cu_seqlens_list.append(np.array(cu_seqlens, dtype=np.int32))
         assert len(packed_batch) > 0, "currently not support no data after packing"
         self._packed_batch = packed_batch
         self._packed_cu_seqlens_list = packed_cu_seqlens_list
@@ -55,9 +90,21 @@ class Bucket:
     def packed_batch_size(self):
         assert self._packed_batch != None, "please ensure you have packed the bucket"
         return len(self._packed_batch)
+    
+    def padded_batch_size(self):
+        assert self._paded_batch != None, "please ensure you have padded the bucket"
+        return len(self._padded_batch)
 
     def original_batch_size(self):
         return len(self._batch)
+    
+    def padded_batch(self):
+        assert self._padded_batch != None, "please ensure you have padded the bucket"
+        return self._padded_batch
+    
+    def padded_cu_seqlens_list(self):
+        assert self._padded_cu_seqlens_list != None, "please ensure you have padded the bucket"
+        return self._padded_cu_seqlens_list 
 
     def packed_batch(self):
         assert self._packed_batch != None, "please ensure you have packed the bucket"
@@ -85,8 +132,6 @@ def get_input_and_label_buckets(global_batch: np.ndarray, pad_token: int, batch_
     for seq, vailid_tokens in zip(bucket_batch, bucket_valid_tokens):
         input_bucket.add_data(seq, vailid_tokens - 1)
         label_bucket.add_data(seq[1:], vailid_tokens - 1)
-    input_bucket.pack_data()
-    label_bucket.pack_data()
     return input_bucket, label_bucket
 
 if __name__ == '__main__':

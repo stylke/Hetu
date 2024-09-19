@@ -518,8 +518,6 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> transfer_param_buffer_map;
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> current_grad_buffer_map;
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> accumulate_grad_buffer_map;
-  std::unordered_map<DataType, bool> is_partial_accumulate_grad_buffer_map;
-  std::unordered_map<DataType, bool> has_accumulate_grad_value_map;
   Tensor2TensorMap transfer_map;
   Tensor2TensorMap grad_map;
   Tensor2TensorMap dequantization_tensor_map;
@@ -540,8 +538,6 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     transfer_param_buffer_map[dtype] = std::make_shared<ParamBuffer>("transfer_param_buffer_" + DataType2Str(dtype));
     current_grad_buffer_map[dtype] = std::make_shared<ParamBuffer>("current_grad_buffer_" + DataType2Str(dtype));
     accumulate_grad_buffer_map[dtype] = std::make_shared<ParamBuffer>("accumulate_grad_buffer_" + DataType2Str(dtype));
-    is_partial_accumulate_grad_buffer_map[dtype] = false;
-    has_accumulate_grad_value_map[dtype] = false;
   }  
 
   // initializations of the exec graph
@@ -627,12 +623,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
     }
     // 6)、assign param & optimizer states
     // 目前只是记录而并不会alloc
-    if (_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end()
-        && exec_tensor->producer()->placement_group_union().has(local_device)
-        && tensor->requires_grad()) {
-      // origin_param_buffer->AddTensor(exec_tensor);
-    }
-    if ((_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end() && tensor->requires_grad()
+    if (((_parameter_ops.find(tensor->producer()->id()) != _parameter_ops.end() && tensor->requires_grad())
          || _optimizer_variable_ops.find(tensor->producer()->id()) != _optimizer_variable_ops.end())
         && exec_tensor->producer()->placement_group_union().has(local_device)) {
       // origin_param_and_optimizer_buffer->AddTensor(exec_tensor); // deprecated
@@ -676,7 +667,7 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
 
     // HT_LOG_WARN << local_device << ": deduce placement group union for " << op;
     auto pg_union = DeducePlacementGroup(op, op_to_pg_union_mapping);
-    HT_LOG_DEBUG << local_device << ": placement group union for " << op << " is " << pg_union;
+    HT_LOG_TRACE << local_device << ": placement group union for " << op << " is " << pg_union;
 
     auto autocast_id = AutoCast::cur_autocast_ctx();
     if (autocast_id != UINT64_MAX) {
@@ -887,8 +878,6 @@ void DefineAndRunGraph::Instantiate(OpRefList&& global_topo,
   exec_graph->_transfer_param_buffer_map = std::move(transfer_param_buffer_map);
   exec_graph->_current_grad_buffer_map = std::move(current_grad_buffer_map);
   exec_graph->_accumulate_grad_buffer_map = std::move(accumulate_grad_buffer_map);
-  exec_graph->_is_partial_accumulate_grad_buffer_map = std::move(is_partial_accumulate_grad_buffer_map);
-  exec_graph->_has_accumulate_grad_value_map = std::move(has_accumulate_grad_value_map);
   exec_graph->_transfer_map = std::move(transfer_map);
   exec_graph->_grad_map = std::move(grad_map);
   
@@ -1049,7 +1038,14 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         // 2、有可能是feed_dict的shape发生了改变（shape对不上）
         HT_LOG_TRACE << local_device << ": shape plan is " << shape_plan << " and key to match is "
           << kv.first << ":" << feed_dict_shape_list[idx][kv.first];
-        if (it == shape_plan.end() || it->second != feed_dict_shape_list[idx][kv.first]) {
+        if (it == shape_plan.end()) {
+          HT_LOG_TRACE << local_device << ": cannot find feed dict tensor " << kv.first << " in shape plan " << i;
+          shape_plan_matched = false;
+          break;
+        }
+        if (it->second != feed_dict_shape_list[idx][kv.first]) {
+          HT_LOG_TRACE << local_device << ": feed dict tensor " << kv.first << " shape is " << feed_dict_shape_list[idx][kv.first]
+            << " but its shape in shape plan " << i << " is " << it->second;
           shape_plan_matched = false;
           break;
         }
@@ -1057,10 +1053,10 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       if (shape_plan_matched) {
         in_shape_plan_pool = true;
         next_active_shape_plan_list[idx] = i;
+        HT_LOG_DEBUG << next_active_shape_plan_list[idx] << "-th shape plan is matched for micro batch " << idx;
         break;
       }
     }
-    HT_LOG_DEBUG << next_active_shape_plan_list[idx] << "-th shape plan is matched for micro batch " << idx;
     // 如果不在shape_plan_pool中
     // 需要推导新的shape plan
     if (!in_shape_plan_pool) {
@@ -1115,9 +1111,8 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
                   || old_exec_graph->_run_level == RunLevel::UPDATE) 
           << "graph with RunLevel::ALLOC should only follow behind graph with RunLevel::TOPO or RunLevel::ALLOC or RunLevel::UPDATE right now";
       }
-      if (old_exec_graph->_run_level == RunLevel::GRAD || old_exec_graph->_run_level == RunLevel::LOCAL_GRAD) {
+      if (old_exec_graph->_run_level == RunLevel::GRAD) {
         HT_ASSERT(_run_level == RunLevel::GRAD
-                  || _run_level == RunLevel::LOCAL_GRAD
                   || _run_level == RunLevel::UPDATE) 
           << "graph with RunLevel::GRAD should only followed by graph with RunLevel::GRAD or RunLevel::UPDATE right now";
       }
@@ -1168,7 +1163,7 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
       // 那么热切换需要释放之前的current grad buffer
       // 如果旧的exec graph是update
       // 那么热切换需要释放之前的transfer param buffer和current grad buffer
-      if (old_exec_graph->_run_level == RunLevel::GRAD || _run_level == RunLevel::LOCAL_GRAD) {
+      if (old_exec_graph->_run_level == RunLevel::GRAD) {
         if (old_exec_graph->_use_current_grad_buffer) {
           for (auto it = old_exec_graph->_current_grad_buffer_map.begin(); 
                it != old_exec_graph->_current_grad_buffer_map.end(); ++it) {

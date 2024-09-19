@@ -20,8 +20,7 @@ examples/efficiency/exp
 third_party/nccl/
 
 examples/hydraulis/data/
-examples/hydraulis/_cache.pkl
-examples/hydraulis/_counter.pkl
+examples/hydraulis/*.pkl
 
 # Python
 *.png

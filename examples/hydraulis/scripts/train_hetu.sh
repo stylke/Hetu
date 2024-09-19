@@ -13,8 +13,31 @@ SERVER_PORT=${8:-"23333"}
 HOST_FILE_PATH=${9:-"./scripts/host.yaml"}
 ENV_FILE_PATH=${10:-"./scripts/env_A100.sh"}
 
-NUM_GPUS=16
-MULTI_TP_PP_LIST="[[(4, 2), (1, 8)], ]"
+CASE=4
+if [[ ${CASE} -eq 1 ]]; then
+	# homo + padding
+	NUM_GPUS=16
+	MULTI_TP_PP_LIST="[[(4, 2), (4, 2)], ]"
+	BATCHING_METHOD=0
+elif [[ ${CASE} -eq 2 ]]; then	
+    # homo + greedy packing
+	NUM_GPUS=16
+	MULTI_TP_PP_LIST="[[(4, 2), (4, 2)], ]"
+	BATCHING_METHOD=2
+elif [[ ${CASE} -eq 3 ]]; then	
+    # homo + hydraulis packing
+	NUM_GPUS=16
+	MULTI_TP_PP_LIST="[[(4, 2), (4, 2)], ]"
+	BATCHING_METHOD=3
+elif [[ ${CASE} -eq 4 ]]; then	
+    # hetero + hydraulis packing
+	NUM_GPUS=16
+	MULTI_TP_PP_LIST="[[(4, 2), (1, 8)], ]"
+	BATCHING_METHOD=3
+else
+    echo unknown CASE
+	exit 1
+fi
 
 echo num_gpus=${NUM_GPUS}, global_batch_size = ${GLOBAL_BATCH_SIZE}, max_seq_len = ${MAX_SEQ_LEN}
 
@@ -30,7 +53,7 @@ else
 fi
 
 # 请注意log编号目前并不等于rank编号
-LOG_FOLDER=logs/llama${MODEL_SIZE}_gpus${NUM_GPUS}_gbs${GLOBAL_BATCH_SIZE}_msl${MAX_SEQ_LEN}
+LOG_FOLDER=logs/case${CASE}/llama${MODEL_SIZE}_gpus${NUM_GPUS}_gbs${GLOBAL_BATCH_SIZE}_msl${MAX_SEQ_LEN}
 mkdir -p ${LOG_FOLDER}
 echo logs will save to ${LOG_FOLDER}...
 
@@ -41,6 +64,7 @@ VOCAB_FILE=${ROOT_FOLDER}/vocab.json
 MERGE_FILE=${ROOT_FOLDER}/merges.txt
 
 CMD="python3 -u train_hetu.py \
+--batching_method $BATCHING_METHOD \
 --multi_tp_pp_list \"${MULTI_TP_PP_LIST}\" \
 --global_batch_size $GLOBAL_BATCH_SIZE \
 --max_seq_len $MAX_SEQ_LEN \

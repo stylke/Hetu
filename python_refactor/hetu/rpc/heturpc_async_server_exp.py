@@ -285,7 +285,7 @@ def serve(arr, exit_arr, last_heartbeat, port):
     print("Server started, listening on " + port)
     server.wait_for_termination()
 
-def server_launch(port):
+def server_launch(port, message_queue):
     logging.basicConfig()
     arr = multiprocessing.Array("i", [0], lock=True)
     exit_arr = multiprocessing.Array("i", [0] * 32, lock=True)
@@ -300,7 +300,15 @@ def server_launch(port):
             if (interval > 10):
                 exit_arr[i] = 1
             print("Heartbeat interval of rank", i, "is", interval)
+            # workaround: server may get stuck for unknown reasons
+            if interval > 1000:
+                break
         if arr[0] != 0 and arr[0] <= sum(exit_arr):
             break
-    print("Server Stopped.")
+        if not message_queue.empty():
+            message = message_queue.get()
+            if message == "terminate":
+               print("Server is manually terminated by clients") 
+            break
+    print("Server is stopped")
     p.terminate()

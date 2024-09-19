@@ -13,14 +13,13 @@ def extract_total_run_times(file_path):
             if match:
                 total_run_times.append(int(match.group(1)))
 
-    return total_run_times[1:]
+    return total_run_times[1:16]
 
-def plot_total_run_times(file_paths):
+def plot_total_run_times(file_paths, labels):
     plt.figure(figsize=(12, 8))
 
-    for file_path in file_paths:
+    for file_path, label in zip(file_paths, labels):
         total_run_times = extract_total_run_times(file_path)
-        label = file_path.split('/')[-1]  # 使用文件名作为label
         plt.plot(total_run_times, marker='o', linestyle='-', label=label)
 
     plt.title('Total Run Time Comparison')
@@ -32,6 +31,16 @@ def plot_total_run_times(file_paths):
 
 if __name__ == "__main__":
     file_paths = [
-        '/home/pkuhetu/lhy/multi_switch/examples/hydraulis/logs/llama7b_gpus16_gbs64_msl8192/log_0.txt',
+        '/home/pkuhetu/lhy/multi_switch/examples/hydraulis/logs/case1/llama7b_gpus16_gbs128_msl8192/log_0.txt',
+        '/home/pkuhetu/lhy/multi_switch/examples/hydraulis/logs/case4/llama7b_gpus16_gbs128_msl8192/log_0.txt',
+        # '/home/pkuhetu/lhy/multi_switch/examples/hydraulis/logs/case2/llama7b_gpus16_gbs128_msl8192/log_0.txt',
+        # '/home/pkuhetu/lhy/multi_switch/examples/hydraulis/logs/case3/llama7b_gpus16_gbs128_msl8192/log_0.txt'
     ]
-    plot_total_run_times(file_paths)
+    labels = [
+        "Padding",
+        "Normal Packing",
+        # "Balanced Packing",
+        # "Ours Estimated Packing"
+        # "Hetero Packing"
+    ]
+    plot_total_run_times(file_paths, labels)

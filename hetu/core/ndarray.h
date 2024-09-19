@@ -739,10 +739,6 @@ class NDArrayDef : public shared_ptr_target {
     return _meta.device.is_cuda();
   }
 
-  bool is_new_malloc() const {
-    return _storage->is_new_malloc();
-  }
-
   bool can_quantization() const {
     return _meta.dtype == kFloat32 ||
            _meta.dtype == kFloat16 ||

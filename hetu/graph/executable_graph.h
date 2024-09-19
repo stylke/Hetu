@@ -61,6 +61,10 @@ class ExecutableGraph : public Graph {
 
   bool Instantiate(const TensorList& fetches, const Device& placement);
 
+  NDArrayList CrucialRun(const TensorList& fetches, 
+                         const FeedDict& feed_dict, 
+                         const int num_micro_batches);
+
   NDArrayList Run(const TensorList& fetches, 
                   const FeedDict& feed_dict = {});
 
@@ -289,8 +293,6 @@ class ExecutableGraph : public Graph {
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _transfer_param_buffer_map;
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _current_grad_buffer_map;
   std::unordered_map<DataType, std::shared_ptr<ParamBuffer>> _accumulate_grad_buffer_map;
-  std::unordered_map<DataType, bool> _is_partial_accumulate_grad_buffer_map;
-  std::unordered_map<DataType, bool> _has_accumulate_grad_value_map;
   TensorList _leaf_symbolic_tensor_list;
   Tensor2TensorMap _transfer_map; // origin param到transfer param的映射
   Tensor2TensorMap _grad_map; // origin param到未substitue comm op前的grad的映射

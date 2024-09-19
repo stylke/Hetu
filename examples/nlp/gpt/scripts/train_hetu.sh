@@ -3,8 +3,8 @@ NUM_LAYERS=${1:-32}
 HIDDEN_SIZE=${2:-256}
 NUM_HEADS=${3:-32}
 SEQ_LEN=${4:-1024}
-GLOBAL_BATCH_SIZE=${5:-256}
-MICRO_BATCH_SIZE=${6:-4}
+GLOBAL_BATCH_SIZE=${5:-128}
+MICRO_BATCH_SIZE=${6:-1}
 # FFN_HIDDEN_SIZE=${7:-11008}
 FFN_HIDDEN_SIZE=${7:-2752}
 SERVER_ADDR="172.24.10.109"
@@ -16,7 +16,7 @@ ENV_FILE_PATH=${11:-"./scripts/env_A100.sh"}
 
 # 注意目前属于同一CP的几条pipeline的layer与stage的划分以及recompute的layers必须一致
 # 否则会由于topo序和pipeline的scheduler不一致而出现死锁
-CASE=2
+CASE=1
 if [[ ${CASE} -eq 1 ]]; then
 	# 单机同构
 	# setting 1
@@ -26,7 +26,7 @@ if [[ ${CASE} -eq 1 ]]; then
 	TP=1
 	PP=2
 	HETERO=false
-	RECOMPUTE_LAYERS="[0,1]"
+	RECOMPUTE_LAYERS="[]"
 elif [[ ${CASE} -eq 2 ]]; then
 	# 单机异构
 	# setting 2

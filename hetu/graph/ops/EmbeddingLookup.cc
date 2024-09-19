@@ -9,7 +9,7 @@ void EmbeddingLookupOpImpl::DoCompute(Operator& op,
                                       const NDArrayList& inputs,
                                       NDArrayList& outputs,
                                       RuntimeContext& ctx) const {
-  // do offset for vocab parallel emebedding
+  // do offset for vocab parallel embedding
   NDArray id_offset = inputs.at(1);
   if (offset(op) != 0) 
     id_offset = NDArray::sub(inputs.at(1), offset(op), op->instantiation_ctx().stream_index);

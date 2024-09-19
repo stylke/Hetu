@@ -17,6 +17,53 @@
 namespace hetu {
 namespace graph {
 
+// mempool debug use
+// see whether it can reuse
+static std::unordered_map<uint64_t, std::pair<size_t, Tensor>> malloc_outputs_map;
+
+static void checkOutputsMemory(const Operator& op, size_t micro_batch_id, const NDArrayList& inputs, const NDArrayList& outputs) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  for (size_t i = 0; i < op->num_outputs(); i++) {
+    const auto& output = outputs.at(i);
+    bool is_inplace = false;
+    for (size_t j = 0; j < op->num_inputs(); j++) {
+      const auto& input = inputs.at(i);
+      if (output->storage() == input->storage()) {
+        HT_LOG_DEBUG << local_device << ": micro batch " << micro_batch_id << " " << op->output(i)
+          << " is inplace (with " << op->input(j) << ")"
+          << ", ptr id = " << output->storage()->ptr_id();
+        is_inplace = true;
+        break;
+      }
+    }
+    if (is_inplace) {
+      continue;
+    }
+    if (output->storage()->is_new_malloc()) {
+      if (is_all_gather_op(op)) {
+        // workaround
+        // all_gather由于开启了共享的buffer不对其进行分析
+        continue;
+      }
+      HT_LOG_INFO << local_device << ": micro batch " << micro_batch_id << " " << op->output(i)
+        << " malloc new GPU memory with shape = " << output->shape()
+        << ", ptr id = " << output->storage()->ptr_id();
+      malloc_outputs_map[output->storage()->ptr_id()] = std::make_pair(micro_batch_id, op->output(i));
+    } else {
+      auto it = malloc_outputs_map.find(output->storage()->split_from_ptr_id());
+      if (it == malloc_outputs_map.end()) {
+        HT_LOG_DEBUG << local_device << ": " << op->output(i) << " is not reused from any op outputs"
+          << ", whose shape = " << output->shape() << " and ptr id = " << output->storage()->ptr_id();
+        continue;
+      }
+      HT_LOG_DEBUG << local_device << ": " << op->output(i)
+        << " is reused from micro batch " << it->second.first << " " << it->second.second << " (ptr id = " << output->storage()->split_from_ptr_id() << ")"
+        << ", with shape = " << output->shape()
+        << ", ptr id = " << output->storage()->ptr_id();
+    }
+  }
+}
+
 static bool is_comm_without_reduce_op(const uint64_t comm_type) {
   return comm_type & (PEER_TO_PEER_SEND_OP | PEER_TO_PEER_RECV_OP |
                       ALL_TO_ALL_OP | ALL_GATHER_OP | BROADCAST_OP |
@@ -319,7 +366,7 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
     if (!it->second->IsEmpty() && !it->second->IsAllocated()) {
       // alloc transfer param
       it->second->Alloc(Stream(local_device, kBlockingStream));
-      HT_LOG_DEBUG << local_device << ": alloc transfer param buffer "
+      HT_LOG_DEBUG << local_device << ": alloc transfer param buffer"
         << ", the size is " << it->second->size();
     }
   }
@@ -353,10 +400,14 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
         // 这种也包括了单策略一直训练
         // 即每次不需要再单独分配transfer param buffer但需要重新进行transfer
         else {
-          // alloc and compute origin param
-          auto origin_param = op->Compute({}, runtime_ctx_list[0]);
-          // compute transfer param
-          transfer_param->producer()->Compute(origin_param, runtime_ctx_list[0]);
+          // COMPUTE_ONLY模式用于跑实验测latency
+          // 尽可能不进行多余的显存分配
+          if (_run_level != RunLevel::COMPUTE_ONLY) {
+            // alloc and compute origin param
+            auto origin_param = op->Compute({}, runtime_ctx_list[0]);
+            // compute transfer param
+            transfer_param->producer()->Compute(origin_param, runtime_ctx_list[0]);
+          }
           // todo: for pp > 1, it is safer to 
           // record the start and end event on all micro batches here
           _preserved_data[transfer_param->id()] = transfer_param_data;
@@ -379,9 +430,9 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
         if (_run_level == RunLevel::ALLOC) {
           continue;
         }
-        // grad阶段optimizer相关的variable不用跑
+        // compute_only和grad阶段optimizer相关的variable不用跑
         // 例如Adam的step、mean、variance
-        if (_run_level == RunLevel::GRAD) {
+        if (_run_level == RunLevel::COMPUTE_ONLY || _run_level == RunLevel::GRAD) {
           if (op->output(0)->num_consumers() == 1 
               && is_optimizer_update_op(op->output(0)->consumer(0))) {
             continue;
@@ -397,7 +448,7 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
     }
   } 
   // ---------- grad ----------
-  if (_run_level == RunLevel::GRAD || _run_level == RunLevel::LOCAL_GRAD || _run_level == RunLevel::UPDATE) {
+  if (_run_level == RunLevel::GRAD || _run_level == RunLevel::UPDATE) {
     if (_use_current_grad_buffer) {
       for (auto it_ = _current_grad_buffer_map.begin();
            it_ != _current_grad_buffer_map.end(); ++it_) {
@@ -427,7 +478,7 @@ void ExecutableGraph::AllocRuntimeBuffer(std::vector<RuntimeContext>& runtime_ct
     // 使用accumulate_grad_buffer
     // 初始全为0
     else {
-      if (_run_level == RunLevel::GRAD || _run_level == RunLevel::LOCAL_GRAD) {
+      if (_run_level == RunLevel::GRAD) {
         for (auto it = _accumulate_grad_buffer_map.begin();
              it != _accumulate_grad_buffer_map.end(); ++it) {
           if (!it->second->IsEmpty() && !it->second->IsAllocated()) {
@@ -1422,57 +1473,24 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
     if (!grad_accumulation_finished && accumulated_ops.find(op->id()) != accumulated_ops.end()) {
       continue;
     }
-    // GRAD模式和UPDATE模式
+    // COMPUTE_ONLY、GRAD和UPDATE模式
     // 只需要再单独考虑optimizer op及之后的算子
     // 其余部分照常
-    if (is_group_op(op) && (_run_level == RunLevel::GRAD || _run_level == RunLevel::LOCAL_GRAD)) {
+    if (is_group_op(op) && (_run_level == RunLevel::COMPUTE_ONLY || _run_level == RunLevel::GRAD)) {
       continue;
     }
-    if ((is_grad_reduce_op(op) && is_optimizer_update_op(op->output(0)->consumer(0))) && _run_level == RunLevel::LOCAL_GRAD) {
-      HT_ASSERT(op->input(0)->shape() == op->output(0)->shape())
-        << "LOCAL_GRAD mode only support grad reduce op with same input and output shape";
+    if (_run_level == RunLevel::COMPUTE_ONLY
+        && ((is_grad_reduce_op(op) && is_optimizer_update_op(op->output(0)->consumer(0)))
+            || (is_grad_reduce_op(op) && is_grad_reduce_op(op->output(0)->consumer(0)) && is_optimizer_update_op(op->output(0)->consumer(0)->output(0)->consumer(0))))) {
       continue;
-    }
-    if ((_run_level == RunLevel::UPDATE || _run_level == RunLevel::GRAD) &&
-        (is_grad_reduce_op(op) && is_optimizer_update_op(op->output(0)->consumer(0)))) {
-      auto& grad = op->input(0);
-      if (_is_partial_accumulate_grad_buffer_map[grad->dtype()] &&
-          _accumulate_grad_buffer_map[grad->dtype()]->IsAllocated()) {
-        auto& grad_op = grad->producer();
-        auto it = _reversed_grad_grad_map.find(op->output(0)->id());
-        HT_ASSERT(it != _reversed_grad_grad_map.end())
-          << "cannot find the mapping of " << grad << " in the reversed grad grad map";
-        auto& grad_in_buffer = it->second;
-        HT_ASSERT(tensor2data.find(grad->id()) != tensor2data.end());
-        auto current_grad_data = tensor2data[grad->id()];
-        auto grad_stream = Stream(grad_op->placement(),
-                                  grad_op->instantiation_ctx().stream_index);
-        if (_grad_scale != 1) {
-          NDArray::mul(current_grad_data,
-                        _grad_scale,
-                        grad_stream.stream_index(),
-                        current_grad_data);
-        }
-        auto accumulate_grad_data = NDArray(grad->meta(), 
-                                            _accumulate_grad_buffer_map[grad->dtype()]->AsStorage(), 
-                                            _accumulate_grad_buffer_map[grad->dtype()]->GetElementOffest(grad_in_buffer));
-        // 如果有一些累计梯度是switch过来的
-        // 那么我们这里进行实际的sync
-        auto event_it = _switch_grad_events.find(grad_in_buffer->id());
-        if (event_it != _switch_grad_events.end()) {
-          event_it->second->Block(grad_stream);
-        } 
-        NDArray::add(current_grad_data, 
-                     accumulate_grad_data, 
-                     grad_stream.stream_index(),
-                     current_grad_data);
-        // 需要重新设置grad op的stop event来保证update算子的输入是sync的
-        grad->producer()->instantiation_ctx().stop[micro_batch_id]->Record(grad_stream);
-      }
     }
     if (is_optimizer_update_op(op)) {
+      // 什么都不做
+      if (_run_level == RunLevel::COMPUTE_ONLY) {
+        continue;
+      }
       // 只用得到grad而不需要进行update
-      if (_run_level == RunLevel::GRAD) {
+      else if (_run_level == RunLevel::GRAD) {
         auto& grad = op->input(1);
         auto& grad_op = grad->producer();
         // HT_LOG_INFO << "grad op " << grad_op << " placement is " << grad_op->placement();
@@ -1504,62 +1522,6 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
           if (event_it != _switch_grad_events.end()) {
             event_it->second->Block(grad_stream);
           } 
-          // 如果是当前是local grad的buffer，则在梯度同步时已经加上buffer的partial grad
-          // 此时应当将同步后的梯度copy到accumulate_grad_buffer上
-          if (_is_partial_accumulate_grad_buffer_map[grad->dtype()]) {
-            NDArray::copy(current_grad_data, grad_stream.stream_index(), accumulate_grad_data);
-            _is_partial_accumulate_grad_buffer_map[grad->dtype()] = false;
-            _has_accumulate_grad_value_map[grad->dtype()] = true;
-          } else {
-            NDArray::add(current_grad_data, 
-                        accumulate_grad_data, 
-                        grad_stream.stream_index(),
-                        accumulate_grad_data);                                    
-          }
-        }
-        // 需要记录grad op的event来在结束时同步
-        auto event = std::make_unique<hetu::impl::CUDAEvent>(grad_op->placement());
-        event->Record(grad_op->instantiation_ctx().stream());
-        _run_grad_events[grad->id()] = std::move(event);
-        tensor2data.erase(grad); // 清除tensor2data中该grad的引用计数
-        continue;
-      }
-      else if (_run_level == RunLevel::LOCAL_GRAD) {
-        if (is_grad_reduce_op(op->input(1)->producer())) {
-          _is_partial_accumulate_grad_buffer_map[op->input(1)->producer()->input(0)->dtype()] = true;
-          HT_ASSERT(!_has_accumulate_grad_value_map[op->input(1)->producer()->input(0)->dtype()])
-            << "partial grad should not be accumulated with complete grad, "
-            << "it will happen if you switch to LOCAL_GRAD mode after GRAD mode.";
-        }
-        auto& grad = is_grad_reduce_op(op->input(1)->producer()) ? op->input(1)->producer()->input(0) : op->input(1);
-        auto& grad_op = is_grad_reduce_op(op->input(1)->producer()) ? grad->producer()->input(0)->producer() : grad->producer();
-        if (_use_current_grad_buffer) {
-          // 什么都不用操作
-        }
-        // 不使用current_grad_buffer的话需要在这里直接将grad加到accumulate_grad_buffer上
-        else {
-          auto it = _reversed_grad_grad_map.find(op->input(1)->id());
-          HT_ASSERT(it != _reversed_grad_grad_map.end())
-            << "cannot find the mapping of " << grad << " in the reversed grad grad map";
-          auto& grad_in_buffer = it->second;
-          HT_ASSERT(tensor2data.find(grad->id()) != tensor2data.end());
-          auto current_grad_data = tensor2data[grad->id()];
-          auto accumulate_grad_data = NDArray(grad->meta(), 
-                                              _accumulate_grad_buffer_map[grad->dtype()]->AsStorage(), 
-                                              _accumulate_grad_buffer_map[grad->dtype()]->GetElementOffest(grad_in_buffer));
-          auto grad_stream = grad_op->instantiation_ctx().stream(); 
-          if (_grad_scale != 1) {
-            NDArray::mul(current_grad_data,
-                         _grad_scale,
-                         grad_stream.stream_index(),
-                         current_grad_data);
-          }
-          // 如果有一些累计梯度是switch过来的
-          // 那么我们这里进行实际的sync
-          auto event_it = _switch_grad_events.find(grad_in_buffer->id());
-          if (event_it != _switch_grad_events.end()) {
-            event_it->second->Block(grad_stream);
-          } 
           NDArray::add(current_grad_data, 
                        accumulate_grad_data, 
                        grad_stream.stream_index(),
@@ -1574,8 +1536,6 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
       }
       // 要进行梯度更新
       else if (_run_level == RunLevel::UPDATE) {
-        _is_partial_accumulate_grad_buffer_map[op->input(1)->dtype()] = false;
-        _has_accumulate_grad_value_map[op->input(1)->dtype()] = false;
         // 如果有累积梯度那么此时要加上
         // 这里的逻辑和上面的正好反过来
         if (_accumulate_grad_buffer_map[op->input(1)->dtype()]->IsAllocated()) {
@@ -1705,6 +1665,7 @@ void ExecutableGraph::ComputeFunc(size_t& micro_batch_id, const OpRefList& topo,
 
     // **** 调用op计算 ****
     NDArrayList output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
+    checkOutputsMemory(op, micro_batch_id, input_vals, output_vals);
 
     // auto output_vals = op->Compute(input_vals, runtime_ctx, micro_batch_id);
     if (is_shared_weight_or_grad_p2p(op)) {
@@ -1821,12 +1782,431 @@ void ExecutableGraph::GetExecEnvs() {
   }
 }
 
+// 每次run都会经过的核心部分
+// 我们将这一部分单独提取出来做成一个函数来增加代码的可读性
+NDArrayList ExecutableGraph::CrucialRun(const TensorList& fetches, 
+                                        const FeedDict& feed_dict, 
+                                        const int num_micro_batches) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  // calculate params
+  bool is_calculate_params = false;
+  if (is_calculate_params) {
+    int64_t params_size = 0;
+    for (auto& op : _execute_plan.local_topo) {
+      if (is_variable_op(op)) {
+        params_size += op.get()->output(0)->numel();
+        // HT_LOG_INFO << local_device << ": variable op " << op << ", shape = " << op.get()->output(0)->shape();
+      }
+    }
+    HT_LOG_INFO << local_device << ": params_size = " << params_size;
+  }
+
+  HT_LOG_DEBUG << local_device << ": 0. Create Execution Plan [end]";
+
+  // ********************** Run Level Check Point **********************
+  if (_run_level == RunLevel::TOPO) {
+    return {};
+  }
+  // ********************** Run Level Check Point **********************
+
+  HT_LOG_DEBUG << local_device << ": 1. pipeline init[begin]";
+  // runtime ctx for m micro batches
+  std::vector<RuntimeContext> runtime_ctx_list(num_micro_batches);
+  // tensor data for m micro batches
+  std::vector<Tensor2NDArrayMap> tensor2data_list(num_micro_batches);
+  // tensor degrees for m micro batches, if degree=0 && not in fetches, free memory for this tensor
+  std::vector<Tensor2IntMap> tensor2degrees_list(num_micro_batches);
+  // flush update once for m micro batches
+  Tensor2NDArrayMap grad_accumulation;
+
+  for (int i = 0; i < num_micro_batches; i++) {
+    runtime_ctx_list[i] = RuntimeContext(_execute_plan.local_topo.size(), _shape_plan_pool.at(_active_shape_plan_list[i]));
+  } 
+
+  // placeholder ops: get feed in dict & split into m micro batches
+  for (const auto& kv : feed_dict) {
+    if (kv.second.size() == 0) // only feed placeholder_op in local device group
+      continue;
+    if (kv.second.size() == 1) {
+      auto micro_batches = NDArray::split(kv.second[0], num_micro_batches);
+      for (int i = 0; i < num_micro_batches; i++) {
+        tensor2data_list[i][kv.first] = micro_batches[i];
+      }
+    } else {
+      HT_ASSERT(kv.second.size() == num_micro_batches);
+      for (int i = 0; i < num_micro_batches; i++) {
+        tensor2data_list[i][kv.first] = kv.second[i];
+      }
+    }
+  }
+
+  std::unordered_map<TensorId, size_t> fetch_indices;
+  for (size_t i = 0; i < fetches.size(); i++)
+    fetch_indices[fetches.at(i)->id()] = i;
+  // get consume times for each tensor
+  Tensor2IntMap tensor2degrees;
+  for (auto& op_ref : _execute_plan.local_topo) {
+    for (auto& input : op_ref.get()->inputs()) {
+      tensor2degrees[input->id()]++;
+    }
+  }
+  for (int i = 0; i < num_micro_batches; i++) {
+    tensor2degrees_list[i] = tensor2degrees;
+  }
+
+  if (_pipeline_map.find(local_device) == _pipeline_map.end()) {
+    HT_LOG_WARN << local_device << ": can't figure out which pipeline the local device belongs to"
+      << ", so we just return";
+    return {};
+  }
+  auto& pipeline = _pipeline_map[local_device];
+  int num_stages = pipeline.size();
+  bool is_inference = (_execute_plan.local_bw_topo.size() == 0);
+  HT_LOG_DEBUG << local_device << ": num_stages = " << num_stages << ", stages = " << pipeline 
+    << ", num_micro_batches = " << num_micro_batches << ", is_inference = " << is_inference;
+  // get task schedule table for pipedream-flush, also suitable for non-pipeline cases
+  auto schedule = GeneratePipedreamFlushSchedule(
+    num_stages, num_micro_batches, is_inference);
+  // get task schedule table for gpipe    
+  // auto schedule = generate_gpipe_schedule(num_stages, num_micro_batches);
+  // get tasks for current stage
+  // int stage_id = local_device.index() / _stages.at(0).num_devices();
+  int stage_id = -1;
+  for (int i = 0; i < pipeline.size(); i++) {
+    if (pipeline[i].contains(local_device)) {
+      stage_id = i;
+    }
+  }
+  // HT_LOG_DEBUG << local_device << ": stages = " << _stages << "; stage id = " << stage_id;
+  auto& tasks = schedule[stage_id];
+  // NOTE: revert memory plan for now and may be used in the future
+  HT_LOG_DEBUG << local_device << ": stage id = " << stage_id;
+  HT_LOG_DEBUG << local_device << ": 1. pipeline init[end]";
+
+  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[begin]";
+  // alloc origin/transfer params and pre-compute, alloc grads
+  AllocRuntimeBuffer(runtime_ctx_list);
+  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[end]";
+
+  // ********************** Run Level Check Point **********************
+  if (_run_level == RunLevel::ALLOC) {
+    SynchronizeAllStreams();
+    // memory debug use
+    // hetu::impl::comm::EmptyNCCLCache();
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run ALLOC end");
+    return {};
+  }
+  // ********************** Run Level Check Point **********************
+
+  /*
+  HT_LOG_DEBUG << local_device << ": 2-plus. memory plan[begin]";
+  // TODO: cache memory plan
+  size_t memory_size = 0;
+  auto memory_plan = GenerateMemoryPlan(memory_size, tasks, tensor2degrees_list, feed_dict);
+  auto memory_space = NDArray::empty({memory_size}, local_device, kInt64, kComputingStream);
+  HT_LOG_DEBUG << "Memory plan is generated and allocated";
+  if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+    GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " alloc memory according to plan end");
+  for (auto& op_ref : _execute_plan.local_topo) {
+    auto& op = op_ref.get();
+    for (auto& tensor : op->outputs()) {
+      for (size_t micro_batch_id = 0; micro_batch_id < num_micro_batches; micro_batch_id++) {
+        auto it = memory_plan.find({micro_batch_id, tensor->id()});
+        if (it == memory_plan.end()) {
+          break;
+        }
+        auto begin_pos = it->second.first;
+        auto block_size = it->second.second;
+        auto raw_memory = NDArray::slice(memory_space, {begin_pos}, {block_size});
+        auto memory = NDArray(NDArrayMeta()
+                              .set_shape(GetTensorShape(tensor))
+                              .set_dtype(tensor->dtype())
+                              .set_device(tensor->producer()->instantiation_ctx().placement), 
+                              raw_memory->storage(), raw_memory->storage_offset() * DataType2Size(kInt64) / DataType2Size(tensor->dtype()));
+        runtime_ctx_list.at(micro_batch_id).add_runtime_allocation(tensor->id(), memory);
+      }
+    }
+  }
+  HT_LOG_DEBUG << local_device << ": 2-plus. memory plan[end]";
+  */
+  
+  HT_LOG_DEBUG << local_device << ": 3. compute[begin]";
+  bool is_continuous_p2p = false;
+  for (size_t i = 0; i < tasks.size(); i++) {
+    auto& task = tasks[i];
+    int32_t task_type = task.first;
+    // bubble
+    if (task_type == -1) {
+      ncclGroupEnd();
+      ncclGroupStart();
+      continue;
+    }
+    bool is_forward = (task_type == 0);
+    size_t& micro_batch_id = task.second;
+    auto& tensor2data = tensor2data_list[micro_batch_id];
+    auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
+    auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
+    // set arithmetic shape
+    SetShapePlan(_active_shape_plan_list[micro_batch_id]);
+    // set symbolic shape
+    for (auto& tensor: _leaf_symbolic_tensor_list) {
+      // HT_LOG_INFO << local_device << ": leaf symbolic tensor " << tensor; 
+      tensor->set_symbolic_shape(GetTensorShape(tensor));
+    }
+    // some tensor (inserted just now) may need to infer shape again
+    UpdateExecShapePlan(runtime_ctx);
+    // micro batch i>0 reuse: 
+    // 0. shared weight which was recved in micro batch 0
+    // 1. f32 -> fp16, bf16 weight which was transfered in micro batch 0
+    if (micro_batch_id > 0) {
+      if (!_execute_plan.shared_weight_tensor.empty()) {
+        for (auto& shared_weight_id : _execute_plan.shared_weight_tensor) {
+          if (tensor2data.find(shared_weight_id) != tensor2data.end()) break; // avoid assign twice by fw, bw
+          tensor2data[shared_weight_id] = tensor2data_list[0][shared_weight_id];
+        }
+      }
+      if (!_execute_plan.dtype_transfer_tensor.empty()) {
+        for (auto& dtype_transfer_id : _execute_plan.dtype_transfer_tensor) {
+          if (tensor2data.find(dtype_transfer_id) != tensor2data.end()) break; // avoid assign twice by fw, bw
+          tensor2data[dtype_transfer_id] = tensor2data_list[0][dtype_transfer_id];
+        }
+      }
+    }
+    if (is_forward) {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward begin]";
+    } else {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward begin]";
+    }
+    // micro batch i: profile memory begin
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::MICRO_BATCH) {
+      auto micro_batch_memory_info = std::make_shared<MicroBatchMemoryInfo>();
+      micro_batch_memory_info->is_forward = is_forward;
+      micro_batch_memory_info->stage_id = stage_id;
+      micro_batch_memory_info->micro_batch_id = micro_batch_id;
+      micro_batch_memory_info->begin_memory_info = GetCUDAProfiler(local_device)->GetCurrMemoryInfo();
+      _all_micro_batches_memory_info.emplace_back(micro_batch_memory_info);
+    }
+    // micro batch i: execute fw/bw
+    if (is_forward) {
+      // HT_LOG_INFO << "fw topo: " << _execute_plan.local_fw_topo;
+      ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx,
+                  tensor2data, tensor2degrees, grad_accumulation, false, 
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
+    } else {
+      bool grad_accumulation_finished = (i == tasks.size() - 1);
+      // HT_LOG_INFO << "bw topo: " << _execute_plan.local_bw_topo;
+      ComputeFunc(micro_batch_id, _execute_plan.local_bw_topo, runtime_ctx, 
+                  tensor2data, tensor2degrees, grad_accumulation, grad_accumulation_finished, 
+                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
+    }
+    // micro batch i: profile memory end
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::MICRO_BATCH) {
+      _all_micro_batches_memory_info.back()->end_memory_info = GetCUDAProfiler(local_device)->GetCurrMemoryInfo();
+      // HT_LOG_INFO << *_all_micro_batches_memory_info.back();
+    }
+    if (is_forward) {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward end]";
+    } else {
+      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward end]";
+    }
+  }
+  if (is_continuous_p2p) {
+    NCCL_CALL(ncclGroupEnd());
+    auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
+    event->Record(Stream(local_device, kP2PStream));
+    event->Block(Stream(local_device, kComputingStream));
+    // event->Block(Stream(local_device, kOptimizerStream));
+    _p2p_events.emplace_back(std::move(event));
+  }
+  HT_LOG_DEBUG << local_device << ": 3. compute[end]";
+
+  // ********************** Run Level Check Point **********************
+  // 仅仅是进行了local的计算而不涉及任何grad的reduce
+  if (_run_level == RunLevel::COMPUTE_ONLY) {
+    SynchronizeAllStreams();
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run COMPUTE_ONLY end");
+    return {};
+  }
+  // 仅仅是算出grad但不更新
+  // 这里需要先对grad op进行sync
+  if (_run_level == RunLevel::GRAD) {
+    // 理论上这里我们可以不让_run_grad_events同步
+    // 假如之后切换到别的exec graph的话再在切换grad的时候再进行同步
+    for (const auto& event_it : _run_grad_events) {
+      event_it.second->Sync();
+    }
+    _run_grad_events.clear();
+    // Question: 可能单独设计接口指定dst exec graph去切换能更快更省显存
+    // 即，当前current_grad_buffer切换到dst exec graph后再加到accumulate_grad_buffer上
+    // 但dp8逐渐切换到tp8的例子里，逐一切换和直接切换到dst并无明显区别
+    // 因此目前grad也用两两间的热切换来弄
+    if (_use_current_grad_buffer) {
+      // 在define graph中自动切换accumulate_grad_buffer
+      // 然后将当前的current_grad_buffer加到当前的accumulate_grad_buffer后清空即可
+      for (auto it = _current_grad_buffer_map.begin();
+           it != _current_grad_buffer_map.end(); ++it) {
+        if (!it->second->IsEmpty() && !_accumulate_grad_buffer_map[it->first]->IsEmpty()) {
+          DataType dtype = it->first;
+          if (!_accumulate_grad_buffer_map[dtype]->IsAllocated()) {
+            // 说明是第一次算grad，之前没有累积grad
+            // 直接bind即可
+            _accumulate_grad_buffer_map[dtype]->Bind(_current_grad_buffer_map[dtype]->AsStorage());
+          } else {
+            // 用kBlockingStream集中对整个buffer进行一次add
+            // 相比于算出来某一个grad后进行局部的async的add
+            // 虽然并发程度降低，但是写法上会简单许多
+            auto current_grad_buffer_data = _current_grad_buffer_map[dtype]->AsNDArray();
+            auto accumulate_grad_buffer_data = _accumulate_grad_buffer_map[dtype]->AsNDArray();
+            if (_grad_scale != 1) {
+              NDArray::mul(current_grad_buffer_data,
+                           _grad_scale,
+                           kBlockingStream,
+                           current_grad_buffer_data);
+            }
+            // 如果有一些累计梯度是switch过来的
+            // 那么我们这里进行实际的sync
+            for(const auto& event_it : _switch_grad_events) {
+              event_it.second->Sync();
+            } 
+            // 当前的计算的梯度也需要sync
+            for(const auto& event_it : _run_grad_events) {
+              event_it.second->Sync();
+            } 
+            NDArray::add(current_grad_buffer_data, 
+                         accumulate_grad_buffer_data, 
+                         kBlockingStream,
+                         accumulate_grad_buffer_data);
+          }          
+        }
+      }
+    } 
+    // 为节省显存峰值，可以不使用current_grad_buffer
+    else {
+      // 什么都不用操作
+      // 已经在ComputeFunc中将grad加到了accumulate_grad_buffer中
+    }
+    _p2p_events.clear();
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run GRAD end");
+    return {};
+  }
+  // 说明是RunLevel::UPDATE了
+  // 提前进行一些固有map的清空（sync结果前）
+  // 这样CPU和GPU可以异步进行
+  _run_grad_events.clear();
+  bool transfer_not_empty = false;
+  for (auto it = _transfer_param_buffer_map.begin();
+       it != _transfer_param_buffer_map.end(); ++it) {
+    if (!it->second->IsEmpty()) {
+      HT_ASSERT(it->second->IsAllocated()) 
+        << "transfer param buffer should be allocated";
+      transfer_not_empty = true;
+    }
+  }
+  if (transfer_not_empty) {
+    for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
+      auto& op = op_ref.get();
+      if (is_variable_op(op) && _parameter_ops.find(op->id()) != _parameter_ops.end()) {
+        auto it = _transfer_map.find(op->output(0)->id());
+        HT_ASSERT(it != _transfer_map.end())
+          << "The transfer map does not consist of " << op->output(0);
+        auto& transfer_param = it->second;
+        auto data_it = _preserved_data.find(transfer_param->id());
+        HT_ASSERT(data_it != _preserved_data.end())
+          << "The preserved data does not consist of " << transfer_param;
+        _preserved_data.erase(data_it);
+      }
+    }
+    // _transfer_param_buffer->Free();
+  }
+  // ********************** Run Level Check Point **********************
+
+  HT_LOG_DEBUG << local_device << ": 4. get results[begin]";
+  NDArrayList results(fetches.size(), NDArray());
+  std::unordered_set<OpId> to_sync_op_ids;
+  to_sync_op_ids.reserve(fetches.size());
+  for (auto& op_ref : _execute_plan.local_topo) {
+    auto& op = op_ref.get();
+    Operator::for_each_output_tensor(op, [&](const Tensor& output) {
+      auto it = fetch_indices.find(output->id());
+      if (it != fetch_indices.end()) {
+        if (output->output_id() >= 0) {
+          if (is_variable_op(op) || _execute_plan.accumulated_ops.find(op) != _execute_plan.accumulated_ops.end() 
+            || _execute_plan.accumulated_tensor.find(output->id()) != _execute_plan.accumulated_tensor.end()) {
+            results[it->second] = tensor2data_list[num_micro_batches - 1][output->id()];
+          } else if (is_placeholder_op(op)) {
+            auto feed_it = feed_dict.find(output->id());
+            if (feed_it != feed_dict.end()) {
+              results[it->second] = feed_it->second[num_micro_batches - 1];
+            }
+          } else {
+            NDArrayList result;
+            result.reserve(num_micro_batches);
+            for (auto& tensor2data : tensor2data_list) {
+              auto it = tensor2data.find(output->id());
+              HT_ASSERT (it != tensor2data.end()) << "Something wrong! Can't find the data to fetch.";
+              result.push_back(tensor2data[output->id()]);
+            }
+            results[it->second] = NDArray::cat(result);
+          }
+        }
+        to_sync_op_ids.insert(op->id());
+      }
+    });
+  }
+  // SynchronizeAllStreams(local_device);
+  // OpList sync_ops;
+  for (auto op_id : to_sync_op_ids) {
+    _op_indexing[op_id]->Sync(num_micro_batches - 1);
+    // sync_ops.push_back(_op_indexing[op_id]);
+  }
+  
+  // HT_LOG_DEBUG << local_device << ": sync ops = " << sync_ops;
+  for (size_t i = 0; i < results.size(); i++)
+    HT_LOG_TRACE << "results[" << i << "]: " << results[i];
+  HT_LOG_DEBUG << local_device << ": 4. get results[end]";
+
+  // ********************** Run Level Check Point **********************
+  // 一次完整的optimizer update发生了
+  // transfer param buffer如果存在需要被清理掉
+  // origin param buffer不能被清理掉
+  // accumulate grad buffer如果存在需要被清理掉
+  // current grad buffer需要被清理掉
+  // 2024.3.3 update
+  // 考虑到单策略alloc和free具有一定耗时
+  // 因此把transfer param buffer和current grad buffer的清理放在需要热切换的时候
+  if (_run_level == RunLevel::UPDATE) {
+    for (auto it = _accumulate_grad_buffer_map.begin();
+         it != _accumulate_grad_buffer_map.end(); ++it) {
+      if (it->second->IsAllocated()) {
+        // 已经对fetches sync过了
+        // 这里直接free即可
+        it->second->Free();
+      }
+    }
+    if (_use_current_grad_buffer) {
+      for (auto it = _current_grad_buffer_map.begin();
+           it != _current_grad_buffer_map.end(); ++it) {
+        HT_ASSERT(it->second->IsAllocated())
+        << "current grad buffer should be allocated in RunLevel::UPDATE";
+      }
+      // _current_grad_buffer->Free();
+    }
+    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
+      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run UPDATE end");
+    return results;
+  }
+  // ********************** Run Level Check Point **********************
+}
+
 NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches, 
                                  const FeedDict& feed_dict, const int num_micro_batches,
                                  const int cur_strategy_id, RunLevel run_level, const double grad_scale) {
   
   GetExecEnvs();
-  TIK(run);
+  TIK(prepare_run);
   _grad_scale = grad_scale;
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
@@ -2296,438 +2676,35 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     // update & cached execute plan 
     _execute_plan.update(local_placeholder_variable_ops, local_fw_topo, local_bw_topo, local_topo, dtype_transfer_tensor,
                          shared_weight_tensor, shared_weight_p2p, shared_weight_grad_p2p, accumulated_tensor, accumulated_ops);
-    if (_used_ranks.size() >= 2) {
-      auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(_used_ranks, local_device);
-      comm_group->Barrier(true);
-    }
-    // sync partially
-    /*
-    std::vector<int> ranks;
-    for (const auto& stage : _pipeline_map[hetu::impl::comm::GetLocalDevice()]) {
-      for (const auto& device : stage.devices()) {
-        auto rank = hetu::impl::comm::DeviceToWorldRank(device);
-        if (std::find(ranks.begin(), ranks.end(), rank) == ranks.end()) {
-          ranks.push_back(rank);
-        }
-      }
-    }
-    if (ranks.size() >= 2) {
-      std::sort(ranks.begin(), ranks.end());
-      // hetu::impl::comm::Barrier(ranks);
-      auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, local_device);
-      comm_group->Barrier(true);
-    }
-    */
   }
-  TOK(run);
-  HT_LOG_DEBUG << local_device << ": prepare execution plan cost time = " << COST_MSEC(run) << " ms."; 
-
-  // calculate params
-  bool is_calculate_params = false;
-  if (is_calculate_params) {
-    int64_t params_size = 0;
-    for (auto& op : _execute_plan.local_topo) {
-      if (is_variable_op(op)) {
-        params_size += op.get()->output(0)->numel();
-        // HT_LOG_INFO << local_device << ": variable op " << op << ", shape = " << op.get()->output(0)->shape();
-      }
-    }
-    HT_LOG_INFO << local_device << ": params_size = " << params_size;
+  TOK(prepare_run);
+  HT_LOG_DEBUG << local_device << ": prepare execution plan cost time = " << COST_MSEC(prepare_run) << " ms."; 
+  
+  if (_used_ranks.size() >= 2) {
+    auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(_used_ranks, local_device);
+    comm_group->Barrier(true);
   }
-
-  HT_LOG_DEBUG << local_device << ": 0. Create Execution Plan [end]";
-
-  // ********************** Run Level Check Point **********************
-  if (_run_level == RunLevel::TOPO) {
-    return {};
-  }
-  // ********************** Run Level Check Point **********************
-
-  HT_LOG_DEBUG << local_device << ": 1. pipeline init[begin]";
-  // runtime ctx for m micro batches
-  std::vector<RuntimeContext> runtime_ctx_list(num_micro_batches);
-  // tensor data for m micro batches
-  std::vector<Tensor2NDArrayMap> tensor2data_list(num_micro_batches);
-  // tensor degrees for m micro batches, if degree=0 && not in fetches, free memory for this tensor
-  std::vector<Tensor2IntMap> tensor2degrees_list(num_micro_batches);
-  // flush update once for m micro batches
-  Tensor2NDArrayMap grad_accumulation;
-
-  for (int i = 0; i < num_micro_batches; i++) {
-    runtime_ctx_list[i] = RuntimeContext(_execute_plan.local_topo.size(), _shape_plan_pool.at(_active_shape_plan_list[i]));
-  } 
-
-  // placeholder ops: get feed in dict & split into m micro batches
-  for (const auto& kv : feed_dict) {
-    if (kv.second.size() == 0) // only feed placeholder_op in local device group
-      continue;
-    if (kv.second.size() == 1) {
-      auto micro_batches = NDArray::split(kv.second[0], num_micro_batches);
-      for (int i = 0; i < num_micro_batches; i++) {
-        tensor2data_list[i][kv.first] = micro_batches[i];
-      }
-    } else {
-      HT_ASSERT(kv.second.size() == num_micro_batches);
-      for (int i = 0; i < num_micro_batches; i++) {
-        tensor2data_list[i][kv.first] = kv.second[i];
-      }
-    }
-  }
-
-  std::unordered_map<TensorId, size_t> fetch_indices;
-  for (size_t i = 0; i < fetches.size(); i++)
-    fetch_indices[fetches.at(i)->id()] = i;
-  // get consume times for each tensor
-  Tensor2IntMap tensor2degrees;
-  for (auto& op_ref : _execute_plan.local_topo) {
-    for (auto& input : op_ref.get()->inputs()) {
-      tensor2degrees[input->id()]++;
-    }
-  }
-  for (int i = 0; i < num_micro_batches; i++) {
-    tensor2degrees_list[i] = tensor2degrees;
-  }
-
-  if (_pipeline_map.find(local_device) == _pipeline_map.end()) {
-    HT_LOG_WARN << local_device << ": can't figure out which pipeline the local device belongs to"
-      << ", so we just return";
-    return {};
-  }
-  auto& pipeline = _pipeline_map[local_device];
-  int num_stages = pipeline.size();
-  bool is_inference = (_execute_plan.local_bw_topo.size() == 0);
-  HT_LOG_DEBUG << local_device << ": num_stages = " << num_stages << ", stages = " << pipeline 
-    << ", num_micro_batches = " << num_micro_batches << ", is_inference = " << is_inference;
-  // get task schedule table for pipedream-flush, also suitable for non-pipeline cases
-  auto schedule = GeneratePipedreamFlushSchedule(
-    num_stages, num_micro_batches, is_inference);
-  // get task schedule table for gpipe    
-  // auto schedule = generate_gpipe_schedule(num_stages, num_micro_batches);
-  // get tasks for current stage
-  // int stage_id = local_device.index() / _stages.at(0).num_devices();
-  int stage_id = -1;
-  for (int i = 0; i < pipeline.size(); i++) {
-    if (pipeline[i].contains(local_device)) {
-      stage_id = i;
-    }
-  }
-  // HT_LOG_DEBUG << local_device << ": stages = " << _stages << "; stage id = " << stage_id;
-  auto& tasks = schedule[stage_id];
-  // NOTE: revert memory plan for now and may be used in the future
-  HT_LOG_DEBUG << local_device << ": stage id = " << stage_id;
-  HT_LOG_DEBUG << local_device << ": 1. pipeline init[end]";
-
-  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[begin]";
-  // alloc origin/transfer params and pre-compute, alloc grads
-  AllocRuntimeBuffer(runtime_ctx_list);
-  HT_LOG_DEBUG << local_device << ": 2. alloc and compute buffer[end]";
-
-  // ********************** Run Level Check Point **********************
-  if (_run_level == RunLevel::ALLOC) {
-    SynchronizeAllStreams();
-    // memory debug use
-    // hetu::impl::comm::EmptyNCCLCache();
-    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
-      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run ALLOC end");
-    return {};
-  }
-  // ********************** Run Level Check Point **********************
-
+  // sync partially
   /*
-  HT_LOG_DEBUG << local_device << ": 2-plus. memory plan[begin]";
-  // TODO: cache memory plan
-  size_t memory_size = 0;
-  auto memory_plan = GenerateMemoryPlan(memory_size, tasks, tensor2degrees_list, feed_dict);
-  auto memory_space = NDArray::empty({memory_size}, local_device, kInt64, kComputingStream);
-  HT_LOG_DEBUG << "Memory plan is generated and allocated";
-  if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
-    GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " alloc memory according to plan end");
-  for (auto& op_ref : _execute_plan.local_topo) {
-    auto& op = op_ref.get();
-    for (auto& tensor : op->outputs()) {
-      for (size_t micro_batch_id = 0; micro_batch_id < num_micro_batches; micro_batch_id++) {
-        auto it = memory_plan.find({micro_batch_id, tensor->id()});
-        if (it == memory_plan.end()) {
-          break;
-        }
-        auto begin_pos = it->second.first;
-        auto block_size = it->second.second;
-        auto raw_memory = NDArray::slice(memory_space, {begin_pos}, {block_size});
-        auto memory = NDArray(NDArrayMeta()
-                              .set_shape(GetTensorShape(tensor))
-                              .set_dtype(tensor->dtype())
-                              .set_device(tensor->producer()->instantiation_ctx().placement), 
-                              raw_memory->storage(), raw_memory->storage_offset() * DataType2Size(kInt64) / DataType2Size(tensor->dtype()));
-        runtime_ctx_list.at(micro_batch_id).add_runtime_allocation(tensor->id(), memory);
+  std::vector<int> ranks;
+  for (const auto& stage : _pipeline_map[hetu::impl::comm::GetLocalDevice()]) {
+    for (const auto& device : stage.devices()) {
+      auto rank = hetu::impl::comm::DeviceToWorldRank(device);
+      if (std::find(ranks.begin(), ranks.end(), rank) == ranks.end()) {
+        ranks.push_back(rank);
       }
     }
   }
-  HT_LOG_DEBUG << local_device << ": 2-plus. memory plan[end]";
+  if (ranks.size() >= 2) {
+    std::sort(ranks.begin(), ranks.end());
+    // hetu::impl::comm::Barrier(ranks);
+    auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, local_device);
+    comm_group->Barrier(true);
+  }
   */
-  
-  HT_LOG_DEBUG << local_device << ": 3. compute[begin]";
-  bool is_continuous_p2p = false;
-  for (size_t i = 0; i < tasks.size(); i++) {
-    auto& task = tasks[i];
-    int32_t task_type = task.first;
-    // bubble
-    if (task_type == -1) {
-      ncclGroupEnd();
-      ncclGroupStart();
-      continue;
-    }
-    bool is_forward = (task_type == 0);
-    size_t& micro_batch_id = task.second;
-    auto& tensor2data = tensor2data_list[micro_batch_id];
-    auto& tensor2degrees = tensor2degrees_list[micro_batch_id];
-    auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
-    // set arithmetic shape
-    SetShapePlan(_active_shape_plan_list[micro_batch_id]);
-    // set symbolic shape
-    for (auto& tensor: _leaf_symbolic_tensor_list) {
-      // HT_LOG_INFO << local_device << ": leaf symbolic tensor " << tensor; 
-      tensor->set_symbolic_shape(GetTensorShape(tensor));
-    }
-    // some tensor (inserted just now) may need to infer shape again
-    UpdateExecShapePlan(runtime_ctx);
-    // micro batch i>0 reuse: 
-    // 0. shared weight which was recved in micro batch 0
-    // 1. f32 -> fp16, bf16 weight which was transfered in micro batch 0
-    if (micro_batch_id > 0) {
-      if (!_execute_plan.shared_weight_tensor.empty()) {
-        for (auto& shared_weight_id : _execute_plan.shared_weight_tensor) {
-          if (tensor2data.find(shared_weight_id) != tensor2data.end()) break; // avoid assign twice by fw, bw
-          tensor2data[shared_weight_id] = tensor2data_list[0][shared_weight_id];
-        }
-      }
-      if (!_execute_plan.dtype_transfer_tensor.empty()) {
-        for (auto& dtype_transfer_id : _execute_plan.dtype_transfer_tensor) {
-          if (tensor2data.find(dtype_transfer_id) != tensor2data.end()) break; // avoid assign twice by fw, bw
-          tensor2data[dtype_transfer_id] = tensor2data_list[0][dtype_transfer_id];
-        }
-      }
-    }
-    if (is_forward) {
-      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward begin]";
-    } else {
-      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward begin]";
-    }
-    // micro batch i: profile memory begin
-    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::MICRO_BATCH) {
-      auto micro_batch_memory_info = std::make_shared<MicroBatchMemoryInfo>();
-      micro_batch_memory_info->is_forward = is_forward;
-      micro_batch_memory_info->stage_id = stage_id;
-      micro_batch_memory_info->micro_batch_id = micro_batch_id;
-      micro_batch_memory_info->begin_memory_info = GetCUDAProfiler(local_device)->GetCurrMemoryInfo();
-      _all_micro_batches_memory_info.emplace_back(micro_batch_memory_info);
-    }
-    // micro batch i: execute fw/bw
-    if (is_forward) {
-      // HT_LOG_INFO << "fw topo: " << _execute_plan.local_fw_topo;
-      ComputeFunc(micro_batch_id, _execute_plan.local_fw_topo, runtime_ctx,
-                  tensor2data, tensor2degrees, grad_accumulation, false, 
-                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
-    } else {
-      bool grad_accumulation_finished = (i == tasks.size() - 1);
-      // HT_LOG_INFO << "bw topo: " << _execute_plan.local_bw_topo;
-      ComputeFunc(micro_batch_id, _execute_plan.local_bw_topo, runtime_ctx, 
-                  tensor2data, tensor2degrees, grad_accumulation, grad_accumulation_finished, 
-                  feed_dict, fetches, fetch_indices, is_continuous_p2p);
-    }
-    // micro batch i: profile memory end
-    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::MICRO_BATCH) {
-      _all_micro_batches_memory_info.back()->end_memory_info = GetCUDAProfiler(local_device)->GetCurrMemoryInfo();
-      // HT_LOG_INFO << *_all_micro_batches_memory_info.back();
-    }
-    if (is_forward) {
-      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": forward end]";
-    } else {
-      HT_LOG_DEBUG << local_device << ": [micro batch " << micro_batch_id << ": backward end]";
-    }
-  }
-  if (is_continuous_p2p) {
-    NCCL_CALL(ncclGroupEnd());
-    auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
-    event->Record(Stream(local_device, kP2PStream));
-    event->Block(Stream(local_device, kComputingStream));
-    // event->Block(Stream(local_device, kOptimizerStream));
-    _p2p_events.emplace_back(std::move(event));
-  }
-  HT_LOG_DEBUG << local_device << ": 3. compute[end]";
-
-  // ********************** Run Level Check Point **********************
-  // 仅仅是算出grad但不更新
-  // 这里需要先对grad op进行sync
-  if (_run_level == RunLevel::GRAD || _run_level == RunLevel::LOCAL_GRAD) {
-    // 理论上这里我们可以不让_run_grad_events同步
-    // 假如之后切换到别的exec graph的话再在切换grad的时候再进行同步
-    for (const auto& event_it : _run_grad_events) {
-      event_it.second->Sync();
-    }
-    _run_grad_events.clear();
-    // Question: 可能单独设计接口指定dst exec graph去切换能更快更省显存
-    // 即，当前current_grad_buffer切换到dst exec graph后再加到accumulate_grad_buffer上
-    // 但dp8逐渐切换到tp8的例子里，逐一切换和直接切换到dst并无明显区别
-    // 因此目前grad也用两两间的热切换来弄
-    if (_use_current_grad_buffer) {
-      // 在define graph中自动切换accumulate_grad_buffer
-      // 然后将当前的current_grad_buffer加到当前的accumulate_grad_buffer后清空即可
-      for (auto it = _current_grad_buffer_map.begin();
-           it != _current_grad_buffer_map.end(); ++it) {
-        if (!it->second->IsEmpty() && !_accumulate_grad_buffer_map[it->first]->IsEmpty()) {
-          DataType dtype = it->first;
-          if (!_accumulate_grad_buffer_map[dtype]->IsAllocated()) {
-            // 说明是第一次算grad，之前没有累积grad
-            // 直接bind即可
-            _accumulate_grad_buffer_map[dtype]->Bind(_current_grad_buffer_map[dtype]->AsStorage());
-          } else {
-            // 用kBlockingStream集中对整个buffer进行一次add
-            // 相比于算出来某一个grad后进行局部的async的add
-            // 虽然并发程度降低，但是写法上会简单许多
-            auto current_grad_buffer_data = _current_grad_buffer_map[dtype]->AsNDArray();
-            auto accumulate_grad_buffer_data = _accumulate_grad_buffer_map[dtype]->AsNDArray();
-            if (_grad_scale != 1) {
-              NDArray::mul(current_grad_buffer_data,
-                           _grad_scale,
-                           kBlockingStream,
-                           current_grad_buffer_data);
-            }
-            // 如果有一些累计梯度是switch过来的
-            // 那么我们这里进行实际的sync
-            for(const auto& event_it : _switch_grad_events) {
-              event_it.second->Sync();
-            } 
-            // 当前的计算的梯度也需要sync
-            for(const auto& event_it : _run_grad_events) {
-              event_it.second->Sync();
-            } 
-            NDArray::add(current_grad_buffer_data, 
-                         accumulate_grad_buffer_data, 
-                         kBlockingStream,
-                         accumulate_grad_buffer_data);
-          }          
-        }
-      }
-    } 
-    // 为节省显存峰值，可以不使用current_grad_buffer
-    else {
-      // 什么都不用操作
-      // 已经在ComputeFunc中将grad加到了accumulate_grad_buffer中
-    }
-    _p2p_events.clear();
-    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
-      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run GRAD end");
-    return {};
-  }
-  // 说明是RunLevel::UPDATE了
-  // 提前进行一些固有map的清空（sync结果前）
-  // 这样CPU和GPU可以异步进行
-  _run_grad_events.clear();
-  bool transfer_not_empty = false;
-  for (auto it = _transfer_param_buffer_map.begin();
-       it != _transfer_param_buffer_map.end(); ++it) {
-    if (!it->second->IsEmpty()) {
-      HT_ASSERT(it->second->IsAllocated()) 
-        << "transfer param buffer should be allocated";
-      transfer_not_empty = true;
-    }
-  }
-  if (transfer_not_empty) {
-    for (auto& op_ref : _execute_plan.local_placeholder_variable_ops) {
-      auto& op = op_ref.get();
-      if (is_variable_op(op) && _parameter_ops.find(op->id()) != _parameter_ops.end()) {
-        auto it = _transfer_map.find(op->output(0)->id());
-        HT_ASSERT(it != _transfer_map.end())
-          << "The transfer map does not consist of " << op->output(0);
-        auto& transfer_param = it->second;
-        auto data_it = _preserved_data.find(transfer_param->id());
-        HT_ASSERT(data_it != _preserved_data.end())
-          << "The preserved data does not consist of " << transfer_param;
-        _preserved_data.erase(data_it);
-      }
-    }
-    // _transfer_param_buffer->Free();
-  }
-  // ********************** Run Level Check Point **********************
-
-  HT_LOG_DEBUG << local_device << ": 4. get results[begin]";
-  NDArrayList results(fetches.size(), NDArray());
-  std::unordered_set<OpId> to_sync_op_ids;
-  to_sync_op_ids.reserve(fetches.size());
-  for (auto& op_ref : _execute_plan.local_topo) {
-    auto& op = op_ref.get();
-    Operator::for_each_output_tensor(op, [&](const Tensor& output) {
-      auto it = fetch_indices.find(output->id());
-      if (it != fetch_indices.end()) {
-        if (output->output_id() >= 0) {
-          if (is_variable_op(op) || _execute_plan.accumulated_ops.find(op) != _execute_plan.accumulated_ops.end() 
-            || _execute_plan.accumulated_tensor.find(output->id()) != _execute_plan.accumulated_tensor.end()) {
-            results[it->second] = tensor2data_list[num_micro_batches - 1][output->id()];
-          } else if (is_placeholder_op(op)) {
-            auto feed_it = feed_dict.find(output->id());
-            if (feed_it != feed_dict.end()) {
-              results[it->second] = feed_it->second[num_micro_batches - 1];
-            }
-          } else {
-            NDArrayList result;
-            result.reserve(num_micro_batches);
-            for (auto& tensor2data : tensor2data_list) {
-              auto it = tensor2data.find(output->id());
-              HT_ASSERT (it != tensor2data.end()) << "Something wrong! Can't find the data to fetch.";
-              result.push_back(tensor2data[output->id()]);
-            }
-            results[it->second] = NDArray::cat(result);
-          }
-        }
-        to_sync_op_ids.insert(op->id());
-      }
-    });
-  }
-  // SynchronizeAllStreams(local_device);
-  // OpList sync_ops;
-  for (auto op_id : to_sync_op_ids) {
-    _op_indexing[op_id]->Sync(num_micro_batches - 1);
-    // sync_ops.push_back(_op_indexing[op_id]);
-  }
-  
-  // HT_LOG_DEBUG << local_device << ": sync ops = " << sync_ops;
-  for (size_t i = 0; i < results.size(); i++)
-    HT_LOG_TRACE << "results[" << i << "]: " << results[i];
-  HT_LOG_DEBUG << local_device << ": 4. get results[end]";
-
-  // ********************** Run Level Check Point **********************
-  // 一次完整的optimizer update发生了
-  // transfer param buffer如果存在需要被清理掉
-  // origin param buffer不能被清理掉
-  // accumulate grad buffer如果存在需要被清理掉
-  // current grad buffer需要被清理掉
-  // 2024.3.3 update
-  // 考虑到单策略alloc和free具有一定耗时
-  // 因此把transfer param buffer和current grad buffer的清理放在需要热切换的时候
-  if (_run_level == RunLevel::UPDATE) {
-    for (auto it = _accumulate_grad_buffer_map.begin();
-         it != _accumulate_grad_buffer_map.end(); ++it) {
-      if (it->second->IsAllocated()) {
-        // 已经对fetches sync过了
-        // 这里直接free即可
-        it->second->Free();
-        _is_partial_accumulate_grad_buffer_map[it->first] = false;
-        _has_accumulate_grad_value_map[it->first] = false;
-      }
-    }
-    if (_use_current_grad_buffer) {
-      for (auto it = _current_grad_buffer_map.begin();
-           it != _current_grad_buffer_map.end(); ++it) {
-        HT_ASSERT(it->second->IsAllocated())
-        << "current grad buffer should be allocated in RunLevel::UPDATE";
-      }
-      // _current_grad_buffer->Free();
-    }
-    if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)
-      GetCUDAProfiler(local_device)->PrintCurrMemoryInfo(name() + " run UPDATE end");
-  }
-  // ********************** Run Level Check Point **********************
-
+  TIK(crucial_run);
+  // ****核心的exec graph执行部分****
+  auto results = CrucialRun(fetches, feed_dict, num_micro_batches);
   auto profiler_optional = hetu::impl::Profile::get_cur_profile();
   bool is_analysis_perf = false;
   if (is_analysis_perf || _straggler_flag || profiler_optional) {
@@ -2736,8 +2713,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
       comm_group->Barrier(true);
     }
   }
-  TOK(run);
-  HT_LOG_DEBUG << local_device << ": total run time = " << COST_MSEC(run)
+  TOK(crucial_run);
+  HT_LOG_DEBUG << local_device << ": crucial run time = " << COST_MSEC(crucial_run)
                << " ms";
   
   // get all micro batches memory consumption
@@ -2764,15 +2741,6 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   // get op execute time, sort and analysis
   if (is_analysis_perf || _straggler_flag) {
-    TIK(free);
-    runtime_ctx_list.clear();
-    tensor2data_list.clear();
-    grad_accumulation.clear();
-    TOK(free);
-    HT_LOG_DEBUG << local_device
-                 << ": free temporary memory time = " << COST_MSEC(free)
-                 << " ms";
-
     std::vector<std::pair<int64_t, int64_t>> op_execute_time;
     for (auto& op_ref : _execute_plan.local_topo) {
       auto& op = op_ref.get();
@@ -2869,7 +2837,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
     if (is_analysis_perf) {
       HT_LOG_INFO << local_device << ": " 
-                  << "\ntotal run time: " << COST_MSEC(run) << " ms, "
+                  << "\ntotal run time: " << COST_MSEC(crucial_run) << " ms, "
                   << "attn fwd time: " << attn_fwd_time << " ms, "
                   << "attn bwd time: " << attn_bwd_time << " ms, "
                   << "optimizer time: " << optimizer_time << " ms, "
@@ -2884,7 +2852,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
     if (_straggler_flag) {
       HT_LOG_WARN << local_device << ": " 
-                  << "\ntotal run time: " << COST_MSEC(run) << " ms, "
+                  << "\ntotal run time: " << COST_MSEC(crucial_run) << " ms, "
                   << "attn fwd time: " << attn_fwd_time << " ms, "
                   << "attn bwd time: " << attn_bwd_time << " ms, "
                   << "optimizer time: " << optimizer_time << " ms, "
@@ -2906,7 +2874,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
         } else if (_straggler_flag == 2) {
           ofstream_sync file(_straggler_log_file_path + "_" + std::to_string(hetu::impl::comm::GetWorldRank()) + ".txt", std::ios_base::app);
           if (file.is_open()) {
-            file << "total run time: " << COST_MSEC(run) << " ms" << std::endl;
+            file << "total run time: " << COST_MSEC(crucial_run) << " ms" << std::endl;
             file << "compute time: " << other_compute_time << " ms" << std::endl;
           } else {
             HT_RUNTIME_ERROR << "Error opening the file";
@@ -2915,7 +2883,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
           if (hetu::impl::comm::GetWorldRank() == 0) {
             ofstream_sync file(_straggler_log_file_path, std::ios_base::app);
             if (file.is_open()) {
-              file << "total run time: " << COST_MSEC(run) << " ms, "
+              file << "total run time: " << COST_MSEC(crucial_run) << " ms, "
                 << "attn fwd time: " << attn_fwd_time << " ms, "
                 << "attn bwd time: " << attn_bwd_time << " ms, "
                 << "optimizer time: " << optimizer_time << " ms, "
@@ -2942,18 +2910,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
 
   // TODO: merge with analysis perf
   if (profiler_optional) {
-    TIK(free);
-    runtime_ctx_list.clear();
-    tensor2data_list.clear();
-    grad_accumulation.clear();
-    TOK(free);
-    HT_LOG_DEBUG << local_device
-                 << ": free temporary memory time = " << COST_MSEC(free)
-                 << " ms";
-
     auto profiler = *profiler_optional;
     profiler->set_device(local_device);
-
     std::vector<std::pair<int64_t, int64_t>> op_execute_time;
     std::unordered_map<int64_t, int64_t> is_forward;
     std::unordered_map<std::string, double> summarized_time;
@@ -3037,7 +2995,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
 
     // total time = forward + backward = forward compute + backward compute + tp-collective + tp-p2p
-    profiler->push("total-run-time", COST_MSEC(run));
+    profiler->push("total-run-time", COST_MSEC(crucial_run));
     profiler->push("forward-compute", summarized_time["forward-compute"]);
     profiler->push("backward-compute", summarized_time["backward-compute"]);
     profiler->push("forward-backward-compute", summarized_time["forward-backward-compute"]);

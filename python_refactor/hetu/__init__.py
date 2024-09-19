@@ -148,9 +148,9 @@ class _RunLevel(object):
     def __init__(self, type):
         if type == "update":
             self.type = 0
-        elif type == "local_grad":
-            self.type = 1
         elif type == "grad":
+            self.type = 1
+        elif type == "compute_only":
             self.type = 2
         elif type == "alloc":
             self.type = 3
