@@ -13,27 +13,32 @@ SERVER_PORT=${8:-"23333"}
 HOST_FILE_PATH=${9:-"./scripts/host.yaml"}
 ENV_FILE_PATH=${10:-"./scripts/env_A100.sh"}
 
-CASE=4
+CASE=5
 if [[ ${CASE} -eq 1 ]]; then
-	# homo + padding
-	NUM_GPUS=16
-	MULTI_TP_PP_LIST="[[(4, 2), (4, 2)], ]"
-	BATCHING_METHOD=0
-elif [[ ${CASE} -eq 2 ]]; then	
-    # homo + greedy packing
+	# homo + greedy packing with static shape
 	NUM_GPUS=16
 	MULTI_TP_PP_LIST="[[(4, 2), (4, 2)], ]"
 	BATCHING_METHOD=2
+elif [[ ${CASE} -eq 2 ]]; then	
+    # homo + greedy packing with dynamic shape
+	NUM_GPUS=16
+	MULTI_TP_PP_LIST="[[(4, 2), (4, 2)], ]"
+	BATCHING_METHOD=3
 elif [[ ${CASE} -eq 3 ]]; then	
     # homo + hydraulis packing
 	NUM_GPUS=16
 	MULTI_TP_PP_LIST="[[(4, 2), (4, 2)], ]"
-	BATCHING_METHOD=3
+	BATCHING_METHOD=4
 elif [[ ${CASE} -eq 4 ]]; then	
     # hetero + hydraulis packing
 	NUM_GPUS=16
 	MULTI_TP_PP_LIST="[[(4, 2), (1, 8)], ]"
-	BATCHING_METHOD=3
+	BATCHING_METHOD=4
+elif [[ ${CASE} -eq 5 ]]; then	
+    # hetero + hydraulis packing
+	NUM_GPUS=16
+	MULTI_TP_PP_LIST="[[(4, 2), (1, 4), (1, 4)], ]"
+	BATCHING_METHOD=4
 else
     echo unknown CASE
 	exit 1

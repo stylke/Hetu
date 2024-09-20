@@ -3,6 +3,7 @@
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/impl/utils/ndarray_utils.h"
 #include "hetu/utils/task_queue.h"
+#include "hetu/core/ndarray_storage.h"
 #include <numeric>
 #include <mutex>
 
@@ -122,11 +123,11 @@ void EmptyNCCLCache() {
 struct NCCLGroupGuard {
   NCCLGroupGuard(bool group = false) : is_group_call(group) {
     if (is_group_call)
-      NCCL_CALL(ncclGroupStart());
+      ncclGroupStart_safe();
   }
   ~NCCLGroupGuard() {
     if (is_group_call)
-      NCCL_CALL(ncclGroupEnd());
+      ncclGroupEnd_safe();
   }
   bool is_group_call;
 };

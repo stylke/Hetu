@@ -6,6 +6,26 @@
 
 namespace hetu {
 
+void ncclGroupStart_safe();
+void ncclGroupEnd_safe();
+
+class ncclGroupMemCtx {
+ public:
+  void Free() {
+    for (const auto& ptr : _free_data_ptr_list) {
+      FreeToMemoryPool(ptr);
+    }
+    _free_data_ptr_list.clear();
+  } 
+
+  void AddFreeDataPtr(const DataPtr& ptr) {
+    _free_data_ptr_list.emplace_back(ptr);
+  } 
+
+ protected:
+  std::vector<DataPtr> _free_data_ptr_list{};
+};
+
 class NDArrayStorage {
  public:
   NDArrayStorage(DataPtr ptr, bool in_mempool = true): 
@@ -13,16 +33,7 @@ class NDArrayStorage {
     _in_mempool(in_mempool) {
   } 
 
-  ~NDArrayStorage() {
-    if (_in_mempool) {
-      FreeToMemoryPool(_ptr);
-    } else {
-      // deprecated: 这一部分使用mempool的borrow data
-      // 内存由外界维护
-      // 例如ncclMemAlloc和ncclMemFree
-      return;
-    }
-  }
+  ~NDArrayStorage();
 
   inline size_t size() const {
     return _ptr.size;

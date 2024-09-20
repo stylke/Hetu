@@ -199,9 +199,15 @@ def pretrain(args):
         consumed_samples = 0,
         strategy_id = 0,
         warm_up = False,
-        batching_method = 2, # 0 means padding, 1 means packing, 2 means hydraulis packing
+        batching_method = 4, 
         max_padded_seqlen = None
     ):     
+        # batching_method
+        # 0 means padding
+        # 1 means unblanced assigned packing (maybe not a proper baseline)
+        # 2 means greedy packing with static shape
+        # 3 means greedy packing with dynamic shape
+        # 4 means hydraulis packing
         assert strategy_id < num_strategy, "strategy out of range"
         if max_padded_seqlen:
             max_padded_seqlen % alignment == 0, "max_padded_seqlen should be aligned"
@@ -239,11 +245,11 @@ def pretrain(args):
             num_micro_batches = 8
             if dp_id != None:
                 # packing
-                if batching_method > 0:
+                if batching_method == 4:
                     max_seqlen = max_seqlen_list[dp_id]
-                # padding
+                # padding (or original greedy packing with static or dynamic shape)
                 else:
-                    assert max_padded_seqlen, "you should provide the max seqlen when doing padding"
+                    assert max_padded_seqlen, "you should provide the max seqlen when doing padding or static-shape packing"
                     max_seqlen = max_padded_seqlen
                 assert max_seqlen % alignment == 0, "max seqlen should already be aligned"
                 config.max_seqlen_symbol.set_data(max_seqlen)
@@ -280,21 +286,27 @@ def pretrain(args):
                     if batching_method >= 2:
                         # batch_indices = dynamic_strategy(strategy_pool, match_id_list, max_seqlen_list, dp_id, sorted_len)
                         estimated_cost_1, batch_indices = distributed_call((gpu_id, dp_id, dp_representive_gpu), dynamic_strategy, strategy_pool, match_id_list, max_seqlen_list, dp_id, sorted_len)
-                        # greedy packing
-                        if batching_method == 2:
-                            estimated_cost_2, batching_option_matrix = None, None
                         # hydraulis packing: balanced packing with utilization guranteed
-                        else:
+                        if batching_method == 4:
                             # batching_option_matrix = batching_strategy(strategy_pool, match_id_list[dp_id], sorted_len[batch_indices], max_seqlen_list[dp_id])
-                            estimated_cost_2, batching_option_matrix = distributed_call((gpu_id, dp_id, dp_representive_gpu), batching_strategy, strategy_pool, match_id_list[dp_id], sorted_len[batch_indices], max_seqlen_list[dp_id])
+                            estimated_cost_2, batching_option_matrix = distributed_call((gpu_id, dp_id, dp_representive_gpu), batching_strategy, strategy_pool, match_id_list[dp_id], sorted_len[batch_indices], max_seqlen_list[dp_id]) 
+                        # greedy packing
+                        else:
+                            estimated_cost_2, batching_option_matrix = None, None
                     # Question: 每个micro batch的实际的max_seqlen都不一样
                     # FlashAttn的这一属性的设置是否对性能有明显的影响有待探究
                     # 目前暂时将其设置成当前轮次所处理的最大的seqlen
                     config.max_seqlen_symbol.set_data(sorted_len[batch_indices[-1]] - 1) 
                     print(f"{local_device}: {dp_id}-th dp local batch indices is {batch_indices}, estimated cost is {estimated_cost_1}")
-                    input_bucket, label_bucket = get_input_and_label_buckets(sorted_batch, train_dataset.pad_id(), batch_indices, max_seqlen_list[dp_id], alignment)
-                    input_bucket.pack_data(batching_option_matrix)
-                    label_bucket.pack_data(batching_option_matrix)
+                    strategy_max_seqlen = max_seqlen_list[dp_id] 
+                    static_shape = False
+                    if batching_method == 2 or batching_method == 3:
+                        assert max_padded_seqlen, "static-shape packing should provide the max seqlen after packing"
+                        strategy_max_seqlen = max_padded_seqlen
+                        static_shape = True
+                    input_bucket, label_bucket = get_input_and_label_buckets(sorted_batch, train_dataset.pad_id(), batch_indices, strategy_max_seqlen, alignment)
+                    input_bucket.pack_data(batching_option_matrix, static_shape)
+                    label_bucket.pack_data(batching_option_matrix, static_shape)
                     input_batch, label_batch = input_bucket.packed_batch(), label_bucket.packed_batch()
                     cu_seqlens_list = input_bucket.packed_cu_seqlens_list()
                     print(f"{local_device}: {dp_id}-th dp seqlens after packed is {[len(seq) for seq in input_batch]}, estimated cost is {estimated_cost_2}")
@@ -356,7 +368,7 @@ if __name__ == '__main__':
     print("Run hetu training")
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--batching_method", type=int, default=3, help="batching method, 0 means padding, 1 means packing, 2 means hydraulis greedy packing, 3 means hydraulis balanced packing"
+        "--batching_method", type=int, default=4, help="batching method, 0 means padding, 1 means packing, 2 means hydraulis greedy packing, 3 means hydraulis balanced packing"
     )
     parser.add_argument(
         "--strategy_pool", type=str, default="./strategy/strategy_pool.json", help="json path to the strategy pool"
