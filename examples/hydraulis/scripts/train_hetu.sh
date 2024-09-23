@@ -96,7 +96,7 @@ CMD="python3 -u train_hetu.py \
 
 source ${ENV_FILE_PATH}
 if [ ${NUM_GPUS} -gt 8 ]; then
-python3 ../../python_refactor/hetu/rpc/pssh_start.py \
+python3 ../../python/hetu/rpc/pssh_start.py \
 	--hosts ${HOST_FILE_PATH} \
 	--command "$CMD" \
 	--server_port ${SERVER_PORT} \
@@ -104,7 +104,7 @@ python3 ../../python_refactor/hetu/rpc/pssh_start.py \
 	--envs ${ENV_FILE_PATH} \
 	--log_path ${LOG_FOLDER}
 else
-python3 ../../python_refactor/hetu/rpc/pssh_start.py \
+python3 ../../python/hetu/rpc/pssh_start.py \
 	--command "$CMD" \
 	--server_port ${SERVER_PORT} \
 	--ngpus ${NUM_GPUS} \

@@ -10,17 +10,19 @@ Committers should be familiar with the guidelines for new contributors in [CONTR
 ### Current Committer
 - [Hsword](https://github.com/Hsword) - **Xupeng Miao** <[swordonline@foxmail.com](swordonline@foxmail.com)>
 - [ccchengff](https://github.com/ccchengff) - **Fangcheng Fu** <[ccchengff@gmail.com](ccchengff@gmail.com)>
+- [Sakura-gh](https://github.com/Sakura-gh) - **Hao Ge**
+- [tarccy](https://github.com/tarccy) - **Xuanyu Wang**
+- [lhy101](https://github.com/lhy101) - **Haoyang Li**
+- [Somoku](https://github.com/Somoku) - **Sheng Lin**
+- [njw1123](https://github.com/njw1123) - **Jiawen Niu**
 - [codecaution](https://github.com/codecaution) - **Xiaonan Nie**
 - [HugoZHL](https://github.com/HugoZHL) - **Hailin Zhang**
 - [AFDWang](https://github.com/AFDWang) - **Yujie Wang**
-- [zshCuanNi](https://github.com/zshCuanNi) **Shenhan Zhu**
-- [SpiritedAwayCN](https://github.com/SpiritedAwayCN) **Chunan Shi**
-- **Xinyi Liu**
-- [Hankpipi](https://github.com/Hankpipi) - **Zihao Yu**
+- [zshCuanNi](https://github.com/zshCuanNi) - **Shenhan Zhu**
+- [SpiritedAwayCN](https://github.com/SpiritedAwayCN) - **Chunan Shi**
+- [Fizzmy](https://github.com/Fizzmy) - **Xinyi Liu**
 - **Pinxue Zhao**
 - **Penghao Zhao**
-- **Hao Ge**
-- **Xuanyu Wang**
 
 
 
@@ -43,3 +45,4 @@ We would like to sincerely thank the following community members for their contr
 - [sj1104](https://github.com/sj1104) - **Jia Shen**
 - [nox-410](https://github.com/nox-410) - **Yining Shi**
 - [Youhe-Jiang](https://github.com/Youhe-Jiang) - **Youhe Jiang (University of Cambridge, PhD)**
+- [Hankpipi](https://github.com/Hankpipi) - **Zihao Yu**

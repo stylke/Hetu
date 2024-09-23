@@ -6,7 +6,7 @@ set(DCMAKE_BUILD_TYPE Debug)
 
 project(Hetu LANGUAGES CXX CUDA)
 
-include(cmake/config_refactor.cmake)
+include(cmake/config.cmake)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
 
 set(USE_FLASH_ATTN ON)
@@ -57,6 +57,6 @@ if(${HETU_COMPILE_CUDA})
 endif()
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/hetu)
-add_subdirectory(${CMAKE_SOURCE_DIR}/python_refactor)
-add_subdirectory(${CMAKE_SOURCE_DIR}/tests/refactor/cpp)
+add_subdirectory(${CMAKE_SOURCE_DIR}/python)
+add_subdirectory(${CMAKE_SOURCE_DIR}/tests/cpp)
 add_subdirectory(${CMAKE_SOURCE_DIR}/workloads/cuda)

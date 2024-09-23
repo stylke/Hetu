@@ -1,59 +1,46 @@
 ######################
-### Set targets ######
-######################
-
-# hetu main version, choose from (mkl, gpu, all)
-# if using mkl (for CPU) or all, OpenMP(*), mkl required
-# if using gpu or all, OpenMP(*), CUDA(*), CUDNN(*) required
-set(HETU_VERSION "all")
-
-# whether to compile allreduce module
-# nccl(*), openmpi required
-set(HETU_ALLREDUCE ON)
-
-# whether to compile ps module
-# protobuf(*), zeromq required
-set(HETU_PS ON)
-
-# whether to compile geometric module (for GNNs)
-# pybind11(*), metis(*) required
-set(HETU_GEOMETRIC OFF)
-
-# whether to compile cache module (for PS)
-# to enable this, you must turn HETU_PS on
-# pybind11(*) required
-set(HETU_CACHE ON)
-
-# whether to compile Hetu ML Module
-set(HETU_ML OFF)
-set(HETU_PARALLEL_ML OFF)
-
-######################
-### Set paths ########
+### Set paths ######
 ######################
 
 # CUDA version >= 10.1
-set(CUDAToolkit_ROOT /usr/local/cuda)
+if(DEFINED ENV{CUDA_HOME})
+  set(CUDAToolkit_ROOT $ENV{CUDA_HOME})
+else()
+  set(CUDAToolkit_ROOT /usr/local/cuda)
+endif()
 
-# NCCL version >= 2.8
-set(NCCL_ROOT $ENV{CONDA_PREFIX})
-
+# CUDNN >= 7.5
+# - CUDNN_ROOT: root directory of cudnn
 set(CUDNN_ROOT)
 
-# MPI version >= 3.1 (OpenMPI version >= 4.0.3)
-# if valid version not found, we'll download and compile it in time (openmpi-4.0.3)
-set(MPI_HOME $ENV{CONDA_PREFIX})
+# NCCL version >= 2.8
+set(NCCL_ROOT)
 
-# MKL 1.6.1, MKL_ROOT: root directory of mkl, MKL_BUILD: build directory of mkl
+# MPI >= 3.1
+set(MPI_ROOT)
+
+# PyBind11 2.6.2
+# - pybind11_DIR: cmake directory of pybind11, 
+#                 can be obtained by `python3 -m pybind11 --cmakedir` 
+#                 if pybind11 has been installed via pip
 # if not found, we'll download and compile it in time
-set(MKL_ROOT $ENV{CONDA_PREFIX})
-set(MKL_BUILD $ENV{CONDA_PREFIX})
+set(pybind11_DIR)
 
-# ZMQ 4.3.2, ZMQ_ROOT: root directory of zeromq, ZMQ_BUILD: build directory of zeromq
+# ZMQ 4.3.2
+# - ZMQ_ROOT: root directory of zeromq
+# - ZMQ_BUILD: build directory of zeromq
 # if not found, we'll download and compile it in time
-set(ZMQ_ROOT $ENV{CONDA_PREFIX})
-set(ZMQ_BUILD $ENV{CONDA_PREFIX})
+set(ZMQ_ROOT)
+set(ZMQ_BUILD)
 
-# CUB & THRUST
-set(CUB_ROOT $ENV{CONDA_PREFIX})
-set(THRUST_ROOT $ENV{CONDA_PREFIX})
+# DNNL (oneDNN) 3.0
+# - DNNL_ROOT: root directory of zeromq
+# - DNNL_BUILD: build directory of zeromq
+# if not found, we'll download and compile it in time
+set(DNNL_ROOT)
+set(DNNL_BUILD)
+
+# if you have a protoc in conda bin, ignore `/path/to/anaconda3/bin`
+set(CMAKE_IGNORE_PATH)
+
+set(FLASH_ROOT)

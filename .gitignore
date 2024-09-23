@@ -75,8 +75,8 @@ hetu/impl/communication/rpc
 *_pb2_grpc.pyi
 
 # Codegen
-python_refactor/hetu/_binding/autograd/ops/generated/
-python_refactor/hetu/_binding/graph/generated
+python/hetu/_binding/autograd/ops/generated/
+python/hetu/_binding/graph/generated
 
 # third party
 # hetu/flash_attn
