@@ -1,4 +1,5 @@
 import os
+import sys
 import numpy as np
 
 
@@ -15,11 +16,17 @@ def download_criteo(path):
     assert os.path.isdir(path), 'Please provide a directory path.'
     # this source may be invalid, please use other valid sources.
     origin = (
-        'https://s3-eu-west-1.amazonaws.com/kaggle-display-advertising-challenge-dataset/dac.tar.gz'
+        'https://go.criteo.net/criteo-research-kaggle-display-advertising-challenge-dataset.tar.gz'
     )
+
+    def _progress(block_num, block_size, total_size):
+        sys.stdout.write('\r>> Downloading %.1f%%' % (
+                        float(block_num * block_size) / float(total_size) * 100.0))
+        sys.stdout.flush()
+
     print('Downloading data from %s' % origin)
     dataset = os.path.join(path, 'criteo.tar.gz')
-    urllib.request.urlretrieve(origin, dataset)
+    urllib.request.urlretrieve(origin, dataset, _progress)
     print("Extracting criteo zip...")
     with tarfile.open(dataset) as f:
         f.extractall(path=path)
@@ -38,9 +45,10 @@ def download_criteo(path):
         'test_dense_feats.npy', 'test_sparse_feats.npy', 'test_labels.npy']]
     dense_feats = [col for col in df.columns if col.startswith('I')]
     sparse_feats = [col for col in df.columns if col.startswith('C')]
-    labels = df['label']
-    dense_feats = process_dense_feats(df, dense_feats)
-    sparse_feats = process_sparse_feats(df, sparse_feats)
+    labels = np.array(df['label']).reshape(-1, 1)
+    dense_feats = np.array(process_dense_feats(df, dense_feats))
+    sparse_feats = np.array(process_sparse_feats(
+        df, sparse_feats)).astype(np.int32)
     num_data = dense_feats.shape[0]
     perm = np.random.permutation(num_data)
     # split data in 2 parts
@@ -317,4 +325,4 @@ def process_avazu(path=os.path.join(os.path.split(os.path.abspath(__file__))[0],
 
 if __name__ == '__main__':
     download_criteo(os.path.join(os.path.split(
-        os.path.abspath(__file__)), '../datasets/criteo'))
+        os.path.abspath(__file__))[0], '../datasets/criteo'))

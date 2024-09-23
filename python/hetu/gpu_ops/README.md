@@ -35,8 +35,6 @@ This directory contains executor and operators for computation and communication
 | DivConstOp | ✔ | ✔ | ✔ | / |
 | DropoutOp | ✔ | ✔ | ✔ | CuRAND |
 | Dropout_GradientOp | ✔ | ✔ | ✔ | CuRAND |
-| Dropout2dOp | ✖ | ✖ | ✔ | CuRAND |
-| Dropout2d_GradientOp | ✖ | ✖ | ✔ | CuRAND |
 | EmbeddingLookUp | ✔ | ✖ | ✔ | / |
 | EmbeddingLookUp_Gradient | ✔ | ✖ | ✔ | / |
 | Instance_Normalization2dOp | ✖ | ✖ | ✔ | CuDNN |
@@ -76,6 +74,7 @@ This directory contains executor and operators for computation and communication
 | SumOp | ✔ | ✖ | ✔ | / |
 | ReciprocalSqrtOp | ✔ | ✔ | ✔ | / |
 | TanhOp | ✔ | ✔ | ✔ | / |
+| TanhGradientOp | ✔ | ✖ | ✔ | / |
 | TransposeOp | ✔ | ✔ | ✔ | / |
 | WhereOp | ✔ | ✖ | ✔ | / |
 | ZerosLikeOp | ✔ | ✔ | ✔ | / |

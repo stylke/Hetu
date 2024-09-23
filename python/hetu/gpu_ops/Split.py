@@ -12,6 +12,7 @@ class SplitOp(Op):
         self.axes = axes
         self.indices = indices
         self.splits = splits
+        self.grad_node = None
         assert len(self.axes) == len(self.splits)
         assert all([x >= 0 for x in axes])
         assert all([x >= 1 for x in splits])
@@ -43,7 +44,7 @@ class SplitOp(Op):
             self.output_shape[axe] = part_size if ind != spl - \
                 1 else ori_shape[axe] - self.begin_pos[axe]
 
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.begin_pos = self.begin_pos
             self.grad_node.output_shape = ori_shape
 
@@ -56,7 +57,7 @@ class SplitOp(Op):
                 gpu_buf[ndim + i] = ori_shape[i]
                 gpu_buf[2 * ndim + i] = self.output_shape[i]
             self.gpu_buffer = ndarray.array(
-                gpu_buf, self.ctx, data_type=np.uintc)
+                gpu_buf, self.ctx, dtype=np.uintc)
         return self.output_shape
 
     def naive_infer_shape(self, input_shapes):
@@ -70,7 +71,7 @@ class SplitOp(Op):
             self.output_shape[axe] = part_size if ind != spl - \
                 1 else ori_shape[axe] - self.begin_pos[axe]
 
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.begin_pos = self.begin_pos
             self.grad_node.output_shape = ori_shape
         return self.output_shape
@@ -120,7 +121,7 @@ class SplitGradientOp(Op):
                 gpu_buf[ndim + i] = ori_shape[i]
                 gpu_buf[2 * ndim + i] = self.output_shape[i]
             self.gpu_buffer = ndarray.array(
-                gpu_buf, self.ctx, data_type=np.uintc)
+                gpu_buf, self.ctx, dtype=np.uintc)
         return self.output_shape
 
 

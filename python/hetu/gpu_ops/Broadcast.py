@@ -9,6 +9,8 @@ from .. import ndarray
 class BroadcastToOp(Op):
     def __init__(self, node_A, node_B, ctx=None):
         super().__init__(BroadcastToOp, [node_A, node_B], ctx)
+        self.grad_node = None
+        self.grad_set = False
 
     def compute(self, input_vals, output_val, stream_handle=None):
         if self.on_cpu:
@@ -24,7 +26,6 @@ class BroadcastToOp(Op):
                     input_vals[0], output_val, self.out_strides, self.in_dims, stream_handle)
 
     def gradient(self, output_grad):
-        self.grad_set = False
         self.grad_node = reduce_sum_op(
             output_grad, None, None, ctx=self.raw_ctx)
         return [self.grad_node, None]
@@ -40,12 +41,14 @@ class BroadcastToOp(Op):
         keepdims = [False] * diff
         input_shape = [1] * diff + input_shape
         for i in range(output_ndim):
+            if isinstance(output_shape[i], (np.int32, np.int64)):
+                output_shape[i] = output_shape[i].item()
             assert output_shape[i] > 0 and isinstance(output_shape[i], int)
             assert input_shape[i] == 1 or input_shape[i] == output_shape[i]
             if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
                 axes.append(i)
                 keepdims.append(True)
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.axes = axes
             self.grad_node.keepdims = keepdims
 
@@ -60,8 +63,8 @@ class BroadcastToOp(Op):
             in_dims = [1 for _ in range(diff)] + input_shape
 
             self.out_strides = ndarray.array(
-                out_strides, self.ctx, data_type=np.int32)
-            self.in_dims = ndarray.array(in_dims, self.ctx, data_type=np.int32)
+                out_strides, self.ctx, dtype=np.int32)
+            self.in_dims = ndarray.array(in_dims, self.ctx, dtype=np.int32)
         return input_shapes[1]
 
     def naive_infer_shape(self, input_shapes):
@@ -80,7 +83,7 @@ class BroadcastToOp(Op):
             if i >= diff and input_shape[i] == 1 and output_shape[i] > 1:
                 axes.append(i)
                 keepdims.append(True)
-        if hasattr(self, 'grad_node'):
+        if self.grad_node is not None:
             self.grad_node.axes = axes
             self.grad_node.keepdims = keepdims
 
@@ -95,12 +98,15 @@ class BroadcastToOp(Op):
 
     def backward_deduce_states(self, status, input_statuses, deduce_order):
         assert len(input_statuses) == len(self.inputs)
-        if hasattr(self, 'grad_node') and not self.grad_set:
+        if self.grad_node is not None and not self.grad_set:
             self.grad_node.ori_status = input_statuses[0]
             self.grad_node.tar_status = status
             self.grad_set = True
         # there is no information for input[0] here, so we don't deduce
         input_statuses[1].copy_from(status, deduce_order)
+
+    def reset_status(self):
+        self.grad_set = False
 
 
 def broadcastto_op(node_A, node_B, ctx=None):
