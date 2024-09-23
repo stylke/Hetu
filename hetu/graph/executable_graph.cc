@@ -2703,6 +2703,15 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     comm_group->Barrier(true);
   }
   */
+
+  // mempool test
+  /*
+  TIK(free_mempool);
+  hetu::impl::ProfileAfterEmptyAllCUDACache(local_device);
+  TOK(free_mempool);
+  HT_LOG_INFO << local_device << ": free mempool time = " << COST_MSEC(free_mempool) << " ms";
+  */
+
   TIK(crucial_run);
   // ****核心的exec graph执行部分****
   auto results = CrucialRun(fetches, feed_dict, num_micro_batches);
@@ -2715,8 +2724,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     }
   }
   TOK(crucial_run);
-  HT_LOG_DEBUG << local_device << ": crucial run time = " << COST_MSEC(crucial_run)
-               << " ms";
+  HT_LOG_DEBUG << local_device << ": crucial run time = " << COST_MSEC(crucial_run) << " ms";
   
   // get all micro batches memory consumption
   if (_memory_profile_level == MEMORY_PROFILE_LEVEL::MICRO_BATCH && _memory_log_file_path != "") {

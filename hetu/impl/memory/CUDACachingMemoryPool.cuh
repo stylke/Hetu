@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hetu/impl/memory/CUDAMemoryPool.cuh"
+#include "hetu/impl/memory/memory_manager.h"
 #include "hetu/impl/stream/CUDAStream.h"
 #include "hetu/utils/task_queue.h"
 #include "hetu/utils/emhash7_hashmap.h"
@@ -55,7 +56,7 @@ void ProfileAfterEmptyAllCUDACache(const Device& device);
 
 class CUDACachingMemoryPool final : public CUDAMemoryPool {
  public:
-  CUDACachingMemoryPool(DeviceIndex device_id, size_t _max_split_size, size_t _max_internal_fragment_size);
+  CUDACachingMemoryPool(DeviceIndex device_id, size_t _max_split_size, size_t _max_internal_fragment_size, size_t _pre_allocate_size);
 
   ~CUDACachingMemoryPool();
 
@@ -147,6 +148,7 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   const size_t kMallocLargeBuffer = 10485760;
   size_t max_split_size{209715200}; // in bytes
   size_t max_internal_fragment_size{20971520}; // NOTE: 从PyTorch借鉴的20MiB剩余量限额
+  size_t pre_allocate_size{0}; // 提前分配的显存大小
 
   // Record stream info of an allocated pointer.
   struct CudaDataPtrInfo {
@@ -219,7 +221,9 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
 
   size_t GetAlignedMallocSize(size_t request_size);
 
-  bool AllocNewPtr(void*& ptr, size_t size);
+  bool AllocPtr(void*& ptr, size_t size);
+
+  void FreePtr(void* ptr);
 
   void ReleaseAll();
 
@@ -254,7 +258,8 @@ class CUDACachingMemoryPool final : public CUDAMemoryPool {
   emhash7::HashMap<PackedStreamId, std::unique_ptr<std::deque<std::tuple<std::unique_ptr<CUDAEvent>, DataPtrId>>>> _multi_stream_free_events;
   // Events to indicate whether a data ptr is available to all streams
   emhash7::HashMap<PackedStreamId, std::unique_ptr<AvailableEventLookupTable>> _single_stream_free_events;
-  
+  // 2024.9.23 Update: add memory manager to avoid cudaMalloc and cudaFree
+  std::shared_ptr<MemoryManager> _memory_manager = nullptr;
 
   size_t _allocated{0};
   size_t _reserved{0}; // allocated size + cached size

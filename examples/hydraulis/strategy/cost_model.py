@@ -1,16 +1,22 @@
 import json
+import numpy as np
 
 # key是粗策略编号与seqs的span起始下标组成的tuple
 # value是其所消耗的时间以及span内最大的seq长度
 cache = {}
 
+def linear_predict(s, b, c):
+    return b * s + c
+
 def quadratic_predict(s, a, b, c):
-    # return a * (s ** 2) + b * s + c
-    return a * (s ** 2) + b * s
+    return a * (s ** 2) + b * s + c
 
 def dynamic_strategy_time_cost(data, strategy_id, s):
     strategy = data['strategies'][strategy_id]
-    return quadratic_predict(s, strategy['a'], strategy['b'], strategy['c'])
+    if isinstance(s, (int, np.int32, np.int64)):
+        return quadratic_predict(s, strategy['a'], strategy['b'], 0)
+    else:
+        return linear_predict(s, strategy['b'], strategy['c'])
 
 # 策略编号为strategy_id数据并行维度为D的情况下处理数据集中长度在[s - l, s]区间范围内的所消耗的时间
 def static_strategy_time_cost(data, counter, strategy_id, s_begin, s_end, S_STEP):

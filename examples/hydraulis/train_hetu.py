@@ -10,7 +10,7 @@ import numpy as np
 import hetu as ht
 from hetu_llama import LLamaLMHeadModel
 from llama_config import LLaMAConfig
-from data_utils import LLaMAJsonDataset, build_data_loader, get_sorted_batch_and_len, get_input_and_label_buckets
+from data_utils import LLaMAJsonDataset, build_data_loader, get_sorted_batch_and_len, build_fake_batch_and_len, get_input_and_label_buckets
 from parallel_utils import read_ds_parallel_config, parse_multi_ds_parallel_config, convert_strategy, generate_ds_parallel_config
 from strategy import strategy_max_seqlen, dynamic_strategy, batching_strategy, distributed_call
 
@@ -200,7 +200,8 @@ def pretrain(args):
         strategy_id = 0,
         warm_up = False,
         batching_method = 4, 
-        max_padded_seqlen = None
+        max_padded_seqlen = None,
+        fake_seqlens = []
     ):     
         # batching_method
         # 0 means padding
@@ -272,8 +273,11 @@ def pretrain(args):
             # load data for each dp
             input_batch, label_batch, cu_seqlens_list = None, None, None
             if dp_id != None:
-                global_batch = next(train_iter).numpy()
-                sorted_batch, sorted_len = get_sorted_batch_and_len(global_batch, train_dataset.pad_id())
+                if len(fake_seqlens) > 0:
+                    sorted_batch, sorted_len = build_fake_batch_and_len(fake_seqlens, train_dataset.pad_id())
+                else:
+                    global_batch = next(train_iter).numpy()
+                    sorted_batch, sorted_len = get_sorted_batch_and_len(global_batch, train_dataset.pad_id())
                 # packing
                 if batching_method > 0:
                     # unbalanced seqs assignment
@@ -359,7 +363,8 @@ def pretrain(args):
                 consumed_samples=consumed_samples,
                 strategy_id=strategy_id,
                 batching_method=args.batching_method,
-                max_padded_seqlen=args.max_seq_len
+                max_padded_seqlen=args.max_seq_len,
+                fake_seqlens=ast.literal_eval(args.fake_seqlens)
             )
     
     test()
@@ -368,7 +373,10 @@ if __name__ == '__main__':
     print("Run hetu training")
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--batching_method", type=int, default=4, help="batching method, 0 means padding, 1 means packing, 2 means hydraulis greedy packing, 3 means hydraulis balanced packing"
+        "--fake_seqlens", type=str, default="[]", help="seqlen list of fake data"
+    )
+    parser.add_argument(
+        "--batching_method", type=int, default=4, help="batching method"
     )
     parser.add_argument(
         "--strategy_pool", type=str, default="./strategy/strategy_pool.json", help="json path to the strategy pool"

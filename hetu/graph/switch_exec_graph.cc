@@ -86,7 +86,7 @@ static const P2PRoute& GetP2PRoute(const Device& from, const Device& to) {
 
 // nccl存在一些冷启动的开销
 // 先简单地进行一个小的all-to-all
-static void WarmUpComm(const std::unordered_set<Device>& comm_set) {
+static void WarmUpComm(const std::unordered_set<Device>& comm_set, const StreamIndex comm_stream_idx) {
   auto local_device = hetu::impl::comm::GetLocalDevice();
   std::vector<int> ranks(comm_set.size());
   std::transform(comm_set.begin(), comm_set.end(), ranks.begin(), 
@@ -94,8 +94,8 @@ static void WarmUpComm(const std::unordered_set<Device>& comm_set) {
   std::sort(ranks.begin(), ranks.end());
   HT_LOG_DEBUG << "all-to-all warm up for " << comm_set
     << ", whose ranks after sort = " << ranks;
-  auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, Stream(local_device, kSwitchCollectiveStream));
-  auto data = NDArray::empty({comm_set.size()}, local_device, kFloat32, kSwitchCollectiveStream);
+  auto& comm_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(ranks, Stream(local_device, comm_stream_idx));
+  auto data = NDArray::empty({comm_set.size()}, local_device, kFloat32, comm_stream_idx);
   comm_group->AlltoAll(data, data);
 }
 
@@ -113,12 +113,12 @@ static bool NeedConcatBuffer(const Operator& op) {
   return false;
 }
 
-static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer) {
+static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer, const StreamIndex comp_stream_idx) {
   auto local_device = hetu::impl::comm::GetLocalDevice();
   if (is_concat_op(tensor->producer())) {
     // concat原地啥都不干
     if (tensor->producer()->num_inputs() == 1) {
-      HandleConcatBuffer(tensor->producer()->input(0), buffer);
+      HandleConcatBuffer(tensor->producer()->input(0), buffer, comp_stream_idx);
     } 
     // concat发挥作用
     else {
@@ -143,7 +143,7 @@ static void HandleConcatBuffer(const Tensor& tensor, TensorList& buffer) {
     auto& contiguous_op = new_tensor->producer();
     if (tensor->placement() == local_device) {
       contiguous_op->MapToParallelDevices(tensor->placement_group_union());
-      contiguous_op->Instantiate(local_device, kSwitchComputingStream);
+      contiguous_op->Instantiate(local_device, comp_stream_idx);
       // 将contiguous算子插入到BatchedIsendIrecv/Slice算子和concat算子之间
       auto& consumer = tensor->consumer(0);
       HT_ASSERT(is_concat_op(consumer) && consumer->num_inputs() == 1)
@@ -237,7 +237,7 @@ void ParamBuffer::Alloc(const Stream& stream,
 #else
   // Use AllocDataSpace will cause OOM
   /*
-  // Note that we need to use kSwitchCollectiveStream for BufferBatchedIsendIrecv
+  // Note that we need to use comm_stream_idx for BufferBatchedIsendIrecv
   _storage = std::make_shared<NDArrayStorage>(AllocFromMemoryPool(local_device, _buffer_size, stream));
   _raw_ptr = _storage->mutable_data();
   */
@@ -602,7 +602,8 @@ void SwitchExecGraph::MakeAllParamSlices(const Tensor& param, ParamBlock& block,
                                          const std::unordered_map<int32_t, int32_t>& state,
                                          const std::vector<int32_t>& multiple, int32_t dim,
                                          bool is_uncontiguous, int32_t uncontiguous_ordinal, 
-                                         int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple) {
+                                         int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple,
+                                         const StreamIndex comp_stream_idx) {
   if (dim == multiple.size()) {
     auto& param_slice = block.GetParamSlice(slice_num);
     HTShape indices(slice_relative_num.begin(), slice_relative_num.end()); // int32_t -> int64_t
@@ -619,7 +620,7 @@ void SwitchExecGraph::MakeAllParamSlices(const Tensor& param, ParamBlock& block,
     // 其他device上生成的不需要map placement_group和placement
     if (hetu::impl::comm::GetLocalDevice() == device) { 
       split_op->MapToParallelDevices({{group}});
-      split_op->Instantiate(device, kSwitchComputingStream);
+      split_op->Instantiate(device, comp_stream_idx);
       dynamic_cast<ExecutableGraph&>(split_op->graph()).RecordExecTensor(split_output);
     }
     if (param->symbolic()) {
@@ -644,7 +645,7 @@ void SwitchExecGraph::MakeAllParamSlices(const Tensor& param, ParamBlock& block,
         slice_num[dim] = basic_slice_num + i * uncontiguous_slice_multiple + k;
         slice_relative_num[dim] = j * uncontiguous_slice_multiple + k;
         MakeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1, 
-                           is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple);
+                           is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple, comp_stream_idx);
       }
     }   
     return;  
@@ -654,7 +655,7 @@ void SwitchExecGraph::MakeAllParamSlices(const Tensor& param, ParamBlock& block,
     slice_num[dim] = basic_slice_num + i;
     slice_relative_num[dim] = i;
     MakeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1,
-                       is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple);
+                       is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple, comp_stream_idx);
   }                            
 }
 
@@ -667,7 +668,8 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
                                     const std::unordered_map<int32_t, int32_t>& state,
                                     const std::vector<int32_t>& multiple, int32_t dim,
                                     bool is_uncontiguous, int32_t uncontiguous_ordinal, 
-                                    int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple) {
+                                    int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple,
+                                    const StreamIndex comp_stream_idx) {
   if (dim == multiple.size()) {
     auto& param_slice = block.GetParamSlice(slice_num);
     const auto& owned_slice_instance = param_slice->OwnedSliceInst(0);
@@ -695,7 +697,7 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
         slice_num[dim] = basic_slice_num + i * uncontiguous_slice_multiple + k;
         slice_relative_num[dim] = j * uncontiguous_slice_multiple + k;
         Tensor merged_slice = MergeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1,
-                                                  is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple);
+                                                  is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple, comp_stream_idx);
         merged_slices.push_back(std::move(merged_slice));
       }
     }   
@@ -706,7 +708,7 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
       slice_num[dim] = basic_slice_num + i;
       slice_relative_num[dim] = i;
       Tensor merged_slice = MergeAllParamSlices(param, block, device, group, slice_num, slice_relative_num, state, multiple, dim + 1,
-                                                is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple);
+                                                is_uncontiguous, uncontiguous_ordinal, uncontiguous_multiple, uncontiguous_slice_multiple, comp_stream_idx);
       merged_slices.push_back(std::move(merged_slice));
     }  
   }
@@ -717,7 +719,7 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
   // 其他device上生成的不需要map placement_group和placement
   if (hetu::impl::comm::GetLocalDevice() == device) { 
     concatenate_op->MapToParallelDevices({{group}});
-    concatenate_op->Instantiate(device, kSwitchComputingStream);
+    concatenate_op->Instantiate(device, comp_stream_idx);
     dynamic_cast<ExecutableGraph&>(concatenate_op->graph()).RecordExecTensor(concatenate_output);
   }  
   return concatenate_output;
@@ -729,7 +731,8 @@ Tensor SwitchExecGraph::MergeAllParamSlices(const Tensor& param, ParamBlock& blo
 // support hetero param now
 void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, const DeviceGroupUnion& src_group_union,
                                   const DistributedStatesUnion& dst_ds_union, const DeviceGroupUnion& dst_group_union,
-                                  const Tensor& comm_input, const Tensor& after_param, const HTShape& global_shape) {
+                                  const Tensor& comm_input, const Tensor& after_param, const HTShape& global_shape, 
+                                  const StreamIndex comp_stream_idx) {
   // safety check
   HT_ASSERT(src_ds_union.size() == src_group_union.size() && dst_ds_union.size() == dst_group_union.size())
     << "union size mismatches";
@@ -886,7 +889,8 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
       MakeAllParamSlices(comm_input, *param_block_ptr, src_group.get(i), src_group, cur_slice_num, cur_slice_relative_num, 
                          cur_state_index, src_multiple.at(union_dim), 0,
                          src_uncontiguous, union_dim, 
-                         src_uncontiguous_multiple, src_uncontiguous_slice_multiple);
+                         src_uncontiguous_multiple, src_uncontiguous_slice_multiple,
+                         comp_stream_idx);
     }
   }
   HT_LOG_DEBUG << "set comm input shape back to " << input_local_shape;
@@ -915,7 +919,8 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
       auto result = MergeAllParamSlices(after_param, *param_block_ptr, dst_group.get(i), dst_group, cur_slice_num, cur_slice_relative_num, 
                                         cur_state_index, dst_multiple.at(union_dim), 0,
                                         dst_uncontiguous, union_dim, 
-                                        dst_uncontiguous_multiple, dst_uncontiguous_slice_multiple);
+                                        dst_uncontiguous_multiple, dst_uncontiguous_slice_multiple,
+                                        comp_stream_idx);
       // 如果是local的result
       // 记录result以及其与after graph param的映射
       if (local_device == dst_group.get(i)) {
@@ -934,7 +939,8 @@ void SwitchExecGraph::SwitchParam(const DistributedStatesUnion& src_ds_union, co
   }
 }
 
-void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_level) {
+void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch_level,
+                                    const StreamIndex comp_stream_idx, const StreamIndex comm_stream_idx) {
 
   auto local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": make a new comm graph begin...";
@@ -1122,7 +1128,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
                                           OpMeta().set_device_group_hierarchy({{src_group_union}}).set_name(before_param->name() + "_comm_input"));
       if (src_group_union.has(local_device)) {
         comm_input->producer()->MapToParallelDevices(src_group_union);
-        comm_input->producer()->Instantiate(local_device, kSwitchComputingStream);
+        comm_input->producer()->Instantiate(local_device, comp_stream_idx);
         // 只求comm graph的topo的话并不需要实际的feed dict
         if (switch_level != SWITCH_LEVEL::TOPO) {
           auto comm_input_data_it = before_graph->_preserved_data.find(before_param->id());
@@ -1143,7 +1149,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
       HT_LOG_DEBUG << local_device << ": switch param from " << before_param << " to " << after_param
         << ", src group union = " << src_group_union << " and dst group union = " << dst_group_union
         << ", src ds states union = " << src_ds_union.ds_union_info() << " and dst states union = " << dst_ds_union.ds_union_info();
-      SwitchParam(src_ds_union, src_group_union, dst_ds_union, dst_group_union, comm_input, after_param, after_param->global_shape());
+      SwitchParam(src_ds_union, src_group_union, dst_ds_union, dst_group_union, comm_input, after_param, after_param->global_shape(), comp_stream_idx);
     }
   }
 
@@ -1199,7 +1205,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
     HT_ASSERT(send_tensor->placement_group().contains(local_device))
       << "send tensor should already be instantiated locally";
     contiguous_op->MapToParallelDevices(send_tensor->placement_group());
-    contiguous_op->Instantiate(local_device, kSwitchComputingStream);
+    contiguous_op->Instantiate(local_device, comm_stream_idx);
     contiguous_send_tensors.push_back(std::move(contiguous_send_tensor));
     */
     // 给所有发向同一个device的tensor记录一个ParamBuffer
@@ -1221,7 +1227,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
                                         OpMeta().set_is_deduce_states(false));
   auto& batched_isend_irecv_op = result->producer();
   batched_isend_irecv_op->MapToParallelDevices({{comm_device_group}});
-  batched_isend_irecv_op->Instantiate(local_device, kSwitchCollectiveStream);
+  batched_isend_irecv_op->Instantiate(local_device, comm_stream_idx);
   TensorList recv_tensors = batched_isend_irecv_op->outputs();
   // we need to add dummy link for topo sort
   // 只有send没有recv
@@ -1279,7 +1285,7 @@ void SwitchExecGraph::MakeCommGraph(SWITCH_MODE switch_mode, SWITCH_LEVEL switch
         << "comm result should be concat op only";
       // ****TODO: A more general way!
       // now only support buffer when concat happens on a single axis while the other axis is not
-      HandleConcatBuffer(comm_result, buffer_comm_results);
+      HandleConcatBuffer(comm_result, buffer_comm_results, comp_stream_idx);
     }
     _concat_buffer = std::make_shared<ParamBuffer>("concat", buffer_comm_results);
     // HT_LOG_INFO << local_device << ": concat buffer has " << _concat_buffer->_tensor_list.size() << " tensor";
@@ -1314,16 +1320,14 @@ void SwitchExecGraph::BufferBatchedIsendIrecvExec(const hetu::impl::comm::NCCLCo
     recv_data_list.push_back(std::move(recv_data));
   }
   comm_nccl_group->BatchedISendIRecv(tasks);
-  // 在BatchedIsendIrecv中以及mark过了
-  // NDArray::MarkUsedBy(send_data_list, Stream(local_device, kSwitchCollectiveStream));
-  // NDArray::MarkUsedBy(recv_data_list, Stream(local_device, kSwitchCollectiveStream));
   HT_LOG_DEBUG << local_device << ": BufferBatchedIsendIrecvExec is done";
 }
 
 void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
                                               const hetu::impl::comm::NCCLCommunicationGroup& comm_nccl_group,
                                               Tensor2NDArrayMap& tensor2data,
-                                              Tensor2IntMap& tensor2degrees) {
+                                              Tensor2IntMap& tensor2degrees,
+                                              const StreamIndex comp_stream_idx) {
   auto local_device = hetu::impl::comm::GetLocalDevice();
   BatchedISendIRecvOpImpl& op_interface = dynamic_cast<BatchedISendIRecvOpImpl&>(op->body());
   auto op_stream = op->stream();
@@ -1376,10 +1380,10 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
     NDArrayMeta buffer_data_meta = input_meta.set_shape(input->shape()); // contiguous meta!!!
     auto buffer_data = NDArray(buffer_data_meta, buffer->AsStorage(), buffer->GetElementOffest(input));
     auto event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
-    auto stream = Stream(local_device, kSwitchComputingStream);
+    auto stream = Stream(local_device, comp_stream_idx);
     event->Record(stream);
     _buffer_transfer_events.emplace_back(std::move(event));
-    NDArray::contiguous(data, kSwitchComputingStream, buffer_data); // data ---> buffer_data
+    NDArray::contiguous(data, comp_stream_idx, buffer_data); // data ---> buffer_data
     NDArray::MarkUsedBy(data, stream);
     NDArray::MarkUsedBy(buffer_data, stream);
     event = std::make_unique<hetu::impl::CUDAEvent>(local_device);
@@ -1391,7 +1395,7 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
     }
   }
   // 同步
-  // 保证op_stream在kSwitchComputingStream之后
+  // 保证op_stream在comp_stream_idx之后
   auto buffer_transfer_events_len = _buffer_transfer_events.size() / 2;
   for (size_t i = 0; i < buffer_transfer_events_len; ++i) {
     // 用end event进行同步
@@ -1438,7 +1442,9 @@ void SwitchExecGraph::BufferBatchedIsendIrecv(const Operator& op,
 // 重新分配到after graph中
 void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode, 
                                    SWITCH_LEVEL switch_level, 
-                                   std::string switch_name) {
+                                   std::string switch_name,
+                                   const StreamIndex comp_stream_idx,
+                                   const StreamIndex comm_stream_idx) {
 
   // utils
   auto local_device = hetu::impl::comm::GetLocalDevice();
@@ -1534,7 +1540,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     HT_ASSERT(_comm_results.empty())
       << "no comm result should exist";
     // *建图*
-    MakeCommGraph(switch_mode, switch_level);
+    MakeCommGraph(switch_mode, switch_level, comp_stream_idx, comm_stream_idx);
     // 计算topo
     HT_LOG_DEBUG << local_device << ": the mutual params len is " << _param_blocks.size()
       << " and the local recv params len is " << _comm_results.size();
@@ -1589,11 +1595,12 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
   std::transform(_comm_set.begin(), _comm_set.end(), comm_ranks.begin(), 
                  [&](const Device& device) { return hetu::impl::comm::DeviceToWorldRank(device); });
   std::sort(comm_ranks.begin(), comm_ranks.end());
-  auto& comm_nccl_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(comm_ranks, Stream(local_device, kSwitchCollectiveStream));
+  auto& comm_nccl_group = hetu::impl::comm::NCCLCommunicationGroup::GetOrCreate(comm_ranks, Stream(local_device, comm_stream_idx));
   if (_bucket_num == -1) {
     std::call_once(warmup_flags[comm_device_group], 
-                  WarmUpComm, 
-                  _comm_set);
+                   WarmUpComm, 
+                   _comm_set,
+                   comm_stream_idx);
   }
   // 如果只需要建立topo
   // 此处直接返回即可
@@ -1676,7 +1683,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     }
     if (!send_buffer->IsAllocated()) {
       // use_nccl=true will slow down
-      send_buffer->Alloc(Stream(local_device, kSwitchCollectiveStream), false, comm_nccl_group->GetComm());
+      send_buffer->Alloc(Stream(local_device, comm_stream_idx), false, comm_nccl_group->GetComm());
     }
   }
   if (_profile_level <= SWITCH_PROFILE_LEVEL::MEMORY) {
@@ -1712,7 +1719,7 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
     // 特殊处理2
     // 使用聚合的buffer进行通信
     if (is_batched_isend_irecv_op(op)) {
-      BufferBatchedIsendIrecv(op, comm_nccl_group, tensor2data, tensor2degrees);
+      BufferBatchedIsendIrecv(op, comm_nccl_group, tensor2data, tensor2degrees, comp_stream_idx);
       continue;
     }
     // 特殊处理3
@@ -1726,8 +1733,8 @@ void SwitchExecGraph::SwitchParams(SWITCH_MODE switch_mode,
       if (!_concat_buffer->IsAllocated()) {
         // 分配concat的buffer
         // TODO: 目前可能显存溢出，之后应该考虑在溢出时扫描mempool中的free_event
-        // 目前kSwitchComputingStream的concat_buffer的显存只能确保可以重用send_buffer释放出的显存
-        _concat_buffer->Alloc(Stream(local_device, kSwitchComputingStream));
+        // 目前comp_stream_idx的concat_buffer的显存只能确保可以重用send_buffer释放出的显存
+        _concat_buffer->Alloc(Stream(local_device, comp_stream_idx));
       }
       auto& output = op->output(0);
       auto output_data = NDArray(output->meta(), _concat_buffer->AsStorage(), _concat_buffer->GetElementOffest(output));
@@ -2117,7 +2124,7 @@ Tensor ComplexExecComm::Instantiate() {
     << ", partial src group = " << partial_src_group
     << ", partial dst group = " << partial_dst_group;
   */
-  SwitchParam({{partial_src_ds}}, {{partial_src_group}}, {{partial_dst_ds}}, {{partial_dst_group}}, comm_input, comm_output, global_shape);
+  SwitchParam({{partial_src_ds}}, {{partial_src_group}}, {{partial_dst_ds}}, {{partial_dst_group}}, comm_input, comm_output, global_shape, kComputingStream);
   HT_ASSERT(_param_blocks.size() == 1)
     << "size wrong";
   for (auto& param_block_ptr : _param_blocks) {

@@ -1,3 +1,3 @@
 from .llama_dataloader import build_data_loader
 from .llama_dataset import LLaMAJsonDataset, get_mask_and_position_ids
-from .bucket import get_sorted_batch_and_len, get_input_and_label_buckets
+from .bucket import get_sorted_batch_and_len, build_fake_batch_and_len, get_input_and_label_buckets

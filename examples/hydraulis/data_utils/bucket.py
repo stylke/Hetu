@@ -124,6 +124,20 @@ def get_sorted_batch_and_len(global_batch: np.ndarray, pad_token: int):
     sorted_valid_tokens = non_pad_counts[sorted_indices]
     return sorted_global_batch, sorted_valid_tokens
 
+# 制造一个虚假的data
+def build_fake_batch_and_len(fake_seqlens: List[int], pad_token: int):
+    # 对fake_seqlens进行排序
+    sorted_seqlens = sorted(fake_seqlens)
+    # 获取最大长度
+    max_len = sorted_seqlens[-1]
+    # 初始化返回的ndarray
+    result = np.full((len(sorted_seqlens), max_len), pad_token, dtype=int)
+    # 填充0
+    assert pad_token != 0, "please change a number to fill the fake batch"
+    for i, seq_len in enumerate(sorted_seqlens):
+        result[i, :seq_len] = 0
+    return result, sorted_seqlens
+
 # 从global_batch中取出batch_indices的seqs并进行截断后分别构成两个buckets
 def get_input_and_label_buckets(global_batch: np.ndarray, pad_token: int, batch_indices: List[int], max_seqlen: int, alignment: int):
     bucket_batch = global_batch[batch_indices]

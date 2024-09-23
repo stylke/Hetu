@@ -4,7 +4,7 @@ HIDDEN_SIZE=${2:-4096}
 FFN_HIDDEN_SIZE=${3:-11008}
 # FFN_HIDDEN_SIZE=${3:-2752}
 NUM_HEADS=${4:-32}
-GLOBAL_BATCH_SIZE=${5:-64}
+GLOBAL_BATCH_SIZE=${5:-128}
 MAX_SEQ_LEN=${6:-8192}
 SERVER_ADDR=${7:-"172.24.10.109"} # master-0
 # SERVER_ADDR=${7:-"172.24.93.179"} # worker-0
@@ -13,7 +13,7 @@ SERVER_PORT=${8:-"23333"}
 HOST_FILE_PATH=${9:-"./scripts/host.yaml"}
 ENV_FILE_PATH=${10:-"./scripts/env_A100.sh"}
 
-CASE=5
+CASE=1
 if [[ ${CASE} -eq 1 ]]; then
 	# homo + greedy packing with static shape
 	NUM_GPUS=16

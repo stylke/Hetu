@@ -14,6 +14,7 @@ export HETU_MEMORY_PROFILE=WARN
 # export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=20
 export HETU_MAX_SPLIT_SIZE_MB=10240
 export HETU_MAX_INTERNAL_FRAGMENT_SIZE_MB=0
+export HETU_PRE_ALLOCATE_SIZE_MB=20000
 
 # Using multi-stream cuda event to watch time elaspe is inaccurate!
 # export HETU_PARALLEL_ATTN=ANALYSIS

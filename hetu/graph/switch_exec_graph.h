@@ -578,7 +578,9 @@ class SwitchExecGraph {
     
     void SwitchParams(SWITCH_MODE switch_mode = SWITCH_MODE::SWITCH_ORIGIN_PARAM,
                       SWITCH_LEVEL switch_level = SWITCH_LEVEL::EXEC,
-                      std::string switch_name = "switch");
+                      std::string switch_name = "switch",
+                      const StreamIndex comp_stream_idx = kSwitchComputingStream,
+                      const StreamIndex comm_stream_idx = kSwitchCollectiveStream);
 
   protected:
     void CreateParamBlock(ParamBlock& block,
@@ -592,7 +594,8 @@ class SwitchExecGraph {
                             const std::unordered_map<int32_t, int32_t>& state,
                             const std::vector<int32_t>& multiple, int32_t dim,
                             bool is_uncontiguous, int32_t uncontiguous_ordinal, 
-                            int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple);
+                            int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple,
+                            const StreamIndex comp_stream_idx);
 
     Tensor MergeAllParamSlices(const Tensor& param, ParamBlock& block, 
                                const Device& device, const DeviceGroup& group,
@@ -600,21 +603,26 @@ class SwitchExecGraph {
                                const std::unordered_map<int32_t, int32_t>& state,
                                const std::vector<int32_t>& multiple, int32_t dim,
                                bool is_uncontiguous, int32_t uncontiguous_ordinal, 
-                               int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple);
+                               int32_t uncontiguous_multiple, int32_t uncontiguous_slice_multiple,
+                               const StreamIndex comp_stream_idx);
     
     void MakeCommGraph(SWITCH_MODE switch_mode,
-                       SWITCH_LEVEL switch_level);
+                       SWITCH_LEVEL switch_level,
+                       const StreamIndex comp_stream_idx,
+                       const StreamIndex comm_stream_idx);
 
     void BufferBatchedIsendIrecvExec(const hetu::impl::comm::NCCLCommunicationGroup& comm_nccl_group);
     
     void BufferBatchedIsendIrecv(const Operator& op,
                                  const hetu::impl::comm::NCCLCommunicationGroup& comm_nccl_group,
                                  Tensor2NDArrayMap& tensor2data,
-                                 Tensor2IntMap& tensor2degrees);
+                                 Tensor2IntMap& tensor2degrees,
+                                 const StreamIndex comp_stream_idx);
 
     void SwitchParam(const DistributedStatesUnion& src_ds_union, const DeviceGroupUnion& src_group_union,
                      const DistributedStatesUnion& dst_ds_union, const DeviceGroupUnion& dst_group_union,
-                     const Tensor& comm_input, const Tensor& after_param, const HTShape& global_shape);
+                     const Tensor& comm_input, const Tensor& after_param, const HTShape& global_shape,
+                     const StreamIndex comp_stream_idx);
 
     void ProfileRunningDetails();
 
