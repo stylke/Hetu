@@ -9,17 +9,15 @@ if(${HETU_COMPILE_CUDA})
   list(APPEND HETU_SRC ${HETU_CU_SRC})
 endif()
 
-# Exclude test files
+# Exclude files
 list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/test/*")
+list(FILTER HETU_SRC EXCLUDE REGEX "${HETU_SRC_DIR}/hetu/v1/*")
 
 # Add main library
 add_library(hetu_C SHARED ${HETU_SRC})
 
 # Set CMake prefix path
-# A100
-set(CMAKE_PREFIX_PATH /home/pkuhetu/Hetu-dev/fused_kernel/.local)
-# 4090
-# set(CMAKE_PREFIX_PATH /home/gehao/lhy/local)
+set(CMAKE_PREFIX_PATH $ENV{GRPC_CMAKE_PREFIX_PATH})
 include(../cmake/grpc.cmake)
 
 # Get proto file paths
@@ -46,8 +44,8 @@ add_custom_command(
 
 # Execute Python gRPC tools
 execute_process(
-  COMMAND python -m grpc_tools.protoc -I./protos --python_out=../../../python_refactor/hetu/rpc/  
-  --pyi_out=../../../python_refactor/hetu/rpc/ --grpc_python_out=../../../python_refactor/hetu/rpc/  ./protos/heturpc.proto
+  COMMAND python -m grpc_tools.protoc -I./protos --python_out=../../../python/hetu/rpc/  
+  --pyi_out=../../../python/hetu/rpc/ --grpc_python_out=../../../python/hetu/rpc/  ./protos/heturpc.proto
   WORKING_DIRECTORY ${HETU_SRC_DIR}/hetu/impl/communication
 )
 

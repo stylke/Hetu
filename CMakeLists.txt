@@ -6,7 +6,7 @@ set(DCMAKE_BUILD_TYPE Debug)
 
 project(Hetu LANGUAGES CXX CUDA)
 
-include(cmake/config.cmake)
+include(cmake/config.example.cmake)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/Modules)
 
 set(USE_FLASH_ATTN ON)

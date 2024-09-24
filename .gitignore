@@ -12,9 +12,9 @@ CIFAR_100/
 update.sh
 cmake/config.cmake
 .hypothesis/
-examples/nlp/gpt/_cache.pkl
-examples/nlp/gpt/experiments/
-examples/nlp/gpt/data/
+examples/gpt/_cache.pkl
+examples/gpt/experiments/
+examples/gpt/data/
 examples/malleus/data/
 examples/efficiency/exp
 third_party/nccl/
@@ -80,3 +80,8 @@ python/hetu/_binding/graph/generated
 
 # third party
 # hetu/flash_attn
+
+# Open Source
+**/env_4090.sh
+**/env_A100.sh
+**/host.yaml

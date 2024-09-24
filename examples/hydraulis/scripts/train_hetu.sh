@@ -6,8 +6,8 @@ FFN_HIDDEN_SIZE=${3:-11008}
 NUM_HEADS=${4:-32}
 GLOBAL_BATCH_SIZE=${5:-128}
 MAX_SEQ_LEN=${6:-8192}
-SERVER_ADDR=${7:-"172.24.10.109"} # master-0
-# SERVER_ADDR=${7:-"172.24.93.179"} # worker-0
+SERVER_ADDR=${7:-"${IP_1}"} # master-0
+# SERVER_ADDR=${7:-"${IP_2}"} # worker-0
 # SERVER_ADDR=${7:-"127.0.0.1"} # 216
 SERVER_PORT=${8:-"23333"}
 HOST_FILE_PATH=${9:-"./scripts/host.yaml"}
@@ -67,6 +67,10 @@ JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
 JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json
 MERGE_FILE=${ROOT_FOLDER}/merges.txt
+
+if [ ! -d "ds_parallel_config" ]; then
+  mkdir "ds_parallel_config"
+fi
 
 CMD="python3 -u train_hetu.py \
 --batching_method $BATCHING_METHOD \

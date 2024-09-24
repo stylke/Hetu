@@ -1,3 +1,7 @@
+# 2024.9.24: need to support grpc and cp
+echo "*** this script is currently deprecated ***"
+exit 1
+
 NUM_LAYERS=${1:-32}
 HIDDEN_SIZE=${2:-4096}
 NUM_HEADS=${3:-32}
@@ -63,7 +67,7 @@ JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json
 MERGE_FILE=${ROOT_FOLDER}/merges.txt
 
-PATH="/home/pkuhetu/envs/miniconda3/envs/hetu-py/bin:${PATH}"
+PATH="${CONDA_ENV_PREFIX_PATH}/envs/hetu-py/bin:${PATH}"
 HETU_HOME="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../../../" && pwd )"
 LD_LIBRARY_PATH="${HETU_HOME}/build/lib:${LD_LIBRARY_PATH}"
 PYTHONPATH="${HETU_HOME}/python:${HETU_HOME}/build/lib:${PYTHONPATH}"
