@@ -1082,8 +1082,10 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
         for (int i = 0; i < static_cast<int>(DataType::NUM_DATA_TYPES); i++) {
           DataType dtype = static_cast<DataType>(i);
           _param_and_opt_var_bucket_switcher_pool[key][dtype] = std::vector<std::shared_ptr<SwitchExecGraph>>();
-          _param_switcher_pool[key][dtype] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype);
-          _grad_switcher_pool[key][dtype] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype);
+          _param_switcher_pool[key][dtype] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype, 
+            -1, std::unordered_set<Device>{}, std::unordered_map<DataType, DataType>{{DataType::BFLOAT16, DataType::FLOAT32}});
+          _grad_switcher_pool[key][dtype] = std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype, 
+            -1, std::unordered_set<Device>{}, std::unordered_map<DataType, DataType>{{DataType::BFLOAT16, DataType::FLOAT32}});
         }
       }
       // 旧的exec graph
@@ -1239,7 +1241,9 @@ NDArrayList DefineAndRunGraph::Run(const Tensor& loss, const TensorList& fetches
               comm_set.emplace(device);
             }
             for (int32_t bucket_num = 0; bucket_num < buckets_size; bucket_num++) {
-              _param_and_opt_var_bucket_switcher_pool[key][dtype].emplace_back(std::make_shared<SwitchExecGraph>(this, _active_exec_plan, next_active_exec_plan, dtype, bucket_num, comm_set));
+              _param_and_opt_var_bucket_switcher_pool[key][dtype].emplace_back(std::make_shared<SwitchExecGraph>(
+                this, _active_exec_plan, next_active_exec_plan, dtype, bucket_num, comm_set, 
+                std::unordered_map<DataType, DataType>{{DataType::FLOAT32, DataType::FLOAT32}}));
             }
           }
           // 实际bucket热切换

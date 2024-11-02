@@ -7,10 +7,10 @@ import ptvsd
 import hetu as ht
 from elastic.models.gpt.gpt_model import GPTLMHeadModel
 from elastic.models.gpt.gpt_config import GPTConfig
-from elastic.engine.data_utils import GPTJsonDataset
+from elastic.engine.data_utils.gpt import GPTJsonDataset
 from elastic.engine.parallel_config import read_ds_parallel_config
 from elastic.engine.wrapper import ModelWrapper, OptimizerWrapper, DatasetWrapper
-from elastic.engine.trainer import TrainerCtxs, Trainer
+from elastic.engine.trainer import TrainerCtxs, MalleusTrainer
 
 local_device = None
 all_devices = None
@@ -75,7 +75,7 @@ def pretrain(args):
     dataset_wrapper = DatasetWrapper(GPTJsonDataset)
     
     # trainer
-    trainer = Trainer(model_wrapper, optimizer_wrapper, dataset_wrapper)
+    trainer = MalleusTrainer(model_wrapper, optimizer_wrapper, dataset_wrapper)
     
     # build graph
     # ctxs should be profiled in advance

@@ -201,7 +201,7 @@ class _RecomputeContext(object):
         cur_multi_recompute = []
         self.multi_len = len(self.multi_recompute)
         for recompute_context in cur_recompute_contexts:
-            assert self.multi_len == len(recompute_context.multi_recompute), "all multi len should be equal"
+            assert self.multi_len == len(recompute_context.multi_recompute), f"all multi len should be equal: self.multi_recompute = {self.multi_recompute}, recompute_context.multi_recompute = {recompute_context.multi_recompute}"
         for i in range(self.multi_len):
             pipeline_num = 1
             for recompute_context in cur_recompute_contexts:

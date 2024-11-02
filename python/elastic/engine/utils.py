@@ -70,6 +70,15 @@ class TrainerCommArgs(Args):
         self.label_device_group_union: List[ht.DeviceGroup] = kwargs["label_device_group_union"]
         self.local_device: ht.device = kwargs["local_device"]
         self.all_devices: ht.DeviceGroup = kwargs["all_devices"]
+
+class TrainerCommAllArgs(Args):
+    def __init__(self, **kwargs):
+        self.input_ds_hierarchy: ht.DistributedStatesHierarchy = kwargs["input_ds_hierarchy"]
+        self.input_device_group_hierarchy: ht.DeviceGroupHierarchy = kwargs["input_device_group_hierarchy"]
+        self.label_ds_hierarchy: ht.DistributedStatesHierarchy = kwargs["label_ds_hierarchy"]
+        self.label_device_group_hierarchy: ht.DeviceGroupHierarchy = kwargs["label_device_group_hierarchy"]
+        self.local_device: ht.device = kwargs["local_device"]
+        self.all_devices: ht.DeviceGroup = kwargs["all_devices"]
         
 class TrainerEnvs(Args):
     def __init__(self, **kwargs):

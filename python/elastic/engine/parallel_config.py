@@ -130,7 +130,10 @@ def generate_gpt_3d_config(rank_to_device_mapping, unused_rank, hetero_layers, h
 
 def read_ds_parallel_config(args):
     # read ds_parallel_config from json file
-    config_paths = args.ds_parallel_config.split(',')
+    if ',' in args.ds_parallel_config:
+        config_paths = args.ds_parallel_config.split(',')
+    else:
+        config_paths = args.ds_parallel_config.split()
     assert len(config_paths) == args.num_strategy, \
       f'ds_parallel_config num should equal to num_strategy {args.num_strategy}'
     ds_parallel_configs = []
@@ -184,6 +187,20 @@ def parse_multi_ds_parallel_config(ds_parallel_configs, module_name, _range=-1):
         ds_hierarchy.append(ds_union)
         dg_hierarchy.append(dg_union)
     return ds_hierarchy, dg_hierarchy
+
+def get_dg_from_union(device, dg_union):
+    for i, dg in enumerate(dg_union):
+        if dg.contains(device):
+            return i, dg
+    return None, None
+
+def simple_check_blocks_range(ds_parallel_configs, model_config, model='llama'):
+    # simple check for llama/gpt blocks range
+    ranges = []
+    for _, block_config in ds_parallel_configs[0][model]['blocks'].items():
+        ranges.append(block_config['range'])
+    assert ranges[0][0] == 0 and ranges[-1][-1] == model_config.num_hidden_layers-1, \
+        f"{model} blocks range: {ranges} is conflict with num_hidden_layers: {model_config.num_hidden_layers}!"
 
 # walkaround: just give order by type(placeholder/varibale), may not include all cases
 def config2ds(config):

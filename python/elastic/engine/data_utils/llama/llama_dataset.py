@@ -6,9 +6,8 @@ from tqdm import tqdm
 from types import SimpleNamespace
 
 import numpy as np
-import torch
 from torch.utils.data import Dataset, DataLoader
-from .tokenizer.tokenizer import build_tokenizer
+from ..tokenizer import build_tokenizer
 
 class Encoder(object):
     def __init__(self, args):
@@ -26,7 +25,7 @@ class Encoder(object):
         
         return doc_ids
 
-class GPTJsonDataset(Dataset):
+class LLaMAJsonDataset(Dataset):
     def __init__(self, json_file, key, max_seq_len, vocab_file, merge_file):
         args = {
             'key': key,
@@ -68,7 +67,7 @@ class GPTJsonDataset(Dataset):
             print(f'Building dataset end, time cost: {end_time - start_time: .3f} s')
 
         # deal with max_seq_len + 1 (for tokens/labels seq_len = max_seq_len+1 - 1)
-        print(f'Cutting or padding data to max_seq_len + 1 = {max_seq_len + 1} begin ...')
+        print(f'Prepare data for max_seq_len + 1 = {max_seq_len + 1} begin ...')
         start_time = time.time()
         max_seq_len = max_seq_len + 1
         for idx, doc_ids in enumerate(self.data):
@@ -77,8 +76,10 @@ class GPTJsonDataset(Dataset):
             elif len(doc_ids) < max_seq_len:
                 self.data[idx] += [self.encoder.pad_id()] * (max_seq_len - len(doc_ids))
         end_time = time.time()
-        print(f'Cutting or padding data end, time cost: {end_time - start_time: .3f} s')
+        print(f'Prepare data end, time cost: {end_time - start_time: .3f} s')
 
+    def pad_id(self):
+        return self.encoder.pad_id()
     
     def __len__(self):
         return len(self.data)
@@ -104,7 +105,7 @@ def get_mask_and_position_ids(tokens, pad):
 
 if __name__ == '__main__':
     root_folder = 'data'
-    test_dataset = GPTJsonDataset(
+    test_dataset = LLaMAJsonDataset(
         json_file=f'{root_folder}/web/refinedweb0.json',
         key='content',
         max_seq_len=1024,

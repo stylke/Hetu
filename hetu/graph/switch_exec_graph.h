@@ -470,7 +470,8 @@ class SwitchExecGraph {
                     size_t plan_after,
                     DataType dtype,
                     int32_t bucket_num = -1,
-                    std::unordered_set<Device> comm_set = {}):
+                    std::unordered_set<Device> comm_set = {},
+                    std::unordered_map<DataType, DataType> dtype_to_filter_dtype = {}):
       _define_graph(define_graph),
       _dtype(dtype),
       _bucket_num(bucket_num),
@@ -482,14 +483,18 @@ class SwitchExecGraph {
       const auto& define_graph_params_and_opt_vars_unfiltered = define_graph->params_and_opt_vars();
       TensorCRefList define_graph_params, define_graph_params_and_opt_vars;
       // 筛选出dtype类型的
-      for (const auto& param_and_opt_var_unfiltered_ref : define_graph_params_and_opt_vars_unfiltered) {
-        if (param_and_opt_var_unfiltered_ref.get()->dtype() == _dtype) {
-          define_graph_params_and_opt_vars.emplace_back(param_and_opt_var_unfiltered_ref);
+      auto it = dtype_to_filter_dtype.find(_dtype);
+      if (it != dtype_to_filter_dtype.end()) {
+        auto filter_dtype = it->second;
+        for (const auto& param_and_opt_var_unfiltered_ref : define_graph_params_and_opt_vars_unfiltered) {
+          if (param_and_opt_var_unfiltered_ref.get()->dtype() == filter_dtype) {
+            define_graph_params_and_opt_vars.emplace_back(param_and_opt_var_unfiltered_ref);
+          }
         }
-      }
-      for (const auto& param_unfiltered_ref : define_graph_params_unfiltered) {
-        if (param_unfiltered_ref.get()->dtype() == _dtype) {
-          define_graph_params.emplace_back(param_unfiltered_ref);
+        for (const auto& param_unfiltered_ref : define_graph_params_unfiltered) {
+          if (param_unfiltered_ref.get()->dtype() == filter_dtype) {
+            define_graph_params.emplace_back(param_unfiltered_ref);
+          }
         }
       }
       // 分别设置_define_graph_params和_define_graph_params_and_opt_vars

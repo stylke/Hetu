@@ -18,7 +18,7 @@ examples/gpt/data/
 examples/malleus/data/
 examples/efficiency/exp
 third_party/nccl/
-
+examples/hotspa/data/
 examples/hydraulis/data/
 examples/hydraulis/*.pkl
 

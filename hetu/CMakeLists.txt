@@ -44,7 +44,7 @@ add_custom_command(
 
 # Execute Python gRPC tools
 execute_process(
-  COMMAND python -m grpc_tools.protoc -I./protos --python_out=../../../python/hetu/rpc/  
+  COMMAND python3 -m grpc_tools.protoc -I./protos --python_out=../../../python/hetu/rpc/  
   --pyi_out=../../../python/hetu/rpc/ --grpc_python_out=../../../python/hetu/rpc/  ./protos/heturpc.proto
   WORKING_DIRECTORY ${HETU_SRC_DIR}/hetu/impl/communication
 )

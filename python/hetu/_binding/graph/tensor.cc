@@ -133,6 +133,34 @@ PyObject* PyTensor_repr(PyTensor* self) {
   return PyTensor_str(self);
 }
 
+Py_hash_t PyTensor_hash(PyTensor* self) {
+  return self->tensor->id();
+}
+
+PyObject* PyTensor_richcompare(PyObject* a, PyObject* b, int op) {
+  if (!PyObject_TypeCheck(a, PyTensor_Type) || !PyObject_TypeCheck(b, PyTensor_Type)) {
+    Py_RETURN_NOTIMPLEMENTED;
+  }
+  PyTensor* ta = (PyTensor*)a;
+  PyTensor* tb = (PyTensor*)b;
+  switch (op) {
+    case Py_EQ:
+      if (ta->tensor->id() == tb->tensor->id()) {
+        Py_RETURN_TRUE;
+      } else {
+        Py_RETURN_FALSE;
+      }
+    case Py_NE:
+      if (ta->tensor->id() != tb->tensor->id()) {
+        Py_RETURN_TRUE;
+      } else {
+        Py_RETURN_FALSE;
+      }
+    default:
+      Py_RETURN_NOTIMPLEMENTED;
+  }
+}
+
 PyObject* PyTensor_id(PyTensor* self) {
   HT_PY_FUNC_BEGIN
   return PyLong_FromInteger(self->tensor->id());
@@ -610,7 +638,7 @@ PyTypeObject PyTensor_Type_obj = {
   nullptr, /* tp_as_number */
   nullptr, /* tp_as_sequence */
   nullptr, /* tp_as_mapping */
-  nullptr, /* tp_hash  */
+  (hashfunc) PyTensor_hash, /* tp_hash  */
   nullptr, /* tp_call */
   (reprfunc) PyTensor_str, /* tp_str */
   nullptr, /* tp_getattro */
@@ -620,7 +648,7 @@ PyTypeObject PyTensor_Type_obj = {
   nullptr, /* tp_doc */
   nullptr, /* tp_traverse */
   nullptr, /* tp_clear */
-  nullptr, /* tp_richcompare */
+  (richcmpfunc) PyTensor_richcompare, /* tp_richcompare */
   0, /* tp_weaklistoffset */
   nullptr, /* tp_iter */
   nullptr, /* tp_iternext */

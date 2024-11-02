@@ -46,7 +46,7 @@ static void checkOutputsMemory(const Operator& op, size_t micro_batch_id, const 
         // all_gather由于开启了共享的buffer不对其进行分析
         continue;
       }
-      HT_LOG_INFO << local_device << ": micro batch " << micro_batch_id << " " << op->output(i)
+      HT_LOG_DEBUG << local_device << ": micro batch " << micro_batch_id << " " << op->output(i)
         << " malloc new GPU memory with shape = " << output->shape()
         << ", ptr id = " << output->storage()->ptr_id();
       malloc_outputs_map[output->storage()->ptr_id()] = std::make_pair(micro_batch_id, op->output(i));
@@ -1950,13 +1950,14 @@ NDArrayList ExecutableGraph::CrucialRun(const TensorList& fetches,
     auto& runtime_ctx = runtime_ctx_list[micro_batch_id];
     // set arithmetic shape
     SetShapePlan(_active_shape_plan_list[micro_batch_id]);
+    // some tensor (inserted just now) may need to infer shape again
+    UpdateExecShapePlan(runtime_ctx);
     // set symbolic shape
     for (auto& tensor: _leaf_symbolic_tensor_list) {
       // HT_LOG_INFO << local_device << ": leaf symbolic tensor " << tensor; 
       tensor->set_symbolic_shape(GetTensorShape(tensor));
+      // HT_LOG_INFO << local_device << ": leaf symbolic tensor end"; 
     }
-    // some tensor (inserted just now) may need to infer shape again
-    UpdateExecShapePlan(runtime_ctx);
     // micro batch i>0 reuse: 
     // 0. shared weight which was recved in micro batch 0
     // 1. f32 -> fp16, bf16 weight which was transfered in micro batch 0
@@ -2465,8 +2466,8 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
     local_topo.insert(local_topo.end(), local_placeholder_variable_ops.begin(), local_placeholder_variable_ops.end());
     local_topo.insert(local_topo.end(), local_fw_topo.begin(), local_fw_topo.end());
     local_topo.insert(local_topo.end(), local_bw_topo.begin(), local_bw_topo.end());
-    HT_LOG_DEBUG << local_device  << ": local placeholder & variable ops: " << local_placeholder_variable_ops
-                 << "\nlocal fw topo: " << local_fw_topo << "\nlocal bw topo: " << local_bw_topo;
+    HT_LOG_DEBUG << local_device  << ": local placeholder & variable ops: " << local_placeholder_variable_ops;
+    HT_LOG_DEBUG << local_device << ": local fw topo: " << local_fw_topo << "\nlocal bw topo: " << local_bw_topo;
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get local fw/bw topo end...";
 
     HT_LOG_DEBUG << local_device << ": [Execution Plan] get leaf symbolic tensor list begin...";

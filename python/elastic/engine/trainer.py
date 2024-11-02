@@ -5,18 +5,23 @@ import os
 import ast
 import numpy as np
 import hetu as ht
+from queue import Queue
 from typing import List, Dict, Any
 from .utils import *
 from .wrapper import *
 from .straggler import *
 from .strategy import StrategyModel
-from .parallel_config import parse_multi_ds_parallel_config, config2ds
-from .data_utils import get_mask_and_position_ids, build_pretraining_data_loader
+from .parallel_config import parse_multi_ds_parallel_config, config2ds, get_dg_from_union
+from .data_utils.gpt import get_mask_and_position_ids, build_pretraining_data_loader
+from .data_utils.llama import build_dist_data_loader, build_normal_data_loader
+from .data_utils.bucket import sort_and_pack_for_global_batch
 
 SLIDING_WINDOW = 2
 PRE_PROFILING_ROUND = 5
 WORKLOAD_BIAS_THRESHOLD = 0.1
 LOG_FILE_PATH = "./elastic_log/straggler"
+start_time = 0
+end_time = 0
         
 class TrainerCrucialOps(Args):
     def __init__(self, **kwargs):
@@ -36,7 +41,321 @@ class Trainer:
     ):
         self.model_wrapper = model_wrapper
         self.optimizer_wrapper = optimizer_wrapper
-        self.dataset_wrapper = dataset_wrapper 
+        self.dataset_wrapper = dataset_wrapper
+
+        self.dataset = None
+        self.data_iter = None
+        self.is_built = False
+
+    def build_data_iter(self, args):
+        normal_dataloader = build_normal_data_loader(self.dataset, 0, args.global_batch_size)
+        self.data_iter = iter(normal_dataloader)
+
+    def create_dataset(self, args):
+        self.dataset = self.dataset_wrapper.create_dataset(
+            json_file=args.json_file,
+            key=args.json_key,
+            max_seq_len=args.seq_len,
+            vocab_file=args.vocab_file,
+            merge_file=args.merge_file)
+
+    def build(self, args, ds_parallel_configs):
+        assert self.is_built == False, "should only build once"
+        # 1. Build Dataset & Data Iterator
+        self.create_dataset(args)
+        self.build_data_iter(args)
+        # 2. Build Computation Graph
+        with ht.graph("define_and_run", num_strategy=len(ds_parallel_configs)):
+            if args.bf16:
+                precision = "ht.bfloat16"
+            else:
+                precision = "ht.float32"
+            with ht.autocast(eval(precision)):
+                # print(f'{local_device}: use precision {precision}')
+                self.create_define_graph(args, ds_parallel_configs)
+        self.is_built = True
+
+    def create_define_graph(self, args, ds_parallel_configs):
+        pass
+
+    def train(self, args):
+        pass
+
+    def run_plan(self, args):
+        pass
+
+class HotSPaTrainer(Trainer):
+    def __init__(
+        self, 
+        model_wrapper: ModelWrapper, 
+        optimizer_wrapper: OptimizerWrapper, 
+        dataset_wrapper: DatasetWrapper
+    ):
+        super().__init__(model_wrapper, optimizer_wrapper, dataset_wrapper)
+
+    def create_define_graph(self, args, ds_parallel_configs):
+        # 1. Config Information
+        input_ds_hierarchy, input_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'input')
+        label_ds_hierarchy, label_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'label')
+        dp_size = input_ds_hierarchy[0].get(0).get_dim(0)
+        dummy_size = dp_size * args.seq_len # just a dummy shape, will change depend on real data shape
+
+        # 2. Build Placeholders
+        input_ids = ht.parallel_placeholder(ht.int64, global_shape=[dummy_size], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='input_ids')
+        masked_lm_labels = ht.parallel_placeholder(ht.int64, global_shape=[dummy_size], ds_hierarchy=label_ds_hierarchy, device_group_hierarchy=label_dg_hierarchy, name='masked_lm_labels')
+        position_ids = ht.parallel_placeholder(ht.int64, global_shape=[dummy_size], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='position_ids')
+        token_type_ids = ht.parallel_placeholder(ht.int64, global_shape=[dummy_size], ds_hierarchy=input_ds_hierarchy, device_group_hierarchy=input_dg_hierarchy, name='token_type_ids')
+        
+        # 3. Build Model Weight
+        model = self.model_wrapper.create_model(ds_parallel_configs)
+
+        # 4. Build Symbolic Shape
+        config = self.model_wrapper.model_config
+        config.cu_seqlens_list = []
+        for block_id, block in enumerate(model.transformer.h):
+            config.cu_seqlens_list.append(
+                ht.parallel_placeholder(
+                    ht.int32, 
+                    global_shape=[dummy_size], 
+                    ds_hierarchy=block.attn.qkv_dense.ds_union_map['split0_dup'], 
+                    device_group_hierarchy=block.attn.qkv_dense.device_group_unions,
+                    name=f'cu_seqlens_{block_id}'
+                )
+            )
+
+        # just symbolic value, will change depend on real data
+        config.multi_seq_lens_symbol = []
+        config.multi_cp_group_symbol = []
+        for i in range(len(input_ds_hierarchy)):
+            cur_dp = input_ds_hierarchy[i].get(0).get_dim(0) # dp_i for strategy_i
+            config.multi_seq_lens_symbol.append([input_ids.symbolic_shape[0] for _ in range(cur_dp)])
+            config.multi_cp_group_symbol.append([ht.IntSymbol(i) for i in range(cur_dp)])
+        config.max_seqlen_symbol = ht.IntSymbol(1)
+
+        # 5. Build Forward Graph
+        loss_op = model(input_ids=input_ids,
+                        labels=masked_lm_labels)
+
+        # 6. Build Backward Graph
+        opt = self.optimizer_wrapper.create_optimizer(lr=args.lr)
+        train_op = opt.minimize(loss_op)
+
+        # 7. Record Ops
+        if self.is_built == False:
+            self.build_ops = TrainerCrucialOps(
+                input_ids=input_ids,
+                masked_lm_labels=masked_lm_labels,
+                position_ids=position_ids,
+                token_type_ids=token_type_ids,
+                loss_op=loss_op,
+                train_op=train_op
+            )
+
+    def train(
+        self, 
+        args, 
+        ds_parallel_configs,
+        local_device: ht.device,
+        all_devices: ht.DeviceGroup,
+        ):
+        assert self.is_built == True and self.dataset != None and self.data_iter != None, \
+            "must build graph and dataset before HotSPa training!"
+        input_ds_hierarchy, input_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'input')
+        label_ds_hierarchy, label_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'label')
+        comm_args = TrainerCommAllArgs(
+            input_ds_hierarchy=input_ds_hierarchy,
+            input_device_group_hierarchy=input_dg_hierarchy,
+            label_ds_hierarchy=label_ds_hierarchy,
+            label_device_group_hierarchy=label_dg_hierarchy,
+            local_device=local_device,
+            all_devices=all_devices
+        )
+        if args.bf16:
+            precision = "ht.bfloat16"
+        else:
+            precision = "ht.float32"
+
+        self.feed_dicts = Queue()
+        def cache_feed_dict(feed_dict):
+            if self.feed_dicts.qsize() == 50:
+                self.feed_dicts.get()
+            self.feed_dicts.put(feed_dict)
+        self.cache_feed_dict = cache_feed_dict
+
+        print(f'{local_device}: the first step may take a few minutes to [generate topo & execution plan], please be patient...')
+        for epoch in range(args.epochs):
+            consumed_samples = 0 # should be reset when run next epoch
+            for step in range(args.steps):
+                # group and packing
+                global_batch = next(self.data_iter).numpy()
+                buckets = sort_and_pack_for_global_batch(global_batch, self.dataset.pad_id(), args.bucket_sizes, False)
+                # enable parallelism hot switching
+                for strategy_id in range(args.num_strategy + 1):
+                    alloc_run_level = ht.run_level("alloc")
+                    grad_run_level = ht.run_level("grad")
+                    update_run_level = ht.run_level("update")
+                    if strategy_id == 0:
+                        cur_run_level = alloc_run_level
+                        bucket = buckets[0]
+                    elif strategy_id == len(ds_parallel_configs): # init graph
+                        strategy_id = 0
+                        cur_run_level = update_run_level
+                        bucket = buckets[0]
+                    else:
+                        cur_run_level = grad_run_level
+                        bucket = buckets[args.num_strategy - strategy_id]
+                    # run sperate strategy for bucket
+                    with ht.autocast(eval(precision)):
+                        consumed_samples = self.run_plan(
+                            args,
+                            ds_parallel_configs,
+                            comm_args = comm_args,
+                            epoch = epoch,
+                            step = step,
+                            consumed_samples = consumed_samples, 
+                            bucket = bucket, 
+                            strategy_id = strategy_id, 
+                            run_level = cur_run_level)
+
+    def run_plan(
+        self, 
+        args,
+        ds_parallel_configs,
+        comm_args = None,
+        epoch = 0,
+        step = 0,
+        consumed_samples = 0,
+        bucket = None,
+        strategy_id = 0, 
+        run_level = 0):
+
+        global start_time, end_time
+        input_ds_hierarchy = comm_args.input_ds_hierarchy
+        input_dg_hierarchy = comm_args.input_device_group_hierarchy
+        label_ds_hierarchy = comm_args.label_ds_hierarchy
+        label_dg_hierarchy = comm_args.label_device_group_hierarchy
+        local_device = comm_args.local_device
+        all_devices = comm_args.all_devices
+
+        input_ds_union = input_ds_hierarchy[strategy_id]
+        input_device_group_union = input_dg_hierarchy[strategy_id]
+        label_ds_union = label_ds_hierarchy[strategy_id]
+        label_device_group_union = label_dg_hierarchy[strategy_id]
+        assert input_ds_union.hetero_dim == -3, "input hetero dim unsupported"
+        assert label_ds_union.hetero_dim == -3, "label hetero dim unsupported"
+
+        # device in same dp_group will read the same batch data, idx=-1 means no need to read data
+        dup_group_idx, dup_group_num = -1, -1
+        input_union_idx, input_device_group = get_dg_from_union(local_device, input_device_group_union)
+        label_union_idx, label_device_group = get_dg_from_union(local_device, label_device_group_union)
+        if input_device_group != None:
+            local_device_idx = input_device_group.get_index(local_device)
+            dup_group_idx = input_union_idx
+            dup_group_num = len(input_device_group_union)
+            if input_ds_union.hetero_dim == -3:
+                dup_group_idx = input_ds_union.get(0).get_dup_group_index(local_device_idx)
+                dup_group_num = input_ds_union.get(0).get_dim(0)
+        elif label_device_group != None:
+            local_device_idx = label_device_group.get_index(local_device)
+            dup_group_idx = label_union_idx
+            dup_group_num = len(label_device_group_union)
+            if label_ds_union.hetero_dim == -3:
+                dup_group_idx = label_ds_union.get(0).get_dup_group_index(local_device_idx)
+                dup_group_num = label_ds_union.get(0).get_dim(0)
+        else:
+            dup_group_num = len(input_device_group_union)
+            if input_ds_union.hetero_dim == -3:
+                dup_group_num = input_ds_union.get(0).get_dim(0)
+            # raise RuntimeError(f"device {local_device} not in input_device_group or label_device_group!")
+
+        dp_rank = dup_group_idx
+        dp_size = dup_group_num
+        micro_batch_size = 1 # already packed
+        input_bucket, label_bucket = bucket
+        global_batch_size = input_bucket.packed_batch_size() // dp_size * dp_size
+        if global_batch_size == 0: # empty input_bucket, just run a dummy batch with full padded
+            input_bucket.make_dummy_batch()
+            label_bucket.make_dummy_batch()
+            global_batch_size = dp_size
+        seq_len = input_bucket.max_seq_len()
+        gbs_per_dp = global_batch_size // dp_size
+        mbs_times_dp = micro_batch_size * dp_size
+        assert global_batch_size % mbs_times_dp == 0, \
+            f'gbs {global_batch_size} must could be divided by mbs {micro_batch_size} * dp {dp_size}'
+        num_micro_batches = global_batch_size // mbs_times_dp
+
+        # load data for each dp
+        if dp_rank != -1:
+            input_batch, label_batch = input_bucket.packed_batch(), label_bucket.packed_batch()
+            cu_seqlens_list_batch = input_bucket.packed_cu_seqlens_list()
+            input_list = []
+            label_list = []
+            cu_seqlens_list = []
+            for begin_idx in range(dp_rank * micro_batch_size, global_batch_size, mbs_times_dp):
+                assert begin_idx >= 0 and begin_idx+micro_batch_size <= len(input_batch) and begin_idx+micro_batch_size <= len(label_batch) and begin_idx+micro_batch_size <= len(cu_seqlens_list_batch), 'read micro batch error!!!'
+                input_list += input_batch[begin_idx: begin_idx+micro_batch_size] # # batch_size * [seq_len], seq_len may different!
+                label_list += label_batch[begin_idx: begin_idx+micro_batch_size]
+                cu_seqlens_list += cu_seqlens_list_batch[begin_idx: begin_idx+micro_batch_size]
+            input_list = [micro_batch.astype(np.int64) for micro_batch in input_list]
+            label_list = [micro_batch.astype(np.int64) for micro_batch in label_list]
+            num_micro_batches = len(input_list)
+            max_seqlen_val = input_bucket.max_seq_len()
+            config = self.model_wrapper.model_config
+            config.max_seqlen_symbol.set_data(max_seqlen_val)
+            feed_dict = {
+                self.build_ops.input_ids: input_list,
+                self.build_ops.masked_lm_labels: label_list,
+            }
+            for i in range(config.n_layer):
+                feed_dict[config.cu_seqlens_list[i]] = [x.astype(np.int32) for x in cu_seqlens_list]
+            self.cache_feed_dict(feed_dict)
+        else: # fake data; feed_dict={} will cause segment fault?
+            print("Need feed dict data!")
+            os.killpg(0, signal.SIGTERM)
+        if run_level == ht.run_level("alloc") or (len(ds_parallel_configs) == 1 and run_level == ht.run_level("update")):
+            start_time = time.time()
+        if args.run_memory_experiment and step == 0:
+            os.environ['HETU_MEMORY_LOG_FILE'] = args.memory_file
+        try:
+            results = self.build_ops.train_op.graph.run(
+                self.build_ops.loss_op, 
+                [self.build_ops.loss_op, self.build_ops.train_op], 
+                feed_dict = feed_dict, 
+                num_micro_batches = num_micro_batches, 
+                cur_strategy_id = strategy_id,
+                run_level = run_level,
+                grad_scale = 1.0)
+        except RuntimeError as e:
+            print(e)
+            with open("./logs/exception.txt", 'w') as file:
+                print(f"{local_device}:", file=file)
+                print(e, file=file)
+            os.killpg(0, signal.SIGTERM)
+        if args.run_memory_experiment and step == 0:
+            if 'HETU_MEMORY_LOG_FILE' in os.environ:
+                del os.environ['HETU_MEMORY_LOG_FILE'] 
+            return consumed_samples
+        
+        if run_level != ht.run_level("alloc"):
+            consumed_samples += input_bucket.original_batch_size()
+
+        if run_level == ht.run_level("update"):
+            # NOTE: update new step end time
+            end_time = time.time()
+            if label_device_group != None:
+                loss_out = results[0].numpy(force=True).mean()
+                print(f"{local_device}: [Epoch {epoch}] (step {step}, consumed_samples = {consumed_samples}): loss = {loss_out:.3f}, time = {end_time - start_time:.4f}")
+
+        return consumed_samples
+
+class MalleusTrainer(Trainer):
+    def __init__(
+        self, 
+        model_wrapper: ModelWrapper, 
+        optimizer_wrapper: OptimizerWrapper, 
+        dataset_wrapper: DatasetWrapper
+    ):
+        super().__init__(model_wrapper, optimizer_wrapper, dataset_wrapper)
         
         self.dataset = None
         self.is_built = False
