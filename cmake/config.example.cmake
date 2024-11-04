@@ -2,21 +2,21 @@
 ### Set paths ######
 ######################
 
-# CUDA version >= 10.1
+# CUDA version >= 11.8
 if(DEFINED ENV{CUDA_HOME})
   set(CUDAToolkit_ROOT $ENV{CUDA_HOME})
 else()
   set(CUDAToolkit_ROOT /usr/local/cuda)
 endif()
 
-# CUDNN >= 7.5
+# CUDNN >= 8.2
 # - CUDNN_ROOT: root directory of cudnn
 set(CUDNN_ROOT)
 
-# NCCL version >= 2.8
+# NCCL version >= 2.19
 set(NCCL_ROOT)
 
-# MPI >= 3.1
+# MPI >= 4.1
 set(MPI_ROOT)
 
 # PyBind11 2.6.2
@@ -25,13 +25,6 @@ set(MPI_ROOT)
 #                 if pybind11 has been installed via pip
 # if not found, we'll download and compile it in time
 set(pybind11_DIR)
-
-# ZMQ 4.3.2
-# - ZMQ_ROOT: root directory of zeromq
-# - ZMQ_BUILD: build directory of zeromq
-# if not found, we'll download and compile it in time
-set(ZMQ_ROOT)
-set(ZMQ_BUILD)
 
 # DNNL (oneDNN) 3.0
 # - DNNL_ROOT: root directory of zeromq
