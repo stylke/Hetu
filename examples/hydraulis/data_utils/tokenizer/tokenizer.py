@@ -33,8 +33,7 @@ def _vocab_size_with_padding(orig_vocab_size, args):
     still having GPU friendly size."""
 
     after = orig_vocab_size
-    multiple = args.make_vocab_size_divisible_by * \
-        args.tensor_model_parallel_size
+    multiple = args.make_vocab_size_divisible_by
     while (after % multiple) != 0:
         after += 1
     if args.rank == 0:
@@ -44,7 +43,7 @@ def _vocab_size_with_padding(orig_vocab_size, args):
     return after
 
 
-class AbstractTokenizer(ABC):
+class HetuTokenizer(ABC):
     """Abstract class for tokenizer."""
 
     def __init__(self, name):
@@ -101,7 +100,7 @@ class AbstractTokenizer(ABC):
         raise NotImplementedError('MASK is not provided for {} '
                                   'tokenizer'.format(self.name))
 
-class _GPT2BPETokenizer(AbstractTokenizer):
+class _GPT2BPETokenizer(HetuTokenizer):
     """Original GPT2 BPE tokenizer."""
 
     def __init__(self, vocab_file, merge_file):

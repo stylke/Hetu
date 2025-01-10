@@ -1,4 +1,4 @@
-source /home/pkuhetu/ls/bashrc
+source ./ls/bashrc
 conda activate hetu-py
 
 HETU_HOME="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../../../" && pwd )"

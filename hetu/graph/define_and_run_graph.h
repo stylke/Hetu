@@ -23,7 +23,8 @@ namespace graph {
 class ExecGraphPlan {
  public:
   std::shared_ptr<ExecutableGraph> exec_graph;
-  size_t strategy_id;
+  size_t compute_strategy_id;
+  size_t optimize_strategy_id;
   Op2OpMap op_to_exec_op_mapping;
   Tensor2TensorMap tensor_to_exec_tensor_mapping;
   OpRefList global_topo; // cache the global topo to accelerate ineferring new shape plan
@@ -51,13 +52,15 @@ class ExecGraphPlan {
                 Tensor2TensorMap&& _tensor_to_exec_tensor_mapping,
                 OpRefList&& _global_topo,
                 std::vector<Tensor2ShapeMap>&& _shape_plan_pool,
-                size_t _strategy_id = 0)
+                size_t _compute_strategy_id = 0,
+                size_t _optimize_strategy_id = 0)
   : exec_graph(std::move(_exec_graph)), 
     op_to_exec_op_mapping(std::move(_op_to_exec_op_mapping)),
     tensor_to_exec_tensor_mapping(std::move(_tensor_to_exec_tensor_mapping)),
     global_topo(std::move(_global_topo)),
     shape_plan_pool(std::move(_shape_plan_pool)),
-    strategy_id(_strategy_id) {}
+    compute_strategy_id(_compute_strategy_id),
+    optimize_strategy_id(_optimize_strategy_id) {}
 };
 
 /*
@@ -93,16 +96,24 @@ class DefineAndRunGraph : public Graph {
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                   const FeedDict& feed_dict = {}, const int num_micro_batches = 1,
-                  const int cur_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE,
+                  const int compute_strategy_id = 0, const int optimize_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE,
                   bool save_checkpoint = false, const double grad_scale = 1);
 
   GraphType type() const {
     return GraphType::DEFINE_AND_RUN;
   }
 
+  bool use_optimizer_strategy(Operator& op) const;
+
   const ExecGraphPlan& GetPlan(size_t num) const {
     HT_ASSERT(num < _exec_graph_plan_pool.size());
     return _exec_graph_plan_pool[num];
+  }
+
+  void RecordBeforeZero(const Tensor& tensor, const DistributedStatesHierarchy& ds_hierarchy) {
+    HT_ASSERT(_ds_hierarchy_before_zero.find(tensor->id()) ==_ds_hierarchy_before_zero.end())
+      << tensor << " is already recorded in the ds hierarchy before zero mapping";
+    _ds_hierarchy_before_zero[tensor->id()] = ds_hierarchy;
   }
 
   void MergeGraph(DefineAndRunGraph& another_graph);
@@ -162,6 +173,7 @@ class DefineAndRunGraph : public Graph {
   // deprecated: now support heterogenous pipeline parallel
   // std::vector<DeviceGroupList> _multi_device_groups; // all the device groups of ops, in the order of MakeOp calls
   std::vector<Operator> _ops_with_device_group_hierarchy; // all ops with device groups, in the order of MakeOp calls
+  std::unordered_map<TensorId, DistributedStatesHierarchy> _ds_hierarchy_before_zero; // all tensors (most likely parameters) with ds hierarchy changed due to zero
   // Note: here Device2PipelineMap record the mapping from device to the pipeline that it belongs to
   // and each strategy has a specified mapping
   // To be specific, for each pipeline, each stage is a tp group 

@@ -1,16 +1,15 @@
 #pragma once
 
 #include "hetu/graph/operator.h"
+#include "hetu/graph/optim/optimizerParamScheduler.h"
 
 namespace hetu {
 namespace graph {
 
 class OptimizerUpdateOpInterface : public OpInterface {
  public:
-  OptimizerUpdateOpInterface(OpType&& op_type, float learning_rate)
-  : OpInterface(std::move(op_type)), _learning_rate(learning_rate) {
-    HT_VALUE_ERROR_IF(_learning_rate < 0)
-      << "Invalid learning rate: " << _learning_rate;
+  OptimizerUpdateOpInterface(OpType&& op_type, OptimizerParamScheduler param_scheduler)
+  : OpInterface(std::move(op_type)), _param_scheduler(param_scheduler) {
   }
 
   uint64_t op_indicator() const noexcept override {
@@ -43,9 +42,7 @@ class OptimizerUpdateOpInterface : public OpInterface {
     return {inputs.front()};
   }
 
-  bool
-  DoMapToParallelDevices(Operator& op,
-                         const DeviceGroupUnion& placement_group_union) const override;
+  bool DoMapToParallelDevices(Operator& op, const DeviceGroupUnion& placement_group_union) const override;
 
  public:
   inline bool require_contig_inputs() const override {
@@ -56,23 +53,28 @@ class OptimizerUpdateOpInterface : public OpInterface {
     if (OpInterface::operator==(rhs)) {
       const auto& rhs_ =
         reinterpret_cast<const OptimizerUpdateOpInterface&>(rhs);
-      return learning_rate() == rhs_.learning_rate();
+      return param_scheduler() == rhs_.param_scheduler();
     }
     return false;
   }
 
-  float learning_rate() const {
-    return _learning_rate;
+  float learning_rate(int64_t step = 0) const {
+    return _param_scheduler.get_lr(step);
   }
 
+  OptimizerParamScheduler param_scheduler() const{
+    return _param_scheduler;
+  }
+
+
  protected:
-  float _learning_rate;
+  OptimizerParamScheduler _param_scheduler;
 };
 
 class SGDUpdateOpImpl final : public OptimizerUpdateOpInterface {
  public:
-  SGDUpdateOpImpl(float learning_rate)
-  : OptimizerUpdateOpInterface(quote(SGDUpdateOp), learning_rate) {}
+  SGDUpdateOpImpl(OptimizerParamScheduler param_scheduler)
+  : OptimizerUpdateOpInterface(quote(SGDUpdateOp), param_scheduler) {}
 
  protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
@@ -81,8 +83,8 @@ class SGDUpdateOpImpl final : public OptimizerUpdateOpInterface {
 
 class SGDUpdateWithGradScalerOpImpl final : public OptimizerUpdateOpInterface {
  public:
-  SGDUpdateWithGradScalerOpImpl(float learning_rate)
-  : OptimizerUpdateOpInterface(quote(SGDUpdateWithGradScalerOp), learning_rate) {}
+  SGDUpdateWithGradScalerOpImpl(OptimizerParamScheduler param_scheduler)
+  : OptimizerUpdateOpInterface(quote(SGDUpdateWithGradScalerOp), param_scheduler) {}
 
  protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
@@ -91,8 +93,8 @@ class SGDUpdateWithGradScalerOpImpl final : public OptimizerUpdateOpInterface {
 
 class MomentumUpdateOpImpl final : public OptimizerUpdateOpInterface {
  public:
-  MomentumUpdateOpImpl(float learning_rate, float momentum, bool nesterov)
-  : OptimizerUpdateOpInterface(quote(MomemtumUpdateOp), learning_rate),
+  MomentumUpdateOpImpl(OptimizerParamScheduler param_scheduler, float momentum, bool nesterov)
+  : OptimizerUpdateOpInterface(quote(MomemtumUpdateOp), param_scheduler),
     _momentum(momentum),
     _nesterov(nesterov) {
     HT_VALUE_ERROR_IF(momentum < 0 || momentum > 1)
@@ -127,15 +129,14 @@ class MomentumUpdateOpImpl final : public OptimizerUpdateOpInterface {
 
 class AdamOpImpl : public OptimizerUpdateOpInterface {
  public:
-  AdamOpImpl(float learning_rate, const std::vector<bool>& multi_zero = {false},
+  AdamOpImpl(OptimizerParamScheduler param_scheduler, const std::vector<bool>& multi_zero = {false},
              float beta1 = 0.9, float beta2 = 0.999, 
-             float eps = 1e-8, float weight_decay = 0)
-  : OptimizerUpdateOpInterface(quote(AdamOp), learning_rate),
+             float eps = 1e-8)
+  : OptimizerUpdateOpInterface(quote(AdamOp), param_scheduler),
     _multi_zero(multi_zero),
     _beta1(beta1),
     _beta2(beta2),
-    _eps(eps),
-    _weight_decay(weight_decay) {
+    _eps(eps){
     HT_VALUE_ERROR_IF(beta1 < 0 || beta1 > 1)
       << "Invalid beta1: " << beta1;
     HT_VALUE_ERROR_IF(beta2 < 0 || beta1 > 2)
@@ -164,8 +165,7 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
       const auto& rhs_ = reinterpret_cast<const AdamOpImpl&>(rhs);
       return beta1() == rhs_.beta1() && 
              beta2() == rhs_.beta2() && 
-             eps() == rhs_.eps() && 
-             weight_decay() == rhs_.weight_decay();
+             eps() == rhs_.eps();
     }
     return false;
   }
@@ -186,8 +186,8 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
     return _eps;
   }
 
-  float weight_decay() const {
-    return _weight_decay;
+  float weight_decay(int64_t step) const{
+    return _param_scheduler.get_wd(step);
   }
 
   const NDArray& adam_step() const {
@@ -199,25 +199,23 @@ class AdamOpImpl : public OptimizerUpdateOpInterface {
   float _beta1;
   float _beta2;
   float _eps;
-  float _weight_decay;
   NDArray _adam_step;
 };
 
-Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, float learning_rate,
+Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, OptimizerParamScheduler param_scheduler,
                        OpMeta op_meta = OpMeta());
 
-Tensor MakeSGDUpdateWithGradScalerOp(Tensor param, Tensor grad, Tensor infinite_count, float learning_rate,
+Tensor MakeSGDUpdateWithGradScalerOp(Tensor param, Tensor grad, Tensor infinite_count, OptimizerParamScheduler param_scheduler ,
                                      OpMeta op_meta = OpMeta());
 
 Tensor MakeMomentumUpdateOp(Tensor param, Tensor grad, Tensor velocity,
-                            float learning_rate, float momentum, bool nesterov,
+                            OptimizerParamScheduler param_scheduler, float momentum, bool nesterov,
                             OpMeta op_meta = OpMeta());
 
 Tensor MakeAdamOp(Tensor param, Tensor grad, 
                   Tensor mean, Tensor variance,
-                  float learning_rate, Tensor step, float beta1 = 0.9,
+                  OptimizerParamScheduler param_scheduler, Tensor step, float beta1 = 0.9,
                   float beta2 = 0.999, float eps = 1e-8,
-                  float weight_decay = 0,
                   OpMeta op_meta = OpMeta());
 
 } // namespace graph

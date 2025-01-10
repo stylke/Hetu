@@ -44,7 +44,7 @@ mkdir -p ${LOG_FOLDER}
 LOG_FILE=${LOG_FOLDER}/gbs${GLOBAL_BATCH_SIZE}_mbs${MICRO_BATCH_SIZE}_dp${DP}_tp${TP}_pp${PP}.log
 echo log will save to ${LOG_FILE}...
 
-ROOT_FOLDER=/home/pkuhetu/njw1123/Hetu-dev/tests/ci_test/data_utils/data
+ROOT_FOLDER=./tests/ci_test/data_utils/data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
 JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json

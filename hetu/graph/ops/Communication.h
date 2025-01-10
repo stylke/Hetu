@@ -25,7 +25,8 @@ class CommOpInfo {
   DeviceGroupUnion dst_group_union;
   DistributedStatesUnion src_ds_union;
   DistributedStatesUnion dst_ds_union;
-  size_t union_idx;
+  size_t src_union_idx;
+  size_t dst_union_idx;
   int32_t placement_pos;
   DeviceGroup src_group;
   DeviceGroup dst_group;
@@ -39,20 +40,21 @@ class CommOpInfo {
 
   CommOpInfo(const DeviceGroupUnion& src_group_union_, const DeviceGroupUnion& dst_group_union_,
              const DistributedStatesUnion& src_ds_union_, const DistributedStatesUnion& dst_ds_union_,
-             size_t union_idx_, int32_t placement_pos_)
+             size_t src_union_idx_, size_t dst_union_idx_, int32_t placement_pos_)
     : is_empty(false),
       src_group_union(src_group_union_),
       dst_group_union(dst_group_union_),
       src_ds_union(src_ds_union_),
       dst_ds_union(dst_ds_union_),
-      union_idx(union_idx_),
+      src_union_idx(src_union_idx_),
+      dst_union_idx(dst_union_idx_),
       placement_pos(placement_pos_) {
-    src_group = src_group_union.get(union_idx);
-    dst_group = dst_group_union.get(union_idx);
-    src_ds = src_ds_union.get(union_idx);
-    dst_ds = dst_ds_union.get(union_idx);
-    local_src_ds = src_ds_union.get_local(union_idx);
-    local_dst_ds = dst_ds_union.get_local(union_idx);
+    src_group = src_group_union.get(src_union_idx);
+    dst_group = dst_group_union.get(dst_union_idx);
+    src_ds = src_ds_union.get(src_union_idx);
+    dst_ds = dst_ds_union.get(dst_union_idx);
+    local_src_ds = src_ds_union.get_local(src_union_idx);
+    local_dst_ds = dst_ds_union.get_local(dst_union_idx);
   }
 };
 
@@ -148,8 +150,7 @@ class CommOpImpl final: public OpInterface {
         return ds_union.is_hetero() ? ds_union.get(graph.CUR_HETERO_ID) : ds_union.get(0);
       }
     } else {
-      // inferred_local_placement_group_idx sucks!
-      auto idx = op->inferred_local_placement_group_idx();
+      auto idx = op->output(0)->inferred_local_placement_group_idx();
       if (_dst_ds_hierarchy.size() == 1) { // for comm op created in exec_graph, without multi ds
         return _dst_ds_hierarchy.get(0).is_hetero() ? _dst_ds_hierarchy.get(0).get(idx) : _dst_ds_hierarchy.get(0).get(0);
       } else { // for comm op created in define_and_run_graph, with multi ds
@@ -211,7 +212,7 @@ Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy,
                   const std::string& mode, OpMeta op_meta = OpMeta());
 
 Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, 
-                  DeviceGroupHierarchy dst_group_hierarchy, OpMeta op_meta = OpMeta());
+                  DeviceGroupHierarchy dst_group_hierarchy, bool is_pipeline_op=true, OpMeta op_meta = OpMeta());
 
 Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, 
                   OpMeta op_meta = OpMeta());
@@ -288,9 +289,9 @@ Tensor MakeAllReduceOp(Tensor input, DeviceGroup comm_group, ReductionType red_t
 
 class P2PSendOpImpl final : public OpInterface {
  public:
-  P2PSendOpImpl(DeviceGroup dst_group, int dst_device_index = -1)
+  P2PSendOpImpl(DeviceGroup dst_group, int dst_device_index = -1, std::vector<int> all_ranks = {})
   : OpInterface(quote(P2PSendOp)), _dst_group(std::move(dst_group)), 
-    _dst_device_index(dst_device_index) {
+    _dst_device_index(dst_device_index), _all_ranks(std::move(all_ranks)) {
     HT_ASSERT(!_dst_group.empty())
       << "Please provide the \"dst_group\" argument to indicate "
       << "the destination devices for P2PSend";
@@ -328,18 +329,19 @@ class P2PSendOpImpl final : public OpInterface {
  protected:
   DeviceGroup _dst_group;
   int _dst_device_index{-1};
+  std::vector<int> _all_ranks;
 };
 
 Tensor MakeP2PSendOp(Tensor input, DeviceGroup dst_group, 
-                     int dst_device_index = -1, OpMeta op_meta = OpMeta());
+                     int dst_device_index = -1, std::vector<int> all_ranks = {}, OpMeta op_meta = OpMeta());
 
 class P2PRecvOpImpl final : public OpInterface {
  public:
   // symbolic shape constructor
   P2PRecvOpImpl(DeviceGroup src_group, DataType dtype,
-                SyShape shape, int src_device_index = -1)
+                SyShape shape, int src_device_index = -1, std::vector<int> all_ranks = {})
   : OpInterface(quote(P2PRecvOp)), _src_group(std::move(src_group)), _dtype(dtype),
-                _shape(std::move(shape)), _src_device_index(src_device_index) {
+                _shape(std::move(shape)), _src_device_index(src_device_index), _all_ranks(std::move(all_ranks)) {
     HT_ASSERT(!_src_group.empty())
       << "Please provide the \"src_group\" argument to indicate "
       << "the source devices for P2PRecv";
@@ -350,9 +352,9 @@ class P2PRecvOpImpl final : public OpInterface {
   }
   // fixed shape constructor
   P2PRecvOpImpl(DeviceGroup src_group, DataType dtype,
-                HTShape shape, int src_device_index = -1)
+                HTShape shape, int src_device_index = -1, std::vector<int> all_ranks = {})
   : OpInterface(quote(P2PRecvOp)), _src_group(std::move(src_group)), _dtype(dtype),
-                _shape(shape.begin(), shape.end()), _src_device_index(src_device_index) {
+                _shape(shape.begin(), shape.end()), _src_device_index(src_device_index), _all_ranks(std::move(all_ranks)) {
     HT_ASSERT(!_src_group.empty())
       << "Please provide the \"src_group\" argument to indicate "
       << "the source devices for P2PRecv";
@@ -403,17 +405,18 @@ class P2PRecvOpImpl final : public OpInterface {
   DeviceGroup _src_group;
   int _src_device_index{-1};
   DataType _dtype;
-  SyShape _shape;           
+  SyShape _shape;  
+  std::vector<int> _all_ranks;         
 };
 
 Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
                      HTShape shape, int src_device_index = -1, 
-                     OpMeta op_meta = OpMeta());
+                     std::vector<int> all_ranks = {}, OpMeta op_meta = OpMeta());
 
 // symbolic shape
 Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
                      SyShape shape, int src_device_index = -1, 
-                     OpMeta op_meta = OpMeta());     
+                     std::vector<int> all_ranks = {}, OpMeta op_meta = OpMeta());     
 
 class BatchedISendIRecvOpImpl final : public OpInterface {
  public:

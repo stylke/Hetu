@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
-from ..tokenizer import build_tokenizer
+from hetu.engine.data_utils.tokenizer import build_tokenizer
 
 class Encoder(object):
     def __init__(self, args):

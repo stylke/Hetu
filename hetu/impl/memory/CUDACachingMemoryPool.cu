@@ -13,7 +13,7 @@ namespace hetu {
 namespace impl {
 
 // TODO: Release lock and re-acquire to hide the latency of cudaMalloc
-bool CUDACachingMemoryPool::AllocPtr(void* &ptr, size_t size) {
+bool CUDACachingMemoryPool::AllocPtr(void*& ptr, size_t size) {
   if (_memory_manager) {
     return _memory_manager->Malloc(&ptr, size);
   } else {
@@ -43,6 +43,14 @@ bool AllocAfterFreeFromCUDACache(const Device& device, void*& ptr, size_t size) 
   auto caching_mempool = std::dynamic_pointer_cast<CUDACachingMemoryPool>(GetMemoryPool(device));
   std::lock_guard<std::mutex> lock(caching_mempool->_mtx);
   return caching_mempool->AllocPtr(ptr, size) || caching_mempool->WaitUntilAlloc(ptr, size);
+}
+
+void FreeFromCUDACache(const Device& device, void* ptr) {
+  // corresponding to AllocAfterFreeFromCUDACache
+  // the caller should hold the mutex
+  // should only be used in param buffer
+  auto caching_mempool = std::dynamic_pointer_cast<CUDACachingMemoryPool>(GetMemoryPool(device));
+  caching_mempool->FreePtr(ptr);
 }
 
 void ProfileAfterEmptyAllCUDACache(const Device& device) {

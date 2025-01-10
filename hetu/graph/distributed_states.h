@@ -179,9 +179,9 @@ class DistributedStatesUnion {
     bool judgement_1 = (_hetero_dim != NULL_HETERO_DIM);
     bool judgement_2 = (_union.size() > 1);
     HT_ASSERT(!(judgement_1 ^ judgement_2))
-        << "hetero means union size is greater than 1"
-        << ", but found hetero dim is " << _hetero_dim
-        << " and union size is " << _union.size();
+      << "hetero means union size is greater than 1"
+      << ", but found hetero dim is " << _hetero_dim
+      << " and union size is " << _union.size();
     return judgement_1;
   }
 
@@ -220,7 +220,7 @@ class DistributedStatesUnion {
   }
 
   const DistributedStatesUnion to_hetero(int32_t dim, int32_t num) const {
-    HT_ASSERT(is_hetero())
+    HT_ASSERT(!is_hetero())
       << "The union is already hetero";
     HT_ASSERT(_union.size() == 1)
       << "Double check, the union is already hetero";
@@ -299,7 +299,8 @@ class DistributedStatesUnion {
   bool check_equal(const DistributedStatesUnion& another) {
     if (is_hetero() != another.is_hetero() 
         || _hetero_dim != another.hetero_dim()
-        || _union.size() != another.size()) {
+        || _union.size() != another.size()
+        || !_split_pattern.check_equal(another.split_pattern())) {
       return false;
     }
     size_t size = _union.size();

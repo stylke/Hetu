@@ -56,7 +56,7 @@ class BinaryOpImpl : public OpInterface {
   }
 
   inline uint64_t op_indicator() const noexcept override {
-    return _inplace ? INPLACE_OP : 0;
+    return (_inplace ? INPLACE_OP : 0) | BINARY_OP;
   }
 
   bool operator==(const OpInterface& rhs) const override {
@@ -173,12 +173,16 @@ class AddElewiseOpImpl final : public BinaryOpImpl {
 
 class AddByConstOpImpl final : public BinaryOpImpl {
  public:
-  AddByConstOpImpl(double value, bool inplace)
+  AddByConstOpImpl(DoubleSymbol value, bool inplace)
   : BinaryOpImpl(quote(AddByConstOp), inplace), _value(value) {
   }
 
-  inline double const_value() const {
+  inline const DoubleSymbol& const_value_symbol() const {
     return _value;
+  }
+
+  inline double const_value() const {
+    return _value->get_val();
   }
 
 protected:
@@ -197,7 +201,7 @@ protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
   
-  double _value;
+  DoubleSymbol _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -249,12 +253,16 @@ class SubElewiseOpImpl final : public BinaryOpImpl {
 
 class SubByConstOpImpl final : public BinaryOpImpl {
  public:
-  SubByConstOpImpl(double value, bool inplace)
+  SubByConstOpImpl(DoubleSymbol value, bool inplace)
   : BinaryOpImpl(quote(SubByConstOp), inplace), _value(value) {
   }
 
-  inline double const_value() const {
+  inline const DoubleSymbol& const_value_symbol() const {
     return _value;
+  }
+
+  inline double const_value() const {
+    return _value->get_val();
   }
 
 protected:
@@ -273,7 +281,7 @@ protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
   
-  double _value;
+  DoubleSymbol _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -287,12 +295,16 @@ protected:
 
 class SubFromConstOpImpl final : public BinaryOpImpl {
   public:
-  SubFromConstOpImpl(double value, bool inplace)
+  SubFromConstOpImpl(DoubleSymbol value, bool inplace)
   : BinaryOpImpl(quote(SubFromConstOp), inplace), _value(value) {
   }
 
-  inline double const_value() const {
+  inline const DoubleSymbol& const_value_symbol() const {
     return _value;
+  }
+
+  inline double const_value() const {
+    return _value->get_val();
   }
 
 protected:
@@ -311,7 +323,7 @@ protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
   
-  double _value;
+  DoubleSymbol _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -386,12 +398,16 @@ public:
 
 class MulByConstOpImpl final : public BinaryOpImpl {
  public:
-  MulByConstOpImpl(double value, bool inplace)
+  MulByConstOpImpl(DoubleSymbol value, bool inplace)
   : BinaryOpImpl(quote(MulByConstOp), inplace), _value(value) {
   }
 
-  inline double const_value() const {
+  inline const DoubleSymbol& const_value_symbol() const {
     return _value;
+  }
+
+  inline double const_value() const {
+    return _value->get_val();
   }
 
 protected:
@@ -410,7 +426,7 @@ protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
   
-  double _value;
+  DoubleSymbol _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -463,12 +479,16 @@ class DivElewiseOpImpl final : public BinaryOpImpl {
 
 class DivByConstOpImpl final : public BinaryOpImpl {
  public:
-  DivByConstOpImpl(double value, bool inplace)
+  DivByConstOpImpl(DoubleSymbol value, bool inplace)
   : BinaryOpImpl(quote(DivByConstOp), inplace), _value(value) {
   }
 
-  inline double const_value() const {
+  inline const DoubleSymbol& const_value_symbol() const {
     return _value;
+  }
+
+  inline double const_value() const {
+    return _value->get_val();
   }
 
 protected:
@@ -487,7 +507,7 @@ protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
   
-  double _value;
+  DoubleSymbol _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -502,12 +522,16 @@ protected:
 
 class DivFromConstOpImpl final : public BinaryOpImpl {
  public:
-  DivFromConstOpImpl(double value, bool inplace)
+  DivFromConstOpImpl(DoubleSymbol value, bool inplace)
   : BinaryOpImpl(quote(DivFromConstOp), inplace), _value(value) {
   }
 
-  inline double const_value() const {
+  inline const DoubleSymbol& const_value_symbol() const {
     return _value;
+  }
+
+  inline double const_value() const {
+    return _value->get_val();
   }
 
 protected:
@@ -526,7 +550,7 @@ protected:
   void DoCompute(Operator& op, const NDArrayList& inputs, NDArrayList& outputs,
                  RuntimeContext& ctx) const override;
   
-  double _value;
+  DoubleSymbol _value;
 
  public:
   bool operator==(const OpInterface& rhs) const override {
@@ -674,25 +698,49 @@ Tensor MakeDivElewiseOp(Tensor a, Tensor b,
 Tensor MakeAddByConstOp(Tensor input, double value,
                         OpMeta op_meta = OpMeta());
 
+Tensor MakeAddByConstOp(Tensor input, DoubleSymbol value,
+                        OpMeta op_meta = OpMeta());
+
 Tensor MakeAddByConstOp(double value, Tensor input,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeAddByConstOp(DoubleSymbol value, Tensor input,
                         OpMeta op_meta = OpMeta());
 
 Tensor MakeSubByConstOp(Tensor input, double value,
                         OpMeta op_meta = OpMeta());
 
+Tensor MakeSubByConstOp(Tensor input, DoubleSymbol value,
+                        OpMeta op_meta = OpMeta());
+
 Tensor MakeSubFromConstOp(double value, Tensor input,
+                          OpMeta op_meta = OpMeta());
+
+Tensor MakeSubFromConstOp(DoubleSymbol value, Tensor input,
                           OpMeta op_meta = OpMeta());
 
 Tensor MakeMulByConstOp(Tensor input, double value,
                         OpMeta op_meta = OpMeta());
 
+Tensor MakeMulByConstOp(Tensor input, DoubleSymbol value,
+                        OpMeta op_meta = OpMeta());
+
 Tensor MakeMulByConstOp(double value, Tensor input,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeMulByConstOp(DoubleSymbol value, Tensor input,
                         OpMeta op_meta = OpMeta());
 
 Tensor MakeDivByConstOp(Tensor input, double value,
                           OpMeta op_meta = OpMeta());
 
+Tensor MakeDivByConstOp(Tensor input, DoubleSymbol value,
+                          OpMeta op_meta = OpMeta());
+
 Tensor MakeDivFromConstOp(double value, Tensor input,
+                          OpMeta op_meta = OpMeta());
+
+Tensor MakeDivFromConstOp(DoubleSymbol value, Tensor input,
                           OpMeta op_meta = OpMeta());
 
 Tensor MakeAddElewiseInplaceOp(Tensor a, Tensor b,
@@ -710,25 +758,49 @@ Tensor MakeDivElewiseInplaceOp(Tensor a, Tensor b,
 Tensor MakeAddByConstInplaceOp(Tensor input, double value,
                         OpMeta op_meta = OpMeta());
 
+Tensor MakeAddByConstInplaceOp(Tensor input, DoubleSymbol value,
+                        OpMeta op_meta = OpMeta());
+
 Tensor MakeAddByConstInplaceOp(double value, Tensor input,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeAddByConstInplaceOp(DoubleSymbol value, Tensor input,
                         OpMeta op_meta = OpMeta());
 
 Tensor MakeSubByConstInplaceOp(Tensor input, double value,
                         OpMeta op_meta = OpMeta());
 
+Tensor MakeSubByConstInplaceOp(Tensor input, DoubleSymbol value,
+                        OpMeta op_meta = OpMeta());
+
 Tensor MakeSubFromConstInplaceOp(double value, Tensor input,
+                          OpMeta op_meta = OpMeta());
+
+Tensor MakeSubFromConstInplaceOp(DoubleSymbol value, Tensor input,
                           OpMeta op_meta = OpMeta());
 
 Tensor MakeMulByConstInplaceOp(Tensor input, double value,
                         OpMeta op_meta = OpMeta());
 
+Tensor MakeMulByConstInplaceOp(Tensor input, DoubleSymbol value,
+                        OpMeta op_meta = OpMeta());
+
 Tensor MakeMulByConstInplaceOp(double value, Tensor input,
+                        OpMeta op_meta = OpMeta());
+
+Tensor MakeMulByConstInplaceOp(DoubleSymbol value, Tensor input,
                         OpMeta op_meta = OpMeta());
 
 Tensor MakeDivByConstInplaceOp(Tensor input, double value,
                           OpMeta op_meta = OpMeta());
 
+Tensor MakeDivByConstInplaceOp(Tensor input, DoubleSymbol value,
+                          OpMeta op_meta = OpMeta());
+
 Tensor MakeDivFromConstInplaceOp(double value, Tensor input,
+                          OpMeta op_meta = OpMeta());
+
+Tensor MakeDivFromConstInplaceOp(DoubleSymbol value, Tensor input,
                           OpMeta op_meta = OpMeta());
 
 Tensor MakeAddElewiseGradientOp(Tensor a, Tensor input, Tensor output, int index, 

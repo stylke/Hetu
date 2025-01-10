@@ -195,7 +195,7 @@ class TensorDef : public shared_ptr_target {
     return _global_shape.size() > 0;
   }
 
-  const Device& placement() noexcept {
+  const Device& placement() const noexcept {
     return _placement;
   }
 
@@ -242,9 +242,7 @@ class TensorDef : public shared_ptr_target {
 
   NDArray get_or_compute();
 
-  bool has_cur_ds_union() {
-    return cur_strategy_id() < _ds_hierarchy.size();
-  }
+  bool has_cur_ds_union();
 
   DistributedStatesUnion& cur_ds_union();
 
@@ -256,9 +254,12 @@ class TensorDef : public shared_ptr_target {
     return _ds_hierarchy;
   }
 
+  // executable graph now only need set_cur_ds_union() method
+  /*
   void set_ds_hierarchy(const DistributedStatesHierarchy& ds_hierarchy) {
     _ds_hierarchy = ds_hierarchy;
   }
+  */
 
   bool check_ds_hierarchy_equal(const DistributedStatesHierarchy& ds_hierarchy) {
     if (_ds_hierarchy.size() != ds_hierarchy.size()) {
@@ -362,6 +363,10 @@ class TensorDef : public shared_ptr_target {
     return _placement_group_union.get_index(_placement);
   }
 
+  // 支持placement还未instantiate时候进行推导
+  // 主要用在未instantiate的variable和comm中
+  size_t inferred_local_placement_group_idx() const;
+
   void set_placement_group_union(const DeviceGroupUnion& placement_group_union) {
     _placement_group_union = placement_group_union;
     _has_placement_group = true;
@@ -375,6 +380,19 @@ class TensorDef : public shared_ptr_target {
     HT_ASSERT(_symbolic) 
       << name() << ": symbolic_shape() can only work after calling copy/set/init symbolic_shape";
     return _symbolic_shape;
+  }
+
+  SyShape symbolic_global_shape() {
+    HT_ASSERT(_symbolic) 
+      << name() << ": symbolic_global_shape() can only work after calling copy/set/init symbolic_shape";
+    if (!has_distributed_states()) {
+      return _symbolic_shape;
+    }
+    SyShape sy_global_shape;
+    for (size_t d = 0; d < _symbolic_shape.size(); d++) {
+      sy_global_shape.emplace_back(_symbolic_shape[d] * inferred_cur_ds().get_dim(d));
+    }
+    return sy_global_shape;
   }
 
   void set_shape(const HTShape& shape) {
@@ -416,6 +434,14 @@ class TensorDef : public shared_ptr_target {
 
   void merge_strategy(Tensor& tensor);
 
+  bool use_compute_suggested_hetero_id() const {
+    return _use_compute_suggested_hetero_id;
+  }
+
+  void set_to_use_compute_suggested_hetero_id() {
+    _use_compute_suggested_hetero_id = true;
+  }
+
  protected:
   void AddConsumer(Operator& op);
 
@@ -434,8 +460,10 @@ class TensorDef : public shared_ptr_target {
   bool _inform_graph_on_destruction;
   // deprecated: DistributedStatesList _distributed_states; // for multi ds deduce
   DistributedStatesHierarchy _ds_hierarchy; // for multi ds multi hetero-dp deduce
+  DistributedStatesUnion _dummy_ds_union{}; // for deduce_states=False op outputs
   HTShape _global_shape;
   bool _is_grad{false};
+  bool _use_compute_suggested_hetero_id{true};
 
   // Used when the tensor's shape is not fixed
   bool _symbolic;

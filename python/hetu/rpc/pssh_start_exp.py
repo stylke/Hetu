@@ -11,7 +11,7 @@ from heturpc_async_server_exp import server_launch
 import multiprocessing.spawn
 
 # enable_host_logger()
-TIMEOUT = 240 # 如果240s之间log都没有增加我们认为其卡死
+TIMEOUT = 180 # 如果180s之间log都没有增加我们认为其卡死
 
 def read_yaml(file_path):
     with open(file_path, "r") as f:
@@ -32,16 +32,17 @@ def pssh(args):
             min_workers = int(host['min_workers'])
             max_workers = int(host['max_workers'])
             for i in range(initial_workers):
+                if len(hostnames) == args.ngpus:
+                    break
                 hostnames.append(addr)
     print("HostNames:", hostnames)
     train_command = args.command
     cwd = os.getcwd()
     cmd = "cd " + cwd 
-    cmd += f" && source {args.envs} && " + train_command 
-    print(cmd)
+    cmd += f" && source {args.envs} && " 
     cmd_list = []
     log_list = []
-    for i in range(len(hostnames)):
+    for i, hostname in enumerate(hostnames):
         # 请注意log编号目前并不等于rank编号
         # log编号是进程编号
         # 但不能保证分配到同样编号的rank
@@ -49,13 +50,11 @@ def pssh(args):
         log = open(log_path, 'w')
         log.close()
         log_list.append(log_path)
-        cmd_list.append(cmd + f" 2>&1 | tee {log_path}")
+        cmd_list.append(cmd + f"export HETU_LOCAL_HOSTNAME={hostname} && " + train_command + f" 2>&1 | tee {log_path}")
     clients = []
     outputs = []
     for hostname, cmd in zip(hostnames, cmd_list):
-        client = ParallelSSHClient([hostname])
-        # If password is needed, you should ssh like this
-        # client = ParallelSSHClient([hostname], port=args.pssh_port, password=args.pssh_password)
+        client = ParallelSSHClient([hostname], user='root', port=36000)
         output = client.run_command(cmd, use_pty=True)
         clients.append(client)
         outputs.append(output)
@@ -105,18 +104,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--command", type=str, default='uname', help="command for pssh"
-    )
-    parser.add_argument(
-        "--pssh_port", type=str, default='60001', help="pssh's port"
-    )
-    parser.add_argument(
-        "--pssh_password", type=str, default='xxx', help="pssh's password"
-    )
-    parser.add_argument(
-        "--server_addr", type=str, default='127.0.0.1', help="server's address"
-    )
-    parser.add_argument(
-        "--server_port", type=str, default='23457', help="server's port"
     )
     parser.add_argument(
         "--ngpus", type=int, default=8, help="num gpus"

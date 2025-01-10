@@ -3,6 +3,7 @@
 #include "hetu/graph/define_and_run_graph.h"
 #include "hetu/graph/eager_graph.h"
 #include "hetu/graph/executable_graph.h"
+#include "hetu/graph/profiler.h"
 #include "hetu/graph/ops/Contiguous.h"
 #include "hetu/graph/ops/ones_like.h"
 #include "hetu/graph/ops/sum.h"
@@ -99,18 +100,6 @@ Operator& Graph::MakeOp(std::shared_ptr<OpInterface> body, TensorList inputs,
   Graph::InitOnce();
   Operator& op = graph.MakeOpInner(std::move(body), std::move(inputs),
                                    std::move(op_meta));
-  // workaround: 暂时不把pipeline插入的comm op放到任何subgraph中
-  if (op->name().find("pipeline_layer") == std::string::npos) { 
-    if (graph.get_cur_subgraph_name() != "") {
-      graph.AddOpToSubGraph(op, graph.get_cur_subgraph_name());
-    }
-    if (is_optimizer_update_op(op)) {
-      std::shared_ptr<SubGraph> subgraph = graph.GetSubGraph(op->input(0)->producer());
-      if (subgraph != nullptr) {
-        graph.AddOpToSubGraph(op, subgraph->global_graph_name(), SubGraphType::UPDATE);
-      }
-    }
-  }
   return op;
 }
 
@@ -307,7 +296,10 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
 
   // traverse the forward graph in the reversed topo order
   auto topo = Graph::TopoSort(ys, num_ops_hint);
-  for (auto it = topo.rbegin(); it != topo.rend(); ++it) {  
+  
+
+
+  for (auto it = topo.rbegin(); it != topo.rend(); ++it) { 
     auto& op = it->get();
     TensorList grad_outputs;
     if (op->num_outputs() > 0) {
@@ -411,6 +403,16 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
             OpMeta().set_name("workaround_share_weight_grad_inter_comm")); // inter group op
           grad_outputs.at(0)->set_is_grad(true);
           grad_outputs.at(0)->producer()->set_fw_op_id(op->id());
+          // 其应该不属于任何一个subgraph而被放到最后的update subgraph中只执行一次
+          /*
+          auto& cur_graph = op->graph();
+          std::shared_ptr<SubGraph> subgraph = cur_graph.GetSubGraph(op);
+          if (subgraph != nullptr) {
+            cur_graph.AddOpToSubGraph(grad_outputs.at(0)->producer(), 
+                                      subgraph->global_name(), 
+                                      SubGraphOpType::BACKWARD);
+          }
+          */
           // 2、make intra comm op
           // SplitAllReduce/SplitReduceScatter
           // 将partial再都转化为dup（SplitAllReduce）或者split0（SplitReduceScatter）
@@ -435,13 +437,15 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
         if (!grad_inputs[i].is_defined())
           continue;
         // bw subgraph deduce
-        // TODO: subgraph need to contain other inserted intermediate op (e.g. sum)
+        // note subgraph no need to contain other inserted intermediate op (e.g. sum)
+        // these ops belong to update subgraph
         auto& cur_graph = op->graph();
         std::shared_ptr<SubGraph> subgraph = cur_graph.GetSubGraph(op);
         if (subgraph != nullptr) {
+          // HT_LOG_INFO << grad_inputs[i]->producer() << " will place in the same subgraph " << subgraph->global_name() << " with fwd op " << op;
           cur_graph.AddOpToSubGraph(grad_inputs[i]->producer(), 
-                                    subgraph->global_graph_name(), 
-                                    SubGraphType::BACKWARD);
+                                    subgraph->global_name(), 
+                                    SubGraphOpType::BACKWARD);
         }
         grad_inputs[i]->set_is_grad(true);
         grad_inputs[i]->producer()->set_fw_op_id(op->id());
@@ -462,7 +466,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
               << "something wrong when initializing or deducing the ds for " << grad_inputs[i];
             // HT_LOG_DEBUG << local_device << ": " << "grad_op: " << grad_op << ": states: " << ds_grad.ds_info() << ", shape: " << grad_inputs[i]->shape();
             // partial->duplicate 
-            if (ds_grad.get_dim(-2) > 1) { 
+            if (ds_grad.get_dim(-2) > 1 && !is_binary_op(op)) { 
               int32_t device_num = ds_grad.get_device_num();
               // std::pair<std::vector<int32_t>, int32_t> src2dst({{-2}, -1});
               std::pair<std::vector<int32_t>, int32_t> src2dst;
@@ -476,7 +480,7 @@ TensorList Graph::Gradients(const TensorList& ys, const TensorList& xs,
               } 
               // share weight
               // TODO: comm op后续要支持变成一个p2p和一个reduce
-              // 这样的话如果is_comm_op(op->input(i)->producer()
+              // 这样的话如果is_comm_op(op->input(i)->producer())
               // 那么可以全部交给这个comm op进行处理
               if (is_comm_op(op->input(i)->producer())
                   && is_variable_op(op->input(i)->producer()->input(0)->producer())) {
@@ -634,14 +638,6 @@ std::ostream& operator<<(std::ostream& os, GraphType type) {
 std::ostream& operator<<(std::ostream& os, const Graph& graph) {
   os << "graph(name=" << graph.name() << ", id=" << graph.id()
      << ", type=" << graph.type() << ")";
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, SubGraph& subgraph) {
-  os << "subgraph(name=" << subgraph.name() << ", type=" << subgraph.subgraph_type()
-     << ", ops=" << subgraph.ops() << ", bwd_ops=" << subgraph.bwd_ops() << 
-     ", update_ops=" << subgraph.update_ops() << ", subgraphs=" << subgraph.subgraph_info().size() << "-"
-     << subgraph.subgraph_info();
   return os;
 }
 

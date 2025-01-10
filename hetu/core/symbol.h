@@ -148,6 +148,7 @@ class Symbol : public shared_ptr_wrapper<SymbolDef<T>> {
 };
 
 using IntSymbol = Symbol<int64_t>;
+using DoubleSymbol = Symbol<double>;
 using SyShape = std::vector<IntSymbol>;
 using SyShapeList = std::vector<SyShape>;
 

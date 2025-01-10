@@ -5,6 +5,8 @@ namespace hetu {
 
 template class SymbolDef<int64_t>;
 template class Symbol<int64_t>;
+template class SymbolDef<double>;
+template class Symbol<double>;
 
 template <typename T>
 T SymbolDef<T>::get_val() const {
@@ -21,12 +23,14 @@ T SymbolDef<T>::get_val() const {
         HT_ASSERT(divisor) << "DIV op can't divide 0";
         return _input_1->get_val() / divisor;
       }
+      /*
       case SymbolOp::REM: {
         HT_ASSERT((std::is_same<T, int64_t>::value)) << "REM op could only used for int64_t";
         auto divisor = _input_2->get_val();
         HT_ASSERT(divisor) << "REM op can't divide 0";
         return _input_1->get_val() % divisor;
       }
+      */
       default:
         HT_RUNTIME_ERROR << "SymbolOp type unspported!";
     }

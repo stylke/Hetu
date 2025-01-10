@@ -8,13 +8,13 @@
 namespace hetu {
 namespace graph {
 
-PyObject* PySubGraph_New(std::string subgraph_name) {
+PyObject* PySubGraph_New(std::string global_name) {
   HT_PY_FUNC_BEGIN
   auto* unsafe_self = PySubGraph_Type->tp_alloc(PySubGraph_Type, 0);
   HT_RUNTIME_ERROR_IF(!unsafe_self) << "Failed to alloc PySubGraph";
   auto* self = reinterpret_cast<PySubGraph*>(unsafe_self);
   // new(&self->graph_id) SubGraphId();
-  self->subgraph_name = subgraph_name;
+  self->global_name = global_name;
   return reinterpret_cast<PyObject*>(self);
   HT_PY_FUNC_END
 }
@@ -36,14 +36,14 @@ PyObject* PySubGraph_repr(PySubGraph* self) {
 
 PyObject* PySubGraph_name(PySubGraph* self) {
   HT_PY_FUNC_BEGIN
-  return PyUnicode_FromString(self->subgraph_name);
+  return PyUnicode_FromString(self->global_name);
   HT_PY_FUNC_END
 }
 
 PyObject* PySubGraph_get_subgraph(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "get_subgraph(std::string subgraph_name)",
+    "get_subgraph(std::string global_name)",
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
@@ -69,14 +69,15 @@ PyObject* PySubGraph_make_new_subgraph(PyObject*, PyObject* args,
                                    PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "make_new_subgraph(std::string subgraph_type=\"\", std::string name=\"\", std::string subgraph_name=\"\")",
+    "make_new_subgraph(std::string name=\"\", bool use_relative=true, std::string module_type=\"\")",
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
     auto& cur_graph = Graph::GetGraph(Graph::cur_graph_ctx());
     return PySubGraph_New(
-      cur_graph.MakeSubGraph(parsed_args.get_string_or_default(0),
-                             parsed_args.get_string_or_default(1),
+      cur_graph.MakeSubGraph(SubGraphType::MODULE,
+                             parsed_args.get_string_or_default(0),
+                             parsed_args.get_bool_or_default(1),
                              parsed_args.get_string_or_default(2))->name());
   } else {
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
@@ -88,7 +89,7 @@ PyObject* PySubGraph_make_new_subgraph(PyObject*, PyObject* args,
 PyObject* PySubGraph_add_op(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "add_op_to_subgraph(Tensor tensor, std::string subgraph_name=\"\")",
+    "add_op_to_subgraph(Tensor tensor, std::string global_name=\"\")",
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
@@ -106,7 +107,7 @@ PyObject* PySubGraph_add_op(PyObject*, PyObject* args, PyObject* kwargs) {
 PyObject* PyPushSubGraphCtx(PyObject*, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
-    "push_subgraph_ctx(std::string subgraph_name)"
+    "push_subgraph_ctx(std::string global_name)"
   });
   auto parsed_args = parser.parse(args, kwargs);
   if (parsed_args.signature_index() == 0) {
@@ -150,7 +151,7 @@ PyMethodDef PySubGraphCtx_methods[] = {
 
 // NOLINTNEXTLINE
 PyGetSetDef PySubGraph_properties[] = {
-  {PY_GET_SET_DEF_NAME("name"), (getter) PySubGraph_name, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("global_name"), (getter) PySubGraph_name, nullptr, nullptr, nullptr}, 
   {nullptr}
 };
 

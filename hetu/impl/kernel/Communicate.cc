@@ -32,24 +32,16 @@ void ReduceScatterCpu(const NDArray& input, NDArray& output, ReductionType red_t
   NDArray::MarkUsedBy({input, output}, stream);
 }
 
-void P2PSendCpu(const NDArray& data, const Device& dst, const Stream& stream) {
-  auto src_rank = GetWorldRank();
+void P2PSendCpu(const NDArray& data, const Device& dst, const std::vector<int>& comm_group_ranks, const Stream& stream) {
   auto dst_rank = DeviceToWorldRank(dst);
-  std::vector<int> ranks(2);
-  ranks[0] = std::min(src_rank, dst_rank);
-  ranks[1] = std::max(src_rank, dst_rank);
-  auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
+  auto& comm_group = MPICommunicationGroup::GetOrCreate(comm_group_ranks, stream);
   comm_group->Send(data, dst_rank);
   NDArray::MarkUsedBy({data}, stream);
 }
 
-void P2PRecvCpu(NDArray& data, const Device& src, const Stream& stream) {
+void P2PRecvCpu(NDArray& data, const Device& src, const std::vector<int>& comm_group_ranks, const Stream& stream) {
   auto src_rank = DeviceToWorldRank(src);
-  auto dst_rank = GetWorldRank();
-  std::vector<int> ranks(2);
-  ranks[0] = std::min(src_rank, dst_rank);
-  ranks[1] = std::max(src_rank, dst_rank);
-  auto& comm_group = MPICommunicationGroup::GetOrCreate(ranks, stream);
+  auto& comm_group = MPICommunicationGroup::GetOrCreate(comm_group_ranks, stream);
   comm_group->Recv(data, src_rank);
   NDArray::MarkUsedBy({data}, stream);
 }

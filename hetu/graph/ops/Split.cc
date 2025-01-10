@@ -236,7 +236,7 @@ void SplitGradientOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_h
 
 // need symbolic shape
 Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
-                   const HTShape& splits, OpMeta op_meta) {
+                   const HTShape& splits, bool remain, OpMeta op_meta) {
   HT_ASSERT(input->has_shape());
   // get begin_pos, output_shape
   HT_ASSERT(axes.size() == splits.size());
@@ -265,7 +265,11 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
     if (indices[i] != splits[i] - 1) {
       output_shape[axe] = part_size;
     } else {
-      output_shape[axe] = ori_shape[axe] - begin_pos[axe];
+      if (!remain) {
+        output_shape[axe] = ori_shape[axe] - begin_pos[axe];
+      } else {
+        output_shape[axe] = part_size;
+      }
     }
   }
 
@@ -278,7 +282,7 @@ Tensor MakeSplitOp(Tensor input, const HTAxes& axes, const HTShape& indices,
 
 // need symbolic shape
 Tensor MakeSplitOp(Tensor input, const HTShape& indices,
-                   const HTShape& splits, OpMeta op_meta) {
+                   const HTShape& splits, bool remain, OpMeta op_meta) {
   HT_ASSERT(input->has_shape());
   // get begin_pos, output_shape
   auto len = indices.size();
@@ -301,7 +305,11 @@ Tensor MakeSplitOp(Tensor input, const HTShape& indices,
     if (indices[i] != splits[i] - 1) {
       output_shape[i] = part_size;
     } else {
-      output_shape[i] = ori_shape[i] - begin_pos[i];
+      if (!remain) {
+        output_shape[i] = ori_shape[i] - begin_pos[i];
+      } else {
+        output_shape[i] = part_size;
+      }
     }
   }
 
@@ -312,7 +320,7 @@ Tensor MakeSplitOp(Tensor input, const HTShape& indices,
 
 // 这里只能做到在单一的dim上的切分
 TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
-                       OpMeta op_meta) {
+                       bool remain, OpMeta op_meta) {
   HT_ASSERT(input->has_shape());
   dim = NDArrayMeta::ParseAxis(dim, input->ndim());
 
@@ -329,8 +337,8 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
   for (int i = 0; i < num_chunks; ++i) {
     SyShape begin_pos(input->ndim(), 0);
     SyShape output_shape(ori_shape);
-    output_shape[dim] = i == num_chunks - 1 ? (ori_shape[dim] - 1) % chunk_size + 1
-                                            : chunk_size;
+    output_shape[dim] = (i == num_chunks - 1 && !remain) ? (ori_shape[dim] - 1) % chunk_size + 1
+                                                         : chunk_size;
     begin_pos[dim] = chunk_sum;
     chunk_sum = chunk_sum + chunk_size;
     begin_pos_list.emplace_back(begin_pos);
@@ -396,7 +404,7 @@ Tensor MakeSplitGradientOp(TensorList grad_outputs, Tensor ori_input,
 
 // deprecated: only used in gpt inference, before symbolic shape is realized
 TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
-                       int64_t padding_axis, OpMeta op_meta) {
+                       int64_t padding_axis, bool remain, OpMeta op_meta) {
   HT_RUNTIME_ERROR << "deprecated";
   HT_ASSERT(input->has_shape());
   dim = NDArrayMeta::ParseAxis(dim, input->ndim());
@@ -409,8 +417,8 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
   HTShape output_shape = input->shape();
   TensorList outputs = {};
   for (int i = 0; i < num_chunks; ++i) {
-    output_shape[dim] = i == num_chunks - 1 ? (input->shape(dim) - 1) % chunk_size + 1
-                                            : chunk_size;
+    output_shape[dim] = i == (num_chunks - 1 && !remain) ? (input->shape(dim) - 1) % chunk_size + 1
+                                                         : chunk_size;
     begin_pos[dim] = chunk_sum;
     chunk_sum += chunk_size;
     outputs.emplace_back(Graph::MakeOp(
@@ -422,7 +430,7 @@ TensorList MakeSplitOp(Tensor input, int64_t num_chunks, int64_t dim,
 
 // seems deprecated
 TensorList MakeSplitOp(Tensor input, const HTShape& chunks, int64_t dim,
-                       OpMeta op_meta) {
+                       bool remain, OpMeta op_meta) {
   HT_RUNTIME_ERROR << "deprecated";
   HT_ASSERT(input->has_shape());
   dim = NDArrayMeta::ParseAxis(dim, input->ndim());

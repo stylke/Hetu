@@ -164,6 +164,11 @@ class ParallelVariableOpImpl : public OpInterface {
       _global_shape = get_global_shape(_local_shape, _ds_hierarchy.get_default_ds());
     }    
 
+  uint64_t op_indicator() const noexcept override {
+    return VARIABLE_OP;
+  }  
+
+ protected:
   HTShape get_global_shape(HTShape& local_shape, const DistributedStates& ds) {
     if (!_global_shape.empty())
       return _global_shape;
@@ -184,11 +189,6 @@ class ParallelVariableOpImpl : public OpInterface {
     return shape;    
   }
 
-  uint64_t op_indicator() const noexcept override {
-    return VARIABLE_OP;
-  }  
-
- protected:
   std::vector<NDArrayMeta>
   DoInferMeta(const TensorList& inputs) const override {
     const auto& cur_ds_union = _ds_hierarchy.get(Graph::GetGraph(Graph::cur_graph_ctx()).CUR_STRATEGY_ID);
@@ -228,9 +228,7 @@ class ParallelVariableOpImpl : public OpInterface {
 
   HTShapeList DoInferShape(Operator& op, const HTShapeList& input_shapes,
                            RuntimeContext& runtime_ctx) const override {
-    auto cur_ds_union = _ds_hierarchy.get(op->graph().CUR_STRATEGY_ID);
-    // inferred_local_placement_group_id sucks!
-    auto cur_ds = cur_ds_union.get(op->inferred_local_placement_group_idx());
+    auto cur_ds = op->output(0)->inferred_cur_ds();
     HT_ASSERT(!_global_shape.empty())
       << "global shape should be initialized";
     HTShape cur_local_shape(_global_shape.size());
@@ -273,6 +271,11 @@ class ParallelVariableOpImpl : public OpInterface {
     for (size_t d = 0; d < _global_shape.size(); d++) {
       _local_shape[d] = _global_shape[d] / ds.get_dim(d);
     }
+  }
+
+  // Used for applying zero
+  void set_ds_hierarchy(const DistributedStatesHierarchy& ds_hierarchy) {
+    _ds_hierarchy = ds_hierarchy;
   }
 
   DataType dtype() const {

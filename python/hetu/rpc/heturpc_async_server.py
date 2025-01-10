@@ -1,4 +1,5 @@
 from concurrent import futures
+from kv_store import key_value_store_server
 import logging
 import multiprocessing.spawn
 import grpc
@@ -8,8 +9,10 @@ import threading
 import time
 import multiprocessing
 
-MAX_UNFOUND_TIMES = 10000
+_MAX_UNFOUND_TIMES = 10000
+_MAX_GRPC_WORKERS = 64
 
+@key_value_store_server
 class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
     def __init__(self, arr, exit_arr, last_heartbeat) -> None:
         super().__init__()
@@ -53,6 +56,7 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
             if nodename not in self.local_worldsizes:
                 self.local_worldsizes[nodename] = 0
                 self.nodenames.append(nodename)
+            print(nodename, "connect")
             self.local_worldsizes[nodename] += 1
             self.worldsize += 1
         return heturpc_pb2.ConnectReply(status=1)
@@ -141,10 +145,10 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
     def RemoveDouble(self, request, context):
         with self.double_cond:
             unfound_times = 0
-            while request.key not in self.double_dict and unfound_times < MAX_UNFOUND_TIMES:
+            while request.key not in self.double_dict and unfound_times < _MAX_UNFOUND_TIMES:
                 self.double_cond.wait(timeout=0.0001)
                 unfound_times += 1
-            if unfound_times == MAX_UNFOUND_TIMES:
+            if unfound_times == _MAX_UNFOUND_TIMES:
                 return heturpc_pb2.RemoveDoubleReply(message="not found:" + request.key)
             else:
                 self.double_dict.pop(request.key)
@@ -166,10 +170,10 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
     def RemoveInt(self, request, context):
         with self.int_cond:
             unfound_times = 0
-            while request.key not in self.int_dict and unfound_times < MAX_UNFOUND_TIMES:
+            while request.key not in self.int_dict and unfound_times < _MAX_UNFOUND_TIMES:
                 self.int_cond.wait(timeout=0.0001)
                 unfound_times += 1
-            if unfound_times == MAX_UNFOUND_TIMES:
+            if unfound_times == _MAX_UNFOUND_TIMES:
                 return heturpc_pb2.RemoveIntReply(message="not found:" + request.key)
             else:
                 self.int_dict.pop(request.key)
@@ -191,10 +195,10 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
     def RemoveString(self, request, context):
         with self.string_cond:
             unfound_times = 0
-            while request.key not in self.string_dict and unfound_times < MAX_UNFOUND_TIMES:
+            while request.key not in self.string_dict and unfound_times < _MAX_UNFOUND_TIMES:
                 self.string_cond.wait(timeout=0.0001)
                 unfound_times += 1
-            if unfound_times == MAX_UNFOUND_TIMES:
+            if unfound_times == _MAX_UNFOUND_TIMES:
                 return heturpc_pb2.RemoveStringReply(message="not found:" + request.key)
             else:
                 self.string_dict.pop(request.key)
@@ -216,10 +220,10 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
     def RemoveBytes(self, request, context):
         with self.bytes_cond:
             unfound_times = 0
-            while request.key not in self.bytes_dict and unfound_times < MAX_UNFOUND_TIMES:
+            while request.key not in self.bytes_dict and unfound_times < _MAX_UNFOUND_TIMES:
                 self.bytes_cond.wait(timeout=0.0001)
                 unfound_times += 1
-            if unfound_times == MAX_UNFOUND_TIMES:
+            if unfound_times == _MAX_UNFOUND_TIMES:
                 return heturpc_pb2.RemoveBytesReply(message="not found:" + request.key)
             else:
                 self.bytes_dict.pop(request.key)
@@ -244,10 +248,10 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
     def RemoveJson(self, request, context):
         with self.json_cond:
             unfound_times = 0
-            while request.key not in self.json_dict and unfound_times < MAX_UNFOUND_TIMES:
+            while request.key not in self.json_dict and unfound_times < _MAX_UNFOUND_TIMES:
                 self.json_cond.wait(timeout=0.0001)
                 unfound_times += 1
-            if unfound_times == MAX_UNFOUND_TIMES:
+            if unfound_times == _MAX_UNFOUND_TIMES:
                 return heturpc_pb2.RemoveJsonReply(message="not found:" + request.key)
             else:
                 self.json_dict.pop(request.key)
@@ -278,7 +282,7 @@ class DeviceController(heturpc_pb2_grpc.DeviceControllerServicer):
         return heturpc_pb2.HeartBeatReply(status=1)
 
 def serve(arr, exit_arr, last_heartbeat, port):
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=32))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=_MAX_GRPC_WORKERS))
     heturpc_pb2_grpc.add_DeviceControllerServicer_to_server(DeviceController(arr, exit_arr, last_heartbeat), server)
     server.add_insecure_port("[::]:" + port)
     server.start()
@@ -288,8 +292,8 @@ def serve(arr, exit_arr, last_heartbeat, port):
 def server_launch(port):
     logging.basicConfig()
     arr = multiprocessing.Array("i", [0], lock=True)
-    exit_arr = multiprocessing.Array("i", [0] * 32, lock=True)
-    last_heartbeat = multiprocessing.Array("d", [0.0] * 32, lock=True)
+    exit_arr = multiprocessing.Array("i", [0] * _MAX_GRPC_WORKERS, lock=True)
+    last_heartbeat = multiprocessing.Array("d", [0.0] * _MAX_GRPC_WORKERS, lock=True)
     p = multiprocessing.Process(target=serve, args=(arr, exit_arr, last_heartbeat, port))
     p.start()
     while True:

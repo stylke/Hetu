@@ -137,7 +137,7 @@ class HotSPaTrainer(Trainer):
                         labels=masked_lm_labels)
 
         # 6. Build Backward Graph
-        opt = self.optimizer_wrapper.create_optimizer(lr=args.lr)
+        opt = self.optimizer_wrapper.create_optimizer(init_lr=args.lr, max_lr=args.lr, min_lr=args.lr, lr_warmup_steps=0, lr_decay_steps=1000, lr_decay_style="constant") 
         train_op = opt.minimize(loss_op)
 
         # 7. Record Ops
@@ -183,6 +183,7 @@ class HotSPaTrainer(Trainer):
         self.cache_feed_dict = cache_feed_dict
 
         print(f'{local_device}: the first step may take a few minutes to [generate topo & execution plan], please be patient...')
+        assert(args.num_strategy == len(ds_parallel_configs))
         for epoch in range(args.epochs):
             consumed_samples = 0 # should be reset when run next epoch
             for step in range(args.steps):
@@ -309,6 +310,7 @@ class HotSPaTrainer(Trainer):
             for i in range(config.n_layer):
                 feed_dict[config.cu_seqlens_list[i]] = [x.astype(np.int32) for x in cu_seqlens_list]
             self.cache_feed_dict(feed_dict)
+            print("feed dict", feed_dict)
         else: # fake data; feed_dict={} will cause segment fault?
             print("Need feed dict data!")
             os.killpg(0, signal.SIGTERM)
@@ -465,9 +467,9 @@ class MalleusTrainer(Trainer):
             token_type_ids=token_type_ids,
             labels=masked_lm_labels
         )
-        
+
         # Build Backward Graph
-        opt = self.optimizer_wrapper.create_optimizer(lr=args.lr) 
+        opt = self.optimizer_wrapper.create_optimizer(init_lr=args.lr, max_lr=args.lr, min_lr=args.lr, lr_warmup_steps=0, lr_decay_steps=1000, lr_decay_style="constant") 
         train_op = opt.minimize(loss_op)
         
         # Record Ops

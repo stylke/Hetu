@@ -288,7 +288,7 @@
 
 - name: split
   op: SplitOp
-  args: Tensor input, int64_t num_chunks, int64_t dim
+  args: Tensor input, int64_t num_chunks, int64_t dim, bool remain=False
   self: input
 
 # multi-task only
@@ -300,12 +300,12 @@
 # deprecated: only used in gpt inference, before symbolic shape is realized
 - name: split
   op: SplitOp
-  args: Tensor input, int64_t num_chunks, int64_t dim, int64_t padding_axis
+  args: Tensor input, int64_t num_chunks, int64_t dim, int64_t padding_axis, bool remain=False
   self: input
 
 - name: split
   op: SplitOp
-  args: Tensor input, HTShape chunks, int64_t dim
+  args: Tensor input, HTShape chunks, int64_t dim, bool remain=False
   self: input
 
 - name: transpose
@@ -611,9 +611,9 @@
 # Optimizer
 #######################################################
 
-- name: sgd_update
-  op: SGDUpdateOp
-  args: Tensor param, Tensor grad, float lr
+# - name: sgd_update
+#   op: SGDUpdateOp
+#   args: Tensor param, Tensor grad, float lr
 
 #######################################################
 # Misc
@@ -633,7 +633,7 @@
 
 - name: comm
   op: CommOp
-  args: Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, DeviceGroupHierarchy dst_dg_hierarchy
+  args: Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, DeviceGroupHierarchy dst_dg_hierarchy, bool is_pipeline_op=True
 
 - name: comm
   op: CommOp

@@ -15,8 +15,12 @@ def read_yaml(file_path):
 
 def pssh(args):
     hostnames = []
+    ports = []
+    passwords = []
     if args.hosts is None:
         hostnames = ['localhost'] * args.ngpus
+        ports = [22] * args.ngpus
+        passwords = [None] * args.ngpus
     else:
         host_info = read_yaml(args.hosts)
         max_restart_times = host_info['max_restart_times']
@@ -24,29 +28,33 @@ def pssh(args):
         for host in host_info['hosts']:
             print(host)
             addr = str(host['addr'])
+            port = int(host['port']) if 'port' in host else 22
+            password = str(host['password']) if 'password' in host else None
             initial_workers = int(host['initial_workers'])
             min_workers = int(host['min_workers'])
             max_workers = int(host['max_workers'])
             for i in range(initial_workers):
+                # workaround: 当不使用host的全部gpu时优先按顺序使用
+                if len(hostnames) == args.ngpus:
+                    break
                 hostnames.append(addr)
+                ports.append(port)
+                passwords.append(password)
     print("HostNames:", hostnames)
     train_command = args.command
     cwd = os.getcwd()
     cmd = "cd " + cwd 
-    cmd += f" && source {args.envs} && " + train_command 
-    print(cmd)
+    cmd += f" && source {args.envs} && " 
     cmd_list = []
-    for i in range(len(hostnames)):
+    for i, hostname in enumerate(hostnames):
         # 请注意log编号目前并不等于rank编号
         # log编号是进程编号
         # 但不能保证分配到同样编号的rank
-        cmd_list.append(cmd + f" 2>&1 | tee {args.log_path}" + "/log_" + f"{i}" + ".txt")
+        cmd_list.append(cmd + f"export HETU_LOCAL_HOSTNAME={hostname} && " + train_command + f" 2>&1 | tee {args.log_path}" + "/log_" + f"{i}" + ".txt")
     clients = []
     outputs = []
-    for hostname, cmd in zip(hostnames, cmd_list):
-        client = ParallelSSHClient([hostname])
-        # If password is needed, you should ssh like this
-        # client = ParallelSSHClient([hostname], port=args.pssh_port, password=args.pssh_password)
+    for hostname, port, password, cmd in zip(hostnames, ports, passwords, cmd_list):
+        client = ParallelSSHClient([hostname], port=port, password=password)
         output = client.run_command(cmd)
         clients.append(client)
         outputs.append(output)

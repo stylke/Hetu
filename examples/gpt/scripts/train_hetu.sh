@@ -1,9 +1,9 @@
 NUM_LAYERS=${1:-32}
-# HIDDEN_SIZE=${2:-4096}
+HIDDEN_SIZE=${2:-4096}
 HIDDEN_SIZE=${2:-256}
 NUM_HEADS=${3:-32}
-SEQ_LEN=${4:-1024}
-GLOBAL_BATCH_SIZE=${5:-128}
+SEQ_LEN=${4:-8192}
+GLOBAL_BATCH_SIZE=${5:-16}
 MICRO_BATCH_SIZE=${6:-1}
 # FFN_HIDDEN_SIZE=${7:-11008}
 FFN_HIDDEN_SIZE=${7:-2752}
@@ -16,8 +16,18 @@ ENV_FILE_PATH=${11:-"./scripts/env_A100.sh"}
 
 # 注意目前属于同一CP的几条pipeline的layer与stage的划分以及recompute的layers必须一致
 # 否则会由于topo序和pipeline的scheduler不一致而出现死锁
-CASE=1
-if [[ ${CASE} -eq 1 ]]; then
+CASE=3
+if [[ ${CASE} -eq 0 ]]; then
+	# 单机同构
+	# setting 1
+	NUM_GPUS=16
+	DP=2
+	CP=1
+	TP=4
+	PP=2
+	HETERO=false
+	RECOMPUTE_LAYERS="[]"
+elif [[ ${CASE} -eq 1 ]]; then
 	# 单机同构
 	# setting 1
 	NUM_GPUS=8
@@ -44,6 +54,22 @@ elif [[ ${CASE} -eq 2 ]]; then
 	RECOMPUTE_LAYERS="[[],[30],[30],[30]]"
 	SEQ_LEN_LIST="[1024, 340, 341, 343]"
 elif [[ ${CASE} -eq 3 ]]; then
+	# 单机异构
+	# setting 2
+	NUM_GPUS=8
+	DP=2
+	CP_LIST="[1,1]"
+	TP=2
+	PP=2
+	HETERO=true
+	LAYERS_NUM_LIST="32,8,12,12"
+	STAGES_NUM_LIST="[1,3]"
+	MICRO_BATCH_NUM_LIST="[34,30]"
+	UNUSED_RANK="[1,3]"
+	RANK_TO_DEVICE_MAPPING="{0:0,1:1,2:7,3:6,4:4,5:5,6:3,7:2}"
+	RECOMPUTE_LAYERS="[[],[30]]"
+	SEQ_LEN_LIST="[]"
+elif [[ ${CASE} -eq 4 ]]; then
 	# 多机同构
 	# setting 3
 	NUM_GPUS=16
@@ -53,7 +79,7 @@ elif [[ ${CASE} -eq 3 ]]; then
 	PP=2
 	HETERO=false
 	RECOMPUTE_LAYERS="[15,16]"
-elif [[ ${CASE} -eq 4 ]]; then	
+elif [[ ${CASE} -eq 5 ]]; then	
 	# 多机异构
 	# setting 4
 	NUM_GPUS=16

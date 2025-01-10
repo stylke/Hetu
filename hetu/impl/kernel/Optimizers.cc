@@ -124,7 +124,7 @@ void AdamCpu(const NDArray& grad, NDArray& param, NDArray& mean,
   if (size == 0)
     return;
   CPUStream cpu_stream(stream);
-  HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "AdamUpdateCpu", [&]() {
+  HT_DISPATCH_FLOATING_TYPES(param->dtype(), spec_t, "AdamUpdateCpu", [&]() {
     auto _future = cpu_stream.EnqueueTask(
     [grad, param, mean, variance, lr, beta1, beta2, weight_decay, eps, step, size]() {
       adam_update_cpu<spec_t>(

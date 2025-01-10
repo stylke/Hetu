@@ -1,0 +1,1 @@
+DELIMITER = '|'  # Delimiter to separate dict_name and key

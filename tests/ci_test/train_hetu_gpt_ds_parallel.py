@@ -134,7 +134,7 @@ def pretrain(args):
     opt = ht.AdamOptimizer(lr=args.lr)
     train_op = opt.minimize(loss_mean)
     print(f'{local_device}: optimizer minimize end...')
-    load_checkpoint_from_megatron(model, opt, "/home/pkuhetu/njw1123/hetu_merge_all/model_optim_rng.pt", config, local_device)
+    load_checkpoint_from_megatron(model, opt, "./model_optim_rng.pt", config, local_device)
     print(f'{local_device}: build dataset begin...')
     train_dataset = train_dataset_provider(args)
     print(f'{local_device}: build dataset end...')

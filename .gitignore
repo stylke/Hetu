@@ -1,4 +1,6 @@
 *.pyc
+*.svg
+*.png
 *.csv
 *.tar.gz*
 *.pkl.gz
@@ -17,16 +19,20 @@ examples/gpt/experiments/
 examples/gpt/data/
 examples/malleus/data/
 examples/efficiency/exp
+examples/efficiency/draw
 third_party/nccl/
 examples/hotspa/data/
 examples/hydraulis/data/
 examples/hydraulis/*.pkl
+examples/hydraulis/func_call/
+examples/hydraulis/dataset_analysis/
+examples/hydraulis/results
+examples/hydraulis/draw
 
 # Python
 *.png
 *.json
 *.txt
-*/elastic.egg-info/
 .mypy_cache
 */*.pyc
 */*.so*

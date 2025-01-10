@@ -37,7 +37,7 @@ void NDArrayDef::Serialize(std::ostream& os, size_t n_print) const {
         }
       });
   }
-  else if(n_print > 0){
+  else if (n_print > 0){
     if (is_cpu()) {
       const uint8_t* ptr = data_ptr<uint8_t>();
       os << int(ptr[0] >> 4) << ", " << int(ptr[0] & 0xF);

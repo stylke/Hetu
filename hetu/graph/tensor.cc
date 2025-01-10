@@ -124,31 +124,91 @@ size_t TensorDef::cur_hetero_id() const {
   return graph().CUR_HETERO_ID;
 }
 
+bool TensorDef::has_cur_ds_union() {
+  if (graph().type() == GraphType::EXECUTABLE) {
+    HT_ASSERT(_ds_hierarchy.size() <= 1)
+      << "ExecutableGraph only has at most one single strategy"
+      << ", but found " << name() << " has " << _ds_hierarchy.size() << " strategy";
+    return _ds_hierarchy.size() == 1;
+  } 
+  return cur_strategy_id() < _ds_hierarchy.size();
+}
+
 DistributedStatesUnion& TensorDef::cur_ds_union() {
+  // 2024.9.25 Update
+  // 限制executable graph只有一个strategy
+  if (graph().type() == GraphType::EXECUTABLE) {
+    if (_ds_hierarchy.size() == 0) {
+      HT_ASSERT(graph().CREATE_STRATEGY)
+        << "ExecutableGraph ds union is constructed only through define graph instantiate or make op in exec graph"
+        << ", but found " << name() << " disobey the rule";
+      _ds_hierarchy.add(DistributedStatesUnion());
+      return _ds_hierarchy.get(0);
+    }
+    HT_ASSERT(_ds_hierarchy.size() == 1)
+      << "ExecutableGraph only has one single strategy"
+      << ", but found " << name() << " has " << _ds_hierarchy.size() << " strategy";
+    return _ds_hierarchy.get(0);
+  }
   if (graph().CREATE_STRATEGY) {
-    while (cur_strategy_id() >= _ds_hierarchy.size()) {
+    while (graph().CUR_STRATEGY_ID >= _ds_hierarchy.size()) {
       _ds_hierarchy.add(DistributedStatesUnion());
     }
+  }
+  // 没有开deduce states的op的输出
+  if (_ds_hierarchy.size() == 0) {
+    return _dummy_ds_union;
   }
   HT_ASSERT(graph().CUR_STRATEGY_ID < _ds_hierarchy.size())
     << name() << " strategy id out of range: " 
     << graph().CUR_STRATEGY_ID << " is larger than " << _ds_hierarchy.size() 
     << ", the CREATE_STRATEGY is " << graph().CREATE_STRATEGY;
-  return _ds_hierarchy.get(cur_strategy_id());
+  return _ds_hierarchy.get(graph().CUR_STRATEGY_ID);
 }
 
 void TensorDef::set_cur_ds_union(const DistributedStatesUnion& ds_union) {
+  // 2024.9.25 Update
+  // 限制executable graph只有一个strategy
+  if (graph().type() == GraphType::EXECUTABLE) {
+    if (_ds_hierarchy.size() == 0) {
+      _ds_hierarchy.add(ds_union);
+      return;
+    }
+    HT_ASSERT(_ds_hierarchy.size() == 1)
+      << "ExecutableGraph only has one single strategy";
+    _ds_hierarchy.get(0) = ds_union;
+    return;
+  }
   // 未在InferMeta时DeduceStatesHierarchy的tensor
   if (_ds_hierarchy.size() == 0) {
-    while (cur_strategy_id() >= _ds_hierarchy.size()) {
+    while (graph().CUR_STRATEGY_ID >= _ds_hierarchy.size()) {
       _ds_hierarchy.add(DistributedStatesUnion());
     }
-    _ds_hierarchy.get(cur_strategy_id()) = ds_union;
+    _ds_hierarchy.get(graph().CUR_STRATEGY_ID) = ds_union;
   }
   // 其余情况必须要求_hierarchy已准备妥当
   HT_ASSERT(graph().CUR_STRATEGY_ID < _ds_hierarchy.size())
     << "Strategy id out of range";
-  _ds_hierarchy.get(cur_strategy_id()) = ds_union;
+  _ds_hierarchy.get(graph().CUR_STRATEGY_ID) = ds_union;
+}
+
+size_t TensorDef::inferred_local_placement_group_idx() const {
+  HT_ASSERT(!graph().USE_HETERO_ID)
+    << "inferred_local_placement_group_idx should only used when hetero id is not provided";
+  auto inferred = hetu::impl::comm::GetLocalDevice();
+  HT_ASSERT(placement().is_undetermined() || placement() == inferred)
+    << "inferred_local_placement_group_idx is mainly used when the op is not instantiated";
+  HT_ASSERT(has_placement_group())
+    << "inferred_local_placement_group_idx should at least guarantee there is a placement group union";
+  if (placement_group_union().has(inferred)) {
+    return placement_group_union().get_index(inferred);
+  }
+  if (graph().type() == GraphType::DEFINE_AND_RUN) {
+    HT_ASSERT(producer()->suggested_hetero_id() == 0)
+      << "All ops in define graph should have the suggested_hetero_id with 0"
+      << ", make sure you haven't changed the COMPUTE_SUGGESTED_HETERO_ID of the define graph";
+  }
+  return placement_group_union().size() > 1 ? producer()->suggested_hetero_id() : 0;
 }
 
 // 对于不同阶段下的tensor
@@ -179,8 +239,9 @@ DistributedStates& TensorDef::inferred_cur_ds() {
   // 但实际上我们并不关心define graph里的ds、dg、shape等
   // 因此默认使用第0个
   if (graph().type() == GraphType::DEFINE_AND_RUN) {
-    HT_ASSERT(graph().SUGGESTED_HETERO_ID == 0)
-      << "Shouldn't change the SUGGESTED_HETERO_ID of the define graph";
+    HT_ASSERT(producer()->suggested_hetero_id() == 0)
+      << "All ops in define graph should have the suggested_hetero_id with 0"
+      << ", make sure you haven't changed the COMPUTE_SUGGESTED_HETERO_ID of the define graph";
     return ds_union.get(0);
   }
   // 2、exec graph
@@ -190,20 +251,13 @@ DistributedStates& TensorDef::inferred_cur_ds() {
       << name() << " should already MapToParallelDevices";
     // 已经instantiate过了
     if (!placement().is_undetermined()) {
-      HT_ASSERT(ds_union.size() == _placement_group_union.size())
+      HT_ASSERT(ds_union.size() == placement_group_union().size())
         << name() << " size of ds union and pg union should be equal";
       return ds_union.get(local_placement_group_idx());
     }
     // 没instantiate或者是op不在当前device上
     else {
-      auto inferred = hetu::impl::comm::GetLocalDevice();
-      if (_placement_group_union.has(inferred)) {
-        return ds_union.get(_placement_group_union.get_index(inferred));
-      }
-      // 这里我们返回default ds
-      else {
-        return ds_union.is_hetero() ? ds_union.get(graph().SUGGESTED_HETERO_ID) : ds_union.get(0);
-      }
+      return ds_union.get(inferred_local_placement_group_idx());
     }
   }
   // 其他graph类型暂不支持

@@ -12,7 +12,7 @@ namespace graph {
 
 struct PySubGraph {
   PyObject_HEAD;
-  std::string subgraph_name;
+  std::string global_name;
 };
 
 extern PyTypeObject* PySubGraph_Type;
@@ -38,7 +38,7 @@ inline bool CheckPySubGraph(PyObject* obj) {
 }
 
 inline std::string SubGraphName_FromPyObject(PyObject* obj) {
-  return reinterpret_cast<PySubGraph*>(obj)->subgraph_name;
+  return reinterpret_cast<PySubGraph*>(obj)->global_name;
 }
 
 /******************************************************

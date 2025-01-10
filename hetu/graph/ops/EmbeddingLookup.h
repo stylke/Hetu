@@ -64,7 +64,7 @@ protected:
     if (_multi_offset.size() == 1) {
       return _multi_offset[0];
     } else {
-      return _multi_offset[graph.CUR_STRATEGY_ID];
+      return _multi_offset[graph.COMPUTE_STRATEGY_ID];
     }
   }
 
@@ -116,7 +116,7 @@ protected:
     if (_multi_offset.size() == 1) {
       return _multi_offset[0];
     } else {
-      return _multi_offset[graph.CUR_STRATEGY_ID];
+      return _multi_offset[graph.COMPUTE_STRATEGY_ID];
     }
   }
 

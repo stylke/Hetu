@@ -42,7 +42,7 @@ mkdir -p ${LOG_FOLDER}
 LOG_FILE=${LOG_FOLDER}/gbs${GLOBAL_BATCH_SIZE}_mbs${MICRO_BATCH_SIZE}_dp${DP}_tp${TP}_pp${PP}.log
 echo log will save to ${LOG_FILE}...
 
-ROOT_FOLDER=/home/pkuhetu/njw1123/Hetu-dev/tests/ci_test/data_utils/data
+ROOT_FOLDER=./tests/ci_test/data_utils/data
 JSON_FILE=${ROOT_FOLDER}/web/refinedweb0.json
 JSON_KEY=content
 VOCAB_FILE=${ROOT_FOLDER}/vocab.json
@@ -51,7 +51,7 @@ MERGE_FILE=${ROOT_FOLDER}/merges.txt
 # ds_parallel_config can use ds_parallel_config/generate_gpt_3d_config.py for auto-generate
 export NCCL_DEBUG=VERSION
 export HETU_INTERNAL_LOG_LEVEL=INFO
-MEGATRON_PATH=/home/pkuhetu/ffc/hetu/time_compare/Megatron-LM
+MEGATRON_PATH=./hetu/time_compare/Megatron-LM
 export PYTHONPATH=$PYTHONPATH:${MEGATRON_PATH}:${MEGATRON_PATH}
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 mpirun  --allow-run-as-root -np 8 \
 --output-filename logs/ds_parallel --merge-stderr-to-stdout \

@@ -30,8 +30,12 @@ def kill_command():
 
 def distributed_init(args):
     global local_device, all_devices
-    hostname = socket.gethostname()
-    os.environ['HETU_LOCAL_HOSTNAME'] = hostname
+    if 'HETU_LOCAL_HOSTNAME' not in os.environ:
+        # 通过socket获取主机名并设置环境变量
+        hostname = socket.gethostname()
+        os.environ['HETU_LOCAL_HOSTNAME'] = hostname
+    else:
+        print(f"Environment variable 'HETU_LOCAL_HOSTNAME' already set: {os.environ['HETU_LOCAL_HOSTNAME']}")
     ht.init_comm_group(args.ngpus, server_address = args.server_addr + ":" + args.server_port)
     local_device = ht.local_device()
     all_devices = ht.global_device_group()
@@ -417,7 +421,7 @@ def pretrain(args):
                 }
             # print(f"{local_device}: strategy_id = {strategy_id}, gbs = {global_batch_size}, mbs = {micro_batch_size}, seq_len = {seq_len} run begin")
             start_time = time.time()
-            if step == 5:
+            if step == 2:
                 os.environ['HETU_STRAGGLER'] = "EXP_NEW"
                 os.environ['HETU_STRAGGLER_LOG_FILE'] = args.exp_file
             try:

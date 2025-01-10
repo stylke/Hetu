@@ -305,10 +305,10 @@ class Module(object):
         with ExitStack() as stack:
             stack.enter_context(hetu.graph("define_and_run"))
             if self.module_name is None:
-                print(self.__class__.__name__, "Not Have Module_Name")
+                print(self.__class__.__name__, "doesn't have module_name")
             else:
                 # print(self.__class__.__name__,  "Module_Name:", self.module_name, "Global_name:", self.global_name)
-                stack.enter_context(hetu.subgraph(subgraph_type = self.__class__.__name__, name = self.module_name))
+                stack.enter_context(hetu.subgraph(name = self.module_name, module_type = self.__class__.__name__))
                 _parameters = self.__dict__.get('_parameters')
                 for key, param in _parameters.items():
                     # print(self.module_name, " ", key, " ", type(param), param)
@@ -316,7 +316,7 @@ class Module(object):
             
             # multi-strategies of recompute  
             if self._recompute:
-                mutli_recompute = [[True] for i in range(1 if self.ds_parallel_configs is None else len(self.ds_parallel_configs))]  
+                mutli_recompute = [[True] for _ in range(1 if self.ds_parallel_configs is None else len(self.ds_parallel_configs))]  
             elif self.ds_parallel_configs is not None:
                 mutli_recompute = [[False] if 'recompute' not in self.ds_parallel_configs[i] else self.ds_parallel_configs[i]['recompute'] for i in range(len(self.ds_parallel_configs))]  
             else:

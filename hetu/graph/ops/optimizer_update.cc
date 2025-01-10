@@ -58,17 +58,44 @@ void MomentumUpdateOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
 void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
                            NDArrayList& outputs,
                            RuntimeContext& runtime_ctx) const {
+  HT_ASSERT(outputs.at(0)->is_equal(inputs.at(0)))
+    << "AdamOp should be inplace, please ensure you have overrided the DoAllocOutputs()";
   NDArray& param = outputs.at(0);
   const NDArray& grad = inputs.at(1);
   NDArray& mean = const_cast<NDArray&>(inputs.at(2));
   NDArray& variance = const_cast<NDArray&>(inputs.at(3));
   NDArray& step = const_cast<NDArray&>(inputs.at(4));
+  int64_t step_num = inputs.at(4)->item<int64_t>();
+  // TODO: 目前只考虑grad和param的ds一致的情况
+  // 后续要支持param冗余
+  HT_ASSERT(op->input(0)->cur_ds_union().check_equal(op->input(1)->cur_ds_union()))
+    << "Currently only support equal ds union for param and grad";
+  // 这里直接更新即可
+  // 如何得到符合ds的grad以及后续的transfer param则交给exec graph中的comm op来做
+  HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
+                                  type(), hetu::impl::Adam, grad, param,
+                                  mean, variance, step, learning_rate(step_num), 
+                                  beta1(), beta2(), eps(), weight_decay(step_num), true,
+                                  op->instantiation_ctx().stream());
+}
+
+// old version: manually implement zero
+/*
+void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
+                           NDArrayList& outputs,
+                           RuntimeContext& runtime_ctx) const {
+  NDArray& param = outputs.at(0);
+  const NDArray& grad = inputs.at(1);
+  NDArray& mean = const_cast<NDArray&>(inputs.at(2));
+  NDArray& variance = const_cast<NDArray&>(inputs.at(3));
+  NDArray& step = const_cast<NDArray&>(inputs.at(4));
+  int64_t step_num = inputs.at(4)->item<int64_t>();
   // 不开zero
-  if (!_multi_zero.at(op->graph().CUR_STRATEGY_ID)) {
+  if (!_multi_zero.at(op->graph().OPTIMIZE_STRATEGY_ID)) {
     HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
                                     type(), hetu::impl::Adam, grad, param,
-                                    mean, variance, step, learning_rate(), 
-                                    beta1(), beta2(), eps(), weight_decay(), true,
+                                    mean, variance, step, learning_rate(step_num), 
+                                    beta1(), beta2(), eps(), weight_decay(step_num), true,
                                     op->instantiation_ctx().stream());
   } 
   // 开zero
@@ -83,7 +110,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
       DeviceGroup comm_group = reduce_scatter_impl.comm_group();
       int32_t scatter_dim = reduce_scatter_impl.get_scatter_dim();
       // HT_LOG_WARN << op << " comm group: " << comm_group;
-      auto local_device_index = op->local_placement_group().get_index(op->placement());
+      auto local_device_index = op->output(0)->local_placement_group().get_index(op->placement());
       auto scatter_num = comm_group.num_devices();
       HT_ASSERT(!partial_grad->cur_ds_union().is_hetero())
         << "Adam: reduce scatter shouln't have hetero grad";
@@ -107,8 +134,8 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
       // only update scatter part of param
       HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
                                       type(), hetu::impl::Adam, grad, param_scatter,
-                                      mean, variance, step, learning_rate(), 
-                                      beta1(), beta2(), eps(), weight_decay(), true,
+                                      mean, variance, step, learning_rate(step_num), 
+                                      beta1(), beta2(), eps(), weight_decay(step_num), true,
                                       op->instantiation_ctx().stream());
       // in-place allgather
       // gather dim和scatter dim对齐
@@ -123,7 +150,7 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
       auto& partial_grad = split_reduce_scatter_op->input(0);
       const std::vector<DeviceGroupList>& comm_groups_list = split_reduce_scatter_impl.comm_groups_list();
       // HT_LOG_WARN << op << " comm group: " << comm_group;
-      auto local_device_index = op->local_placement_group().get_index(op->placement());
+      auto local_device_index = op->output(0)->local_placement_group().get_index(op->placement());
       auto scatter_num = comm_groups_list.at(0).at(0).num_devices();
       HT_ASSERT(partial_grad->cur_ds_union().hetero_dim() == -2)
         << "Adam: split reduce scatter should have hetero grad whose hetero dim is -2";
@@ -133,8 +160,8 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
       auto relative_param = param;
       if (is_reduce_scatter_op(op->input(1)->producer()->input(0)->producer())) {
         auto& reduce_scatter_op = op->input(1)->producer()->input(0)->producer();
-        auto num_chunks = reduce_scatter_op->local_placement_group().num_devices();
-        auto idx = reduce_scatter_op->local_placement_group().get_index(op->placement());
+        auto num_chunks = reduce_scatter_op->output(0)->local_placement_group().num_devices();
+        auto idx = reduce_scatter_op->output(0)->local_placement_group().get_index(op->placement());
         relative_param = NDArray::split(relative_param, num_chunks).at(idx);
       }
       auto param_size_per_split = DIVUP(relative_param->numel(), split_num);
@@ -163,8 +190,8 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
         // 注意这里只有最后一次需要更新step
         HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
                                         type(), hetu::impl::Adam, split_grad.at(i), split_param_scatter,
-                                        split_mean.at(i), split_variance.at(i), step, learning_rate(), 
-                                        beta1(), beta2(), eps(), weight_decay(), i == split_num - 1 ? true : false,
+                                        split_mean.at(i), split_variance.at(i), step, learning_rate(step_num), 
+                                        beta1(), beta2(), eps(), weight_decay(step_num), i == split_num - 1 ? true : false,
                                         op->instantiation_ctx().stream());
         const auto& comm_groups = comm_groups_list.at(i);
         for (const auto& comm_group : comm_groups) {
@@ -188,16 +215,19 @@ void AdamOpImpl::DoCompute(Operator& op, const NDArrayList& inputs,
     }
   }
 }
+*/
 
-// TODO: support zero
+// support zero
+// update op needn't deduce states
 void AdamOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs, 
                                 const OpMeta& op_meta) const {
+  HT_RUNTIME_ERROR << "optimizer op shouldn't deduce states";
   const DistributedStates& ds_param = inputs.at(0)->get_distributed_states();
   const DistributedStates& ds_grad = inputs.at(1)->get_distributed_states();
   const DistributedStates& ds_mean = inputs.at(2)->get_distributed_states();
   const DistributedStates& ds_variance = inputs.at(3)->get_distributed_states();
   const DistributedStates& ds_step = inputs.at(4)->get_distributed_states();
-  if (_multi_zero.at(Graph::GetGraph(Graph::cur_graph_ctx()).CUR_STRATEGY_ID)) {
+  if (_multi_zero.at(Graph::GetGraph(Graph::cur_graph_ctx()).OPTIMIZE_STRATEGY_ID)) {
     HT_ASSERT(ds_param.check_equal(ds_grad) && ds_mean.check_equal(ds_variance) && ds_param.check_equal(ds_mean))
       << "DistributedStates for param, grad, mean, variance should be equal!";
   } else {
@@ -207,8 +237,10 @@ void AdamOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   outputs.at(0)->set_distributed_states(ds_param);
 }
 
+// update op needn't deduce states
 void AdamOpImpl::DoDeduceHeterProp(const std::vector<int32_t>& inputs_hetero_dim,
                                    TensorList& outputs, const OpMeta& op_meta) const {
+  HT_RUNTIME_ERROR << "optimizer op shouldn't deduce states";
   outputs.at(0)->cur_ds_union().set_hetero_dim(inputs_hetero_dim.at(0));
 }
 
@@ -221,34 +253,34 @@ void AdamOpImpl::DoSpecialMergeStrategy(Operator& op, Operator& another_op) {
     << "size mismatch";
 }
 
-Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, float learning_rate,
+Tensor MakeSGDUpdateOp(Tensor param, Tensor grad, OptimizerParamScheduler param_scheduler,
                        OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<SGDUpdateOpImpl>(learning_rate),
+  return Graph::MakeOp(std::make_shared<SGDUpdateOpImpl>(param_scheduler),
                        {std::move(param), std::move(grad)}, std::move(op_meta))
     ->output(0);
 }
 
 Tensor MakeSGDUpdateWithGradScalerOp(Tensor param, Tensor grad, Tensor infinite_count, 
-                                     float learning_rate, OpMeta op_meta) {
-  return Graph::MakeOp(std::make_shared<SGDUpdateWithGradScalerOpImpl>(learning_rate),
+                                     OptimizerParamScheduler param_scheduler, OpMeta op_meta) {
+  return Graph::MakeOp(std::make_shared<SGDUpdateWithGradScalerOpImpl>(param_scheduler),
                        {std::move(param), std::move(grad), std::move(infinite_count)}, std::move(op_meta))
     ->output(0);
 }
 
 
 Tensor MakeMomentumUpdateOp(Tensor param, Tensor grad, Tensor velocity,
-                            float learning_rate, float momentum, bool nesterov,
+                            OptimizerParamScheduler param_scheduler, float momentum, bool nesterov,
                             OpMeta op_meta) {
   return Graph::MakeOp(std::make_shared<MomentumUpdateOpImpl>(
-                         learning_rate, momentum, nesterov),
+                         param_scheduler, momentum, nesterov),
                        {std::move(param), std::move(grad), std::move(velocity)},
                        std::move(op_meta))
     ->output(0);
 }
 
 Tensor MakeAdamOp(Tensor param, Tensor grad, Tensor mean, Tensor variance,
-                  float learning_rate, Tensor step, float beta1, float beta2, 
-                  float eps, float weight_decay, OpMeta op_meta) {
+                   OptimizerParamScheduler param_scheduler, Tensor step, float beta1, float beta2, 
+                  float eps, OpMeta op_meta) {
   // pure tp needn't zero 
   std::vector<bool> multi_zero; 
   multi_zero.reserve(param->ds_hierarchy().size());   
@@ -259,7 +291,7 @@ Tensor MakeAdamOp(Tensor param, Tensor grad, Tensor mean, Tensor variance,
   }                 
   // HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": MakeAdamOp: param = " << param << ", multi zero = " << multi_zero;
   return Graph::MakeOp(std::make_shared<AdamOpImpl>(
-                       learning_rate, multi_zero, beta1, beta2, eps, weight_decay),
+                       param_scheduler, multi_zero, beta1, beta2, eps),
                        {std::move(param), std::move(grad), std::move(mean), std::move(variance), std::move(step)},
                        std::move(op_meta))
     ->output(0);

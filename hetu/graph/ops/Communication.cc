@@ -1,6 +1,7 @@
 #include "hetu/graph/ops/Communication.h"
 #include "hetu/graph/headers.h"
 #include "hetu/graph/ops/kernel_links.h"
+#include "hetu/graph/executable_graph.h"
 #include "hetu/impl/communication/nccl_comm_group.h"
 #include "hetu/impl/communication/comm_group.h"
 #include "hetu/core/symbol.h"
@@ -16,13 +17,12 @@ std::ostream& operator<<(std::ostream& os, const CommOpInfo& info) {
     << " and dst group union = " << info.dst_group_union
     << " and src ds union = " << info.src_ds_union.ds_union_info()
     << " and dst ds union = " << info.dst_ds_union.ds_union_info()
-    << " and union idx = " << info.union_idx;
+    << " and src union idx = " << info.src_union_idx
+    << " and dst union idx = " << info.dst_union_idx;
   return os;
 }
 
 CommOpInfo CommOpImpl::get_comm_info(Operator& op, const Device& inferred) const {
-  Tensor& input = op->input(0);
-  auto& graph = input->graph();
   HT_ASSERT(op->has_placement_group())
     << "get_comm_info should be called after DoMapToParallelDevices";
   // 这里一个比较tricky的是union中选哪个ds会依赖于具体的device
@@ -31,41 +31,66 @@ CommOpInfo CommOpImpl::get_comm_info(Operator& op, const Device& inferred) const
   // 因为该op最终不会出现在local topo中
   const auto& src_group_union = get_src_group_union(op);
   const auto& dst_group_union = get_dst_group_union(op);
-  auto src_ds_union = input->cur_ds_union();
-  auto dst_ds_union = get_dst_ds_union(op);
+  auto src_ds_union = op->input(0)->cur_ds_union();
+  auto dst_ds_union = op->output(0)->cur_ds_union();
   HT_ASSERT(src_ds_union.size() == src_group_union.size() && dst_ds_union.size() == dst_group_union.size())
     << "Size of unions should be equal";
-  size_t union_idx = 0;
+  size_t src_union_idx = 0, dst_union_idx = 0;
   int32_t placement_pos = -1;
-  if (op->placement_group_union().has(inferred)) {
-    union_idx = op->placement_group_union().get_index(inferred);
+  if (src_group_union.has(inferred)) {
+    src_union_idx = src_group_union.get_index(inferred);
   }
-  const auto& src_group = src_group_union.get(union_idx);
-  const auto& dst_group = dst_group_union.get(union_idx);
-  const auto& src_ds = src_ds_union.get(union_idx);
-  const auto& dst_ds = dst_ds_union.get(union_idx);
-  if (dst_group.contains(inferred) && !src_group.contains(inferred)) {
-    placement_pos = 0;
-  } else if (src_group.contains(inferred) && !dst_group.contains(inferred)) {
-    placement_pos = 1;
-  } else if (src_group.contains(inferred) && dst_group.contains(inferred)) {
-    placement_pos = 2;
-  } else {
-    placement_pos = -1;
+  if (dst_group_union.has(inferred)) {
+    dst_union_idx = dst_group_union.get_index(inferred);
+  }
+  // 大部分情况下union size是一样的
+  // src_union_idx与dst_union_idx在只有一边的时候必须把另一边设成一样的值
+  if (src_group_union.size() == dst_group_union.size()) {
+    if (dst_group_union.has(inferred) && !src_group_union.has(inferred)) {
+      placement_pos = 0; // only recv
+      src_union_idx = dst_union_idx;
+    } else if (src_group_union.has(inferred) && !dst_group_union.has(inferred)) {
+      placement_pos = 1; // only send
+      dst_union_idx = src_union_idx;
+    } else if (src_group_union.has(inferred) && dst_group_union.has(inferred)) {
+      placement_pos = 2; // both send and recv
+    } else {
+      placement_pos = -1; // non-local
+    }
+  }
+  // union size不对齐的情况比较罕见
+  // 目前只有brdige comm op会遇到
+  // 只支持最终转化成all-to-all
+  // src_union_idx与dst_union_idx不用管
+  else {
+    if (dst_group_union.has(inferred) && !src_group_union.has(inferred)) {
+      placement_pos = 0; // only recv
+    } else if (src_group_union.has(inferred) && !dst_group_union.has(inferred)) {
+      placement_pos = 1; // only send
+    } else if (src_group_union.has(inferred) && dst_group_union.has(inferred)) {
+      placement_pos = 2; // both send and recv
+    } else {
+      placement_pos = -1; // non-local
+    }
   }
   // 一对多和多对一目前会在hetero dim上将二者尝试对齐
   // 其解决的主要是不同tp组间的activation通信
+  // workaround: hydraulis的bridge-graph并不适用
   if (src_ds_union.is_hetero() && !dst_ds_union.is_hetero()) {
-    dst_ds_union = dst_ds_union.to_hetero(src_ds_union.hetero_dim(), src_ds_union.size());
+    // dst_ds_union = dst_ds_union.to_hetero(src_ds_union.hetero_dim(), src_ds_union.size());
   } 
   else if (!src_ds_union.is_hetero() && dst_ds_union.is_hetero()) {
-    src_ds_union = src_ds_union.to_hetero(dst_ds_union.hetero_dim(), dst_ds_union.size());
+    // src_ds_union = src_ds_union.to_hetero(dst_ds_union.hetero_dim(), dst_ds_union.size());
   } 
-  // 多对多情形则只要求union size一样
+  // 多对多情形
   // hetero dim可以不同
+  // 目前也支持union size不同
+  // 但不能在reduce维度异构
   else if (src_ds_union.is_hetero() && dst_ds_union.is_hetero()) {
-    HT_ASSERT(src_ds_union.size() == dst_ds_union.size())
-      << "Hetero size should be equal for src ds union and dst ds union";
+    if (src_ds_union.size() != dst_ds_union.size()) {
+      HT_ASSERT(src_ds_union.hetero_dim() >= -1 && dst_ds_union.hetero_dim() >= -1)
+        << "no reduce should be included if union size mismatches";
+    }
   } 
   // 其余一对一情形
   else {
@@ -75,13 +100,66 @@ CommOpInfo CommOpImpl::get_comm_info(Operator& op, const Device& inferred) const
     HT_ASSERT(src_ds_union.size() == dst_ds_union.size() && src_ds_union.size() == 1)
       << "Double check fault";
   }
-  return CommOpInfo(src_group_union, dst_group_union, src_ds_union, dst_ds_union, union_idx, placement_pos);
+  return CommOpInfo(src_group_union, dst_group_union, src_ds_union, dst_ds_union, src_union_idx, dst_union_idx, placement_pos);
 }
 
 uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const CommOpInfo& comm_info) {
   CommOpInfo info = comm_info.is_empty ? get_comm_info(op, inferred) : comm_info;
-  // input may be inplaced, so comm_type should be updated for each call
+  bool no_reduction = true;
+  for (size_t i = 0; i < info.src_group_union.size(); i++) {
+    if (info.src_ds_union.get(i).states(-2) != 1) {
+      no_reduction = false;
+      break;
+    }
+  }
+  for (size_t i = 0; i < info.dst_group_union.size(); i++) {
+    if (info.dst_ds_union.get(i).states(-2) != 1) {
+      no_reduction = false;
+      break;
+    }
+  }
   // 下面对不同情形进行处理
+  // 对于union size不一样或者src有uncontiguous的情况
+  // 我们直接用all-to-all或者split-all-gather优化
+  if (info.src_group_union.size() != info.dst_group_union.size() || !info.src_ds_union.split_pattern().is_contiguous()) {
+    HT_ASSERT(no_reduction)
+      << "no reduce should be included if union size mismatches or have uncontiguous input";
+    if (info.src_ds_union.check_equal(info.dst_ds_union) && info.src_group_union.check_equal(info.dst_group_union)) {
+      _comm_type = UNUSED_OP; 
+      return _comm_type;
+    }
+    // 看是否可以split all gather
+    // 条件还是比较苛刻的
+    bool can_split_all_gather = true;
+    if (info.src_group_union.size() == info.dst_group_union.size()
+        && info.src_group_union.check_equal(info.dst_group_union)
+        && info.src_ds_union.hetero_dim() == 0 
+        && !info.src_ds_union.split_pattern().is_contiguous()
+        && info.dst_ds_union.hetero_dim() == -1
+        && info.dst_ds_union.split_pattern().is_contiguous()) {
+      size_t size = info.src_group_union.size();
+      for (size_t i = 0; i < size; i++) {
+        auto src_local_ds = info.src_ds_union.get_local(i);
+        auto dst_local_ds = info.dst_ds_union.get_local(i);
+        if (!src_local_ds.check_equal(dst_local_ds)) {
+          HT_LOG_TRACE << op << " cannot leverage split all gather optimization because " << i << " local ds not equal: "
+            << src_local_ds.ds_info() << " vs " << dst_local_ds.ds_info();
+          can_split_all_gather = false;
+          break;
+        }
+      }
+    } else {
+      HT_LOG_TRACE << op << " cannot leverage split all gather optimization";
+      can_split_all_gather = false;
+    }
+    if (can_split_all_gather) {
+      _comm_type = SPLIT_ALL_GATHER_OP;
+    } else {
+      _comm_type = BATCHED_ISEND_IRECV_OP;
+    }
+    return _comm_type;
+  }
+  // 剩余情形保证union size一样且只可能dst出现uncontiguous
   // 1、hetero dim一样
   // 包括都是homo的情形，即hetero dim是NULL_HETERO_DIM
   // 这种情况下只用关心src ds和dst ds
@@ -151,6 +229,13 @@ uint64_t CommOpImpl::get_comm_type(Operator& op, const Device& inferred, const C
   }
   // 2、hetero dim不一样
   else {
+    // 2-1、不存在reduce
+    // 使用all to all
+    if (no_reduction) {
+      _comm_type = BATCHED_ISEND_IRECV_OP;
+      return _comm_type;
+    }
+    // 2-2、存在reduce
     HT_ASSERT(info.src_group_union.check_equal(info.dst_group_union))
       << "Currently only support intra-group multi hetero dim comm";
     // DistributedStatesList src_local_ds_list, dst_local_ds_list;
@@ -400,6 +485,8 @@ void CommOpImpl::DoDeduceStates(const TensorList& inputs, TensorList& outputs,
   const Tensor& input = inputs.at(0);
   Tensor& output = outputs.at(0);
   const auto& ds_input = input->get_distributed_states();
+  HT_ASSERT(input->graph().USE_HETERO_ID == true)
+    << "comm op DoDeduceStates can only use when using hetero id";
   const auto& ds_dst = get_dst_distributed_states(input->producer());
   // TODO: check states/order between src and dst
   HT_ASSERT(ds_input.is_valid() && ds_dst.is_valid())
@@ -442,7 +529,19 @@ bool CommOpImpl::DoMapToParallelDevices(Operator& op,
   const DistributedStatesUnion& dst_ds_union = get_dst_ds_union(op);
   HT_ASSERT(src_group_union.size() == src_ds_union.size() && dst_group_union.size() == dst_ds_union.size())
     << "Union sizes mismatch";
-  DeviceGroupUnion merge_group_union;
+  auto src_group_all = src_group_union.all();
+  auto dst_group_all = dst_group_union.all();
+  std::set<Device> all_devices;
+  for (const auto& device : src_group_all.devices()) {
+    all_devices.insert(device);
+  }
+  for (const auto& device : dst_group_all.devices()) {
+    all_devices.insert(device);
+  }
+  DeviceGroupUnion merge_group_union({DeviceGroup(std::vector<Device>(all_devices.begin(), all_devices.end()))});
+  // bridge comm op可能存在union size不对齐的情况
+  // workaround: 因此这里直接构造一个拥有src和dst全部device的union size为1的pg union
+  /*
   if (src_group_union.size() == 1 && dst_group_union.size() != 1) {
     merge_group_union = DeviceGroupUnion::device_group_to_union(src_group_union.get(0), src_ds_union.get(0), dst_ds_union.hetero_dim(), dst_ds_union.size());
     merge_group_union = DeviceGroupUnion::merge(merge_group_union, dst_group_union);
@@ -454,6 +553,7 @@ bool CommOpImpl::DoMapToParallelDevices(Operator& op,
       << "Size of src group union and dst group union should be equal";
     merge_group_union = DeviceGroupUnion::merge(src_group_union, dst_group_union);
   }
+  */
   op->instantiation_ctx().placement_group_union = merge_group_union;
   op->instantiation_ctx().has_placement_group = true;
   Operator::for_each_output_tensor(
@@ -539,11 +639,11 @@ HTShapeList CommOpImpl::DoInferShape(Operator& op,
   const auto& src_ds = input->get_distributed_states();
   const auto& dst_ds = get_dst_distributed_states(op);
   HTShape shape(input_shape.size());
-  // HT_LOG_TRACE << "CommOpImpl::DoInferShape, src_ds = " << src_ds.get_states() << " and dst_ds = " << dst_ds.get_states();
+  // HT_LOG_INFO << "CommOpImpl::DoInferShape for " << op << " src_ds = " << src_ds.ds_info() << " and dst_ds = " << dst_ds.ds_info();
   for (size_t d = 0; d < input_shape.size(); d++) {
     shape[d] = input_shape[d] * src_ds.get_dim(d) / dst_ds.get_dim(d);
   }
-  // HT_LOG_TRACE << "CommOpImpl::DoInferShape, shape = " << shape;
+  // HT_LOG_INFO << "CommOpImpl::DoInferShape for " << op << " input shape = " << input_shape << " and output shape = " << shape;
   return {shape};
 }
 
@@ -634,9 +734,9 @@ bool AllReduceOpImpl::DoInstantiate(Operator& op, const Device& placement,
                                     StreamIndex stream_index) const {
   bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
   for (int i = 0; i < _comm_group.num_devices(); i++) {
-    HT_ASSERT(op->local_placement_group().contains(_comm_group.get(i))) 
+    HT_ASSERT(op->output(0)->local_placement_group().contains(_comm_group.get(i))) 
       << "AllReduceOp: device in comm_group: " << _comm_group.get(i) 
-      << " must in palcement_group: " << op->local_placement_group();
+      << " must in placement_group: " << op->output(0)->local_placement_group();
   }
   auto ranks = DeviceGroupToWorldRanks(_comm_group);
   NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
@@ -681,19 +781,22 @@ bool P2PSendOpImpl::DoMapToParallelDevices(Operator& op,
 
 
 bool P2PSendOpImpl::DoInstantiate(Operator& op, const Device& placement,
-                                    StreamIndex stream_index) const {
+                                  StreamIndex stream_index) const {
   bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
-  HT_ASSERT(op->local_placement_group().num_devices() == _dst_group.num_devices())
-    << "Currently we require equal tensor parallelism degree across "
-    << "P2P communication. Got " << op->local_placement_group() << " vs. " << _dst_group;
-  size_t dst_device_index = _dst_device_index == -1 ? 
-         op->local_placement_group().get_index(op->placement()) : _dst_device_index;  
+  HT_ASSERT(op->input(0)->local_placement_group().num_devices() == _dst_group.num_devices())
+    << "Currently we require equal tensor parallelism degree across P2P communication"
+    << ", but got " << op->input(0)->local_placement_group() << " vs " << _dst_group;
+  size_t dst_device_index = _dst_device_index == -1 ? op->input(0)->local_placement_group().get_index(op->placement()) : _dst_device_index;  
   auto src_rank = GetWorldRank();
   auto dst_rank = DeviceToWorldRank(_dst_group.get(dst_device_index));
   std::vector<int> ranks(2);
   ranks[0] = std::min(src_rank, dst_rank);
   ranks[1] = std::max(src_rank, dst_rank);
-  NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  if (op->graph().type() == GraphType::EXECUTABLE && dynamic_cast<ExecutableGraph&>(op->graph()).p2p_single_communicator()) {
+    NCCLCommunicationGroup::GetOrCreate(_all_ranks, op->instantiation_ctx().stream());
+  } else {
+    NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  }
   return ret;
 }
 
@@ -716,13 +819,21 @@ void P2PSendOpImpl::DoCompute(Operator& op,
   HT_ASSERT(input->dtype() == op->input(0)->dtype())
     << "Data type mismatched for P2P communication: " << input->dtype()
     << " vs. " << op->input(0)->dtype();
-  size_t dst_device_index = _dst_device_index == -1 ? 
-         op->local_placement_group().get_index(op->placement()) : _dst_device_index;
+  size_t dst_device_index = _dst_device_index == -1 ? op->input(0)->local_placement_group().get_index(op->placement()) : _dst_device_index;
+
+  std::vector<int> comm_group_ranks(2);
+  auto src_rank = GetWorldRank();
+  auto dst_rank = DeviceToWorldRank(_dst_group.get(dst_device_index));
+  comm_group_ranks[0] = std::min(src_rank, dst_rank);
+  comm_group_ranks[1] = std::max(src_rank, dst_rank);
+  if (op->graph().type() == GraphType::EXECUTABLE && dynamic_cast<ExecutableGraph&>(op->graph()).p2p_single_communicator()) {
+    comm_group_ranks = _all_ranks;
+  }
 
   // HT_LOG_INFO << "rank " << hetu::impl::comm::DeviceToWorldRank(op->instantiation_ctx().placement) << " will send to rank " << hetu::impl::comm::DeviceToWorldRank(_dst_group.get(dst_device_index));
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(), 
                                   type(), hetu::impl::P2PSend, input,
-                                  _dst_group.get(dst_device_index), 
+                                  _dst_group.get(dst_device_index), comm_group_ranks, 
                                   op->instantiation_ctx().stream());                                 
 }
 
@@ -734,17 +845,20 @@ bool P2PRecvOpImpl::DoMapToParallelDevices(Operator& op,
 bool P2PRecvOpImpl::DoInstantiate(Operator& op, const Device& placement,
                                   StreamIndex stream_index) const {
   bool ret = OpInterface::DoInstantiate(op, placement, stream_index);
-  HT_ASSERT(op->local_placement_group().num_devices() == _src_group.num_devices())
-    << "Currently we require equal tensor parallelism degree across "
-    << "P2P communication. Got " << _src_group << " vs. " << op->local_placement_group();
-  size_t src_device_index = _src_device_index == -1 ?
-         op->local_placement_group().get_index(op->placement()) : _src_device_index;
+  HT_ASSERT(op->output(0)->local_placement_group().num_devices() == _src_group.num_devices())
+    << "Currently we require equal tensor parallelism degree across P2P communication"
+    << " but got " << _src_group << " vs " << op->output(0)->local_placement_group();
+  size_t src_device_index = _src_device_index == -1 ? op->output(0)->local_placement_group().get_index(op->placement()) : _src_device_index;
   auto src_rank = DeviceToWorldRank(_src_group.get(src_device_index));
   auto dst_rank = GetWorldRank();
   std::vector<int> ranks(2);
   ranks[0] = std::min(src_rank, dst_rank);
   ranks[1] = std::max(src_rank, dst_rank);
-  NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  if (op->graph().type() == GraphType::EXECUTABLE && dynamic_cast<ExecutableGraph&>(op->graph()).p2p_single_communicator()) {
+    NCCLCommunicationGroup::GetOrCreate(_all_ranks, op->instantiation_ctx().stream());
+  } else {
+    NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
+  }
   return ret;
 }
 
@@ -763,13 +877,21 @@ void P2PRecvOpImpl::DoCompute(Operator& op,
                               const NDArrayList& inputs,
                               NDArrayList& outputs,
                               RuntimeContext& runtime_ctx) const {
-  size_t src_device_index = _src_device_index == -1 ?
-         op->local_placement_group().get_index(op->placement()) : _src_device_index;
+  size_t src_device_index = _src_device_index == -1 ? op->output(0)->local_placement_group().get_index(op->placement()) : _src_device_index;
+
+  std::vector<int> comm_group_ranks(2);
+  auto src_rank = DeviceToWorldRank(_src_group.get(src_device_index));
+  auto dst_rank = GetWorldRank();
+  comm_group_ranks[0] = std::min(src_rank, dst_rank);
+  comm_group_ranks[1] = std::max(src_rank, dst_rank);
+  if (op->graph().type() == GraphType::EXECUTABLE && dynamic_cast<ExecutableGraph&>(op->graph()).p2p_single_communicator()) {
+    comm_group_ranks = _all_ranks;
+  }
 
   // HT_LOG_INFO << "rank " << hetu::impl::comm::DeviceToWorldRank(op->instantiation_ctx().placement) << " will recv from rank " << hetu::impl::comm::DeviceToWorldRank(_src_group.get(src_device_index));
   HT_DISPATCH_KERNEL_CPU_AND_CUDA(op->instantiation_ctx().placement.type(),
                                   type(), hetu::impl::P2PRecv, outputs.at(0),
-                                  _src_group.get(src_device_index),
+                                  _src_group.get(src_device_index), comm_group_ranks,
                                   op->instantiation_ctx().stream());
 }
 
@@ -824,6 +946,12 @@ void BatchedISendIRecvOpImpl::DoCompute(Operator& op,
   // to ensure inputs are contiguous. But for BatchedISendIRecv, we found
   // that inputs may be non-contiguous, which is weird. So we make them
   // contiguous again here.
+  for (const auto& input : inputs) {
+    if (!input->is_contiguous()) {
+      HT_LOG_WARN << op << " input " << input << " is not contiguous"
+        << ", we have to insert contiguous operation on-the-fly";
+    }
+  }
   NDArrayList contig_inputs;
   std::transform(inputs.begin(), inputs.end(), std::back_inserter(contig_inputs), [&](const NDArray& input) {
     return input->is_contiguous() ? input : NDArray::contiguous(input, op->instantiation_ctx().stream_index);
@@ -843,9 +971,9 @@ bool AllGatherOpImpl::DoInstantiate(Operator& op, const Device& placement,
                                     StreamIndex stream_index) const {
   bool ret = OpInterface::DoInstantiate(op, placement, stream_index);   
   for (int i = 0; i < _comm_group.num_devices(); i++) {
-    HT_ASSERT(op->local_placement_group().contains(_comm_group.get(i))) 
+    HT_ASSERT(op->output(0)->local_placement_group().contains(_comm_group.get(i))) 
       << "Allgather: device in comm_group: " << _comm_group.get(i) 
-      << " must in device group: " << op->local_placement_group();
+      << " must in device group: " << op->output(0)->local_placement_group();
   }                                   
   auto ranks = DeviceGroupToWorldRanks(_comm_group);
   NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
@@ -916,9 +1044,9 @@ bool ReduceScatterOpImpl::DoInstantiate(Operator& op, const Device& placement,
                                         StreamIndex stream_index) const {
   bool ret = OpInterface::DoInstantiate(op, placement, stream_index);  
   for (int i = 0; i < _comm_group.num_devices(); i++) {
-    HT_ASSERT(op->local_placement_group().contains(_comm_group.get(i))) 
+    HT_ASSERT(op->output(0)->local_placement_group().contains(_comm_group.get(i))) 
       << "ReduceScatter: device in comm_group: " << _comm_group.get(i) 
-      << " must in device group: " << op->local_placement_group();
+      << " must in device group: " << op->output(0)->local_placement_group();
   }                                    
   auto ranks = DeviceGroupToWorldRanks(_comm_group);
   NCCLCommunicationGroup::GetOrCreate(ranks, op->instantiation_ctx().stream());
@@ -1226,11 +1354,19 @@ Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy,
                       {input}, std::move(op_meta))->output(0);
 }
 
-Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, DeviceGroupHierarchy dst_group_hierarchy, OpMeta op_meta) {
+Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, DeviceGroupHierarchy dst_group_hierarchy, bool is_pipeline_op, OpMeta op_meta) {
   HT_ASSERT(op_meta.device_group_hierarchy.size() == 0)
     << "MakeCommOp mustn't use device group hierarchy, please use its official attribute (dst group hierarchy) instead to avoid chaos";
-  return Graph::MakeOp(std::make_shared<CommOpImpl>(std::move(dst_ds_hierarchy), std::move(dst_group_hierarchy)), 
-                      {input}, std::move(op_meta))->output(0);
+  auto& op = Graph::MakeOp(std::make_shared<CommOpImpl>(std::move(dst_ds_hierarchy), std::move(dst_group_hierarchy)), 
+                           {input}, std::move(op_meta));
+  // record the subgraph
+  // 单独将其放在一个subgraph中
+  if (is_pipeline_op) {
+    op->graph().DeleteOpFromSubGraph(op);
+    auto pipeline_layer_subgraph = op->graph().MakeSubGraph(SubGraphType::PIPELINE, op->name(), true);
+    op->graph().AddOpToSubGraph(op, pipeline_layer_subgraph->global_name());
+  }
+  return op->output(0);
 }
 
 Tensor MakeCommOp(Tensor input, DistributedStatesHierarchy dst_ds_hierarchy, OpMeta op_meta) {
@@ -1259,34 +1395,34 @@ Tensor MakeAllReduceOp(Tensor input, DeviceGroup comm_group,
 
 // p2p send no output
 Tensor MakeP2PSendOp(Tensor input, DeviceGroup dst_group, 
-                     int dst_device_index, OpMeta op_meta) {
+                     int dst_device_index, std::vector<int> all_ranks, OpMeta op_meta) {
   HT_ASSERT(op_meta.device_group_hierarchy.size() == 0 || (op_meta.device_group_hierarchy.size() == 1 && op_meta.device_group_hierarchy.get(0).size() == 1
     && op_meta.device_group_hierarchy.get(0).get(0).num_devices() == dst_group.num_devices()))
     << "Currently we require equal tensor parallelism degree across "
     << "P2P communication. Got " << op_meta.device_group_hierarchy.get(0).get(0) << " vs. " << dst_group;
   return Graph::MakeOp(std::make_shared<P2PSendOpImpl>(std::move(dst_group), 
-                       dst_device_index), {input}, std::move(op_meta))->out_dep_linker();
+                       dst_device_index, all_ranks), {input}, std::move(op_meta))->out_dep_linker();
 }
 
 Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
-                     HTShape shape, int src_device_index, OpMeta op_meta) {
+                     HTShape shape, int src_device_index, std::vector<int> all_ranks, OpMeta op_meta) {
   HT_ASSERT(op_meta.device_group_hierarchy.size() == 0 || (op_meta.device_group_hierarchy.size() == 1 && op_meta.device_group_hierarchy.get(0).size() == 1
     && op_meta.device_group_hierarchy.get(0).get(0).num_devices() == src_group.num_devices()))
     << "Currently we require equal tensor parallelism degree across "
     << "P2P communication. Got " << op_meta.device_group_hierarchy.get(0).get(0) << " vs. " << src_group;
   return Graph::MakeOp(std::make_shared<P2PRecvOpImpl>(std::move(src_group), dtype, std::move(shape), 
-                       src_device_index), {}, std::move(op_meta))->output(0);
+                       src_device_index, all_ranks), {}, std::move(op_meta))->output(0);
 }
 
 // symbolic shape
 Tensor MakeP2PRecvOp(DeviceGroup src_group, DataType dtype,
-                     SyShape shape, int src_device_index, OpMeta op_meta) {
+                     SyShape shape, int src_device_index, std::vector<int> all_ranks, OpMeta op_meta) {
   HT_ASSERT(op_meta.device_group_hierarchy.size() == 0 || (op_meta.device_group_hierarchy.size() == 1 && op_meta.device_group_hierarchy.get(0).size() == 1
     && op_meta.device_group_hierarchy.get(0).get(0).num_devices() == src_group.num_devices()))
     << "Currently we require equal tensor parallelism degree across "
     << "P2P communication. Got " << op_meta.device_group_hierarchy.get(0).get(0) << " vs. " << src_group;
   return Graph::MakeOp(std::make_shared<P2PRecvOpImpl>(std::move(src_group), dtype, std::move(shape), 
-                       src_device_index), {}, std::move(op_meta))->output(0);
+                       src_device_index, all_ranks), {}, std::move(op_meta))->output(0);
 }
 
 // fixed shape

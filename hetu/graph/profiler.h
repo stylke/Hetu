@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hetu/core/device.h"
+#include "hetu/graph/operator.h"
 #include "hetu/impl/memory/CUDACachingMemoryPool.cuh"
 #include <string.h>
 #include <fstream>
@@ -108,6 +109,8 @@ class ofstream_sync : public std::ofstream {
       return flags;
     }
 };
+
+void checkOutputsMemory(const Operator& op, size_t micro_batch_id, const NDArrayList& inputs, const NDArrayList& outputs);
 
 } // namespace graph
 } // namespace hetu

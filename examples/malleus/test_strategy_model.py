@@ -1,5 +1,5 @@
-from elastic.engine.strategy import *
-from elastic.engine.utils import *
+from hetu.engine.strategy import *
+from hetu.engine.utils import *
 from io import StringIO
 import sys
 

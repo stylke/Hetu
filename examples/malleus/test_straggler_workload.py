@@ -1,5 +1,5 @@
 import hetu as ht
-from elastic.engine.straggler import *
+from hetu.engine.straggler import *
 
 device = ht.device("cuda:1")
 workload_info = WorkloadInfo(

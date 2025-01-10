@@ -5,12 +5,12 @@ import socket
 import ast
 import ptvsd
 import hetu as ht
-from elastic.models.gpt.gpt_model import GPTLMHeadModel
-from elastic.models.gpt.gpt_config import GPTConfig
-from elastic.engine.data_utils.gpt import GPTJsonDataset
-from elastic.engine.parallel_config import read_ds_parallel_config
-from elastic.engine.wrapper import ModelWrapper, OptimizerWrapper, DatasetWrapper
-from elastic.engine.trainer import TrainerCtxs, MalleusTrainer
+from hetu.models.gpt.gpt_model import GPTLMHeadModel
+from hetu.models.gpt.gpt_config import GPTConfig
+from hetu.engine.data_utils.gpt import GPTJsonDataset
+from hetu.engine.parallel_config import read_ds_parallel_config
+from hetu.engine.wrapper import ModelWrapper, OptimizerWrapper, DatasetWrapper
+from hetu.engine.trainer import TrainerCtxs, MalleusTrainer
 
 local_device = None
 all_devices = None

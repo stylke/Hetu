@@ -23,11 +23,12 @@ if __name__ == '__main__':
     utilization_seqlen = {'tp1': 1280, 'tp2': 2304, 'tp4': 3072, 'tp8': 4352}
     memory_A = {'tp1': 38, 'tp2': 39, 'tp4': 42, 'tp8': 48}
     memory_B = 197
-    memory_alpha = 0.5
+    memory_alpha = 0.75
     memory_gap = {'gpu1': 1755 * (1024 ** 2), 'gpu2': 4831 * (1024 ** 2), 'gpu4': 7299 * (1024 ** 2), 'node': 12281 * (1024 ** 2)}
     memory_safe_bound = 2 * (1024 ** 3)
     gpus_per_node = 8
-    gpu_memory_bound = (40536 + 9000) * (1024 ** 2)
+    gpu_memory_bound = (40536) * (1024 ** 2)
+    hetero_dp_comm_cost = 300 # ms
     # 生成json
     strategy_list = []
     data = {}
@@ -54,4 +55,6 @@ if __name__ == '__main__':
     data['cluster_config']['gpus_per_node'] = gpus_per_node
     data['cluster_config']['gpu_memory_bound'] = gpu_memory_bound
     data['cluster_config']['utilization_seqlen'] = utilization_seqlen
+    data['comm_cost'] = {}
+    data['comm_cost']['hetero_dp'] = hetero_dp_comm_cost
     generate_json(data)

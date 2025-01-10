@@ -219,6 +219,8 @@ bool DistributedStates::equal_states_and_order(const std::unordered_map<int32_t,
   return (states1 == states2) && (order1 == order2);                              
 }
 
+// 暂时不管zero
+// zero只用来在define graph上打标签
 bool DistributedStates::check_equal(const DistributedStates& dst_distributed_states) const {
   auto dst_device_num = dst_distributed_states.get_device_num();
   const auto& src_states = get_states();

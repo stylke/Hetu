@@ -89,6 +89,7 @@ class SwitchExecGraph;
 class ParamBuffer;
 class ParamBuckets;
 
-#define HT_MAX_NUM_MICRO_BATCHES (256)
+// TODO: larger nmb will slow down the whole system 
+#define HT_MAX_NUM_MICRO_BATCHES (64)
 } // namespace graph
 } // namespace hetu

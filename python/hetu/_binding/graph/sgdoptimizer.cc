@@ -38,8 +38,13 @@ inline PyObject* PySGDOptimizer_pynew(PyTypeObject* type, PyObject* args,
   auto* self = reinterpret_cast<PySGDOptimizer*>(unsafe_self);
 
   static PyArgParser parser({
-    "SGDOptimizer(float lr, float momentum=0.0, bool nesterov=false)", 
-    "SGDOptimizer(TensorList vars, float lr, float momentum=0.0, bool nesterov=false)", 
+    "SGDOptimizer(float init_lr, float max_lr, float min_lr, int lr_warmup_steps, int lr_decay_steps, string lr_decay_style,"
+                  "float momentum=0.0, bool nesterov=false)", 
+
+    "SGDOptimizer(TensorList vars, float init_lr, float max_lr, float min_lr, int lr_warmup_steps, int lr_decay_steps, "
+                  "string lr_decay_style, float momentum=0.0, bool nesterov=false)", 
+
+
   });
   auto parsed_args = parser.parse(args, kwargs);
   
@@ -50,14 +55,24 @@ inline PyObject* PySGDOptimizer_pynew(PyTypeObject* type, PyObject* args,
     new(&self->optimizer) SGDOptimizer();
     self->optimizer = SGDOptimizer(parsed_args.get_float64_or_default(0), 
                                    parsed_args.get_float64_or_default(1), 
-                                   parsed_args.get_bool_or_default(2));
+                                   parsed_args.get_float64_or_default(2), 
+                                   parsed_args.get_int64_or_default(3), 
+                                   parsed_args.get_int64_or_default(4), 
+                                   parsed_args.get_string_or_default(5), 
+                                   parsed_args.get_float64_or_default(6), 
+                                   parsed_args.get_bool_or_default(7));
   } else if (parsed_args.signature_index() == 1) {
     new(&self->optimizer) SGDOptimizer();
     auto params = parsed_args.get_tensor_list_or_empty(0);
     self->optimizer = SGDOptimizer(params,
                                    parsed_args.get_float64_or_default(1), 
                                    parsed_args.get_float64_or_default(2), 
-                                   parsed_args.get_bool_or_default(3));
+                                   parsed_args.get_float64_or_default(3), 
+                                   parsed_args.get_int64_or_default(4), 
+                                   parsed_args.get_int64_or_default(5), 
+                                   parsed_args.get_string_or_default(6), 
+                                   parsed_args.get_float64_or_default(7), 
+                                   parsed_args.get_bool_or_default(8));
   } else {
     Py_TYPE(self)->tp_free(self);
     HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);

@@ -41,6 +41,7 @@ static void RPC_Init_Once() {
                                                                       grpc::InsecureChannelCredentials()));
     // 告知server当前进程的hostname
     // server会统计一共多少host以及每个host上有多少进程
+    HT_LOG_INFO << Device::GetLocalHostname() << " collecting server...";
     local_client->Connect(Device::GetLocalHostname());
     std::vector<int> all_ranks(rpc_world_size);
     std::iota(all_ranks.begin(), all_ranks.end(), 0);
@@ -235,6 +236,12 @@ int DeviceToWorldRank(const Device& device) {
   HT_ASSERT(it != device_to_rank_mapping.end())
     << "Cannot find device " << device << ".";
   return it->second;
+}
+
+const Device& WorldRankToDevice(int rank) {
+  HT_ASSERT(rank < rank_to_device_mapping.size())
+    << "Cannot find rank " << rank << ".";
+  return rank_to_device_mapping[rank];
 }
 
 std::vector<int> DeviceGroupToWorldRanks(const DeviceGroup& device_group) {

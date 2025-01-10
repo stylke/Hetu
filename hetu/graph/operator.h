@@ -269,6 +269,13 @@ class RuntimeContext {
     return it->second;
   }
 
+  void delete_runtime_allocation(const TensorId& tensor_id) {
+    auto it = _allocation_plan.find(tensor_id);
+    HT_ASSERT(it != _allocation_plan.end())
+      << "Tensor " << tensor_id << " is not existed in runtime allocation plan";
+    _allocation_plan.erase(it);
+  }
+
   bool has_runtime_skipped(const OpId& op_id) const {
     return _skipped_plan.find(op_id) != _skipped_plan.end();
   }
@@ -434,8 +441,7 @@ class OpInterface : public shared_ptr_target {
     __builtin_unreachable();
   }
 
-  virtual bool DoMapToParallelDevices(Operator& op,
-                                      const DeviceGroupUnion& placement_group_union) const;
+  virtual bool DoMapToParallelDevices(Operator& op, const DeviceGroupUnion& placement_group_union) const;
 
   virtual void DoMergeStrategy(Operator& op, Operator& another_op);
 
@@ -538,29 +544,9 @@ class OpDef : public shared_ptr_target {
       << "Num micro batches muse <= " << HT_MAX_NUM_MICRO_BATCHES 
       << ", got micro batch id: " << micro_batch_id;
     BlockOrSyncAllInputs(runtime_ctx, micro_batch_id);
-    // precision debug
-    /*
-    NDArrayList input_sums;
-    for (auto& input : inputs) {
-      input_sums.push_back(NDArray::sum(input));
-    }
-    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
-      << ", the input vals are (may not sync) " << input_sums;
-    */
-    // if(instantiation_ctx().placement.index() == 0) std::cout << "start_operator_compute" << std::endl;
     instantiation_ctx().start[micro_batch_id]->Record(stream());
     _body->Compute(get_self(), inputs, outputs, runtime_ctx);
     instantiation_ctx().stop[micro_batch_id]->Record(stream());
-    // precision debug
-    /*
-    // stream().Sync();
-    NDArrayList ret_sums;
-    for (auto& ret : rets) {
-      ret_sums.push_back(NDArray::sum(ret));
-    }
-    HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << ": compute op: " << name()
-      << ", the result is (may not sync) " << ret_sums;
-    */
   }
 
   NDArrayList Compute(const NDArrayList& inputs, RuntimeContext& runtime_ctx, size_t micro_batch_id = 0) {
@@ -570,12 +556,13 @@ class OpDef : public shared_ptr_target {
     BlockOrSyncAllInputs(runtime_ctx, micro_batch_id);
     // correctness debug
     /*
-    HTShapeList input_shapes;
+    HTShapeList input_shapes, input_strides;
     for (auto& input : inputs) {
       input_shapes.push_back(input->shape());
+      input_strides.push_back(input->stride());
     }
     HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
-      << ", the inputs are " << this->inputs() << " and the input shapes are " << input_shapes;
+      << ", the inputs are " << this->inputs() << " and the input shapes are " << input_shapes << ", strides are " << input_strides;
     */
     // precision debug
     /*
@@ -601,12 +588,13 @@ class OpDef : public shared_ptr_target {
     */
     // correctness debug
     /*
-    HTShapeList ret_shapes;
+    HTShapeList ret_shapes, ret_strides;
     for (auto& ret : rets) {
       ret_shapes.push_back(ret->shape());
+      ret_strides.push_back(ret->stride());
     }
     HT_LOG_INFO << hetu::impl::comm::GetLocalDevice() << " micro batch: " << micro_batch_id << ", compute op: " << name()
-      << ", the return shapes are " << ret_shapes;
+      << ", the return shapes are " << ret_shapes << ", strides are " << ret_strides;
     */
     // for some ops that rely on symbolic shape
     // 2024.9.5 Update:
@@ -804,30 +792,42 @@ class OpDef : public shared_ptr_target {
     return _inst_ctx.has_placement_group;
   }
 
-  const DeviceGroupUnion& placement_group_union() const   {
+  const DeviceGroupUnion& placement_group_union() const {
+    HT_RUNTIME_ERROR << "Currently it is forbidden to call placement_group_union() of op " << _op_meta.name
+      << ", only tensor has placement_group_union(), that is because the placement_group_union() is undefined for ops such as comm op"
+      << ", if you want to judge whether op is local, please use placement_group() instead";
     return _inst_ctx.placement_group_union;
   }
 
   const DeviceGroup placement_group() const {
-    HT_LOG_WARN << "It's better to use placement_group_union instead of placement_group";
+    HT_ASSERT(has_placement_group())
+      << _op_meta.name << " should set placement group in advance";
     return _inst_ctx.placement_group_union.all();
   }
 
   const DeviceGroup local_placement_group() const {
+    HT_RUNTIME_ERROR << "Currently it is forbidden to call local_placement_group() of op " << _op_meta.name
+      << ", only tensor has local_placement_group(), that is because the local_placement_group() is undefined for ops such as comm op";
     HT_ASSERT(!placement().is_undetermined())
       << "local_placement_group should be called only after instantiated the placement";
     return _inst_ctx.placement_group_union.get(placement());
   }
 
   size_t local_placement_group_idx() const {
+    HT_RUNTIME_ERROR << "Currently it is forbidden to call local_placement_group_idx() of op " << _op_meta.name
+      << ", only tensor has local_placement_group_idx(), that is because the local_placement_group_idx() is undefined for ops such as comm op";
     HT_ASSERT(!placement().is_undetermined())
       << "local_placement_group_idx should be called only after instantiated the placement";
     return _inst_ctx.placement_group_union.get_index(placement());
   }
 
-  // 支持placement还未instantiate时候进行推导
-  // 主要用在未instantiate的variable和comm中
-  size_t inferred_local_placement_group_idx() const;
+  size_t suggested_hetero_id() const {
+    return _suggested_hetero_id;
+  }
+
+  void set_suggested_hetero_id(size_t suggested_hetero_id) {
+    _suggested_hetero_id = suggested_hetero_id;
+  }
 
   const Device& placement() const noexcept {
     return _inst_ctx.placement;
@@ -884,6 +884,8 @@ class OpDef : public shared_ptr_target {
   OpId _fw_op_id{-1}; // only used for bw op
   OpMeta _op_meta;
   OpInstantiationContext _inst_ctx;
+
+  size_t _suggested_hetero_id{0}; // suggest which hetero id should use for non-local op
 };
 
 class Operator : public shared_ptr_wrapper<OpDef> {
@@ -1134,7 +1136,8 @@ static const uint64_t UNKNOWN_OP = 1ul << 24;
 static const uint64_t UNUSED_OP = 1ul << 25;
 static const uint64_t PARALLEL_ATTN_OP = 1ul << 26;
 static const uint64_t PARALLEL_ATTN_GRAD_OP = 1ul << 27;
-static const uint64_t INDEX_ADD_OP = 1ul << 28;
+static const uint64_t BINARY_OP = 1ul << 28;
+static const uint64_t INDEX_ADD_OP = 1ul << 29;
 static const uint64_t FUSED_GROUP_OP = 1ul << 53;
 static const uint64_t CONCAT_OP = 1ul << 54;
 static const uint64_t CONTIGUOUS_OP = 1ul << 55;
@@ -1188,6 +1191,7 @@ DECLARE_OP_INDICATOR_CHECKER(comm_split, COMM_SPLIT_OP)
 DECLARE_OP_INDICATOR_CHECKER(comm, COMM_OP)
 DECLARE_OP_INDICATOR_CHECKER(parallel_attn, PARALLEL_ATTN_OP)
 DECLARE_OP_INDICATOR_CHECKER(parallel_attn_grad, PARALLEL_ATTN_GRAD_OP)
+DECLARE_OP_INDICATOR_CHECKER(binary, BINARY_OP)
 DECLARE_OP_INDICATOR_CHECKER(unknown, UNKNOWN_OP)
 DECLARE_OP_INDICATOR_CHECKER(index_add, INDEX_ADD_OP)
 DECLARE_OP_INDICATOR_CHECKER(communication,

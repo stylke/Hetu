@@ -2,13 +2,13 @@ import os
 import time
 import argparse
 import hetu as ht
-from elastic.models.llama.llama_model import LLaMALMHeadModel
-from elastic.models.llama.llama_config import LLaMAConfig
-from elastic.engine.data_utils.llama import LLaMAJsonDataset
-from elastic.engine.distributed import distributed_init
-from elastic.engine.parallel_config import read_ds_parallel_config, simple_check_blocks_range
-from elastic.engine.wrapper import ModelWrapper, OptimizerWrapper, DatasetWrapper
-from elastic.engine.trainer import HotSPaTrainer
+from hetu.models.llama.llama_model import LLaMALMHeadModel
+from hetu.models.llama.llama_config import LLaMAConfig
+from hetu.engine.data_utils.llama import LLaMAJsonDataset
+from hetu.engine.distributed import distributed_init
+from hetu.engine.parallel_config import read_ds_parallel_config, simple_check_blocks_range
+from hetu.engine.wrapper import ModelWrapper, OptimizerWrapper, DatasetWrapper
+from hetu.engine.trainer import HotSPaTrainer
 
 def pretrain(args):
     # 1. config

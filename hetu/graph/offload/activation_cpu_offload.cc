@@ -31,8 +31,8 @@ void ActivationCPUOffload::OffloadTensorToCPU(const OpRefList& topo_order, const
                                               .set_name(op->name() + "_offload"));
   cur_exec_graph.RecordExecTensor(offload_tensor);
   auto& offload_op = offload_tensor->producer();
-  if (op->placement_group_union().size() != 0)
-    offload_op->MapToParallelDevices(op->placement_group_union());
+  if (tensor->placement_group_union().size() != 0)
+    offload_op->MapToParallelDevices(tensor->placement_group_union());
   offload_op->Instantiate(Device(kCPU), kOffloadStream);
 
   // Find the first grad consumer of the tensor and build execution dependency
@@ -76,8 +76,8 @@ void ActivationCPUOffload::OffloadTensorToCPU(const OpRefList& topo_order, const
                    << " for " << tensor->name();
       cur_exec_graph.RecordExecTensor(load_tensor);
       auto& load_op = load_tensor->producer();
-      if (offload_op->placement_group_union().size() != 0)
-        load_op->MapToParallelDevices(offload_op->placement_group_union());
+      if (offload_tensor->placement_group_union().size() != 0)
+        load_op->MapToParallelDevices(offload_tensor->placement_group_union());
       load_op->Instantiate(out_consumer->placement(), kOffloadStream);
       device_ops[out_consumer->placement().index()] = load_tensor;
       HT_LOG_DEBUG << "[Offload] inputs of consumer " << out_consumer

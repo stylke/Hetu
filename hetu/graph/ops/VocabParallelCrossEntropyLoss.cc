@@ -50,8 +50,9 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
   }
   if (op->input(0)->get_local_distributed_states().get_dim(1) == 1) {
     // no tp vocab parallel, just pure dp
-    NDArray::sceloss(preds, labels, ignored_index(), reduction(),
-                    op->instantiation_ctx().stream_index, outputs.at(0));    
+    // illegal memory access may occur
+    HT_LOG_WARN << "sceloss will cause illegal memory access, need to fix it";
+    NDArray::sceloss(preds, labels, ignored_index(), reduction(), op->instantiation_ctx().stream_index, outputs.at(0));    
   } else { 
     // tp vocab parallel loss
     DeviceGroup _comm_group = get_devices_by_dim(op->input(0), 1);
@@ -88,7 +89,7 @@ void VocabParallelCrossEntropyOpImpl::DoCompute(
     // 3. x[label]
     // Get the partition's vocab indecies, label should in range [vocab_start_index, vocab_end_index)]
     auto vocab_size_per_partition = preds->shape(1);
-    auto local_device_index = op->local_placement_group().get_index(op->placement());
+    auto local_device_index = op->output(0)->local_placement_group().get_index(op->placement());
     auto vocab_range_index = op->input(0)->get_local_distributed_states().map_device_to_state_index(local_device_index)[1];
     auto vocab_start_index = vocab_size_per_partition * vocab_range_index;
     auto vocab_end_index = vocab_start_index + vocab_size_per_partition;
@@ -200,7 +201,7 @@ void VocabParallelCrossEntropyGradientOpImpl::DoCompute(
   } else {
     // tp vocab parallel loss
     auto vocab_size_per_partition = preds->shape(1);
-    auto local_device_index = op->local_placement_group().get_index(op->placement());
+    auto local_device_index = op->output(0)->local_placement_group().get_index(op->placement());
     auto vocab_range_index = op->input(0)->get_local_distributed_states().map_device_to_state_index(local_device_index)[1];
     auto vocab_start_index = vocab_size_per_partition * vocab_range_index;
     auto vocab_end_index = vocab_start_index + vocab_size_per_partition;

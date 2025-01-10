@@ -1,8 +1,7 @@
 import hetu as ht
 import numpy as np
-import torch
 
-from hetu.nn.modules.parallel_multi_ds import parallel_data_provider, parallel_multi_data_provider, get_multi_ds_parallel_config
+from hetu.nn.modules.parallel_utils import get_multi_ds_parallel_config
 
 def generate_cos_sin(seqlen, rotary_dim, dtype):
     assert rotary_dim % 2 == 0
@@ -93,7 +92,7 @@ class LLamaAttention(ht.nn.Module):
         '''
         
         assert self.use_flash_attn, "currently only support flash attn"
-        # TODO: support packing api
+        # already support packing api
         attn_output = ht.parallel_attn(
             qkv,             
             self.head_dim, 
@@ -133,7 +132,7 @@ class ParallelMLP(ht.nn.Module):
         # self.add_bias = True
         self.add_bias = False
         
-        self.swiglu = True 
+        self.swiglu = False 
         ffn_hidden_size = config.ffn_hidden_size # 2.7h
         if self.swiglu:
             ffn_hidden_size *= 2 # for swiglu: h -> 2 * 2.7h
@@ -149,7 +148,7 @@ class ParallelMLP(ht.nn.Module):
         )
 
         # self.bias_gelu_fusion = bias_gelu_fusion
-        # self.activation_func = ht.nn.NewGeLU()
+        self.activation_func = ht.nn.NewGeLU(get_multi_ds_parallel_config(ds_parallel_configs, 'activation_func', layer_idx))
 
         self.dense_4h_to_h = ht.nn.HtMultiRowParallelLinear(
             config.ffn_hidden_size,
@@ -166,8 +165,8 @@ class ParallelMLP(ht.nn.Module):
     def forward(self, hidden_states):
         # [b * seq_len, h] -> [b * seq_len, 4h]
         intermediate_parallel = self.dense_h_to_4h(hidden_states)
-        # intermediate_parallel = self.activation_func(intermediate_parallel)
-        intermediate_parallel = ht.swiglu(intermediate_parallel)
+        intermediate_parallel = self.activation_func(intermediate_parallel)
+        # intermediate_parallel = ht.swiglu(intermediate_parallel)
 
         # [b * seq_len, 4h] -> [b * seq_len, h]
         output = self.dense_4h_to_h(intermediate_parallel)
@@ -195,10 +194,10 @@ class LLamaBlock(ht.nn.Module):
         self.layer_idx = layer_idx
         hidden_size = config.hidden_size
 
-        # sequence parallel: layernorm前做reduce-scatter(这一部分由row prallel的reduce-scatter完成); layernorm后做allgather
-        self.rmsnorm_1 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm1', layer_idx), sequence_parallel=True, name=f'rmsnorm1_block{layer_idx}')
+        # sequence parallel: rmsnorm前做reduce-scatter(这一部分由row prallel的reduce-scatter完成); rmsnorm后做allgather
+        self.rmsnorm_1 = ht.nn.HtMultiParallelRMSNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'rmsnorm1', layer_idx), sequence_parallel=True, name=f'rmsnorm1_block{layer_idx}')
         self.attn = LLamaAttention(config, get_multi_ds_parallel_config(ds_parallel_configs, "attn", layer_idx), layer_idx=layer_idx, name=f'attn_block{layer_idx}')
-        self.rmsnorm_2 = ht.nn.HtMultiParallelLayerNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm2', layer_idx), sequence_parallel=True, name=f'rmsnorm2_block{layer_idx}')
+        self.rmsnorm_2 = ht.nn.HtMultiParallelRMSNorm(hidden_size, get_multi_ds_parallel_config(ds_parallel_configs, 'rmsnorm2', layer_idx), sequence_parallel=True, name=f'rmsnorm2_block{layer_idx}')
         self.mlp = LLamaMLP(config, get_multi_ds_parallel_config(ds_parallel_configs, "mlp", layer_idx), layer_idx=layer_idx, name=f'mlp_block{layer_idx}')
 
     def forward(
@@ -240,7 +239,7 @@ class LLamaModel(ht.nn.Module):
         for i in range(config.num_hidden_layers):
             blocks.append(LLamaBlock(config, get_multi_ds_parallel_config(ds_parallel_configs, f'blocks{i}'), layer_idx=i))
         self.h = ht.nn.ModuleList(blocks)
-        self.rmsnorm_f = ht.nn.HtMultiParallelLayerNorm(self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'layernorm_final'), sequence_parallel=True, name='rmsnorm_final')
+        self.rmsnorm_f = ht.nn.HtMultiParallelRMSNorm(self.embed_dim, get_multi_ds_parallel_config(ds_parallel_configs, 'rmsnorm_final'), sequence_parallel=True, name='rmsnorm_final')
 
     def forward(
         self,
@@ -295,11 +294,11 @@ class LLamaModel(ht.nn.Module):
             # hetero需要显示地插入通信算子
             if i != len(self.h) - 1:
                 next_block = self.h[i + 1]
-                if next_block.rmsnorm_1.sp:
+                if next_block.rmsnorm_1.sequence_parallel:
                     hidden_states = ht.comm(hidden_states, next_block.rmsnorm_1.ds_union_map['split0'], next_block.rmsnorm_1.device_group_unions, name=f"pipeline_layer_{i}_comm")
                 else:
                     hidden_states = ht.comm(hidden_states, next_block.attn.qkv_dense.ds_union_map['split0_dup'], next_block.rmsnorm_1.device_group_unions, name=f"pipeline_layer_{i}_comm")
-        # layernorm
+        # rmsnorm
         hidden_states = self.rmsnorm_f(hidden_states)
         return hidden_states
 
@@ -309,7 +308,7 @@ class LLamaLMHeadModel(ht.nn.Module):
         super(LLamaLMHeadModel, self).__init__()
         self.config = config
         self.ds_parallel_configs = ds_parallel_configs
-        self.transformer = LLamaModel(config, get_multi_ds_parallel_config(ds_parallel_configs, 'gpt'))
+        self.transformer = LLamaModel(config, get_multi_ds_parallel_config(ds_parallel_configs, 'llama'))
         self.lm_head = ht.nn.HtMultiColumnParallelLinear(
             config.n_embd,
             config.vocab_size,
@@ -325,10 +324,11 @@ class LLamaLMHeadModel(ht.nn.Module):
         self.config = config
     
     def forward(
-        self,
+        self, 
         input_ids=None,
         position_ids=None,
         attention_mask=None,
+        loss_mask=None,
         token_type_ids=None,
         labels=None
     ):
@@ -351,7 +351,9 @@ class LLamaLMHeadModel(ht.nn.Module):
 
         loss = None
         if labels is not None:
-            loss = ht.vocab_parallel_cross_entropy(lm_logits,
-                labels, ignored_index = -1, reduction = "mean")
-
+            # print(f"lm_logits shape {lm_logits.shape}, labels shape {labels.shape}")
+            loss_unreduced = ht.vocab_parallel_cross_entropy(lm_logits, labels, ignored_index = -1, reduction = "none").reshape([-1])
+            loss_sum = ht.sum(ht.mul(loss_unreduced, loss_mask))
+            loss_valid_tokens = ht.sum(loss_mask)
+            loss = ht.div(loss_sum, loss_valid_tokens)
         return loss

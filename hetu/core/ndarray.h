@@ -757,6 +757,12 @@ class NDArrayDef : public shared_ptr_target {
            _meta.dtype == kNFloat4;
   }
 
+  bool is_equal(const NDArray& other) const {
+    return _meta == other->meta() &&
+           _storage == other->storage() &&
+           _storage_offset == other->storage_offset();
+  }
+
   const HTShape& shape() const {
     return _meta.shape;
   }

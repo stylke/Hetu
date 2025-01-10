@@ -3,9 +3,9 @@ PP=${2:-2}
 EXP_FILE=${3:-"./experiments/scale/tp2_pp2.txt"}
 DP=${4:-1}
 
-NUM_LAYERS=32
-HIDDEN_SIZE=4096
-NUM_HEADS=32
+NUM_LAYERS=60
+HIDDEN_SIZE=6656
+NUM_HEADS=64
 MICRO_BATCH_SIZE=1
 GLOBAL_BATCH_SIZE=16
 FFN_HIDDEN_SIZE=11008
@@ -13,8 +13,8 @@ FFN_HIDDEN_SIZE=11008
 SERVER_ADDR="${IP_2}" # worker-0
 # SERVER_ADDR="127.0.0.1" # 216
 SERVER_PORT="23462"
-HOST_FILE_PATH="./scripts/host.yaml"
-ENV_FILE_PATH="./scripts/env_A100.sh"
+HOST_FILE_PATH="./hostfiles/host0123.yaml"
+ENV_FILE_PATH="./scripts/env_A800.sh"
 
 NUM_GPUS=$(expr $TP \* $PP \* $DP)
 CP=1
@@ -30,16 +30,6 @@ CP_LIST="$CP_LIST]"
 RECOMPUTE_LAYERS="[]"
 
 echo run exp: tp=${TP}, pp=${PP}, num_gpus=${NUM_GPUS} 
-if [[ ${NUM_LAYERS} -eq 32 && ${HIDDEN_SIZE} -eq 4096 && ${NUM_HEADS} -eq 32 ]]; then
-	MODEL_SIZE=7b
-	echo use gpt 7b model...
-elif [[ ${NUM_LAYERS} -eq 40 && ${HIDDEN_SIZE} -eq 5120 && ${NUM_HEADS} -eq 40 ]]; then
-	MODEL_SIZE=13b
-	echo use gpt 13b model...
-else
-	MODEL_SIZE=unknown-size
-	echo use gpt unknown-size model...
-fi
 # 请注意log编号目前并不等于rank编号
 LOG_FOLDER=logs/exp_tp${TP}_pp${PP}
 mkdir -p ${LOG_FOLDER}
@@ -69,15 +59,15 @@ if [ ! -e "$EXP_FILE" ]; then
 	> "$EXP_FILE"
 fi
 
-if (( TP == 2 && PP == 4 )); then
-	START_SEQ=7168
+if (( TP == 8 && PP == 4 )); then
+	START_SEQ=8448
 elif (( TP == 8 && PP == 2 )); then
-	START_SEQ=256
+	START_SEQ=128
 else
-	START_SEQ=256
+	START_SEQ=128
 fi
 
-for i in $(seq ${START_SEQ} 256 65536); do
+for i in $(seq ${START_SEQ} 128 32768); do
 
 content=$(<"$EXP_FILE")
 length=${#content}
@@ -124,7 +114,7 @@ CMD="python3 -u train_hetu_exp.py \
 
 source ${ENV_FILE_PATH}
 if [ ${NUM_GPUS} -gt 8 ]; then
-python3 ../../python/hetu/rpc/pssh_start.py \
+python3 ../../python/hetu/rpc/pssh_start_exp.py \
 	--hosts ${HOST_FILE_PATH} \
 	--command "$CMD" \
 	--server_port ${SERVER_PORT} \
@@ -132,7 +122,7 @@ python3 ../../python/hetu/rpc/pssh_start.py \
 	--envs ${ENV_FILE_PATH} \
 	--log_path ${LOG_FOLDER}
 else
-python3 ../../python/hetu/rpc/pssh_start.py \
+python3 ../../python/hetu/rpc/pssh_start_exp.py \
 	--command "$CMD" \
 	--server_port ${SERVER_PORT} \
 	--ngpus ${NUM_GPUS} \

@@ -154,7 +154,7 @@ void AdamCuda(const NDArray& grad, NDArray& param, NDArray& mean,
     grad_ = NDArray::to(grad, param->device(), param->dtype(), stream.stream_index());
   else
     grad_ = grad;
-  HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "AdamUpdateCuda", [&]() {
+  HT_DISPATCH_FLOATING_TYPES(param->dtype(), spec_t, "AdamUpdateCuda", [&]() {
     int64_t cur_step = step->data_ptr<int64_t>()[0];
     launch_loop_kernel_multiple_outputs<std::tuple<spec_t, spec_t, spec_t, spec_t>, thrust::tuple<spec_t, spec_t, spec_t>>
                                        ({grad_, param, mean, variance}, {param, mean, variance}, size, stream,

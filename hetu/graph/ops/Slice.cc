@@ -8,8 +8,13 @@ namespace graph {
 NDArrayList SliceOpImpl::DoCompute(Operator& op,
                                    const NDArrayList& inputs,
                                    RuntimeContext& ctx) const {
-  return {NDArray::slice(inputs.at(0), get_begin_pos(), get_output_shape(),
-                         op->instantiation_ctx().stream_index)};
+  if (ctx.has_runtime_allocation(op->output(0)->id())) {
+    auto output = ctx.get_runtime_allocation(op->output(0)->id());
+    NDArray::contiguous(NDArray::slice(inputs.at(0), get_begin_pos(), get_output_shape(), op->instantiation_ctx().stream_index), 
+                        op->instantiation_ctx().stream_index, output);
+    return {output};
+  }
+  return {NDArray::slice(inputs.at(0), get_begin_pos(), get_output_shape(), op->instantiation_ctx().stream_index)};
 }
 
 // caution: if the op is symbolic, then the corresponding gradient op should also be symbolic!

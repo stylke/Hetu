@@ -2,18 +2,31 @@
 
 #include "hetu/graph/headers.h"
 #include "hetu/graph/ops/variable.h"
+#include "hetu/graph/optim/optimizerParamScheduler.h"
 
 namespace hetu {
 namespace graph {
+
+
+
 
 class Optimizer {
  public:
   Optimizer() {};
 
-  Optimizer(float learning_rate) : _learning_rate(learning_rate) {}
+  Optimizer(double init_lr, double max_lr, double min_lr,
+        int64_t lr_warmup_steps, int64_t lr_decay_steps, std::string lr_decay_style,
+        double start_wd = 0, double end_wd = 0, int wd_incr_steps = -1, std::string wd_incr_style = "constant"){
+            _param_scheduler = OptimizerParamScheduler(init_lr, max_lr, min_lr, lr_warmup_steps, lr_decay_steps, 
+              lr_decay_style, start_wd, end_wd, wd_incr_steps, wd_incr_style);
+        }
 
-  Optimizer(TensorList params, float learning_rate)
-  : _params(std::move(params)), _learning_rate(learning_rate) {
+  Optimizer(TensorList params, double init_lr, double max_lr, double min_lr,
+        int64_t lr_warmup_steps, int64_t lr_decay_steps, std::string lr_decay_style,
+        double start_wd = 0, double end_wd = 0, int wd_incr_steps = -1, std::string wd_incr_style = "constant")
+  : _params(std::move(params)) {
+    _param_scheduler = OptimizerParamScheduler(init_lr, max_lr, min_lr, lr_warmup_steps, lr_decay_steps, 
+      lr_decay_style, start_wd, end_wd, wd_incr_steps, wd_incr_style);    
     HT_VALUE_ERROR_IF(_params.empty()) << "No parameters are provided";
     for (auto& param : _params) {
       HT_VALUE_ERROR_IF(!param->is_parameter())
@@ -36,17 +49,23 @@ class Optimizer {
                                 const OpName& name = OpName(),
                                 const Tensor& infinite_count = Tensor());
 
-  float learning_rate() const {
-    return _learning_rate;
+  OptimizerParamScheduler param_scheduler() const{
+    return _param_scheduler;
+  }
+
+  double learning_rate(int64_t step_num = 0) const{
+    return _param_scheduler.get_lr(step_num);
   }
 
  protected:
   virtual Tensor ApplyDense(const GradAndVar& grad_and_var, const Tensor& infinite_count = Tensor()) { return Tensor(); }
 
+  virtual void ApplyZero(const GradAndVarList& grads_and_vars);
+
   virtual Tensor MakeStates(const Tensor& variable, const Tensor& grad, const OpName& state_name);
 
   TensorList _params;
-  float _learning_rate;
+  OptimizerParamScheduler _param_scheduler;
   std::unordered_map<TensorId, StateDict> state_dict;
 };
 
@@ -54,15 +73,23 @@ class SGDOptimizer : public Optimizer {
  public:
   SGDOptimizer(): Optimizer() {};
 
-  SGDOptimizer(float learning_rate, float momentum = 0.9f,
-               bool nesterov = false)
-  : Optimizer(learning_rate) {
+  SGDOptimizer(double init_lr, double max_lr, double min_lr,
+        int lr_warmup_steps, int lr_decay_steps, std::string lr_decay_style,
+        float momentum = 0.9f, bool nesterov = false)
+  : Optimizer(init_lr, max_lr, min_lr,
+        lr_warmup_steps, lr_decay_steps, lr_decay_style,
+        0, 0, -1,  "constant") {
+    HT_ASSERT(lr_decay_style == "constant");
     _init(momentum, nesterov);
   }
 
-  SGDOptimizer(TensorList params, float learning_rate, float momentum = 0.9f,
-               bool nesterov = false)
-  : Optimizer(std::move(params), learning_rate) {
+  SGDOptimizer(TensorList params, double init_lr, double max_lr, double min_lr,
+        int lr_warmup_steps, int lr_decay_steps, std::string lr_decay_style,
+        float momentum = 0.9f, bool nesterov = false)
+  : Optimizer(init_lr, max_lr, min_lr,
+        lr_warmup_steps, lr_decay_steps, lr_decay_style,
+        0, 0, -1,  "constant")  {
+    HT_ASSERT(lr_decay_style == "constant");  
     _init(momentum, nesterov);
   }
 
@@ -92,18 +119,26 @@ class AdamOptimizer : public Optimizer {
  public:
   AdamOptimizer(): Optimizer() {};
 
-  AdamOptimizer(float learning_rate, float beta1 = 0.9,
-                float beta2 = 0.999, float eps = 1e-8,
-                float weight_decay = 0)
-  : Optimizer(learning_rate) {
-    _init(beta1, beta2, eps, weight_decay);
+  AdamOptimizer(double init_lr, double max_lr, double min_lr,
+                int lr_warmup_steps, int lr_decay_steps,  std::string lr_decay_style,
+                double start_wd, double end_wd, int wd_incr_steps,  std::string wd_incr_style,
+                float beta1 = 0.9, float beta2 = 0.999, float eps = 1e-8)
+  : Optimizer(init_lr, max_lr, min_lr,
+        lr_warmup_steps, lr_decay_steps, lr_decay_style,
+        start_wd, end_wd, wd_incr_steps,  wd_incr_style)   {
+    std::cout << " wd_incr_style " <<  wd_incr_style << std::endl;
+    std::cout << "lr " <<  init_lr << ' ' << max_lr << ' ' << min_lr << ' ' << lr_warmup_steps << ' ' << lr_decay_steps << ' ' << lr_decay_style << std::endl;
+    _init(beta1, beta2, eps);
   }
 
-  AdamOptimizer(TensorList params, float learning_rate, float beta1 = 0.9,
-                float beta2 = 0.999, float eps = 1e-8,
-                float weight_decay = 0)
-  : Optimizer(std::move(params), learning_rate) {
-    _init(beta1, beta2, eps, weight_decay);
+  AdamOptimizer(TensorList params, double init_lr, double max_lr, double min_lr,
+        int lr_warmup_steps, int lr_decay_steps, const std::string& lr_decay_style,
+        double start_wd, double end_wd, int wd_incr_steps, const std::string& wd_incr_style,
+        float beta1 = 0.9, float beta2 = 0.999, float eps = 1e-8)
+  : Optimizer(init_lr, max_lr, min_lr,
+        lr_warmup_steps, lr_decay_steps, lr_decay_style,
+        start_wd, end_wd, wd_incr_steps,  wd_incr_style)  {
+    _init(beta1, beta2, eps);
   }
 
   Tensor ApplyDense(const GradAndVar& grad_and_var, const Tensor& infinite_count = Tensor());
@@ -120,13 +155,8 @@ class AdamOptimizer : public Optimizer {
     return _eps;
   }
 
-  float weight_decay() const {
-    return _weight_decay;
-  }
-
  protected:
-  void _init(float beta1, float beta2, float eps,
-             float weight_decay) {
+  void _init(float beta1, float beta2, float eps) {
     HT_VALUE_ERROR_IF(beta1 < 0 || beta1 > 1)
       << "Invalid beta1: " << beta1;
     HT_VALUE_ERROR_IF(beta2 < 0 || beta1 > 2)
@@ -134,13 +164,11 @@ class AdamOptimizer : public Optimizer {
     _beta1 = beta1;
     _beta2 = beta2;
     _eps = eps;
-    _weight_decay = weight_decay;
   }
 
   float _beta1;
   float _beta2;
   float _eps;
-  float _weight_decay;
 };
 
 } // namespace graph

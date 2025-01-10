@@ -80,13 +80,14 @@ __forceinline__ __device__ void BlockReduceArgmax(spec_t& val,
   }
 
   __syncthreads();
-  val = (thread_id < threads_per_pos / warpSize) ? shared_value[idx * warpSize + tid] : numeric_limits<spec_t>::lowest();
+  val = (tid < threads_per_pos / warpSize) ? shared_value[idx * warpSize + tid] : numeric_limits<spec_t>::lowest();
 
   if (wid == 0) {
     WarpReduceArgmax(val, used_warp_size);
-    if (thread_id == 0)
+    if (tid == 0)
       wrap_max[idx] = val;
   }
+  __syncthreads();
 }
 
 // QUESTION: how to fix the epilogue?
@@ -135,13 +136,14 @@ __forceinline__ __device__ void BlockReduceSumExp(spec_t& val,
 
   __syncthreads();
   spec_t zero = 0;
-  val = (thread_id < threads_per_pos / warpSize) ? shared[idx * threads_per_pos + tid] : zero;
+  val = (tid < threads_per_pos / warpSize) ? shared[idx * threads_per_pos + tid] : zero;
 
   if (wid == 0) {
     val = WarpReduceSumExp(val, used_warp_size);
-    if (thread_id == 0)
+    if (tid == 0)
       wrap_sum[idx] = spec_t(val);
   }
+  __syncthreads();
 }
 
 

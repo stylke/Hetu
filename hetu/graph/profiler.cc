@@ -194,5 +194,52 @@ void CUDAProfiler::PrintNvlinkEnd() {
   HT_LOG_INFO << "********* Profile NVLink End *********";
 }
 
+// mempool debug use
+// see whether it can reuse
+static std::unordered_map<uint64_t, std::pair<size_t, Tensor>> malloc_outputs_map;
+
+void checkOutputsMemory(const Operator& op, size_t micro_batch_id, const NDArrayList& inputs, const NDArrayList& outputs) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  for (size_t i = 0; i < op->num_outputs(); i++) {
+    const auto& output = outputs.at(i);
+    bool is_inplace = false;
+    for (size_t j = 0; j < op->num_inputs(); j++) {
+      const auto& input = inputs.at(j);
+      if (output->storage() == input->storage()) {
+        HT_LOG_TRACE << local_device << ": micro batch " << micro_batch_id << " " << op->output(i)
+          << " is inplace (with " << op->input(j) << ")"
+          << ", ptr id = " << output->storage()->ptr_id();
+        is_inplace = true;
+        break;
+      }
+    }
+    if (is_inplace) {
+      continue;
+    }
+    if (output->storage()->is_new_malloc()) {
+      if (is_all_gather_op(op)) {
+        // workaround
+        // all_gather由于开启了共享的buffer不对其进行分析
+        continue;
+      }
+      HT_LOG_TRACE << local_device << ": micro batch " << micro_batch_id << " " << op->output(i)
+        << " malloc new GPU memory with shape = " << output->shape()
+        << ", ptr id = " << output->storage()->ptr_id();
+      malloc_outputs_map[output->storage()->ptr_id()] = std::make_pair(micro_batch_id, op->output(i));
+    } else {
+      auto it = malloc_outputs_map.find(output->storage()->split_from_ptr_id());
+      if (it == malloc_outputs_map.end()) {
+        HT_LOG_TRACE << local_device << ": " << op->output(i) << " is not reused from any op outputs"
+          << ", whose shape = " << output->shape() << " and ptr id = " << output->storage()->ptr_id();
+        continue;
+      }
+      HT_LOG_TRACE << local_device << ": " << op->output(i)
+        << " is reused from micro batch " << it->second.first << " " << it->second.second << " (ptr id = " << output->storage()->split_from_ptr_id() << ")"
+        << ", with shape = " << output->shape()
+        << ", ptr id = " << output->storage()->ptr_id();
+    }
+  }
+}
+
 } // namespace graph
 } // namespace hetu

@@ -130,7 +130,7 @@ if __name__ == '__main__':
     # )
     args = parser.parse_args()
     if args.model_size == '3b':
-        num_layers = 16
+        num_layers = 8
     elif args.model_size == '7b':
         num_layers = 32
     elif args.model_size == '13b':

@@ -229,6 +229,7 @@ const DeviceGroup& GetGlobalDeviceGroup();
 const Device& GetLocalDevice();
 int GetRankOfLocalHost();
 int DeviceToWorldRank(const Device& device);
+const Device& WorldRankToDevice(int rank);
 std::vector<int> DeviceGroupToWorldRanks(const DeviceGroup& device_group);
 
 } // namespace comm

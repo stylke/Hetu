@@ -64,7 +64,7 @@ class ConcatenateOpImpl final : public OpInterface {
             HT_ASSERT(shape[j] == out_shape[j] || shape[j] == -1 ||
                       out_shape[j] == -1)
             << "input0 and input" << i << " has different size at dim " << j
-            << ", input0 has " << shape[j] <<  ",input" << i << " has "
+            << ", input0 has " << shape[j] <<  ", input" << i << " has "
             << out_shape[j];
           } else {
             out_dim += shape[j];

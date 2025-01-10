@@ -34,9 +34,12 @@ void ConcatenateOpImpl::DoCompute(Operator& op,
         auto output = NDArray(inputs.at(i)->meta(), 
                               outputs.at(0)->storage(),
                               outputs.at(0)->storage_offset() + offset);
-        HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
-                                     hetu::impl::DataTransfer, inputs.at(i), output,
-                                     op->instantiation_ctx().stream());
+        if (!inputs.at(i)->is_equal(output)) {
+          HT_DISPATCH_KERNEL_CUDA_ONLY(op->instantiation_ctx().placement.type(), type(),
+                                       hetu::impl::DataTransfer, inputs.at(i), output,
+                                       op->instantiation_ctx().stream());
+          // HT_LOG_WARN << op << " data transfer may be avoided (unless you are hot switching)";
+        }
         offset += inputs.at(i)->numel();
       }
     } 

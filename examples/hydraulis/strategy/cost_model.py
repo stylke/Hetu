@@ -16,7 +16,8 @@ def dynamic_strategy_time_cost(data, strategy_id, s):
     if isinstance(s, (int, np.int32, np.int64)):
         return quadratic_predict(s, strategy['a'], strategy['b'], 0)
     else:
-        return linear_predict(s, strategy['b'], strategy['c'])
+        # return linear_predict(s, strategy['b'], strategy['c'])
+        return linear_predict(s, strategy['b'], 0)
 
 # 策略编号为strategy_id数据并行维度为D的情况下处理数据集中长度在[s - l, s]区间范围内的所消耗的时间
 def static_strategy_time_cost(data, counter, strategy_id, s_begin, s_end, S_STEP):
@@ -36,6 +37,7 @@ def static_strategy_time_cost(data, counter, strategy_id, s_begin, s_end, S_STEP
             if s in counter:
                 # 1F1B
                 span_sum_time += quadratic_predict(s, strategy['a'], strategy['b'], strategy['c']) * counter[s]
+                # span_sum_time += quadratic_predict(s, strategy['a'], strategy['b'], 0) * counter[s]
                 span_max_seq_len = s
         cache[cache_key] = (span_sum_time, span_max_seq_len)
         sum_time += span_sum_time
@@ -45,7 +47,8 @@ def static_strategy_time_cost(data, counter, strategy_id, s_begin, s_end, S_STEP
     return sum_time
 
 # 策略编号为strategy_id数据并行维度为D的情况下所能支持的最长seqlen
-def strategy_max_seqlen(data, strategy_id, D, unit_test=False):
+def get_strategy_max_seqlen(data, strategy_id, D=None, os_dp_tp_pp=None, unit_test=False):
+    assert (D == None and os_dp_tp_pp != None) or (D != None and os_dp_tp_pp == None), "support only one method"
     gpus_per_node = data['cluster_config']['gpus_per_node']
     gpu_memory_bound = data['cluster_config']['gpu_memory_bound']
     tp = data['strategies'][strategy_id]['tp']
@@ -60,10 +63,14 @@ def strategy_max_seqlen(data, strategy_id, D, unit_test=False):
     L = data['model_config']['L']
     H = data['model_config']['H']
     V = data['model_config']['V'] 
-    p_g_os_memory = (L / pp) * (H * H / tp) * B * (alpha / D + 1 - alpha) + (H * V / tp) * (32 if pp == 1 else 16) * (alpha / D + 1 - alpha)
+    if os_dp_tp_pp != None:
+        os_dp, os_tp, os_pp = os_dp_tp_pp
+        p_g_os_memory = (L / os_pp) * (H * H / os_tp) * B * (alpha / os_dp) + (L / pp) * (H * H / tp) * B * (1 - alpha) + (H * V / os_tp) * (32 if os_pp == 1 else 16) * (alpha / os_dp) + (H * V / tp) * (32 if pp == 1 else 16) * (1 - alpha)
+    if D != None:
+        p_g_os_memory = (L / pp) * (H * H / tp) * B * (alpha / D + 1 - alpha) + (H * V / tp) * (32 if pp == 1 else 16) * (alpha / D + 1 - alpha)
     def predict_memory(S):
         activation_memory = L * (S * H / tp) * A
-        print(f"Predict [tp = {tp}, pp = {pp}, dp = {D}, seqlen = {S}] memory:")
+        print(f"Predict [tp = {tp}, pp = {pp}, dp = {D}, os_dp_tp_pp = {os_dp_tp_pp}, seqlen = {S}] memory:")
         print(f"Activation memory: {activation_memory / (1024 * 1024)} MiB")
         print(f"Parameter & Gradient & Optimizer States memory: {p_g_os_memory / (1024 * 1024)} MiB")
         print(f"Gap (cuda & nccl context): {gap / (1024 * 1024)} MiB")
@@ -81,4 +88,4 @@ if __name__ == '__main__':
     file_path = 'strategy_pool.json'
     with open(file_path, 'r') as f:
         data = json.load(f)
-    print(strategy_max_seqlen(data, 1, 4))
+    print(get_strategy_max_seqlen(data, 1, D=4))
