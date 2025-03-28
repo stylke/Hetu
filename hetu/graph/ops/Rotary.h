@@ -85,10 +85,6 @@ class RotaryOpImpl final : public OpInterface {
       return false;
   }
 
-  uint64_t op_indicator() const noexcept override {
-    return ROTARY_OP;
-  } 
-
   int64_t _head_dim;
   int64_t _group_query_ratio;
   SyShapeList _multi_seq_lens_symbol;
@@ -173,10 +169,6 @@ class RotaryGradientOpImpl final : public OpInterface {
     } else
       return false;
   }
-
-  uint64_t op_indicator() const noexcept override {
-    return ROTARY_GRADIENT_OP;
-  } 
 
   int64_t _head_dim;
   int64_t _group_query_ratio;
