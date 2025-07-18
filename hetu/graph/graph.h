@@ -1,7 +1,10 @@
 #pragma once
 
+#include "hetu/common/logging.h"
 #include "hetu/common/macros.h"
+#include "hetu/core/device.h"
 #include "hetu/core/ndarray.h"
+#include "hetu/core/stream.h"
 #include "hetu/graph/common.h"
 #include "hetu/graph/tensor.h"
 #include "hetu/graph/operator.h"
@@ -53,6 +56,7 @@ class Graph {
     _source_ops.reserve(init_capacity);
     _sink_ops.reserve(init_capacity);
     _preserved_data.reserve(init_capacity);
+    _cpu_preserved_data.reserve(init_capacity);
   }
 
  public:
@@ -81,7 +85,8 @@ class Graph {
   virtual NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
                           const FeedDict& feed_dict = {}, const IntSymbolDict& int_symbol_dict = {}, const int num_micro_batches = 1,
                           const int compute_strategy_id = 0, const int optimize_strategy_id = 0, RunLevel run_level = RunLevel::UPDATE,
-                          bool save_checkpoint = false, const double grad_scale = 1) {}                          
+                          bool save_checkpoint = false, const double grad_scale = 1,
+                          const RuntimeContext& ctx = RuntimeContext()) {}                          
 
   GraphId id() const noexcept {
     return _id;
@@ -228,6 +233,7 @@ class Graph {
 
   std::shared_ptr<SubGraph> AddOpToSubGraph(Operator& op, std::string global_name = "", 
                                             SubGraphOpType op_type = SubGraphOpType::FORWARD) {
+    // HT_LOG_WARN << "add op to subgraph:" << op << "," << global_name << "," << int64_t(op_type);
     if (global_name == "")
       global_name = get_cur_subgraph_global_name();
     HT_ASSERT(_subgraphs.find(global_name) != _subgraphs.end());
@@ -341,6 +347,23 @@ class Graph {
 
   void SubGraphProfiling(std::unordered_map<OpId, int64_t> op_execute_map, int num_micro_batches = 1);
 
+  NDArray GetCPUParam(const NDArray& ndarray, Tensor& tensor) {
+    auto it = _cpu_preserved_data.find(tensor->id());
+    if (it != _cpu_preserved_data.end()) {
+      return it->second;
+    } else {
+      NDArray cpu_param = NDArray::empty(ndarray->shape(),
+                                         kCPU, ndarray->dtype(),
+                                         kBlockingStream, 
+                                         {}, true);
+      cudaHostRegister(cpu_param->raw_data_ptr(),
+                       cpu_param->numel() * DataType2Size(cpu_param->dtype()),
+                       cudaHostRegisterDefault);
+      _cpu_preserved_data[tensor->id()] = cpu_param;
+      return cpu_param;
+    }
+  }
+
  protected:
   virtual Operator& MakeOpInner(std::shared_ptr<OpInterface> body,
                                 TensorList inputs, OpMeta op_meta) = 0;
@@ -418,7 +441,7 @@ class Graph {
     __builtin_unreachable();
   }
 
-  virtual NDArray GetDetachedVariableDataInner(const Tensor& tensor) {
+  virtual NDArray GetDetachedVariableDataInner(const Tensor& tensor, bool gpu = false) {
     HT_RUNTIME_ERROR << "NotImplementedError: Cannot get detached variable data from graph " << name()
                      << " with type " << type();
     __builtin_unreachable();
@@ -459,6 +482,7 @@ class Graph {
   virtual void Clear() {
     _op_indexing.clear();
     _preserved_data.clear();
+    _cpu_preserved_data.clear();
     _parameter_ops.clear();
     _optimizer_variable_ops.clear();
     _source_ops.clear();
@@ -498,6 +522,7 @@ class Graph {
   
   std::unordered_map<OpId, uint32_t> _op_out_degrees;
   Tensor2NDArrayMap _preserved_data;
+  Tensor2NDArrayMap _cpu_preserved_data;
   RunLevel _run_level;
 
  protected:
@@ -711,10 +736,10 @@ class Graph {
     return Graph::GetGraph(tensor).GetVariableDataInner(tensor);
   }
 
-  static NDArray GetDetachedVariableData(const Tensor& tensor) {
+  static NDArray GetDetachedVariableData(const Tensor& tensor, bool gpu = false) {
     HT_VALUE_ERROR_IF(!tensor->is_variable())
       << "'GetDetachedVariableData' does not support non-variable tensor: " << tensor;
-    return Graph::GetGraph(tensor).GetDetachedVariableDataInner(tensor);
+    return Graph::GetGraph(tensor).GetDetachedVariableDataInner(tensor, gpu);
   }
 
   static DeviceGroupUnion GetVariableDeviceGroupUnion(const Tensor& tensor) {
@@ -988,10 +1013,21 @@ inline OpRefList Graph::TopoSort(const OpRefList& ops, int32_t num_ops_hint,
   }
 
   // iteratively find the topo order
+  std::vector<OpRef> recompute_op_list = {};
   while (!topo_queue.empty()) {
     auto op_ref = topo_queue.top();
     topo_queue.pop();
-    ret.push_back(op_ref);
+    if (op_ref.get()->op_meta().is_recompute()) {
+      recompute_op_list.push_back(op_ref);
+    }
+    else {
+      for (int i = 0; i < op_ref.get()->num_inputs(); ++i) {
+        if (op_ref.get()->input(i)->producer()->op_meta().is_recompute()) {
+          ret.push_back(std::ref(op_ref.get()->input(i)->producer()));
+        }
+      }
+      ret.push_back(op_ref);
+    }
     Operator::for_each_output_tensor(op_ref.get(), [&](Tensor& tensor) {
       // Place inplace ops after other ops
       // Step 1. Find all inplace ops.
@@ -1188,8 +1224,12 @@ inline void ResetVariableData(const Tensor& tensor, const NDArray& provided_data
   Graph::ResetVariableData(tensor, ProvidedInitializer(provided_data));
 }
 
-inline NDArray GetDetachedVariableData(const Tensor& tensor) {
-  return Graph::GetDetachedVariableData(tensor);
+inline void ResetVariableDataFromSplits(const Tensor& tensor, const NDArrayList& provided_datas) {
+  Graph::ResetVariableData(tensor, ProvidedListInitializer(provided_datas));
+}
+
+inline NDArray GetDetachedVariableData(const Tensor& tensor, bool gpu = false) {
+  return Graph::GetDetachedVariableData(tensor, gpu);
 }
 
 inline DeviceGroupUnion GetVariableDeviceGroupUnion(const Tensor& tensor) {

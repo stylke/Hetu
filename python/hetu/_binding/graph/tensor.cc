@@ -349,7 +349,13 @@ PyObject* PyTensor_device_group(PyTensor* self) {
 
 PyObject* PyTensor_data(PyTensor* self) {
   HT_PY_FUNC_BEGIN
-  return PyNDArray_New(self->tensor->get_or_compute());
+  return PyNDArray_New(GetDetachedVariableData(self->tensor), true);
+  HT_PY_FUNC_END
+}
+
+PyObject* PyTensor_gpu_data(PyTensor* self) {
+  HT_PY_FUNC_BEGIN
+  return PyNDArray_New(GetDetachedVariableData(self->tensor, true), true);
   HT_PY_FUNC_END
 }
 
@@ -562,6 +568,24 @@ PyObject* PyTensor_reset_data(PyTensor* self, PyObject* args, PyObject* kwargs) 
   HT_PY_FUNC_END
 }
 
+PyObject* PyTensor_reset_data_from_splits(PyTensor* self, PyObject* args, PyObject* kwargs) {
+  HT_PY_FUNC_BEGIN
+  static PyArgParser parser({
+    "reset_data_from_splits(List[numpy.array] provided_datas)",
+  });
+  auto parsed_args = parser.parse(args, kwargs);
+  if (parsed_args.signature_index() == 0) {
+    ResetVariableDataFromSplits(self->tensor, parsed_args.get_numpy_array_list(0));
+    // HT_LOG_TRACE << "ResetVariableData successfully.";
+  }
+  else {
+    HT_PY_PARSER_INCORRECT_SIGNATURE(parsed_args);
+    __builtin_unreachable();
+  }
+  Py_RETURN_NONE;
+  HT_PY_FUNC_END
+}
+
 PyObject* PyTensor_get_data(PyTensor* self, PyObject* args, PyObject* kwargs) {
   HT_PY_FUNC_BEGIN
   static PyArgParser parser({
@@ -749,6 +773,7 @@ PyGetSetDef PyTensor_properties[] = {
   {PY_GET_SET_DEF_NAME("has_placement_group"), (getter) PyTensor_has_placement_group, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("placement_group_union"), (getter) PyTensor_placement_group_union, nullptr, nullptr, nullptr},
   {PY_GET_SET_DEF_NAME("data"), (getter) PyTensor_data, nullptr, nullptr, nullptr}, 
+  {PY_GET_SET_DEF_NAME("gpu_data"), (getter) PyTensor_gpu_data, nullptr, nullptr, nullptr}, 
   {PY_GET_SET_DEF_NAME("graph"), (getter) PyTensor_graph, nullptr, nullptr, nullptr}, 
   {nullptr}
 };
@@ -808,6 +833,7 @@ std::vector<PyMethodDef> InitTensorPyMethodDefs() {
     {"to", (PyCFunction) PyTensor_data_transfer, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"copy", (PyCFunction) PyTensor_copy, METH_NOARGS, nullptr},
     {"reset_data", (PyCFunction) PyTensor_reset_data, METH_VARARGS | METH_KEYWORDS, nullptr },
+    {"reset_data_from_splits", (PyCFunction) PyTensor_reset_data_from_splits, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"get_data", (PyCFunction) PyTensor_get_data, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"raw_data_ptr", (PyCFunction) PyTensor_raw_data_ptr, METH_VARARGS | METH_KEYWORDS, nullptr },
     {"is_floating_point", (PyCFunction) PyTensor_is_floating_point, METH_NOARGS, nullptr },

@@ -325,6 +325,63 @@ __global__ void loop_kernel(
   }
 }
 
+template <int nt, int vt, typename spec_a_t, typename spec_b_t,
+          typename out_t, typename func_t>
+__global__ void binary_kernel(const spec_a_t* inputA,
+                              const spec_b_t* inputB,
+                              size_t size, out_t* output, func_t op,
+                              const OffsetCalculator* A_offset_calculator,
+                              const OffsetCalculator* B_offset_calculator,
+                              const OffsetCalculator* out_offset_calculator) {
+  int tid = threadIdx.x;
+  int nv = nt * vt;
+  int idx = nv * blockIdx.x + tid;
+  #pragma unroll
+  for (int i = 0; i < vt; i++) {
+    if (idx < size) {
+      auto A_offset = A_offset_calculator->get(idx);
+      auto B_offset = B_offset_calculator->get(idx);
+      auto out_offset = out_offset_calculator->get(idx);
+      output[out_offset] = op(inputA[A_offset], inputB[B_offset]);
+      idx += nt;
+    }
+  }
+}
+
+template <typename in_a_t, typename in_b_t, typename out_t, typename func_t>
+void launch_loop_kernel(const NDArray& inputA, const NDArray& inputB,
+                        NDArray& output, size_t size,
+                        const Stream& stream, const func_t& op) {
+  bool contiguous = inputA->is_contiguous() &&
+                    inputB->is_contiguous() &&
+                    output->is_contiguous();
+  if (contiguous) {
+    launch_vectorized_kernel(op, size, stream, output->data_ptr<out_t>(),
+                             inputA->data_ptr<in_a_t>(),
+                             inputB->data_ptr<in_b_t>());
+  } else {
+    constexpr int unroll_factor = sizeof(DataType2Size(output->dtype())) >= 4 ? 2 : 4;
+    dim3 block(NUM_THREADS);
+    dim3 grid(DIVUP(size, unroll_factor * block.x));
+    NDArray A_offset_calculator_arr, B_offset_calculator_arr, out_offset_calculator_arr;
+    OffsetCalculator *A_offset_calculator, *B_offset_calculator, *out_offset_calculator;
+    std::tie(A_offset_calculator_arr, A_offset_calculator) =
+      AllocOffsetCalculator(inputA, stream);
+    std::tie(B_offset_calculator_arr, B_offset_calculator) =
+      AllocOffsetCalculator(inputB, stream);
+    std::tie(out_offset_calculator_arr, out_offset_calculator) =
+      AllocOffsetCalculator(output, stream);
+    CUDAStream cuda_stream(stream);
+    hetu::cuda::CUDADeviceGuard guard(cuda_stream.device_id());
+    binary_kernel<NUM_THREADS, unroll_factor><<<grid, block, 0, cuda_stream>>>(
+      inputA->data_ptr<in_a_t>(), inputB->data_ptr<in_b_t>(),
+      size, output->data_ptr<out_t>(), op,
+      A_offset_calculator, B_offset_calculator, out_offset_calculator);
+    NDArray::MarkUsedBy({A_offset_calculator_arr, B_offset_calculator_arr,
+                        out_offset_calculator_arr}, stream);
+  }
+}
+
 template <typename InTuple, typename OutTuple, typename FuncT>
 void launch_loop_kernel(
   const NDArrayList& inputs, 

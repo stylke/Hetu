@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hetu/graph/graph.h"
+#include "hetu/graph/operator.h"
 #include "hetu/graph/profiler.h"
 #include "hetu/graph/init/initializer.h"
 #include "hetu/graph/ops/Communication.h"
@@ -65,8 +66,10 @@ class ExecutableGraph : public Graph {
                   const FeedDict& feed_dict = {});
 
   NDArrayList Run(const Tensor& loss, const TensorList& fetches, 
-                  const FeedDict& feed_dict = {}, const IntSymbolDict& int_symbol_dict = {}, const int num_micro_batches = 1,
-                  RunLevel run_level = RunLevel::UPDATE, const double grad_scale = 1);
+                  const FeedDict& feed_dict = {}, const IntSymbolDict& int_symbol_dict = {}, 
+                  const int num_micro_batches = 1,
+                  RunLevel run_level = RunLevel::UPDATE, const double grad_scale = 1,
+                  const RuntimeContext& ctx = RuntimeContext());
 
   GraphType type() const {
     return GraphType::EXECUTABLE;
@@ -290,7 +293,7 @@ class ExecutableGraph : public Graph {
 
   NDArray& GetVariableDataInner(const Tensor& tensor) override;
 
-  NDArray GetDetachedVariableDataInner(const Tensor& tensor) override;
+  NDArray GetDetachedVariableDataInner(const Tensor& tensor, bool gpu = false) override;
 
   NDArray& AllocVariableDataInner(
     const Tensor& tensor,
@@ -310,7 +313,8 @@ class ExecutableGraph : public Graph {
   NDArrayList CrucialRun(const TensorList& fetches, 
                          const FeedDict& feed_dict, 
                          const IntSymbolDict& int_symbol_dict,
-                         const int num_micro_batches);
+                         const int num_micro_batches,
+                         const RuntimeContext& ctx);
 
   void GetExecEnvs();
   

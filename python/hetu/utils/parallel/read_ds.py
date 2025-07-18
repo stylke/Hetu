@@ -179,7 +179,8 @@ def get_multi_recompute_from(ds_parallel_configs, layer_idx):
     """
     multi_recompute_configs = []
     for ds_parallel_config in ds_parallel_configs:
-        if ds_parallel_config['recompute_granularity'] is None:
+        if 'recompute_granularity' not in ds_parallel_config.keys() or \
+            ds_parallel_config['recompute_granularity'] is None:
             multi_recompute_configs.append([False])
         else:
             dp_recompute_configs = []
