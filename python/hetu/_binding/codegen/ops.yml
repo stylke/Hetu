@@ -325,6 +325,14 @@
   op: LinearOp
   args: Tensor a, Tensor b, Tensor bias, bool trans_a=False, bool trans_b=False  
 
+- name: fused_column_parallel_linear
+  op: FusedColumnParallelLinearOp
+  args: Tensor a, Tensor b, bool trans_a=False, bool trans_b=False
+
+- name: fused_column_parallel_linear
+  op: FusedColumnParallelLinearOp
+  args: Tensor a, Tensor b, Tensor bias, bool trans_a=False, bool trans_b=False 
+
 - name: matmul
   op: MatMulOp
   args: Tensor input, Tensor other, bool trans_a=False, bool trans_b=False
@@ -422,7 +430,7 @@
 
 - name: fused_rmsnorm
   op: FusedRMSNormOp
-  args: Tensor input, Tensor ln_scale, HTShape normalized_shape, double eps=0.01, bool inplace=False
+  args: Tensor input, Tensor ln_scale, HTShape normalized_shape, double eps=1e-5, bool inplace=False
   self: input
 
 #######################################################

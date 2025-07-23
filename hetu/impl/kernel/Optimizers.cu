@@ -30,11 +30,11 @@ void SGDUpdateCuda(const NDArray& grad, NDArray& param, NDArray& velocity,
     grad_ = NDArray::to(grad, param->device(), param->dtype(), stream.stream_index());
   else
     grad_ = grad;
-  HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "SGDUpdateCuda", [&]() {
+  HT_DISPATCH_FLOATING_TYPES(grad_->dtype(), spec_t, "SGDUpdateCuda", [&]() {
     if (momentum == 0) {
       using InType = std::tuple<spec_t, spec_t>;
       using OutType = thrust::tuple<spec_t>;
-      launch_loop_kernel<InType, OutType>({param, grad}, {param}, size, stream,
+      launch_loop_kernel<InType, OutType>({param, grad_}, {param}, size, stream,
                                          [lr] __device__ (spec_t param, spec_t grad) -> spec_t {
                                            return param - static_cast<spec_t>(lr) * grad;
                                                  });
@@ -93,7 +93,7 @@ void SGDUpdateWithGradScalerCuda(const NDArray& grad, const NDArray& infinite_co
     grad_ = NDArray::to(grad, param->device(), param->dtype(), stream.stream_index());
   else
     grad_ = grad;
-  HT_DISPATCH_FLOATING_TYPES(grad->dtype(), spec_t, "SGDUpdateCuda", [&]() {
+  HT_DISPATCH_FLOATING_TYPES(grad_->dtype(), spec_t, "SGDUpdateCuda", [&]() {
     auto infinite_count_host_arr = NDArray::to(infinite_count, kCPU, kFloat32, stream.stream_index());
     auto infinite_count_host = infinite_count_host_arr->data_ptr<float>()[0];
     if (infinite_count_host) {
