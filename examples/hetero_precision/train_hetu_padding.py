@@ -291,6 +291,7 @@ def pretrain(args):
                 symbol.set_data(cp_cnt)
             else:
                 cp_cnt += 1
+                symbol.set_data(cp_cnt)
                 accumulate_cp += cp_list[cp_cnt]
                 
         inner_group_accumulate_seq_lens = []

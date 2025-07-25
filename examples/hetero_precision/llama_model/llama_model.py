@@ -3,6 +3,15 @@ import numpy as np
 
 from hetu.utils.parallel import get_multi_ds_parallel_config
   
+def generate_cos_sin(seqlen, rotary_dim, dtype):
+    assert rotary_dim % 2 == 0
+    inv_freqs = 1.0 / (10000 ** (np.arange(0, rotary_dim, 2, dtype=dtype) / rotary_dim))
+    seq = np.arange(seqlen, dtype=dtype)
+    freqs = np.outer(seq, inv_freqs)
+    freqs = np.concatenate((freqs, freqs), axis=-1)
+    cos = np.cos(freqs).astype(dtype)
+    sin = np.sin(freqs).astype(dtype)
+    return cos, sin
 # self-attn
 class LLamaAttention(ht.nn.Module):
     def __init__(self, config, ds_parallel_configs, layer_idx, name='attn'):
@@ -64,6 +73,29 @@ class LLamaAttention(ht.nn.Module):
     ):
         # column parallel, [micro_batch_size * seq_len, 3 * embed_dim]
         qkv = self.qkv_dense(hidden_states)
+
+        cos_np, sin_np = generate_cos_sin(32768, self.head_dim, np.float32)
+        ds_hierarchy = self.dense.ds_union_map['dup']
+        ds_hierarchy = [
+            ht.DistributedStatesUnion([ht.DistributedStates(ds.device_num, {-1: ds.device_num}, [-1]) for ds in ds_union.ds_list], ds_union.hetero_dim)
+                for ds_union in ds_hierarchy
+        ]
+        dg_hierarchy = self.qkv_dense.device_group_unions
+        sin_global = ht.from_numpy_parallel(sin_np, ds_hierarchy, device_group_hierarchy=dg_hierarchy, requires_grad=False, name=f'sin_attn')
+        cos_global = ht.from_numpy_parallel(cos_np, ds_hierarchy, device_group_hierarchy=dg_hierarchy, requires_grad=False, name=f'cos_attn')
+        qkv = ht.rotary(
+            qkv, cos_global, sin_global,
+            self.head_dim,
+            1,
+            self.config.multi_seq_lens_symbol,
+            self.config.multi_cp_group_symbol,
+            self.config.packing,
+            self.config.cu_seqlens_list[self.layer_idx],
+            self.config.cu_seqlens_list[self.layer_idx],
+            self.config.max_seqlen_symbol,
+            self.config.max_seqlen_symbol,
+            inplace=False
+        )
         
         assert self.use_flash_attn, "currently only support flash attn"
         # already support packing api
