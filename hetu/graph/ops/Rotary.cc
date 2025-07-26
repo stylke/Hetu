@@ -8,7 +8,30 @@
 namespace hetu {
 namespace graph {
 
+static int64_t get_local_dcp_idx(const Tensor& input) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();
+  if (input->cur_ds_union().is_hetero()) {
+    HT_ASSERT(input->cur_ds_union().hetero_dim() == 0)
+      << "hetero dcp should only hetero on dim 0 (token dim)";
+    HT_ASSERT(input->placement_group_union().has(local_device))
+      << "ParallelAttnOp input " << input << " should already deduced the pg union and be local";
+    return input->placement_group_union().get_index(local_device);
+  } 
+  const auto& ds = input->cur_ds_union().get(0);
+  const auto& pg = input->placement_group_union().get(0);
+  auto it = std::find(pg.devices().begin(), pg.devices().end(), local_device);
+  HT_ASSERT(it != pg.devices().end())
+    << "get_local_dcp_idx should ensure local device is in the placement group";
+  auto device_idx = std::distance(pg.devices().begin(), it);
+  // 查找device idx对应到ds中是第几个split 0
+  auto state = ds.map_device_to_state_index(device_idx);
+  return state[0];
+}
+
+// 这个东西会用在infer meta和shape里头
+// 因此不能保证是在exec graph中
 static int64_t get_local_seq_len(const Tensor& input, const SyShapeList& multi_seq_lens_symbol) {
+  auto local_device = hetu::impl::comm::GetLocalDevice();
   auto& graph = input->producer()->graph();
   if (graph.type() == GraphType::EAGER) {
     HT_ASSERT(multi_seq_lens_symbol.size() == 1 && multi_seq_lens_symbol.at(0).size() == 1)
@@ -26,35 +49,16 @@ static int64_t get_local_seq_len(const Tensor& input, const SyShapeList& multi_s
   if (graph.USE_HETERO_ID) {
     return seq_lens_symbol.at(graph.CUR_HETERO_ID)->get_val();
   } else {
-    if (input->cur_ds_union().is_hetero()) {
-      auto idx = input->inferred_local_placement_group_idx();
-      return seq_lens_symbol.at(idx)->get_val();
-    } else {
-      for (auto& symbol : seq_lens_symbol) {
-        HT_ASSERT(symbol->get_val() == seq_lens_symbol.at(0)->get_val())
-          << "all seq lens should be equal in homo setting";
-      }
-      return seq_lens_symbol.at(0)->get_val();
+    HT_ASSERT(input->has_placement_group())
+      << "should guarantee " << input << " has deduced placement group union";
+    if (input->placement_group_union().has(local_device)) {
+      auto cur_dcp_idx = get_local_dcp_idx(input);
+      return seq_lens_symbol.at(cur_dcp_idx)->get_val();
     }
+    // 说明是非本地的deduce
+    // 返回对应pipeline id的即可
+    return seq_lens_symbol.at(input->producer()->suggested_hetero_id())->get_val();
   }
-}
-
-static int64_t get_local_dcp_idx(const Tensor& input) {
-  auto local_device = hetu::impl::comm::GetLocalDevice();
-  if (input->cur_ds_union().is_hetero()) {
-    HT_ASSERT(input->placement_group_union().has(local_device))
-      << "ParallelAttnOp input " << input << " should already deduced the pg union and be local";
-    return input->placement_group_union().get_index(local_device);
-  } 
-  const auto& ds = input->cur_ds_union().get(0);
-  const auto& pg = input->placement_group_union().get(0);
-  auto it = std::find(pg.devices().begin(), pg.devices().end(), local_device);
-  HT_ASSERT(it != pg.devices().end())
-    << "get_local_dcp_idx should ensure local device is in the placement group";
-  auto device_idx = std::distance(pg.devices().begin(), it);
-  // 查找device idx对应到ds中是第几个split 0
-  auto state = ds.map_device_to_state_index(device_idx);
-  return state[0];
 }
 
 static std::tuple<int64_t, DeviceGroupList, std::vector<int64_t>> get_local_ring(const Tensor& input, const SyShapeList& multi_seq_lens_symbol, const SyShapeList& multi_cp_group_symbol) {

@@ -103,7 +103,7 @@ def pretrain(args):
 
     print(f'{local_device}: optimizer minimize begin...')
     # opt = ht.AdamOptimizer(init_lr=args.lr, max_lr=args.lr, min_lr=args.lr, lr_warmup_steps=0, lr_decay_steps=1000, lr_decay_style="constant")
-    opt = ht.AdamOptimizer(lr=5e-5)
+    opt = ht.AdamOptimizer(lr=args.lr)
     train_op = opt.minimize(loss)
     print(f'{local_device}: optimizer minimize end...')
     
