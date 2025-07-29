@@ -120,7 +120,7 @@ class DistributedStates {
   std::vector<int32_t> get_loop_sizes() const;
   std::unordered_map<int32_t, int32_t> map_device_to_state_index(int32_t device_index) const;
   int32_t get_dup_group_index(int32_t device_index) const;
-  DeviceGroup get_devices_by_dim(int32_t dim, int32_t local_device_idx, DeviceGroup group) const;
+  DeviceGroup get_devices_by_dim(int32_t dim, int32_t local_device_idx, DeviceGroup group, const DistributedStates& src_ds=DistributedStates()) const;
   std::string ds_info() const;
 
  protected:

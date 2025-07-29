@@ -92,11 +92,7 @@ class _GraphContext(object):
 
     def __enter__(self):
         if len(_cur_graph_contexts) > 0:
-            if str(self.graph) != str(_cur_graph_contexts[0].graph):
-                pass
-                # print(f"Caution! You wrap {self.graph} graph in {_cur_graph_contexts[0].graph} graph, we just return you the latter!")
-            self.wrapped_context = True
-            return _cur_graph_contexts[0]
+            print(f"Warning: you are wrapping context. Only inner context will be used.")
         self.wrapped_context = False
         ht_core._internal_context.push_graph_ctx(self.graph.id)
         _cur_graph_contexts.append(self)

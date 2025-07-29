@@ -326,7 +326,10 @@ bool DistributedStates::check_scatter(const DistributedStates& dst_distributed_s
 bool DistributedStates::check_allgather(const DistributedStates& dst_distributed_states) const {
   int32_t gather_dim = get_split_dim(dst_distributed_states);
   std::pair<std::vector<int32_t>, int32_t> src2dst = {{-1}, gather_dim};
-  return states(gather_dim) > 1 && dst_distributed_states.states(-1) > 1 && dst_distributed_states.check_combine(*this, src2dst);
+  std::pair<std::vector<int32_t>, int32_t> src2dst_2 = {{gather_dim}, -1};
+  bool cond1 = dst_distributed_states.check_combine(*this, src2dst);  // 支持split->split_dup, split->dup
+  bool cond2 = check_combine(dst_distributed_states, src2dst_2);  // 支持split_dup->dup
+  return states(gather_dim) > 1 && dst_distributed_states.states(-1) > 1 && (cond1 || cond2);
 }
 
 bool DistributedStates::check_reducescatter(const DistributedStates& dst_distributed_states) const {
@@ -416,7 +419,7 @@ int32_t DistributedStates::get_dup_group_index(int32_t device_index) const {
 
 // devices by dim for collective communication
 DeviceGroup DistributedStates::get_devices_by_dim(int32_t dim, 
-  int32_t local_device_idx, DeviceGroup group) const {
+  int32_t local_device_idx, DeviceGroup group, const DistributedStates& src_ds) const {
   auto order = get_order();
   auto states = get_states();
   auto idx = std::find(order.begin(), order.end(), dim);
@@ -425,6 +428,9 @@ DeviceGroup DistributedStates::get_devices_by_dim(int32_t dim,
     interval *= states[*cur_order];
   }
   int32_t macro_interval = interval * get_dim(dim);
+  if(!src_ds.is_none()) {
+    interval *= src_ds.get_dim(dim);
+  }
   int32_t start = local_device_idx - local_device_idx % macro_interval + local_device_idx % interval;
   std::vector<Device> comm_group;
   for (auto i = start; i < start + macro_interval; i += interval) {

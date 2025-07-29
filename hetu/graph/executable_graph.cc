@@ -199,14 +199,21 @@ bool ExecutableGraph::Instantiate(const TensorList& fetches,
     if (is_loss_gradient_op(op) && op->input(0)->has_distributed_states()) {
       int dp = op->input(0)->get_distributed_states().get_dim(0);
       auto& loss_grad_op_impl = dynamic_cast<LossGradientOpImpl&>(op->body());
-      if ((_num_micro_batches > 1 || dp > 1) && loss_grad_op_impl.reduction() == kMEAN) {
+      if (((_num_micro_batches > 1 || dp > 1) && loss_grad_op_impl.reduction() == kNONE) ||
+            loss_grad_op_impl.reduction() == kSUM) {
         auto& grads = op->outputs();
         for (auto& grad : grads) {
           if (!grad.is_defined()) {
             continue;
           }
-          // TODO: use symbolic shape, replace _num_micro_batches * dp with global_token / local_token
-          Tensor grad_scale = MakeDivByConstOp(grad, _num_micro_batches * dp, OpMeta().set_name(grad->name() + "_scale"));
+          Tensor grad_scale;
+          if((_num_micro_batches > 1 || dp > 1) && loss_grad_op_impl.reduction() == kNONE) {
+            // micro-batch-and-dp level scale
+            grad_scale = MakeDivByConstOp(grad, _num_micro_batches * dp, OpMeta().set_name(grad->name() + "_scale"));
+          } else if(loss_grad_op_impl.reduction() == kSUM) {
+            // token-level scale
+            grad_scale = MakeDivByConstOp(grad, _global_num_tokens, OpMeta().set_name(grad->name() + "_scale"));
+          }
           auto cur_subgraph = GetSubGraph(grad->producer());
           if (cur_subgraph != nullptr) {
             AddOpToSubGraph(grad_scale->producer(), cur_subgraph->global_name(), SubGraphOpType::BACKWARD);
@@ -591,7 +598,7 @@ void ExecutableGraph::SubstituteCommOp(const OpRefList& topo_order) {
           << "wrong src and dst group relationship!";
         // DeviceGroup comm_group = comm_op_impl.get_devices_by_dim(comm_op, 0);
         int32_t local_device_idx = info.dst_group.get_index(local_device);
-        DeviceGroup comm_group = info.local_dst_ds.get_devices_by_dim(-1, local_device_idx, info.dst_group);
+        DeviceGroup comm_group = info.local_dst_ds.get_devices_by_dim(-1, local_device_idx, info.dst_group, info.local_src_ds);
         int32_t gather_dim = info.src_ds.get_split_dim(info.dst_ds);
         // workaround for multi allgather.
         // TODO: fix this
@@ -1763,6 +1770,7 @@ NDArrayList ExecutableGraph::Run(const Tensor& loss, const TensorList& fetches,
   TIK(prepare_run);
   _run_level = run_level;
   _grad_scale = grad_scale;
+  _global_num_tokens = double(num_tokens());
   auto& local_device = hetu::impl::comm::GetLocalDevice();
   HT_LOG_DEBUG << local_device << ": exec graph run begin .............";
   if (_memory_profile_level == MEMORY_PROFILE_LEVEL::INFO)

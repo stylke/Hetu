@@ -12,7 +12,7 @@ import numpy as np
 import hetu as ht
 from queue import Queue
 from torch.profiler import profile, ProfilerActivity
-from llama_model import LLaMALMHeadModel, LLaMAConfig
+from llama_model import LLaMALMHeadModel, LLaMAConfig, LossReduceModel
 from data_util_legacy import HetuJsonDataset, build_data_loader, get_sorted_batch_and_len, get_input_and_label_buckets 
 from hetu.utils.parallel import distributed_init, read_ds_parallel_config, parse_multi_ds_parallel_config
 from hetu.rpc.kv_store import KeyValueStoreClient
@@ -70,7 +70,7 @@ def pretrain(args):
 
     input_ds_hierarchy, input_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'input')
     label_ds_hierarchy, label_dg_hierarchy = parse_multi_ds_parallel_config(ds_parallel_configs, 'label')
-    
+
     config.packing = True
     config.multi_seq_lens_symbol = []
     config.multi_cp_group_symbol = []
@@ -105,7 +105,8 @@ def pretrain(args):
     loss = model(
         input_ids=input_ids,
         loss_mask=loss_mask,
-        labels=masked_lm_labels
+        labels=masked_lm_labels,
+        packing=True
     )
     print(f'{local_device}: build model end...')
 
@@ -124,10 +125,11 @@ def pretrain(args):
         int_symbol_dict, 
         num_micro_batches,
         strategy_id,
-        run_level=ht.run_level("update")
+        run_level=ht.run_level("update"),
+        global_num_tokens=0
     ):    
         try:
-            results = train_op.graph.run(
+            results, _ = train_op.graph.run(
                 loss, 
                 [loss, train_op], 
                 feed_dict = feed_dict, 
@@ -135,6 +137,7 @@ def pretrain(args):
                 num_micro_batches = num_micro_batches, 
                 cur_strategy_id = strategy_id,
                 run_level = run_level,
+                global_num_tokens = global_num_tokens
             )
         except RuntimeError as e:
             print(e)
@@ -251,6 +254,8 @@ def pretrain(args):
         for step in range(steps):
             # load data for each dp
             global_batch = np.array(next(train_iter)) # [gbs, gsl + 1]
+            global_num_tokens = (global_batch != train_dataset.pad_id()).astype(np.int64).sum()
+            print(f"step {step}, global_num_tokens: {global_num_tokens}")
             # workaround: 目前只是为了测试CP + packing是否能正常运行
             # 直接按sorted_batch里的顺序分
             sorted_batch, sorted_len = get_sorted_batch_and_len(global_batch, train_dataset.pad_id())
@@ -327,18 +332,38 @@ def pretrain(args):
             start_time = time.time()
             if args.torch_profile != 0 and step == 1:
                 with profile(activities=[ProfilerActivity.CUDA]) as prof:
-                    results = hetu_train(feed_dict, int_symbol_dict, num_micro_batches, strategy_id)
+                    results = hetu_train(feed_dict, int_symbol_dict, num_micro_batches, strategy_id, global_num_tokens=global_num_tokens)
                 prof.export_chrome_trace(f"trace/trace_{local_device}.json")
             else:
-                results = hetu_train(feed_dict, int_symbol_dict, num_micro_batches, strategy_id)
+                results = hetu_train(feed_dict, int_symbol_dict, num_micro_batches, strategy_id, global_num_tokens=global_num_tokens)
             end_time = time.time()
             
             consumed_samples += global_batch_size
             if run_level == ht.run_level("update"):
                 if label_device_group != None:
-                    losses = results[0][0]
-                    loss_list.append(losses.numpy(force=True).mean())
-                    print(f"{local_device}: [Epoch {epoch}] (step {step}, consumed_samples = {consumed_samples}): loss = {losses}, time = {end_time - start_time:.4f}")
+                    with ht.graph("define_and_run", create_new=True, prefix=f"loss_reduce_step{step}", 
+                                  num_strategy=args.num_strategy):
+                        with ht.autocast(ht.float32):               
+                            loss_cur_dp_rank = results[0].numpy(force=True).reshape(-1).sum(keepdims=True)
+                            loss_reduce_model = LossReduceModel()
+                            loss_unreduced = ht.parallel_placeholder(
+                                ht.float32, 
+                                global_shape=[dcp_size * 16], 
+                                ds_hierarchy=loss.ds_hierarchy, 
+                                device_group_hierarchy=label_dg_hierarchy, 
+                                name='loss_unreduced'
+                            )
+                            loss_reduced = loss_reduce_model(loss_unreduced)
+                            loss_results = loss_reduced.graph.run(
+                                loss = loss_reduced, 
+                                fetch = loss_reduced, 
+                                feed_dict = {loss_unreduced: loss_cur_dp_rank}
+                            )
+                            print(f"loss_results: {loss_results}")
+                            final_loss = loss_results[0].numpy(force=True).sum() / global_num_tokens
+                            loss_list.append(final_loss)
+                            
+                    print(f"{local_device}: [Epoch {epoch}] (step {step}, consumed_samples = {consumed_samples}): loss = {final_loss}, time = {end_time - start_time:.4f}")
         print(f"loss_list: {loss_list}")
         return consumed_samples
     

@@ -402,6 +402,7 @@ class ExecutableGraph : public Graph {
   std::vector<std::shared_ptr<MicroBatchMemoryInfo>> _all_micro_batches_memory_info;
   int32_t _parallel_attn_flag;
   std::string _parallel_attn_log_file_path;
+  DoubleSymbol _global_num_tokens;  // for token-level grad scale
 };
 
 } // namespace graph

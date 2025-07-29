@@ -113,7 +113,7 @@ PyObject* PyGraph_run(PyGraph* self, PyObject* args, PyObject* kwargs) {
     "run(List[Tensor] fetches, FeedDict feed_dict=None)",
     "run(Tensor loss, Tensor fetch, FeedDict feed_dict=None, IntSymbolDict int_symbol_dict=None, int num_micro_batches=1)", 
     "run(Tensor loss, List[Tensor] fetches, FeedDict feed_dict=None, IntSymbolDict int_symbol_dict=None, int num_micro_batches=1, \
-         int cur_strategy_id=0, int run_level=0, bool save_checkpoint=False, double grad_scale=1)",
+         int cur_strategy_id=0, int run_level=0, bool save_checkpoint=False, double grad_scale=1, int global_num_tokens=0)",
     "run(Tensor loss, List[Tensor] fetches, FeedDict feed_dict=None, IntSymbolDict int_symbol_dict=None, int num_micro_batches=1, \
          int compute_strategy_id=0, int optimize_strategy_id=0, int run_level=0, bool save_checkpoint=False, double grad_scale=1)",
     "run(Tensor loss, List[Tensor] fetches, FeedDict feed_dict=None, IntSymbolDict int_symbol_dict=None, int num_micro_batches=1, \

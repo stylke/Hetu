@@ -325,7 +325,8 @@ class LLaMALMHeadModel(ht.nn.Module):
         attention_mask=None,
         loss_mask=None,
         token_type_ids=None,
-        labels=None
+        labels=None,
+        packing=False
     ):
         # [b * seq_len, n_embd]
         hidden_states = self.transformer(
@@ -340,8 +341,26 @@ class LLaMALMHeadModel(ht.nn.Module):
 
         loss = None
         if labels is not None:
-            loss_unreduced = ht.vocab_parallel_cross_entropy(lm_logits, labels, ignored_index = -1, reduction = "none").reshape([-1])
-            loss_sum = ht.sum(ht.mul(loss_unreduced, loss_mask))
-            loss_valid_tokens = ht.sum(loss_mask)
-            loss = ht.div(loss_sum, loss_valid_tokens)
+            # 是否packing对应不同的reduction_type，以便进行不同的grad_scale
+            if packing:
+                loss = ht.vocab_parallel_cross_entropy(lm_logits, labels, ignored_index = 50257, reduction = "sum")
+            else:
+                loss_unreduced = ht.vocab_parallel_cross_entropy(lm_logits, labels, ignored_index = 50257, reduction = "none").reshape([-1])
+                loss_sum = ht.sum(ht.mul(loss_unreduced, loss_mask))
+                loss_valid_tokens = ht.sum(loss_mask)
+                loss = ht.div(loss_sum, loss_valid_tokens)
         return loss
+
+class LossReduceModel(ht.nn.Module):
+    def __init__(self):
+        super(LossReduceModel, self).__init__()
+
+    def forward(self, loss_unreduced):
+        src_ds_hierarchy = loss_unreduced.ds_hierarchy
+        dst_ds_hierarchy = [
+            ht.DistributedStatesUnion([ht.DistributedStates(ds.device_num, {-1: ds.device_num}, [-1]) for ds in ds_union.ds_list], ds_union.hetero_dim)
+                for ds_union in src_ds_hierarchy
+        ]
+        loss_reduced = ht.comm(loss_unreduced, dst_ds_hierarchy, loss_unreduced.dg_hierarchy, name="loss_reduce_comm")
+        loss_reduced = ht.mul(loss_reduced, 1)
+        return loss_reduced

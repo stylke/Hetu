@@ -280,6 +280,17 @@ void DefineAndRunGraph::DeducePipeline(size_t compute_strategy_id, int32_t pipel
       }
     }
   }
+  if(device_to_pipeline_idx_map.empty()) {
+    // 前面根据参数的信息进行推导，如果最后device_to_pipeline_idx_map为空，说明没有参数，
+    // 此时直接设置所有device都在一条pipeline中的一个stage里
+    HT_LOG_INFO << "deduce here, no parameter";
+    auto& dg_union = _ops_with_device_group_hierarchy.front()->device_group_union();
+    auto& device_group = dg_union.get(0);
+    for (int32_t i = 0; i < device_group.num_devices(); i++) {
+      device_to_pipeline_idx_map[device_group.get(i)] = 0;
+    }
+    pipelines[0].push_back(device_group);
+  }
   // 记录当前strategy下的device到pipeline映射
   for (const auto& kv : device_to_pipeline_idx_map) {
     const auto& device = kv.first;
